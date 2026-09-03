@@ -1,11 +1,23 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { Suspense, useActionState, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { signup, login } from "./actions";
 
 type Ruolo = "inquilino" | "proprietario";
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
+  const searchParams = useSearchParams();
+  const erroreConferma = searchParams.get("errore");
+
   const [tab, setTab] = useState<"registrati" | "accedi">("registrati");
   const [ruolo, setRuolo] = useState<Ruolo>("inquilino");
 
@@ -25,6 +37,12 @@ export default function LoginPage() {
           Ogni casa ha un inquilino perfetto che la aspetta. Scorri, matcha,
           affitta. Tutto verificato, su MatchAmI.
         </p>
+
+        {erroreConferma && (
+          <p className="text-clay text-xs text-center mb-4 border border-clay/40 rounded-xl p-3">
+            Conferma email non riuscita: {erroreConferma}
+          </p>
+        )}
 
         {/* Tab Registrati / Accedi */}
         <div className="flex bg-paper/10 rounded-2xl p-1 mb-6">

@@ -12,7 +12,14 @@ export async function GET(request: Request) {
     if (!error) {
       return NextResponse.redirect(`${origin}${next}`);
     }
+    return NextResponse.redirect(
+      `${origin}/login?errore=${encodeURIComponent(error.message)}`
+    );
   }
 
-  return NextResponse.redirect(`${origin}/login?errore=conferma_fallita`);
+  return NextResponse.redirect(
+    `${origin}/login?errore=${encodeURIComponent(
+      "Link di conferma mancante o incompleto."
+    )}`
+  );
 }
