@@ -1,31 +1,36 @@
 import { createClient } from "@/lib/supabase/server";
+import { logout } from "./login/actions";
 
 export default async function Home() {
-  let supabaseStatus: "ok" | "non configurato" | "errore" = "non configurato";
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  if (process.env.NEXT_PUBLIC_SUPABASE_URL) {
-    try {
-      const supabase = await createClient();
-      // Una query innocua solo per verificare che le credenziali/rete funzionino.
-      const { error } = await supabase.from("profiles").select("id").limit(1);
-      supabaseStatus = error ? "errore" : "ok";
-    } catch {
-      supabaseStatus = "errore";
-    }
-  }
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("nome, cognome, ruolo")
+    .eq("id", user!.id)
+    .single();
 
   return (
-    <main className="min-h-screen bg-ink text-paper flex flex-col items-center justify-center gap-6 px-6 text-center">
-      <h1 className="font-display italic text-3xl">
+    <main className="min-h-screen bg-paper text-ink flex flex-col items-center justify-center gap-4 px-6 text-center">
+      <h1 className="font-display italic text-2xl">
         Match<span className="text-gold not-italic">AmI</span>
       </h1>
-      <p className="text-paper/70 max-w-sm text-sm">
-        Scheletro del progetto pronto: Next.js, Tailwind con la palette del
-        prototipo, e client Supabase collegato.
+      <p className="text-sm text-ink/70">
+        Ciao {profile?.nome ?? user!.email}! Sei registrato come{" "}
+        <b>{profile?.ruolo}</b>.
       </p>
-      <div className="text-xs px-4 py-2 rounded-full border border-paper/20">
-        Stato connessione Supabase: <b>{supabaseStatus}</b>
-      </div>
+      <p className="text-xs text-ink/50 max-w-xs">
+        Questa è una pagina segnaposto: l&apos;autenticazione vera funziona,
+        le schermate Home/Profilo/Candidature reali arrivano nella Fase 4.
+      </p>
+      <form action={logout}>
+        <button className="text-xs px-4 py-2 rounded-full border border-ink/20 mt-2">
+          Esci
+        </button>
+      </form>
     </main>
   );
 }

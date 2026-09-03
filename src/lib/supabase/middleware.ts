@@ -1,9 +1,12 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+const PUBLIC_PATHS = ["/login", "/auth"];
+
 /**
- * Rinfresca il token di sessione Supabase ad ogni richiesta.
- * Va richiamato dal middleware.ts nella root del progetto.
+ * Rinfresca il token di sessione Supabase ad ogni richiesta e protegge
+ * le rotte private: senza sessione si viene rimandati a /login, con
+ * sessione attiva non si può tornare su /login.
  */
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
@@ -30,7 +33,24 @@ export async function updateSession(request: NextRequest) {
   );
 
   // IMPORTANTE: non rimuovere. Rinfresca il token scaduto.
-  await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const path = request.nextUrl.pathname;
+  const isPublicPath = PUBLIC_PATHS.some((p) => path.startsWith(p));
+
+  if (!user && !isPublicPath) {
+    const loginUrl = request.nextUrl.clone();
+    loginUrl.pathname = "/login";
+    return NextResponse.redirect(loginUrl);
+  }
+
+  if (user && path === "/login") {
+    const homeUrl = request.nextUrl.clone();
+    homeUrl.pathname = "/";
+    return NextResponse.redirect(homeUrl);
+  }
 
   return supabaseResponse;
 }
