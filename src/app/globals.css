@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+/*
+  Design tokens presi dal prototipo HTML (matchami_ristrutturato.html),
+  così le schermate che ricostruiremo in React mantengono lo stesso stile.
+*/
+:root {
+  --ink: #10151a;
+  --ink-soft: #1b222a;
+  --paper: #f7f4ec;
+  --paper-dim: #eae5d7;
+  --moss: #3e6b57;
+  --moss-light: #5c8c74;
+  --clay: #c9694e;
+  --gold: #c9a15a;
+
+  --background: var(--paper);
+  --foreground: var(--ink);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-paper: var(--paper);
+  --color-paper-dim: var(--paper-dim);
+  --color-moss: var(--moss);
+  --color-moss-light: var(--moss-light);
+  --color-clay: var(--clay);
+  --color-gold: var(--gold);
+  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
