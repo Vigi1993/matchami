@@ -39,7 +39,7 @@ export function GestioneClient({
   const [bolletteAperto, setBolletteAperto] = useState(false);
 
   return (
-    <PageContainer>
+    <PageContainer wide>
       <h1 className="font-display text-xl text-ink mb-1">Gestione affitto</h1>
       <p className="text-xs text-ink/50 mb-6">
         Contratto e bollette della casa che stai affittando, tutto in un
@@ -57,7 +57,7 @@ export function GestioneClient({
           candidatura, il contratto comparirà qui.
         </div>
       ) : (
-        <div className="flex flex-col gap-3 mb-6">
+        <div className="flex flex-col gap-3 mb-6 md:grid md:grid-cols-2 md:gap-4 lg:grid-cols-3">
           {contratti.map((c) => (
             <button
               key={c.id}

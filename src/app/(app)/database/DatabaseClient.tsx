@@ -38,7 +38,7 @@ export function DatabaseClient({
   const valutate = candidature.filter((c) => stato(c) !== "in_attesa");
 
   return (
-    <PageContainer>
+    <PageContainer wide>
       <h1 className="font-display text-xl text-ink mb-1">
         Database inquilini
       </h1>
@@ -198,7 +198,7 @@ function Gruppo({
       <div className="mb-3 text-xs font-bold uppercase tracking-wide text-ink/50">
         {titolo} · {items.length}
       </div>
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3 md:grid md:grid-cols-2 md:gap-4 lg:grid-cols-3">
         {items.map((c) => {
           const s = stato(c);
           return (

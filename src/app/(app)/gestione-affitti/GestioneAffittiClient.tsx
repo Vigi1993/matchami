@@ -43,7 +43,7 @@ export function GestioneAffittiClient({
   );
 
   return (
-    <PageContainer>
+    <PageContainer wide>
       <h1 className="font-display text-xl text-ink mb-1">Gestione affitti</h1>
       <p className="text-xs text-ink/50 mb-6">
         Contratti dei tuoi immobili, dalla bozza alla firma.
@@ -54,7 +54,7 @@ export function GestioneAffittiClient({
           <div className="mb-3 text-xs font-bold uppercase tracking-wide text-ink/50">
             Da avviare · {candidatureSenzaContratto.length}
           </div>
-          <div className="flex flex-col gap-3 mb-6">
+          <div className="flex flex-col gap-3 mb-6 md:grid md:grid-cols-2 md:gap-4 lg:grid-cols-3">
             {candidatureSenzaContratto.map((c) => (
               <button
                 key={c.id}
@@ -93,7 +93,7 @@ export function GestioneAffittiClient({
           </p>
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3 md:grid md:grid-cols-2 md:gap-4 lg:grid-cols-3">
           {contratti.map((c) => (
             <button
               key={c.id}

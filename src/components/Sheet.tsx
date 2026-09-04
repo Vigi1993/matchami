@@ -32,7 +32,7 @@ export function Sheet({
         onClick={onClose}
         aria-hidden
       />
-      <div className="absolute bottom-0 left-0 right-0 max-h-[88vh] overflow-y-auto bg-paper rounded-t-3xl px-5 pt-5 pb-8 shadow-2xl">
+      <div className="absolute bottom-0 left-0 right-0 max-h-[88vh] overflow-y-auto bg-paper rounded-t-3xl px-5 pt-5 pb-8 shadow-2xl md:bottom-auto md:left-1/2 md:right-auto md:top-1/2 md:w-full md:max-w-lg md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-3xl md:px-8 md:pt-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-display text-lg text-ink">{title}</h2>
           <button

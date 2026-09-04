@@ -32,7 +32,7 @@ export function CandidatureClient({
   const rifiutate = candidature.filter((c) => c.status === "rifiutata");
 
   return (
-    <PageContainer>
+    <PageContainer wide>
       <h1 className="font-display text-xl text-ink mb-1">Le tue candidature</h1>
       <p className="text-xs text-ink/50 mb-6">
         {candidature.length === 0
@@ -151,7 +151,7 @@ function Gruppo({
       <div className="mb-3 text-xs font-bold uppercase tracking-wide text-ink/50">
         {titolo} · {items.length}
       </div>
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3 md:grid md:grid-cols-2 md:gap-4 lg:grid-cols-3">
         {items.map((c) => (
           <button
             key={c.id}

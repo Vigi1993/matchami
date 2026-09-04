@@ -12,7 +12,7 @@ export function OwnerHomeClient({
   daValutare: number;
 }) {
   return (
-    <PageContainer>
+    <PageContainer wide>
       <h1 className="font-display text-xl text-ink mb-1">Home</h1>
       <p className="text-xs text-ink/50 mb-6">
         Il riepilogo dei tuoi annunci e delle candidature ricevute.
@@ -50,7 +50,7 @@ export function OwnerHomeClient({
           </p>
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3 md:grid md:grid-cols-2 md:gap-4 lg:grid-cols-3">
           {listings.map((l) => (
             <div
               key={l.id}

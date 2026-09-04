@@ -26,7 +26,7 @@ export function ImmobiliClient({
   );
 
   return (
-    <PageContainer>
+    <PageContainer wide>
       <h1 className="font-display text-xl text-ink mb-1">I tuoi immobili</h1>
       <p className="text-xs text-ink/50 mb-6">
         {immobili.length === 0
@@ -52,7 +52,7 @@ export function ImmobiliClient({
           </p>
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3 md:grid md:grid-cols-2 md:gap-4 lg:grid-cols-3">
           {immobili.map((im) => (
             <button
               key={im.id}
