@@ -38,6 +38,17 @@ export type CandidaturaConAnnuncio = {
   } | null;
 };
 
+export type ListingConFoto = {
+  id: string;
+  titolo: string;
+  zona: string;
+  prezzo: number;
+  locali: number | null;
+  mq: number | null;
+  descrizione: string | null;
+  listing_photos: { url: string }[];
+};
+
 export type ContrattoConAnnuncio = {
   id: string;
   stato: StatoContratto;
