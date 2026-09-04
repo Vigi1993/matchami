@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import type { AffidabilitaResult } from "@/lib/affidabilita";
 import type { ListingConFoto } from "@/lib/types";
 import { candidati } from "./actions";
+import { PageContainer } from "@/components/ui/PageContainer";
 
 export function HomeClient({
   affidabilita,
@@ -36,7 +37,7 @@ export function HomeClient({
   }
 
   return (
-    <div className="px-5 pt-6 pb-8 max-w-md mx-auto">
+    <PageContainer>
       {/* ---- Barra affidabilità + conteggio ---- */}
       <div className="bg-ink text-paper rounded-2xl p-4 mb-6 flex items-center justify-between">
         <div>
@@ -143,6 +144,6 @@ export function HomeClient({
           Candidatura inviata — la trovi in &quot;Candidature&quot;.
         </p>
       )}
-    </div>
+    </PageContainer>
   );
 }

@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Sheet } from "@/components/Sheet";
 import type { CandidaturaConAnnuncio, StatoCandidatura } from "@/lib/types";
+import { PageContainer } from "@/components/ui/PageContainer";
 
 const STATO_LABEL: Record<StatoCandidatura, string> = {
   in_attesa: "Da valutare",
@@ -31,7 +32,7 @@ export function CandidatureClient({
   const rifiutate = candidature.filter((c) => c.status === "rifiutata");
 
   return (
-    <div className="px-5 pt-6 pb-8 max-w-md mx-auto">
+    <PageContainer>
       <h1 className="font-display text-xl text-ink mb-1">Le tue candidature</h1>
       <p className="text-xs text-ink/50 mb-6">
         {candidature.length === 0
@@ -132,7 +133,7 @@ export function CandidatureClient({
           </div>
         )}
       </Sheet>
-    </div>
+    </PageContainer>
   );
 }
 

@@ -8,6 +8,9 @@ import type {
   StatoContratto,
 } from "@/lib/types";
 import { creaContratto, aggiornaContratto, type SaveState } from "./actions";
+import { PageContainer } from "@/components/ui/PageContainer";
+import { Chip } from "@/components/ui/Chip";
+import { Field } from "@/components/ui/Field";
 
 const STATO_LABEL: Record<StatoContratto, string> = {
   bozza: "Bozza",
@@ -40,7 +43,7 @@ export function GestioneAffittiClient({
   );
 
   return (
-    <div className="px-5 pt-6 pb-8 max-w-md mx-auto">
+    <PageContainer>
       <h1 className="font-display text-xl text-ink mb-1">Gestione affitti</h1>
       <p className="text-xs text-ink/50 mb-6">
         Contratti dei tuoi immobili, dalla bozza alla firma.
@@ -145,7 +148,7 @@ export function GestioneAffittiClient({
           />
         )}
       </Sheet>
-    </div>
+    </PageContainer>
   );
 }
 
@@ -273,46 +276,5 @@ function ContrattoForm({
         {pending ? "Salvataggio..." : "Salva"}
       </button>
     </form>
-  );
-}
-
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <div className="text-xs font-bold uppercase tracking-wide text-ink/70 mb-2">
-        {label}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function Chip({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`text-xs font-semibold px-3 py-2 rounded-full border transition-colors ${
-        active
-          ? "bg-moss/15 border-moss text-moss"
-          : "bg-ink/5 border-transparent text-ink/60"
-      }`}
-    >
-      {label}
-    </button>
   );
 }

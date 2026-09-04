@@ -4,6 +4,10 @@ import { useActionState, useEffect, useState, useTransition } from "react";
 import { Sheet } from "@/components/Sheet";
 import { ATTR_VOCAB, ZONE_MILANO } from "@/lib/constants";
 import type { ImmobileDettaglio } from "@/lib/types";
+import { PageContainer } from "@/components/ui/PageContainer";
+import { Chip } from "@/components/ui/Chip";
+import { Field } from "@/components/ui/Field";
+import { Stepper } from "@/components/ui/Stepper";
 import {
   creaImmobile,
   aggiornaImmobile,
@@ -22,7 +26,7 @@ export function ImmobiliClient({
   );
 
   return (
-    <div className="px-5 pt-6 pb-8 max-w-md mx-auto">
+    <PageContainer>
       <h1 className="font-display text-xl text-ink mb-1">I tuoi immobili</h1>
       <p className="text-xs text-ink/50 mb-6">
         {immobili.length === 0
@@ -103,7 +107,7 @@ export function ImmobiliClient({
           />
         )}
       </Sheet>
-    </div>
+    </PageContainer>
   );
 }
 
@@ -274,85 +278,5 @@ function ImmobileForm({
         </button>
       )}
     </form>
-  );
-}
-
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <div className="text-xs font-bold uppercase tracking-wide text-ink/70 mb-2">
-        {label}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function Chip({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`text-xs font-semibold px-3 py-2 rounded-full border transition-colors ${
-        active
-          ? "bg-moss/15 border-moss text-moss"
-          : "bg-ink/5 border-transparent text-ink/60"
-      }`}
-    >
-      {label}
-    </button>
-  );
-}
-
-function Stepper({
-  value,
-  onChange,
-  min,
-  max,
-  step = 1,
-  suffix = "",
-}: {
-  value: number;
-  onChange: (v: number) => void;
-  min: number;
-  max: number;
-  step?: number;
-  suffix?: string;
-}) {
-  return (
-    <div className="flex items-center gap-4">
-      <button
-        type="button"
-        onClick={() => onChange(Math.max(min, value - step))}
-        className="w-8 h-8 rounded-full bg-ink/10 text-ink font-bold"
-      >
-        −
-      </button>
-      <div className="text-sm font-bold text-ink w-16 text-center">
-        {value}
-        {suffix}
-      </div>
-      <button
-        type="button"
-        onClick={() => onChange(Math.min(max, value + step))}
-        className="w-8 h-8 rounded-full bg-ink/10 text-ink font-bold"
-      >
-        +
-      </button>
-    </div>
   );
 }

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Sheet } from "@/components/Sheet";
 import type { ContrattoConAnnuncio, StatoContratto } from "@/lib/types";
+import { PageContainer } from "@/components/ui/PageContainer";
 
 const STATO_LABEL: Record<StatoContratto, string> = {
   bozza: "Bozza",
@@ -38,7 +39,7 @@ export function GestioneClient({
   const [bolletteAperto, setBolletteAperto] = useState(false);
 
   return (
-    <div className="px-5 pt-6 pb-8 max-w-md mx-auto">
+    <PageContainer>
       <h1 className="font-display text-xl text-ink mb-1">Gestione affitto</h1>
       <p className="text-xs text-ink/50 mb-6">
         Contratto e bollette della casa che stai affittando, tutto in un
@@ -173,7 +174,7 @@ export function GestioneClient({
           </button>
         </div>
       </Sheet>
-    </div>
+    </PageContainer>
   );
 }
 

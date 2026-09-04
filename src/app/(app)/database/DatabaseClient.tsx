@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Sheet } from "@/components/Sheet";
 import type { CandidaturaRicevuta } from "@/lib/types";
 import { valutaCandidatura } from "./actions";
+import { PageContainer } from "@/components/ui/PageContainer";
 
 export function DatabaseClient({
   candidature,
@@ -37,7 +38,7 @@ export function DatabaseClient({
   const valutate = candidature.filter((c) => stato(c) !== "in_attesa");
 
   return (
-    <div className="px-5 pt-6 pb-8 max-w-md mx-auto">
+    <PageContainer>
       <h1 className="font-display text-xl text-ink mb-1">
         Database inquilini
       </h1>
@@ -166,7 +167,7 @@ export function DatabaseClient({
           </div>
         )}
       </Sheet>
-    </div>
+    </PageContainer>
   );
 }
 

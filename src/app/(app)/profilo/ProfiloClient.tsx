@@ -10,6 +10,10 @@ import {
 import type { TenantProfile } from "@/lib/types";
 import { updateDatiPersonali, updateRicerca, type SaveState } from "./actions";
 import { logout } from "@/app/login/actions";
+import { PageContainer } from "@/components/ui/PageContainer";
+import { Chip } from "@/components/ui/Chip";
+import { Field } from "@/components/ui/Field";
+import { Stepper } from "@/components/ui/Stepper";
 
 type Props = {
   nome: string | null;
@@ -56,7 +60,7 @@ export function ProfiloClient({
   });
 
   return (
-    <div className="px-5 pt-6 pb-8 max-w-md mx-auto">
+    <PageContainer>
       {/* Avatar */}
       <div className="flex items-center gap-3 mb-6">
         <div className="w-12 h-12 rounded-full bg-ink text-paper flex items-center justify-center font-display font-bold">
@@ -178,7 +182,7 @@ export function ProfiloClient({
         zoneIniziali={zoneIniziali}
         interessiIniziali={interessiIniziali}
       />
-    </div>
+        </PageContainer>
   );
 }
 
@@ -211,30 +215,6 @@ function Row({
         <p className="text-xs text-ink/55 leading-snug">{subtitle}</p>
         <span className="text-xs text-moss font-semibold">{cta}</span>
       </div>
-    </button>
-  );
-}
-
-function Chip({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`text-xs font-semibold px-3 py-2 rounded-full border transition-colors ${
-        active
-          ? "bg-moss/15 border-moss text-moss"
-          : "bg-ink/5 border-transparent text-ink/60"
-      }`}
-    >
-      {label}
     </button>
   );
 }
@@ -528,61 +508,5 @@ function RicercaSheet({
         <SaveButton pending={pending} />
       </form>
     </Sheet>
-  );
-}
-
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <div className="text-xs font-bold uppercase tracking-wide text-ink/70 mb-2">
-        {label}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function Stepper({
-  value,
-  onChange,
-  min,
-  max,
-  step = 1,
-  suffix = "",
-}: {
-  value: number;
-  onChange: (v: number) => void;
-  min: number;
-  max: number;
-  step?: number;
-  suffix?: string;
-}) {
-  return (
-    <div className="flex items-center gap-4">
-      <button
-        type="button"
-        onClick={() => onChange(Math.max(min, value - step))}
-        className="w-8 h-8 rounded-full bg-ink/10 text-ink font-bold"
-      >
-        −
-      </button>
-      <div className="text-sm font-bold text-ink w-16 text-center">
-        {value}
-        {suffix}
-      </div>
-      <button
-        type="button"
-        onClick={() => onChange(Math.min(max, value + step))}
-        className="w-8 h-8 rounded-full bg-ink/10 text-ink font-bold"
-      >
-        +
-      </button>
-    </div>
   );
 }

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ListingProprietario } from "@/lib/types";
+import { PageContainer } from "@/components/ui/PageContainer";
 
 export function OwnerHomeClient({
   listings,
@@ -11,7 +12,7 @@ export function OwnerHomeClient({
   daValutare: number;
 }) {
   return (
-    <div className="px-5 pt-6 pb-8 max-w-md mx-auto">
+    <PageContainer>
       <h1 className="font-display text-xl text-ink mb-1">Home</h1>
       <p className="text-xs text-ink/50 mb-6">
         Il riepilogo dei tuoi annunci e delle candidature ricevute.
@@ -73,7 +74,7 @@ export function OwnerHomeClient({
           ))}
         </div>
       )}
-    </div>
+    </PageContainer>
   );
 }
 

@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { TabBar } from "@/components/TabBar";
+import { Navigation } from "@/components/Navigation";
 
 export default async function AppLayout({
   children,
@@ -13,7 +13,7 @@ export default async function AppLayout({
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("ruolo")
+    .select("ruolo, nome")
     .eq("id", user!.id)
     .single();
 
@@ -21,8 +21,11 @@ export default async function AppLayout({
 
   return (
     <div className="min-h-screen bg-paper">
-      <div className="pb-24">{children}</div>
-      <TabBar ruolo={ruolo} />
+      <Navigation ruolo={ruolo} nome={profile?.nome} />
+      {/* pb-24: spazio per la barra in basso su smartphone.
+          md:pl-64: spazio per la sidebar su desktop. md:pb-0: sul
+          desktop la barra in basso non c'è, non serve il margine. */}
+      <div className="pb-24 md:pb-0 md:pl-64">{children}</div>
     </div>
   );
 }

@@ -5,6 +5,9 @@ import { Sheet } from "@/components/Sheet";
 import type { OwnerProfile } from "@/lib/types";
 import { updateDatiProprietario, type SaveState } from "./owner-actions";
 import { logout } from "@/app/login/actions";
+import { PageContainer } from "@/components/ui/PageContainer";
+import { Chip } from "@/components/ui/Chip";
+import { Field } from "@/components/ui/Field";
 
 const TIPO_VOCAB = [
   { value: "privato", label: "Privato" },
@@ -28,7 +31,7 @@ export function OwnerProfiloClient({
   const [datiAperto, setDatiAperto] = useState(false);
 
   return (
-    <div className="px-5 pt-6 pb-8 max-w-md mx-auto">
+    <PageContainer>
       {/* Avatar */}
       <div className="flex items-center gap-3 mb-6">
         <div className="w-12 h-12 rounded-full bg-ink text-paper flex items-center justify-center font-display font-bold">
@@ -73,7 +76,7 @@ export function OwnerProfiloClient({
       >
         <DatiProprietarioForm owner={owner} onSaved={() => setDatiAperto(false)} />
       </Sheet>
-    </div>
+    </PageContainer>
   );
 }
 
@@ -197,47 +200,6 @@ function Row({
         <p className="text-xs text-ink/55 leading-snug">{subtitle}</p>
         <span className="text-xs text-moss font-semibold">{cta}</span>
       </div>
-    </button>
-  );
-}
-
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <div className="text-xs font-bold uppercase tracking-wide text-ink/70 mb-2">
-        {label}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function Chip({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`text-xs font-semibold px-3 py-2 rounded-full border transition-colors text-left ${
-        active
-          ? "bg-moss/15 border-moss text-moss"
-          : "bg-ink/5 border-transparent text-ink/60"
-      }`}
-    >
-      {label}
     </button>
   );
 }
