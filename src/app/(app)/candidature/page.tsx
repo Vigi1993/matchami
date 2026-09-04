@@ -1,11 +1,22 @@
-export default function CandidaturePage() {
+import { createClient } from "@/lib/supabase/server";
+import { CandidatureClient } from "./CandidatureClient";
+import type { CandidaturaConAnnuncio } from "@/lib/types";
+
+export default async function CandidaturePage() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const { data: candidature } = await supabase
+    .from("candidature")
+    .select("id, status, match_pct, created_at, listings(titolo, zona, prezzo, locali, mq)")
+    .eq("tenant_id", user!.id)
+    .order("created_at", { ascending: false });
+
   return (
-    <div className="px-6 pt-16 text-center">
-      <h1 className="font-display text-xl text-ink mb-2">Candidature</h1>
-      <p className="text-xs text-ink/50 max-w-xs mx-auto">
-        Qui vedrai lo stato delle tue candidature (in attesa, accettata,
-        rifiutata). Arriva in un prossimo passo.
-      </p>
-    </div>
+    <CandidatureClient
+      candidature={(candidature ?? []) as unknown as CandidaturaConAnnuncio[]}
+    />
   );
 }

@@ -22,6 +22,22 @@ export type TenantProfile = {
 
 export type StatoContratto = "bozza" | "in_firma" | "firmato" | "concluso";
 
+export type StatoCandidatura = "in_attesa" | "accettata" | "rifiutata";
+
+export type CandidaturaConAnnuncio = {
+  id: string;
+  status: StatoCandidatura;
+  match_pct: number | null;
+  created_at: string;
+  listings: {
+    titolo: string;
+    zona: string;
+    prezzo: number;
+    locali: number | null;
+    mq: number | null;
+  } | null;
+};
+
 export type ContrattoConAnnuncio = {
   id: string;
   stato: StatoContratto;
