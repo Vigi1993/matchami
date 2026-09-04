@@ -33,6 +33,20 @@ export type ListingProprietario = {
   nCandidature: number;
 };
 
+export type ImmobileDettaglio = {
+  id: string;
+  titolo: string;
+  descrizione: string | null;
+  zona: string;
+  prezzo: number;
+  locali: number | null;
+  mq: number | null;
+  attributi: Record<string, boolean>;
+  pubblicato: boolean;
+  fotoUrl: string | null;
+  nCandidature: number;
+};
+
 export type CandidaturaRicevuta = {
   id: string;
   status: StatoCandidatura;
