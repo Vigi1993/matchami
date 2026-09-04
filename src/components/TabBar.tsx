@@ -10,10 +10,9 @@ const TENANT_TABS = [
   { href: "/profilo", label: "Profilo" },
 ];
 
-// Le schermate proprietario arrivano in un prossimo passo: per ora,
-// se il ruolo è proprietario, mostriamo solo Home per non linkare
-// a pagine che non esistono ancora.
-const OWNER_TABS = [{ href: "/", label: "Home" }];
+// Le altre schermate proprietario (Home, Immobili, Gestione affitti,
+// Profilo) arrivano nei prossimi passi.
+const OWNER_TABS = [{ href: "/database", label: "Database" }];
 
 export function TabBar({ ruolo }: { ruolo: string }) {
   const pathname = usePathname();

@@ -24,6 +24,24 @@ export type StatoContratto = "bozza" | "in_firma" | "firmato" | "concluso";
 
 export type StatoCandidatura = "in_attesa" | "accettata" | "rifiutata";
 
+export type CandidaturaRicevuta = {
+  id: string;
+  status: StatoCandidatura;
+  match_pct: number | null;
+  created_at: string;
+  tenant_id: string;
+  listings: { titolo: string; zona: string } | null;
+  tenant_profiles: {
+    professione: string | null;
+    reddito_mensile: number | null;
+    verificato: boolean;
+    presentazione: string | null;
+  } | null;
+  // aggiunto lato client dopo il fetch separato di profiles
+  nome?: string | null;
+  cognome?: string | null;
+};
+
 export type CandidaturaConAnnuncio = {
   id: string;
   status: StatoCandidatura;

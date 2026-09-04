@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { HomeClient } from "./HomeClient";
 import { computeAffidabilita } from "@/lib/affidabilita";
@@ -8,6 +9,18 @@ export default async function Home() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("ruolo")
+    .eq("id", user!.id)
+    .single();
+
+  // La Home vera per il proprietario arriva in un prossimo passo: per ora
+  // lo mandiamo dritto al Database, che è già il suo schermo principale.
+  if (profile?.ruolo === "proprietario") {
+    redirect("/database");
+  }
 
   const [{ data: tenant }, { data: zoneRows }, { data: recensioni }, { data: giaCandidato }] =
     await Promise.all([
