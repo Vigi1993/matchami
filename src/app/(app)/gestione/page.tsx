@@ -1,11 +1,24 @@
-export default function GestionePage() {
+import { createClient } from "@/lib/supabase/server";
+import { GestioneClient } from "./GestioneClient";
+import type { ContrattoConAnnuncio } from "@/lib/types";
+
+export default async function GestionePage() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  // RLS fa già il filtro giusto (solo i contratti dove sei una delle due
+  // parti), ma filtriamo comunque esplicitamente per chiarezza della query.
+  const { data: contratti } = await supabase
+    .from("contratti")
+    .select(
+      "id, stato, canone, durata_mesi, data_inizio, data_firma, candidature!inner(tenant_id, listings(titolo, zona))"
+    )
+    .eq("candidature.tenant_id", user!.id)
+    .order("created_at", { ascending: false });
+
   return (
-    <div className="px-6 pt-16 text-center">
-      <h1 className="font-display text-xl text-ink mb-2">Gestione affitto</h1>
-      <p className="text-xs text-ink/50 max-w-xs mx-auto">
-        Contratto e bollette della casa che stai affittando. Arriva in un
-        prossimo passo.
-      </p>
-    </div>
+    <GestioneClient contratti={(contratti ?? []) as unknown as ContrattoConAnnuncio[]} />
   );
 }

@@ -19,3 +19,17 @@ export type TenantProfile = {
   locali_min: number | null;
   mq_min: number | null;
 };
+
+export type StatoContratto = "bozza" | "in_firma" | "firmato" | "concluso";
+
+export type ContrattoConAnnuncio = {
+  id: string;
+  stato: StatoContratto;
+  canone: number | null;
+  durata_mesi: number | null;
+  data_inizio: string | null;
+  data_firma: string | null;
+  candidature: {
+    listings: { titolo: string; zona: string } | null;
+  } | null;
+};
