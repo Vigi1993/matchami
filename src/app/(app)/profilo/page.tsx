@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { ProfiloClient } from "./ProfiloClient";
-import type { TenantProfile } from "@/lib/types";
+import { OwnerProfiloClient } from "./OwnerProfiloClient";
+import type { TenantProfile, OwnerProfile } from "@/lib/types";
 
 export default async function ProfiloPage() {
   const supabase = await createClient();
@@ -8,19 +9,34 @@ export default async function ProfiloPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("nome, cognome, ruolo")
+    .eq("id", user!.id)
+    .single();
+
+  if (profile?.ruolo === "proprietario") {
+    const { data: owner } = await supabase
+      .from("owner_profiles")
+      .select("*")
+      .eq("profile_id", user!.id)
+      .single();
+
+    return (
+      <OwnerProfiloClient
+        nome={profile?.nome ?? null}
+        owner={owner as OwnerProfile}
+      />
+    );
+  }
+
   const [
-    { data: profile },
     { data: tenant },
     { data: zoneRows },
     { data: interessiRows },
     { data: recensioni },
   ] = await Promise.all([
-    supabase.from("profiles").select("nome, cognome").eq("id", user!.id).single(),
-    supabase
-      .from("tenant_profiles")
-      .select("*")
-      .eq("profile_id", user!.id)
-      .single(),
+    supabase.from("tenant_profiles").select("*").eq("profile_id", user!.id).single(),
     supabase.from("tenant_zone_interesse").select("zona").eq("tenant_id", user!.id),
     supabase
       .from("tenant_interessi")

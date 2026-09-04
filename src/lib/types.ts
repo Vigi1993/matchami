@@ -33,6 +33,13 @@ export type ListingProprietario = {
   nCandidature: number;
 };
 
+export type OwnerProfile = {
+  profile_id: string;
+  proprietario_tipo: "privato" | "agenzia" | "property_manager" | null;
+  num_immobili: number;
+  obiettivo: string | null;
+};
+
 export type ImmobileDettaglio = {
   id: string;
   titolo: string;
