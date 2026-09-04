@@ -1,3 +1,10 @@
+#!/usr/bin/env bash
+set -e
+echo "Applico Fase 2 grafica - step 3: Home inquilino con layout desktop dedicato..."
+
+mkdir -p "src/app/(app)"
+
+cat > "src/app/(app)/HomeClient.tsx" << 'MATCHAMI_FILE_EOF'
 "use client";
 
 import { useState, useTransition } from "react";
@@ -158,3 +165,8 @@ export function HomeClient({
     </PageContainer>
   );
 }
+MATCHAMI_FILE_EOF
+
+echo "Fatto. Ora lancio la build per verificare..."
+rm -rf .next
+npm run build
