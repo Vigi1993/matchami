@@ -76,6 +76,13 @@ export type ContrattoProprietario = {
   cognome?: string | null;
 };
 
+export type Messaggio = {
+  id: string;
+  mittente_id: string;
+  testo: string;
+  created_at: string;
+};
+
 export type CandidaturaRicevuta = {
   id: string;
   status: StatoCandidatura;

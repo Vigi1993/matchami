@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { Sheet } from "@/components/Sheet";
 import type { CandidaturaRicevuta } from "@/lib/types";
 import { valutaCandidatura } from "./actions";
@@ -140,16 +141,26 @@ export function DatabaseClient({
                 </button>
               </div>
             ) : (
-              <div
-                className={`text-xs rounded-xl p-3 mt-2 ${
-                  stato(selezionata) === "accettata"
-                    ? "bg-moss/10 text-moss"
-                    : "bg-ink/5 text-ink/50"
-                }`}
-              >
-                {stato(selezionata) === "accettata"
-                  ? "Hai accettato questa candidatura."
-                  : "Hai rifiutato questa candidatura."}
+              <div className="flex flex-col gap-2 mt-2">
+                <div
+                  className={`text-xs rounded-xl p-3 ${
+                    stato(selezionata) === "accettata"
+                      ? "bg-moss/10 text-moss"
+                      : "bg-ink/5 text-ink/50"
+                  }`}
+                >
+                  {stato(selezionata) === "accettata"
+                    ? "Hai accettato questa candidatura."
+                    : "Hai rifiutato questa candidatura."}
+                </div>
+                {stato(selezionata) === "accettata" && (
+                  <Link
+                    href={`/chat/${selezionata.id}`}
+                    className="w-full text-center bg-moss text-paper font-bold text-sm py-3 rounded-xl"
+                  >
+                    Apri chat
+                  </Link>
+                )}
               </div>
             )}
           </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Sheet } from "@/components/Sheet";
 import type { CandidaturaConAnnuncio, StatoCandidatura } from "@/lib/types";
 
@@ -105,9 +106,16 @@ export function CandidatureClient({
             )}
 
             {selezionata.status === "accettata" && (
-              <div className="bg-moss/10 text-moss text-xs rounded-xl p-3 mt-2">
-                Il proprietario ha accettato la tua candidatura. La chat per
-                organizzare i prossimi passi arriva in un prossimo passo.
+              <div className="flex flex-col gap-2 mt-2">
+                <div className="bg-moss/10 text-moss text-xs rounded-xl p-3">
+                  Il proprietario ha accettato la tua candidatura.
+                </div>
+                <Link
+                  href={`/chat/${selezionata.id}`}
+                  className="w-full text-center bg-moss text-paper font-bold text-sm py-3 rounded-xl"
+                >
+                  Apri chat
+                </Link>
               </div>
             )}
             {selezionata.status === "in_attesa" && (
