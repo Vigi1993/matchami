@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import type { AffidabilitaResult } from "@/lib/affidabilita";
 import type { ListingConFoto } from "@/lib/types";
 import { candidati } from "./actions";
 import { PageContainer } from "@/components/ui/PageContainer";
+
+const SOGLIA_SWIPE = 100; // px di trascinamento oltre cui la scelta è "decisa"
 
 export function HomeClient({
   affidabilita,
@@ -18,6 +20,11 @@ export function HomeClient({
     new Set()
   );
   const [pending, startTransition] = useTransition();
+
+  // ---- stato del trascinamento della card ----
+  const [drag, setDrag] = useState({ x: 0, y: 0, dragging: false });
+  const [exiting, setExiting] = useState<"left" | "right" | null>(null);
+  const startPos = useRef({ x: 0, y: 0 });
 
   const attuale = listings[index];
   const finito = index >= listings.length;
@@ -35,6 +42,52 @@ export function HomeClient({
       setIndex((i) => i + 1);
     });
   }
+
+  // Azionata sia dal rilascio del trascinamento sia dai pulsanti: fa
+  // "volare via" la card nella direzione scelta, poi passa alla prossima.
+  function swipe(direzione: "left" | "right") {
+    if (!attuale || pending) return;
+    setExiting(direzione);
+    setTimeout(() => {
+      if (direzione === "right") candidati_(attuale);
+      else scarta();
+      setDrag({ x: 0, y: 0, dragging: false });
+      setExiting(null);
+    }, 220);
+  }
+
+  function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    if (exiting) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    startPos.current = { x: e.clientX, y: e.clientY };
+    setDrag({ x: 0, y: 0, dragging: true });
+  }
+
+  function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!drag.dragging) return;
+    setDrag({
+      x: e.clientX - startPos.current.x,
+      y: e.clientY - startPos.current.y,
+      dragging: true,
+    });
+  }
+
+  function onPointerUp() {
+    if (!drag.dragging) return;
+    if (drag.x > SOGLIA_SWIPE) swipe("right");
+    else if (drag.x < -SOGLIA_SWIPE) swipe("left");
+    else setDrag({ x: 0, y: 0, dragging: false });
+  }
+
+  const rotazione = drag.x / 18;
+  const transformStyle =
+    exiting === "right"
+      ? "translate(160%, 40px) rotate(28deg)"
+      : exiting === "left"
+        ? "translate(-160%, 40px) rotate(-28deg)"
+        : `translate(${drag.x}px, ${drag.y}px) rotate(${rotazione}deg)`;
+  const likeOpacity = Math.min(Math.max(drag.x / SOGLIA_SWIPE, 0), 1);
+  const nopeOpacity = Math.min(Math.max(-drag.x / SOGLIA_SWIPE, 0), 1);
 
   return (
     <PageContainer>
@@ -93,25 +146,54 @@ export function HomeClient({
             </div>
           )}
 
-          {/* ---- Card corrente ---- */}
+          {/* ---- Card corrente (trascinabile) ---- */}
           {attuale && !finito && (
             <div className="flex flex-col gap-4 md:max-w-md md:mx-auto">
-              <div className="relative rounded-3xl overflow-hidden bg-ink h-[420px] md:h-[540px]">
+              <div
+                onPointerDown={onPointerDown}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+                onPointerCancel={onPointerUp}
+                style={{
+                  transform: transformStyle,
+                  transition: drag.dragging
+                    ? "none"
+                    : "transform 0.22s ease-out",
+                  touchAction: "pan-y",
+                }}
+                className="relative rounded-3xl overflow-hidden bg-ink h-[420px] md:h-[540px] cursor-grab active:cursor-grabbing select-none"
+              >
                 {attuale.listing_photos?.[0]?.url ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={attuale.listing_photos[0].url}
                     alt={attuale.titolo}
-                    className="absolute inset-0 w-full h-full object-cover"
+                    draggable={false}
+                    className="absolute inset-0 w-full h-full object-cover pointer-events-none"
                   />
                 ) : (
-                  <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                     <span className="font-display italic text-5xl text-paper/15">
                       {attuale.titolo.slice(0, 2).toUpperCase()}
                     </span>
                   </div>
                 )}
-                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-ink/90 to-transparent p-4 md:p-6">
+
+                {/* Timbri LIKE / NOPE, sfumano mentre trascini */}
+                <div
+                  style={{ opacity: likeOpacity }}
+                  className="absolute top-6 left-6 border-4 border-moss text-moss font-display font-bold text-2xl px-3 py-1 rounded-xl -rotate-12 pointer-events-none"
+                >
+                  MI PIACE
+                </div>
+                <div
+                  style={{ opacity: nopeOpacity }}
+                  className="absolute top-6 right-6 border-4 border-clay text-clay font-display font-bold text-2xl px-3 py-1 rounded-xl rotate-12 pointer-events-none"
+                >
+                  NO
+                </div>
+
+                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-ink/90 to-transparent p-4 md:p-6 pointer-events-none">
                   <div className="font-display font-bold text-paper md:text-lg">
                     {attuale.titolo}
                   </div>
@@ -126,7 +208,7 @@ export function HomeClient({
 
               <div className="flex items-center justify-center gap-6">
                 <button
-                  onClick={scarta}
+                  onClick={() => swipe("left")}
                   disabled={pending}
                   aria-label="Scarta"
                   className="w-14 h-14 rounded-full border-2 border-clay text-clay flex items-center justify-center text-2xl disabled:opacity-50"
@@ -134,7 +216,7 @@ export function HomeClient({
                   ✕
                 </button>
                 <button
-                  onClick={() => candidati_(attuale)}
+                  onClick={() => swipe("right")}
                   disabled={pending}
                   aria-label="Candidati"
                   className="w-16 h-16 rounded-full bg-moss text-paper flex items-center justify-center text-2xl disabled:opacity-50"

@@ -8,6 +8,7 @@ import { PageContainer } from "@/components/ui/PageContainer";
 import { Chip } from "@/components/ui/Chip";
 import { Field } from "@/components/ui/Field";
 import { Stepper } from "@/components/ui/Stepper";
+import { createClient } from "@/lib/supabase/client";
 import {
   creaImmobile,
   aggiornaImmobile,
@@ -132,6 +133,47 @@ function ImmobileForm({
     immobile?.attributi ?? {}
   );
   const [pubblicato, setPubblicato] = useState(immobile?.pubblicato ?? true);
+  const [fotoUrl, setFotoUrl] = useState(immobile?.fotoUrl ?? "");
+  const [caricamentoFoto, setCaricamentoFoto] = useState(false);
+  const [erroreFoto, setErroreFoto] = useState<string | null>(null);
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setCaricamentoFoto(true);
+    setErroreFoto(null);
+
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      setErroreFoto("Devi essere autenticato.");
+      setCaricamentoFoto(false);
+      return;
+    }
+
+    const estensione = file.name.split(".").pop() || "jpg";
+    const percorso = `${user.id}/${crypto.randomUUID()}.${estensione}`;
+
+    const { error } = await supabase.storage
+      .from("immobili-foto")
+      .upload(percorso, file, { upsert: true });
+
+    if (error) {
+      setErroreFoto(error.message);
+      setCaricamentoFoto(false);
+      return;
+    }
+
+    const { data } = supabase.storage
+      .from("immobili-foto")
+      .getPublicUrl(percorso);
+
+    setFotoUrl(data.publicUrl);
+    setCaricamentoFoto(false);
+  }
 
   function toggleAttributo(key: string) {
     setAttributi((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -168,6 +210,7 @@ function ImmobileForm({
       <input type="hidden" name="mq" value={mq} />
       <input type="hidden" name="attributi" value={JSON.stringify(attributi)} />
       <input type="hidden" name="pubblicato" value={String(pubblicato)} />
+      <input type="hidden" name="fotoUrl" value={fotoUrl} />
 
       <Field label="Titolo annuncio">
         <input
@@ -221,18 +264,34 @@ function ImmobileForm({
         <Stepper value={mq} onChange={setMq} min={15} max={250} step={5} suffix=" m²" />
       </Field>
 
-      <Field label="URL foto principale (opzionale)">
-        <input
-          name="fotoUrl"
-          type="url"
-          defaultValue={immobile?.fotoUrl ?? ""}
-          placeholder="https://..."
-          className="w-full bg-ink/5 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-gold"
-        />
-        <p className="text-[11px] text-ink/40 mt-1">
-          Il caricamento di file foto arriva in un prossimo passo — per ora
-          incolla il link di un&apos;immagine già online.
-        </p>
+      <Field label="Foto principale">
+        <div className="flex items-center gap-4">
+          {fotoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={fotoUrl}
+              alt="Anteprima"
+              className="w-20 h-20 rounded-xl object-cover bg-ink/10 shrink-0"
+            />
+          ) : (
+            <div className="w-20 h-20 rounded-xl bg-ink/10 shrink-0" />
+          )}
+          <div className="flex-1">
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleFileChange}
+              disabled={caricamentoFoto}
+              className="text-xs text-ink/70 file:mr-3 file:py-2 file:px-3 file:rounded-full file:border-0 file:bg-ink/10 file:text-xs file:font-semibold file:text-ink"
+            />
+            {caricamentoFoto && (
+              <p className="text-[11px] text-ink/40 mt-1">Caricamento...</p>
+            )}
+            {erroreFoto && (
+              <p className="text-[11px] text-clay mt-1">{erroreFoto}</p>
+            )}
+          </div>
+        </div>
       </Field>
 
       <Field label="Caratteristiche">

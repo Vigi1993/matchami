@@ -14,6 +14,8 @@ import { PageContainer } from "@/components/ui/PageContainer";
 import { Chip } from "@/components/ui/Chip";
 import { Field } from "@/components/ui/Field";
 import { Stepper } from "@/components/ui/Stepper";
+import { PrivacySheet } from "@/components/PrivacySheet";
+import { FaqSheet } from "@/components/FaqSheet";
 
 type Props = {
   nome: string | null;
@@ -23,6 +25,8 @@ type Props = {
   interessiIniziali: Record<string, number>;
   mediaRecensioni: number | null;
   numeroRecensioni: number;
+  consensoMarketingIniziale: boolean;
+  consensoTerziIniziale: boolean;
 };
 
 export function ProfiloClient({
@@ -32,9 +36,11 @@ export function ProfiloClient({
   interessiIniziali,
   mediaRecensioni,
   numeroRecensioni,
+  consensoMarketingIniziale,
+  consensoTerziIniziale,
 }: Props) {
   const [sheetAperta, setSheetAperta] = useState<
-    "affidabilita" | "dati" | "ricerca" | null
+    "affidabilita" | "dati" | "ricerca" | "privacy" | "faq" | null
   >(null);
 
   const affidabilita = computeAffidabilita({
@@ -116,20 +122,20 @@ export function ProfiloClient({
         onClick={() => setSheetAperta("ricerca")}
       />
 
-      {/* Privacy / FAQ — segnaposto, arrivano in un prossimo passo */}
+      {/* Privacy / FAQ */}
       <Row
         color="var(--moss)"
         title="Privacy e consensi"
         subtitle="Rivedi o modifica i consensi su marketing e condivisione dati con terzi."
         cta="Gestisci consensi"
-        onClick={() => {}}
+        onClick={() => setSheetAperta("privacy")}
       />
       <Row
         color="var(--gold)"
         title="FAQ e bonus affitto"
         subtitle="Bonus giovani, contributo Comune di Milano, detrazioni 730 e altre curiosità."
         cta="Vedi le domande frequenti"
-        onClick={() => {}}
+        onClick={() => setSheetAperta("faq")}
       />
 
       <form action={logout} className="mt-4">
@@ -182,6 +188,15 @@ export function ProfiloClient({
         zoneIniziali={zoneIniziali}
         interessiIniziali={interessiIniziali}
       />
+
+      {/* ---- Sheet: Privacy e FAQ ---- */}
+      <PrivacySheet
+        open={sheetAperta === "privacy"}
+        onClose={() => setSheetAperta(null)}
+        consensoMarketingIniziale={consensoMarketingIniziale}
+        consensoTerziIniziale={consensoTerziIniziale}
+      />
+      <FaqSheet open={sheetAperta === "faq"} onClose={() => setSheetAperta(null)} />
         </PageContainer>
   );
 }

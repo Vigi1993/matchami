@@ -11,7 +11,7 @@ export default async function ProfiloPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("nome, cognome, ruolo")
+    .select("nome, cognome, ruolo, consenso_marketing, consenso_terzi")
     .eq("id", user!.id)
     .single();
 
@@ -26,6 +26,8 @@ export default async function ProfiloPage() {
       <OwnerProfiloClient
         nome={profile?.nome ?? null}
         owner={owner as OwnerProfile}
+        consensoMarketingIniziale={profile?.consenso_marketing ?? false}
+        consensoTerziIniziale={profile?.consenso_terzi ?? false}
       />
     );
   }
@@ -64,6 +66,8 @@ export default async function ProfiloPage() {
       interessiIniziali={interessiIniziali}
       mediaRecensioni={mediaRecensioni}
       numeroRecensioni={numeroRecensioni}
+      consensoMarketingIniziale={profile?.consenso_marketing ?? false}
+      consensoTerziIniziale={profile?.consenso_terzi ?? false}
     />
   );
 }

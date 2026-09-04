@@ -8,6 +8,8 @@ import { logout } from "@/app/login/actions";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { Chip } from "@/components/ui/Chip";
 import { Field } from "@/components/ui/Field";
+import { PrivacySheet } from "@/components/PrivacySheet";
+import { FaqSheet } from "@/components/FaqSheet";
 
 const TIPO_VOCAB = [
   { value: "privato", label: "Privato" },
@@ -24,11 +26,17 @@ const OBIETTIVO_VOCAB = [
 export function OwnerProfiloClient({
   nome,
   owner,
+  consensoMarketingIniziale,
+  consensoTerziIniziale,
 }: {
   nome: string | null;
   owner: OwnerProfile;
+  consensoMarketingIniziale: boolean;
+  consensoTerziIniziale: boolean;
 }) {
   const [datiAperto, setDatiAperto] = useState(false);
+  const [privacyAperto, setPrivacyAperto] = useState(false);
+  const [faqAperto, setFaqAperto] = useState(false);
 
   return (
     <PageContainer>
@@ -55,14 +63,14 @@ export function OwnerProfiloClient({
         title="Privacy e consensi"
         subtitle="Rivedi o modifica i consensi su marketing e condivisione dati con terzi."
         cta="Gestisci consensi"
-        onClick={() => {}}
+        onClick={() => setPrivacyAperto(true)}
       />
       <Row
         color="var(--gold)"
         title="FAQ"
         subtitle="Domande frequenti su MatchAmI per i proprietari."
         cta="Vedi le domande frequenti"
-        onClick={() => {}}
+        onClick={() => setFaqAperto(true)}
       />
 
       <form action={logout} className="mt-4">
@@ -76,6 +84,14 @@ export function OwnerProfiloClient({
       >
         <DatiProprietarioForm owner={owner} onSaved={() => setDatiAperto(false)} />
       </Sheet>
+
+      <PrivacySheet
+        open={privacyAperto}
+        onClose={() => setPrivacyAperto(false)}
+        consensoMarketingIniziale={consensoMarketingIniziale}
+        consensoTerziIniziale={consensoTerziIniziale}
+      />
+      <FaqSheet open={faqAperto} onClose={() => setFaqAperto(false)} />
     </PageContainer>
   );
 }
