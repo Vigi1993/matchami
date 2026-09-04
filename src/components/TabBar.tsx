@@ -10,12 +10,12 @@ const TENANT_TABS = [
   { href: "/profilo", label: "Profilo" },
 ];
 
-// Le altre schermate proprietario (Gestione affitti, Profilo) arrivano
-// nei prossimi passi.
+// Resta solo il Profilo proprietario da costruire.
 const OWNER_TABS = [
   { href: "/", label: "Home" },
   { href: "/database", label: "Database" },
   { href: "/immobili", label: "Immobili" },
+  { href: "/gestione-affitti", label: "Gestione affitti" },
 ];
 
 export function TabBar({ ruolo }: { ruolo: string }) {

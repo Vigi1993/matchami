@@ -47,6 +47,28 @@ export type ImmobileDettaglio = {
   nCandidature: number;
 };
 
+export type CandidaturaSenzaContratto = {
+  id: string;
+  listings: { titolo: string; zona: string } | null;
+  nome: string | null;
+  cognome: string | null;
+};
+
+export type ContrattoProprietario = {
+  id: string;
+  stato: StatoContratto;
+  canone: number | null;
+  durata_mesi: number | null;
+  data_inizio: string | null;
+  data_firma: string | null;
+  candidature: {
+    listings: { titolo: string; zona: string } | null;
+    tenant_id: string;
+  } | null;
+  nome?: string | null;
+  cognome?: string | null;
+};
+
 export type CandidaturaRicevuta = {
   id: string;
   status: StatoCandidatura;
