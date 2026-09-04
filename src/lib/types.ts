@@ -24,6 +24,15 @@ export type StatoContratto = "bozza" | "in_firma" | "firmato" | "concluso";
 
 export type StatoCandidatura = "in_attesa" | "accettata" | "rifiutata";
 
+export type ListingProprietario = {
+  id: string;
+  titolo: string;
+  zona: string;
+  prezzo: number;
+  pubblicato: boolean;
+  nCandidature: number;
+};
+
 export type CandidaturaRicevuta = {
   id: string;
   status: StatoCandidatura;

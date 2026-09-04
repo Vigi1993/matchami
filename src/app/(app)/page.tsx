@@ -1,8 +1,8 @@
-import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { HomeClient } from "./HomeClient";
+import { OwnerHomeClient } from "./OwnerHomeClient";
 import { computeAffidabilita } from "@/lib/affidabilita";
-import type { TenantProfile, ListingConFoto } from "@/lib/types";
+import type { TenantProfile, ListingConFoto, ListingProprietario } from "@/lib/types";
 
 export default async function Home() {
   const supabase = await createClient();
@@ -16,18 +16,22 @@ export default async function Home() {
     .eq("id", user!.id)
     .single();
 
-  // La Home vera per il proprietario arriva in un prossimo passo: per ora
-  // lo mandiamo dritto al Database, che è già il suo schermo principale.
   if (profile?.ruolo === "proprietario") {
-    redirect("/database");
+    return <OwnerHome userId={user!.id} />;
   }
+
+  return <TenantHome userId={user!.id} />;
+}
+
+async function TenantHome({ userId }: { userId: string }) {
+  const supabase = await createClient();
 
   const [{ data: tenant }, { data: zoneRows }, { data: recensioni }, { data: giaCandidato }] =
     await Promise.all([
-      supabase.from("tenant_profiles").select("*").eq("profile_id", user!.id).single(),
-      supabase.from("tenant_zone_interesse").select("zona").eq("tenant_id", user!.id),
-      supabase.from("recensioni").select("voto").eq("tenant_id", user!.id),
-      supabase.from("candidature").select("listing_id").eq("tenant_id", user!.id),
+      supabase.from("tenant_profiles").select("*").eq("profile_id", userId).single(),
+      supabase.from("tenant_zone_interesse").select("zona").eq("tenant_id", userId),
+      supabase.from("recensioni").select("voto").eq("tenant_id", userId),
+      supabase.from("candidature").select("listing_id").eq("tenant_id", userId),
     ]);
 
   const zone = (zoneRows ?? []).map((r) => r.zona as string);
@@ -76,6 +80,48 @@ export default async function Home() {
     <HomeClient
       affidabilita={affidabilita}
       listings={(listings ?? []) as unknown as ListingConFoto[]}
+    />
+  );
+}
+
+async function OwnerHome({ userId }: { userId: string }) {
+  const supabase = await createClient();
+
+  const [{ data: listings }, { data: candidature }] = await Promise.all([
+    supabase
+      .from("listings")
+      .select("id, titolo, zona, prezzo, pubblicato")
+      .eq("owner_id", userId)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("candidature")
+      .select("id, status, listing_id, listings!inner(owner_id)")
+      .eq("listings.owner_id", userId),
+  ]);
+
+  const nCandidaturePerListing = new Map<string, number>();
+  for (const c of candidature ?? []) {
+    const id = c.listing_id as string;
+    nCandidaturePerListing.set(id, (nCandidaturePerListing.get(id) ?? 0) + 1);
+  }
+
+  const listingsConConteggio: ListingProprietario[] = (listings ?? []).map((l) => ({
+    id: l.id,
+    titolo: l.titolo,
+    zona: l.zona,
+    prezzo: l.prezzo,
+    pubblicato: l.pubblicato,
+    nCandidature: nCandidaturePerListing.get(l.id) ?? 0,
+  }));
+
+  const totaleCandidature = candidature?.length ?? 0;
+  const daValutare = (candidature ?? []).filter((c) => c.status === "in_attesa").length;
+
+  return (
+    <OwnerHomeClient
+      listings={listingsConConteggio}
+      totaleCandidature={totaleCandidature}
+      daValutare={daValutare}
     />
   );
 }

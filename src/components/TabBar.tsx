@@ -10,9 +10,12 @@ const TENANT_TABS = [
   { href: "/profilo", label: "Profilo" },
 ];
 
-// Le altre schermate proprietario (Home, Immobili, Gestione affitti,
-// Profilo) arrivano nei prossimi passi.
-const OWNER_TABS = [{ href: "/database", label: "Database" }];
+// Le altre schermate proprietario (Immobili, Gestione affitti, Profilo)
+// arrivano nei prossimi passi.
+const OWNER_TABS = [
+  { href: "/", label: "Home" },
+  { href: "/database", label: "Database" },
+];
 
 export function TabBar({ ruolo }: { ruolo: string }) {
   const pathname = usePathname();
