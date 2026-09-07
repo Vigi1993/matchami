@@ -3,6 +3,7 @@
 import { Suspense, useActionState, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { signup, login } from "./actions";
+import { IconCasa, IconPalazzo } from "@/components/icons";
 
 type Ruolo = "inquilino" | "proprietario";
 
@@ -28,41 +29,42 @@ function LoginForm() {
   const [loginState, loginAction, loginPending] = useActionState(login, null);
 
   return (
-    <main className="min-h-screen bg-ink text-paper flex flex-col items-center justify-center px-6 py-12">
-      <div className="w-full max-w-sm">
-        <h1 className="font-display italic text-2xl text-center mb-1">
-          Match<span className="text-gold not-italic">AmI</span>
-        </h1>
-        <p className="text-center text-paper/70 text-sm mb-8">
+    <main className="login-view">
+      <div
+        className="login-bg"
+        style={{ backgroundImage: "url(/login-bg.jpg)" }}
+      />
+      <div className="login-scrim" />
+
+      <div className="login-content">
+        <div className="login-brand">
+          Match<b>AmI</b>
+        </div>
+        <h1 className="login-title">Il nuovo modo di affittare casa.</h1>
+        <p className="login-tag">
           Ogni casa ha un inquilino perfetto che la aspetta. Scorri, matcha,
           affitta. Tutto verificato, su MatchAmI.
         </p>
 
         {erroreConferma && (
-          <p className="text-clay text-xs text-center mb-4 border border-clay/40 rounded-xl p-3">
+          <p className="login-error mb-4">
             Conferma email non riuscita: {erroreConferma}
           </p>
         )}
 
         {/* Tab Registrati / Accedi */}
-        <div className="flex bg-paper/10 rounded-2xl p-1 mb-6">
+        <div className="login-switch">
           <button
             type="button"
             onClick={() => setTab("registrati")}
-            className={`flex-1 text-sm font-bold py-2.5 rounded-xl transition-colors ${
-              tab === "registrati"
-                ? "bg-paper text-ink"
-                : "text-paper/60"
-            }`}
+            className={tab === "registrati" ? "on" : ""}
           >
             Registrati
           </button>
           <button
             type="button"
             onClick={() => setTab("accedi")}
-            className={`flex-1 text-sm font-bold py-2.5 rounded-xl transition-colors ${
-              tab === "accedi" ? "bg-paper text-ink" : "text-paper/60"
-            }`}
+            className={tab === "accedi" ? "on" : ""}
           >
             Accedi
           </button>
@@ -70,18 +72,20 @@ function LoginForm() {
 
         {tab === "registrati" ? (
           <form action={signupAction} className="flex flex-col gap-3">
-            <div className="flex gap-3 mb-1">
+            <div className="role-row mb-1">
               <RoleCard
                 label="Cerco casa"
                 sublabel="Affitto come inquilino"
                 selected={ruolo === "inquilino"}
                 onClick={() => setRuolo("inquilino")}
+                icon={<IconCasa />}
               />
               <RoleCard
                 label="Ho un immobile"
                 sublabel="Voglio metterlo in affitto"
                 selected={ruolo === "proprietario"}
                 onClick={() => setRuolo("proprietario")}
+                icon={<IconPalazzo />}
               />
             </div>
             <input type="hidden" name="ruolo" value={ruolo} />
@@ -98,21 +102,17 @@ function LoginForm() {
               required
             />
 
-            <label className="flex items-start gap-2 text-xs text-paper/70 mt-1">
+            <label className="login-consent mt-1">
               <input type="checkbox" name="privacy" className="mt-0.5" />
               Accetto il trattamento dei dati necessario al funzionamento di
               MatchAmI (privacy policy).
             </label>
 
             {signupState?.error && (
-              <p className="text-clay text-xs">{signupState.error}</p>
+              <p className="login-error">{signupState.error}</p>
             )}
 
-            <button
-              type="submit"
-              disabled={signupPending}
-              className="bg-gold text-ink font-bold text-sm py-3 rounded-xl mt-2 disabled:opacity-60"
-            >
+            <button type="submit" disabled={signupPending} className="login-cta mt-2">
               {signupPending ? "Creazione account..." : "Crea il tuo account"}
             </button>
           </form>
@@ -127,30 +127,26 @@ function LoginForm() {
             />
 
             {loginState?.error && (
-              <p className="text-clay text-xs">{loginState.error}</p>
+              <p className="login-error">{loginState.error}</p>
             )}
 
-            <button
-              type="submit"
-              disabled={loginPending}
-              className="bg-gold text-ink font-bold text-sm py-3 rounded-xl mt-2 disabled:opacity-60"
-            >
+            <button type="submit" disabled={loginPending} className="login-cta mt-2">
               {loginPending ? "Accesso..." : "Accedi"}
             </button>
           </form>
         )}
+
+        <p className="login-fine">
+          Dopo la registrazione ti chiederemo se cerchi casa o hai un immobile
+          da mettere in affitto.
+        </p>
       </div>
     </main>
   );
 }
 
 function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  return (
-    <input
-      {...props}
-      className="w-full bg-paper/10 placeholder:text-paper/40 text-paper text-sm rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-gold"
-    />
-  );
+  return <input {...props} className="login-input" />;
 }
 
 function RoleCard({
@@ -158,26 +154,23 @@ function RoleCard({
   sublabel,
   selected,
   onClick,
+  icon,
 }: {
   label: string;
   sublabel: string;
   selected: boolean;
   onClick: () => void;
+  icon: React.ReactNode;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`flex-1 rounded-2xl border p-3 text-left transition-colors ${
-        selected
-          ? "border-moss bg-moss/15"
-          : "border-paper/15 bg-paper/5"
-      }`}
+      className={`login-role-card ${selected ? "on" : ""}`}
     >
-      <div className="font-display font-bold text-sm text-paper">
-        {label}
-      </div>
-      <div className="text-[11px] text-paper/60">{sublabel}</div>
+      {icon}
+      <div className="rt">{label}</div>
+      <div className="rs">{sublabel}</div>
     </button>
   );
 }

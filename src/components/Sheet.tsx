@@ -2,6 +2,11 @@
 
 import { useEffect } from "react";
 
+/**
+ * Bottom sheet del prototipo: pannello color carta che sale dal basso,
+ * alto l'88% del telaio, con maniglia in alto e contenuto scrollabile.
+ * L'interfaccia (open / onClose / title / children) è invariata.
+ */
 export function Sheet({
   open,
   onClose,
@@ -26,25 +31,26 @@ export function Sheet({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50">
-      <div
-        className="absolute inset-0 bg-ink/60"
-        onClick={onClose}
-        aria-hidden
-      />
-      <div className="absolute bottom-0 left-0 right-0 max-h-[88vh] overflow-y-auto bg-paper rounded-t-3xl px-5 pt-5 pb-8 shadow-2xl md:bottom-auto md:left-1/2 md:right-auto md:top-1/2 md:w-full md:max-w-lg md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-3xl md:px-8 md:pt-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-display text-lg text-ink">{title}</h2>
-          <button
-            onClick={onClose}
-            aria-label="Chiudi"
-            className="text-ink/50 text-xl leading-none px-2"
-          >
-            ×
-          </button>
+    <>
+      <div className="sheet-backdrop" onClick={onClose} aria-hidden />
+      <div className="sheet" role="dialog" aria-label={title}>
+        <div className="sheet-handle-area">
+          <div className="sheet-handle" />
         </div>
-        {children}
+        <div className="sheet-scroll">
+          <div className="flex items-start justify-between gap-3">
+            <h2 className="sheet-title">{title}</h2>
+            <button
+              onClick={onClose}
+              aria-label="Chiudi"
+              className="sheet-close mt-2"
+            >
+              ×
+            </button>
+          </div>
+          {children}
+        </div>
       </div>
-    </div>
+    </>
   );
 }

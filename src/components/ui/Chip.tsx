@@ -11,11 +11,7 @@ export function Chip({
     <button
       type="button"
       onClick={onClick}
-      className={`text-xs font-semibold px-3 py-2 rounded-full border transition-colors text-left ${
-        active
-          ? "bg-moss/15 border-moss text-moss"
-          : "bg-ink/5 border-transparent text-ink/60"
-      }`}
+      className={`chip ${active ? "on" : ""}`}
     >
       {label}
     </button>

@@ -19,13 +19,15 @@ export default async function AppLayout({
 
   const ruolo = profile?.ruolo ?? "inquilino";
 
+  /*
+    Come nel prototipo: un unico "telaio" da 480px centrato, alto quanto
+    la viewport e senza scroll di pagina. Dentro, l'area delle schermate
+    (che scorre da sola) e la tab bar fissa in basso.
+  */
   return (
-    <div className="min-h-screen bg-paper">
+    <div className="app-shell">
+      <div className="screens">{children}</div>
       <Navigation ruolo={ruolo} nome={profile?.nome} />
-      {/* pb-24: spazio per la barra in basso su smartphone.
-          md:pl-64: spazio per la sidebar su desktop. md:pb-0: sul
-          desktop la barra in basso non c'è, non serve il margine. */}
-      <div className="pb-24 md:pb-0 md:pl-64">{children}</div>
     </div>
   );
 }

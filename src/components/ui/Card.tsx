@@ -7,13 +7,12 @@ export function Card({
   onClick?: () => void;
   className?: string;
 }) {
-  const base = "bg-white border border-ink/10 rounded-2xl p-4";
   if (onClick) {
     return (
-      <button onClick={onClick} className={`w-full text-left ${base} ${className}`}>
+      <button onClick={onClick} className={`pv-row ${className}`}>
         {children}
       </button>
     );
   }
-  return <div className={`${base} ${className}`}>{children}</div>;
+  return <div className={`pv-row ${className}`}>{children}</div>;
 }

@@ -1,7 +1,7 @@
 const PRESETS = {
-  attesa: "bg-gold/20 text-[#8A6A25]",
-  positivo: "bg-moss/15 text-moss",
-  neutro: "bg-ink/10 text-ink/40",
+  attesa: "is-wait",
+  positivo: "is-match",
+  neutro: "is-off",
 } as const;
 
 export function StatusBadge({
@@ -11,11 +11,5 @@ export function StatusBadge({
   label: string;
   tone: keyof typeof PRESETS;
 }) {
-  return (
-    <span
-      className={`text-[10px] font-bold px-2 py-1 rounded-full ${PRESETS[tone]}`}
-    >
-      {label}
-    </span>
-  );
+  return <span className={`mc-pct ${PRESETS[tone]}`}>{label}</span>;
 }

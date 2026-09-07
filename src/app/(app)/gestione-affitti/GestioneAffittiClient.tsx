@@ -11,6 +11,7 @@ import { creaContratto, aggiornaContratto, type SaveState } from "./actions";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { Chip } from "@/components/ui/Chip";
 import { Field } from "@/components/ui/Field";
+import { IconDocumento } from "@/components/icons";
 
 const STATO_LABEL: Record<StatoContratto, string> = {
   bozza: "Bozza",
@@ -19,11 +20,11 @@ const STATO_LABEL: Record<StatoContratto, string> = {
   concluso: "Concluso",
 };
 
-const STATO_COLOR: Record<StatoContratto, string> = {
-  bozza: "bg-ink/10 text-ink/60",
-  in_firma: "bg-gold/20 text-[#8A6A25]",
-  firmato: "bg-moss/15 text-moss",
-  concluso: "bg-ink/10 text-ink/60",
+const STATO_BADGE: Record<StatoContratto, string> = {
+  bozza: "is-off",
+  in_firma: "is-wait",
+  firmato: "is-match",
+  concluso: "is-off",
 };
 
 const STATI: StatoContratto[] = ["bozza", "in_firma", "firmato", "concluso"];
@@ -44,79 +45,79 @@ export function GestioneAffittiClient({
 
   return (
     <PageContainer wide>
-      <h1 className="font-display text-xl text-ink mb-1">Gestione affitti</h1>
-      <p className="text-xs text-ink/50 mb-6">
+      <h1 className="screen-title">Gestione affitti</h1>
+      <p className="screen-sub">
         Contratti dei tuoi immobili, dalla bozza alla firma.
       </p>
 
       {candidatureSenzaContratto.length > 0 && (
         <>
-          <div className="mb-3 text-xs font-bold uppercase tracking-wide text-ink/50">
-            Da avviare · {candidatureSenzaContratto.length}
+          <div className="pref-label" style={{ marginTop: 8 }}>
+            <span>Da avviare — {candidatureSenzaContratto.length}</span>
           </div>
-          <div className="flex flex-col gap-3 mb-6 md:grid md:grid-cols-2 md:gap-4 lg:grid-cols-3">
-            {candidatureSenzaContratto.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => setNuovaDa(c)}
-                className="w-full text-left bg-white border border-ink/10 rounded-2xl p-4"
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="font-display font-bold text-sm text-ink">
-                    {c.nome} {c.cognome}
-                  </span>
-                  <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-gold/20 text-[#8A6A25]">
-                    Crea contratto
-                  </span>
+          {candidatureSenzaContratto.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => setNuovaDa(c)}
+              className="match-card"
+            >
+              <div className="mc-avatar">
+                {`${c.nome?.[0] ?? ""}${c.cognome?.[0] ?? ""}`.toUpperCase() ||
+                  "IN"}
+              </div>
+              <div className="mc-body">
+                <div className="mc-zona">{c.listings?.zona}</div>
+                <div className="mc-title">
+                  {c.nome} {c.cognome}
                 </div>
-                <div className="text-xs text-ink/50">
-                  {c.listings?.titolo} · {c.listings?.zona}
-                </div>
-              </button>
-            ))}
-          </div>
+                <div className="mc-meta">{c.listings?.titolo}</div>
+              </div>
+              <div className="mc-pct is-wait">Crea contratto</div>
+            </button>
+          ))}
         </>
       )}
 
-      <div className="mb-3 text-xs font-bold uppercase tracking-wide text-ink/50">
-        I tuoi contratti {contratti.length > 0 && `· ${contratti.length}`}
+      <div className="pref-label" style={{ marginTop: 20 }}>
+        <span>
+          I tuoi contratti {contratti.length > 0 && `· ${contratti.length}`}
+        </span>
       </div>
 
       {contratti.length === 0 && candidatureSenzaContratto.length === 0 ? (
-        <div className="bg-ink/5 rounded-2xl p-5 text-center">
-          <h3 className="font-display font-bold text-sm text-ink mb-1">
-            Nessun contratto ancora
-          </h3>
-          <p className="text-xs text-ink/50 max-w-xs mx-auto">
-            Appena accetterai una candidatura, potrai avviare il contratto
-            da qui.
+        <div className="empty-inline" style={{ paddingTop: 30 }}>
+          <IconDocumento className="icon-empty" />
+          <h3>Nessun contratto ancora</h3>
+          <p>
+            Appena accetterai una candidatura, potrai avviare il contratto da
+            qui.
           </p>
         </div>
       ) : (
-        <div className="flex flex-col gap-3 md:grid md:grid-cols-2 md:gap-4 lg:grid-cols-3">
-          {contratti.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => setSelezionato(c)}
-              className="w-full text-left bg-white border border-ink/10 rounded-2xl p-4"
-            >
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-display font-bold text-sm text-ink">
-                  {c.nome} {c.cognome}
-                </span>
-                <span
-                  className={`text-[10px] font-bold px-2 py-1 rounded-full ${STATO_COLOR[c.stato]}`}
-                >
-                  {STATO_LABEL[c.stato]}
-                </span>
+        contratti.map((c) => (
+          <button
+            key={c.id}
+            onClick={() => setSelezionato(c)}
+            className="match-card"
+          >
+            <div className="mc-avatar">
+              {`${c.nome?.[0] ?? ""}${c.cognome?.[0] ?? ""}`.toUpperCase() ||
+                "IN"}
+            </div>
+            <div className="mc-body">
+              <div className="mc-zona">{c.candidature?.listings?.titolo}</div>
+              <div className="mc-title">
+                {c.nome} {c.cognome}
               </div>
-              <div className="text-xs text-ink/50">
-                {c.candidature?.listings?.titolo}
-                {c.canone && ` · €${c.canone.toLocaleString("it-IT")}/mese`}
+              <div className="mc-meta">
+                {c.canone ? `€${c.canone.toLocaleString("it-IT")}/mese` : "—"}
               </div>
-            </button>
-          ))}
-        </div>
+            </div>
+            <div className={`mc-pct ${STATO_BADGE[c.stato]}`}>
+              {STATO_LABEL[c.stato]}
+            </div>
+          </button>
+        ))
       )}
 
       {/* ---- Sheet: crea contratto da candidatura accettata ---- */}
@@ -224,21 +225,17 @@ function ContrattoForm({
       </Field>
 
       <Field label="Durata (mesi)">
-        <div className="flex items-center gap-4">
+        <div className="stepper">
           <button
             type="button"
             onClick={() => setDurata((d) => Math.max(6, d - 6))}
-            className="w-8 h-8 rounded-full bg-ink/10 text-ink font-bold"
           >
             −
           </button>
-          <div className="text-sm font-bold text-ink w-16 text-center">
-            {durata}
-          </div>
+          <div className="val">{durata}</div>
           <button
             type="button"
             onClick={() => setDurata((d) => Math.min(72, d + 6))}
-            className="w-8 h-8 rounded-full bg-ink/10 text-ink font-bold"
           >
             +
           </button>
@@ -250,7 +247,7 @@ function ContrattoForm({
           type="date"
           value={dataInizio}
           onChange={(e) => setDataInizio(e.target.value)}
-          className="w-full bg-ink/5 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-gold"
+          className="contract-input"
         />
       </Field>
 
@@ -260,18 +257,18 @@ function ContrattoForm({
             type="date"
             value={dataFirma}
             onChange={(e) => setDataFirma(e.target.value)}
-            className="w-full bg-ink/5 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-gold"
+            className="contract-input"
           />
         </Field>
       )}
 
-      {state?.error && <p className="text-clay text-xs">{state.error}</p>}
-      {state?.ok && <p className="text-moss text-xs">Salvato.</p>}
+      {state?.error && <p className="note-error">{state.error}</p>}
+      {state?.ok && <p className="note-saved">Salvato.</p>}
 
       <button
         type="submit"
         disabled={pending}
-        className="w-full bg-gold text-ink font-bold text-sm py-3 rounded-xl disabled:opacity-60"
+        className="opp-cta"
       >
         {pending ? "Salvataggio..." : "Salva"}
       </button>

@@ -9,6 +9,7 @@ import { Chip } from "@/components/ui/Chip";
 import { Field } from "@/components/ui/Field";
 import { Stepper } from "@/components/ui/Stepper";
 import { createClient } from "@/lib/supabase/client";
+import { IconPalazzo } from "@/components/icons";
 import {
   creaImmobile,
   aggiornaImmobile,
@@ -28,8 +29,8 @@ export function ImmobiliClient({
 
   return (
     <PageContainer wide>
-      <h1 className="font-display text-xl text-ink mb-1">I tuoi immobili</h1>
-      <p className="text-xs text-ink/50 mb-6">
+      <h1 className="screen-title">I tuoi immobili</h1>
+      <p className="screen-sub">
         {immobili.length === 0
           ? "Pubblica il tuo primo immobile per iniziare a ricevere candidature."
           : `${immobili.length} immobil${immobili.length === 1 ? "e" : "i"} pubblicat${immobili.length === 1 ? "o" : "i"}.`}
@@ -37,51 +38,62 @@ export function ImmobiliClient({
 
       <button
         onClick={() => setNuovoAperto(true)}
-        className="w-full bg-gold text-ink font-bold text-sm py-3 rounded-xl mb-6"
+        className="opp-cta"
+        style={{ marginBottom: 26 }}
       >
         + Nuovo annuncio
       </button>
 
       {immobili.length === 0 ? (
-        <div className="bg-ink/5 rounded-2xl p-5 text-center">
-          <h3 className="font-display font-bold text-sm text-ink mb-1">
-            Nessun immobile ancora
-          </h3>
-          <p className="text-xs text-ink/50 max-w-xs mx-auto">
+        <div className="empty-inline">
+          <IconPalazzo className="icon-empty" />
+          <h3>Nessun immobile ancora</h3>
+          <p>
             Tocca &quot;+ Nuovo annuncio&quot; qui sopra per pubblicare il
             primo.
           </p>
         </div>
       ) : (
-        <div className="flex flex-col gap-3 md:grid md:grid-cols-2 md:gap-4 lg:grid-cols-3">
-          {immobili.map((im) => (
-            <button
-              key={im.id}
-              onClick={() => setSelezionato(im)}
-              className="w-full text-left bg-white border border-ink/10 rounded-2xl p-4"
+        immobili.map((im) => (
+          <button
+            key={im.id}
+            onClick={() => setSelezionato(im)}
+            className="match-card"
+          >
+            {im.fotoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={im.fotoUrl} alt="" />
+            ) : (
+              <div className="mc-avatar">
+                {im.titolo.slice(0, 2).toUpperCase()}
+              </div>
+            )}
+            <div className="mc-body">
+              <div className="mc-zona">{im.zona}</div>
+              <div className="mc-title">{im.titolo}</div>
+              <div className="mc-meta">
+                €{im.prezzo.toLocaleString("it-IT")}/mese
+                {!im.pubblicato && " · non pubblicato"}
+              </div>
+            </div>
+            <div
+              className={`mc-pct ${
+                im.nCandidature > 0 ? "is-match" : "is-off"
+              }`}
             >
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-display font-bold text-sm text-ink">
-                  {im.titolo}
-                </span>
-                <span
-                  className={`text-[10px] font-bold px-2 py-1 rounded-full ${
-                    im.pubblicato
-                      ? "bg-moss/15 text-moss"
-                      : "bg-ink/10 text-ink/40"
-                  }`}
-                >
-                  {im.pubblicato ? "Pubblicato" : "Non pubblicato"}
-                </span>
-              </div>
-              <div className="text-xs text-ink/50">
-                {im.zona} · €{im.prezzo.toLocaleString("it-IT")}/mese
-                {im.nCandidature > 0 &&
-                  ` · ${im.nCandidature} candidatur${im.nCandidature === 1 ? "a" : "e"}`}
-              </div>
-            </button>
-          ))}
-        </div>
+              {im.nCandidature > 0 ? (
+                <>
+                  {im.nCandidature}
+                  <span>candidatur{im.nCandidature === 1 ? "a" : "e"}</span>
+                </>
+              ) : im.pubblicato ? (
+                "Nessuna candidatura"
+              ) : (
+                "Non pubblicato"
+              )}
+            </div>
+          </button>
+        ))
       )}
 
       <Sheet
@@ -217,7 +229,7 @@ function ImmobileForm({
           name="titolo"
           defaultValue={immobile?.titolo}
           placeholder="Es. Bilocale luminoso ai Navigli"
-          className="w-full bg-ink/5 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-gold"
+          className="contract-input"
         />
       </Field>
 
@@ -227,7 +239,7 @@ function ImmobileForm({
           defaultValue={immobile?.descrizione ?? ""}
           rows={3}
           placeholder="Racconta l'immobile: luce, stato, dintorni..."
-          className="w-full bg-ink/5 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-gold"
+          className="ob-textarea"
         />
       </Field>
 
@@ -265,31 +277,27 @@ function ImmobileForm({
       </Field>
 
       <Field label="Foto principale">
-        <div className="flex items-center gap-4">
+        <div className={`doc-upload ${fotoUrl ? "filled" : ""} flex items-center gap-4 text-left`}>
           {fotoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={fotoUrl}
               alt="Anteprima"
-              className="w-20 h-20 rounded-xl object-cover bg-ink/10 shrink-0"
+              className="w-20 h-20 rounded-xl object-cover shrink-0"
             />
           ) : (
-            <div className="w-20 h-20 rounded-xl bg-ink/10 shrink-0" />
+            <div className="w-20 h-20 rounded-xl bg-[var(--paper-dim)] shrink-0" />
           )}
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             <input
               type="file"
               accept="image/*"
               onChange={handleFileChange}
               disabled={caricamentoFoto}
-              className="text-xs text-ink/70 file:mr-3 file:py-2 file:px-3 file:rounded-full file:border-0 file:bg-ink/10 file:text-xs file:font-semibold file:text-ink"
+              className="text-xs text-[var(--body-soft)] file:mr-3 file:py-2 file:px-3 file:rounded-full file:border-0 file:bg-[var(--paper-dim)] file:text-xs file:font-bold file:text-[var(--ink)]"
             />
-            {caricamentoFoto && (
-              <p className="text-[11px] text-ink/40 mt-1">Caricamento...</p>
-            )}
-            {erroreFoto && (
-              <p className="text-[11px] text-clay mt-1">{erroreFoto}</p>
-            )}
+            {caricamentoFoto && <p className="field-note">Caricamento...</p>}
+            {erroreFoto && <p className="note-error mt-1">{erroreFoto}</p>}
           </div>
         </div>
       </Field>
@@ -314,14 +322,14 @@ function ImmobileForm({
         </div>
       </Field>
 
-      {state?.error && <p className="text-clay text-xs">{state.error}</p>}
-      {state?.ok && <p className="text-moss text-xs">Salvato.</p>}
-      {erroreDelete && <p className="text-clay text-xs">{erroreDelete}</p>}
+      {state?.error && <p className="note-error">{state.error}</p>}
+      {state?.ok && <p className="note-saved">Salvato.</p>}
+      {erroreDelete && <p className="note-error">{erroreDelete}</p>}
 
       <button
         type="submit"
         disabled={pending}
-        className="w-full bg-gold text-ink font-bold text-sm py-3 rounded-xl disabled:opacity-60"
+        className="opp-cta"
       >
         {pending ? "Salvataggio..." : "Salva"}
       </button>
@@ -331,7 +339,7 @@ function ImmobileForm({
           type="button"
           onClick={elimina}
           disabled={pendingDelete}
-          className="w-full border-2 border-clay text-clay font-bold text-sm py-3 rounded-xl disabled:opacity-50"
+          className="btn-danger-outline"
         >
           {pendingDelete ? "Eliminazione..." : "Elimina annuncio"}
         </button>

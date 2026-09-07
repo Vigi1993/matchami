@@ -1,26 +1,18 @@
 /**
- * Contenitore standard di ogni schermata. Su smartphone occupa la
- * larghezza disponibile con margini stretti (come oggi). Su desktop
- * (a partire da md), invece di restare largo quanto un telefono,
- * prende una larghezza confortevole per la lettura e più margine.
+ * Contenitore standard di una schermata su fondo chiaro.
+ * Riproduce `.matches-wrap` / `.profile-wrap` del prototipo: riempie
+ * l'area sopra la tab bar, scorre da solo e ha i margini dell'originale.
  *
- * Cambiare l'aspetto di TUTTE le schermate (padding, larghezza massima)
- * si fa modificando solo questo file.
+ * Cambiare l'aspetto di TUTTE le schermate (padding, sfondo) si fa
+ * modificando `.screen-wrap` in globals.css.
  */
 export function PageContainer({
   children,
-  wide = false,
 }: {
   children: React.ReactNode;
+  /** Mantenuto per compatibilità: il telaio è largo 480px, non ci sono
+   *  varianti "wide" come nel layout desktop precedente. */
   wide?: boolean;
 }) {
-  return (
-    <div
-      className={`w-full mx-auto px-5 pt-6 pb-8 md:px-10 md:pt-10 md:pb-12 ${
-        wide ? "max-w-5xl" : "max-w-3xl"
-      }`}
-    >
-      {children}
-    </div>
-  );
+  return <div className="screen-wrap">{children}</div>;
 }

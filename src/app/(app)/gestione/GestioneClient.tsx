@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Sheet } from "@/components/Sheet";
 import type { ContrattoConAnnuncio, StatoContratto } from "@/lib/types";
 import { PageContainer } from "@/components/ui/PageContainer";
+import { IconDocumento } from "@/components/icons";
 
 const STATO_LABEL: Record<StatoContratto, string> = {
   bozza: "Bozza",
@@ -12,11 +13,11 @@ const STATO_LABEL: Record<StatoContratto, string> = {
   concluso: "Concluso",
 };
 
-const STATO_COLOR: Record<StatoContratto, string> = {
-  bozza: "bg-ink/10 text-ink/60",
-  in_firma: "bg-gold/20 text-[#8A6A25]",
-  firmato: "bg-moss/15 text-moss",
-  concluso: "bg-ink/10 text-ink/60",
+const STATO_BADGE: Record<StatoContratto, string> = {
+  bozza: "is-off",
+  in_firma: "is-wait",
+  firmato: "is-match",
+  concluso: "is-off",
 };
 
 function formatData(d: string | null): string {
@@ -40,68 +41,70 @@ export function GestioneClient({
 
   return (
     <PageContainer wide>
-      <h1 className="font-display text-xl text-ink mb-1">Gestione affitto</h1>
-      <p className="text-xs text-ink/50 mb-6">
-        Contratto e bollette della casa che stai affittando, tutto in un
-        posto.
+      <h1 className="screen-title">Gestione affitto</h1>
+      <p className="screen-sub">
+        Contratto e bollette della casa che stai affittando, tutto in un posto.
       </p>
 
       {/* ---- I tuoi contratti ---- */}
-      <div className="mb-3 text-xs font-bold uppercase tracking-wide text-ink/50">
-        I tuoi contratti {contratti.length > 0 && `· ${contratti.length}`}
+      <div className="pref-label">
+        <span>
+          I tuoi contratti {contratti.length > 0 && `· ${contratti.length}`}
+        </span>
       </div>
 
       {contratti.length === 0 ? (
-        <div className="bg-ink/5 rounded-2xl p-4 mb-6 text-xs text-ink/50">
-          Nessun contratto ancora. Quando un proprietario accetterà una tua
-          candidatura, il contratto comparirà qui.
+        <div className="empty-inline" style={{ paddingTop: 30 }}>
+          <IconDocumento className="icon-empty" />
+          <h3>Nessun contratto ancora</h3>
+          <p>
+            Quando un proprietario accetterà una tua candidatura, il contratto
+            comparirà qui.
+          </p>
         </div>
       ) : (
-        <div className="flex flex-col gap-3 mb-6 md:grid md:grid-cols-2 md:gap-4 lg:grid-cols-3">
-          {contratti.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => setSelezionato(c)}
-              className="w-full text-left bg-white border border-ink/10 rounded-2xl p-4"
-            >
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-display font-bold text-sm text-ink">
-                  {c.candidature?.listings?.titolo ?? "Immobile"}
-                </span>
-                <span
-                  className={`text-[10px] font-bold px-2 py-1 rounded-full ${STATO_COLOR[c.stato]}`}
-                >
-                  {STATO_LABEL[c.stato]}
-                </span>
+        contratti.map((c) => (
+          <button
+            key={c.id}
+            onClick={() => setSelezionato(c)}
+            className="match-card"
+          >
+            <div className="mc-avatar">
+              {(c.candidature?.listings?.titolo ?? "IM").slice(0, 2).toUpperCase()}
+            </div>
+            <div className="mc-body">
+              <div className="mc-zona">{c.candidature?.listings?.zona ?? ""}</div>
+              <div className="mc-title">
+                {c.candidature?.listings?.titolo ?? "Immobile"}
               </div>
-              <div className="text-xs text-ink/50">
-                {c.candidature?.listings?.zona ?? ""}
-                {c.canone && ` · €${c.canone.toLocaleString("it-IT")}/mese`}
+              <div className="mc-meta">
+                {c.canone ? `€${c.canone.toLocaleString("it-IT")}/mese` : "—"}
               </div>
-            </button>
-          ))}
-        </div>
+            </div>
+            <div className={`mc-pct ${STATO_BADGE[c.stato]}`}>
+              {STATO_LABEL[c.stato]}
+            </div>
+          </button>
+        ))
       )}
 
       {/* ---- Bollette e utenze ---- */}
-      <div className="mb-3 text-xs font-bold uppercase tracking-wide text-ink/50">
-        Bollette e utenze
+      <div className="pref-label" style={{ marginTop: 24 }}>
+        <span>Bollette e utenze</span>
       </div>
-      <button
-        onClick={() => setBolletteAperto(true)}
-        className="w-full flex items-start gap-3 text-left bg-white border border-ink/10 rounded-2xl p-4"
-      >
-        <div className="w-9 h-9 rounded-full bg-moss shrink-0" />
-        <div className="flex-1">
-          <div className="font-display font-bold text-sm text-ink">
-            Luce, gas e internet
+      <button onClick={() => setBolletteAperto(true)} className="pv-row">
+        <div
+          className="pv-check"
+          style={{ background: "var(--moss)", borderColor: "var(--moss)" }}
+        >
+          <IconDocumento className="fill-none stroke-white stroke-2" />
+        </div>
+        <div className="pv-text">
+          <div className="pv-label-row">
+            <b>Luce, gas e internet</b>
           </div>
-          <p className="text-xs text-ink/55 leading-snug">
-            Stato attivazioni e prossime scadenze.
-          </p>
-          <span className="text-xs text-moss font-semibold">
-            Vedi le bollette
-          </span>
+          <p>Stato attivazioni e prossime scadenze.</p>
+          <span className="pv-readmore">Vedi le bollette</span>
         </div>
       </button>
 
@@ -112,12 +115,12 @@ export function GestioneClient({
         title={selezionato?.candidature?.listings?.titolo ?? "Contratto"}
       >
         {selezionato && (
-          <div className="flex flex-col gap-4">
-            <span
-              className={`self-start text-[10px] font-bold px-2 py-1 rounded-full ${STATO_COLOR[selezionato.stato]}`}
-            >
-              {STATO_LABEL[selezionato.stato]}
-            </span>
+          <>
+            <div className="mb-4">
+              <span className={`mc-pct ${STATO_BADGE[selezionato.stato]}`}>
+                {STATO_LABEL[selezionato.stato]}
+              </span>
+            </div>
             <DettaglioRow
               label="Zona"
               value={selezionato.candidature?.listings?.zona ?? "—"}
@@ -133,9 +136,7 @@ export function GestioneClient({
             <DettaglioRow
               label="Durata"
               value={
-                selezionato.durata_mesi
-                  ? `${selezionato.durata_mesi} mesi`
-                  : "—"
+                selezionato.durata_mesi ? `${selezionato.durata_mesi} mesi` : "—"
               }
             />
             <DettaglioRow
@@ -146,7 +147,7 @@ export function GestioneClient({
               label="Data firma"
               value={formatData(selezionato.data_firma)}
             />
-          </div>
+          </>
         )}
       </Sheet>
 
@@ -156,23 +157,19 @@ export function GestioneClient({
         onClose={() => setBolletteAperto(false)}
         title="Bollette e utenze"
       >
-        <p className="text-xs text-ink/60 mb-5">
+        <p className="sheet-sub">
           Luce, gas e internet della casa in affitto: qui vedrai stato
           attivazioni, importi e scadenze.
         </p>
-        <div className="text-center py-6">
-          <div className="w-12 h-12 rounded-full bg-gold/20 mx-auto mb-3" />
-          <h3 className="font-display font-bold text-sm text-ink mb-1">
-            Nessuna utenza attiva ancora
-          </h3>
-          <p className="text-xs text-ink/50 max-w-xs mx-auto mb-4">
+        <div className="empty-inline" style={{ padding: "30px 10px" }}>
+          <IconDocumento className="icon-empty" />
+          <h3>Nessuna utenza attiva ancora</h3>
+          <p>
             Attiva luce, gas e internet nella tua nuova casa e da qui potrai
             seguire importi e scadenze delle bollette.
           </p>
-          <button className="bg-gold text-ink font-bold text-sm py-3 px-5 rounded-xl">
-            Attiva luce, gas e internet
-          </button>
         </div>
+        <button className="opp-cta">Attiva luce, gas e internet</button>
       </Sheet>
     </PageContainer>
   );
@@ -180,9 +177,9 @@ export function GestioneClient({
 
 function DettaglioRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between text-sm border-b border-ink/10 pb-2">
-      <span className="text-ink/50">{label}</span>
-      <span className="font-semibold text-ink">{value}</span>
+    <div className="feat-row">
+      <span className="k">{label}</span>
+      <span className="v">{value}</span>
     </div>
   );
 }

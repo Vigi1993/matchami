@@ -6,6 +6,18 @@ import { Sheet } from "@/components/Sheet";
 import type { CandidaturaRicevuta } from "@/lib/types";
 import { valutaCandidatura } from "./actions";
 import { PageContainer } from "@/components/ui/PageContainer";
+import { IconPersone } from "@/components/icons";
+
+const BADGE: Record<string, string> = {
+  in_attesa: "is-wait",
+  accettata: "is-match",
+  rifiutata: "is-off",
+};
+const LABEL: Record<string, string> = {
+  in_attesa: "Da valutare",
+  accettata: "Accettata",
+  rifiutata: "Rifiutata",
+};
 
 export function DatabaseClient({
   candidature,
@@ -39,21 +51,18 @@ export function DatabaseClient({
 
   return (
     <PageContainer wide>
-      <h1 className="font-display text-xl text-ink mb-1">
-        Database inquilini
-      </h1>
-      <p className="text-xs text-ink/50 mb-6">
+      <h1 className="screen-title">Database inquilini</h1>
+      <p className="screen-sub">
         {candidature.length === 0
           ? "Le candidature ricevute sui tuoi annunci arrivano qui."
-          : `${candidature.length} candidatur${candidature.length === 1 ? "a ricevuta" : "e ricevute"} · ${inAttesa.length} da valutare`}
+          : `${candidature.length} candidatur${candidature.length === 1 ? "a ricevuta" : "e ricevute"} · ${inAttesa.length} da valutare.`}
       </p>
 
       {candidature.length === 0 && (
-        <div className="bg-ink/5 rounded-2xl p-5 text-center">
-          <h3 className="font-display font-bold text-sm text-ink mb-1">
-            Nessuna candidatura ancora
-          </h3>
-          <p className="text-xs text-ink/50 max-w-xs mx-auto">
+        <div className="empty-inline">
+          <IconPersone className="icon-empty" />
+          <h3>Nessuna candidatura ancora</h3>
+          <p>
             Appena qualcuno si candiderà su un tuo annuncio pubblicato, lo
             vedrai qui.
           </p>
@@ -87,11 +96,10 @@ export function DatabaseClient({
         }
       >
         {selezionata && (
-          <div className="flex flex-col gap-4">
-            <div className="text-xs text-ink/50">
-              Candidatura per{" "}
-              <b className="text-ink">{selezionata.listings?.titolo}</b>
-            </div>
+          <>
+            <p className="sheet-sub">
+              Candidatura per <b>{selezionata.listings?.titolo}</b>
+            </p>
 
             <DettaglioRow
               label="Situazione lavorativa"
@@ -116,39 +124,40 @@ export function DatabaseClient({
               />
             )}
             {selezionata.tenant_profiles?.presentazione && (
-              <div>
-                <div className="text-xs text-ink/50 mb-1">Presentazione</div>
-                <p className="text-sm text-ink italic">
+              <div style={{ marginTop: 18 }}>
+                <div className="pref-label">
+                  <span>Presentazione</span>
+                </div>
+                <p className="note-box" style={{ marginTop: 0, fontStyle: "italic" }}>
                   &quot;{selezionata.tenant_profiles.presentazione}&quot;
                 </p>
               </div>
             )}
 
             {stato(selezionata) === "in_attesa" ? (
-              <div className="flex gap-3 mt-2">
+              <div className="flex gap-3 mt-6">
                 <button
                   onClick={() => valuta(selezionata, "rifiutata")}
                   disabled={pending}
-                  className="flex-1 border-2 border-clay text-clay font-bold text-sm py-3 rounded-xl disabled:opacity-50"
+                  className="btn-danger-outline"
                 >
                   Rifiuta
                 </button>
                 <button
                   onClick={() => valuta(selezionata, "accettata")}
                   disabled={pending}
-                  className="flex-1 bg-moss text-paper font-bold text-sm py-3 rounded-xl disabled:opacity-50"
+                  className="opp-cta"
                 >
                   Accetta
                 </button>
               </div>
             ) : (
-              <div className="flex flex-col gap-2 mt-2">
+              <div className="flex flex-col gap-3 mt-6">
                 <div
-                  className={`text-xs rounded-xl p-3 ${
-                    stato(selezionata) === "accettata"
-                      ? "bg-moss/10 text-moss"
-                      : "bg-ink/5 text-ink/50"
-                  }`}
+                  className={
+                    stato(selezionata) === "accettata" ? "note-ok" : "note-box"
+                  }
+                  style={{ marginTop: 0 }}
                 >
                   {stato(selezionata) === "accettata"
                     ? "Hai accettato questa candidatura."
@@ -157,14 +166,14 @@ export function DatabaseClient({
                 {stato(selezionata) === "accettata" && (
                   <Link
                     href={`/chat/${selezionata.id}`}
-                    className="w-full text-center bg-moss text-paper font-bold text-sm py-3 rounded-xl"
+                    className="opp-cta block text-center"
                   >
                     Apri chat
                   </Link>
                 )}
               </div>
             )}
-          </div>
+          </>
         )}
       </Sheet>
     </PageContainer>
@@ -182,58 +191,44 @@ function Gruppo({
   onSelect: (c: CandidaturaRicevuta) => void;
   stato: (c: CandidaturaRicevuta) => string;
 }) {
-  const COLOR: Record<string, string> = {
-    in_attesa: "bg-gold/20 text-[#8A6A25]",
-    accettata: "bg-moss/15 text-moss",
-    rifiutata: "bg-ink/10 text-ink/40",
-  };
-  const LABEL: Record<string, string> = {
-    in_attesa: "Da valutare",
-    accettata: "Accettata",
-    rifiutata: "Rifiutata",
-  };
-
   return (
-    <div className="mb-6">
-      <div className="mb-3 text-xs font-bold uppercase tracking-wide text-ink/50">
-        {titolo} · {items.length}
+    <>
+      <div className="pref-label" style={{ marginTop: 20 }}>
+        <span>
+          {titolo} — {items.length}
+        </span>
       </div>
-      <div className="flex flex-col gap-3 md:grid md:grid-cols-2 md:gap-4 lg:grid-cols-3">
-        {items.map((c) => {
-          const s = stato(c);
-          return (
-            <button
-              key={c.id}
-              onClick={() => onSelect(c)}
-              className="w-full text-left bg-white border border-ink/10 rounded-2xl p-4"
-            >
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-display font-bold text-sm text-ink">
-                  {c.nome} {c.cognome}
-                </span>
-                <span
-                  className={`text-[10px] font-bold px-2 py-1 rounded-full ${COLOR[s]}`}
-                >
-                  {LABEL[s]}
-                </span>
+      {items.map((c) => {
+        const s = stato(c);
+        const iniziali = `${c.nome?.[0] ?? ""}${c.cognome?.[0] ?? ""}`.toUpperCase();
+        return (
+          <button key={c.id} onClick={() => onSelect(c)} className="match-card">
+            <div className="mc-avatar">{iniziali || "IN"}</div>
+            <div className="mc-body">
+              <div className="mc-zona">
+                {c.tenant_profiles?.professione ?? "Profilo inquilino"}
               </div>
-              <div className="text-xs text-ink/50">
-                {c.listings?.titolo} · {c.tenant_profiles?.professione ?? "—"}
+              <div className="mc-title">
+                {c.nome} {c.cognome}
+              </div>
+              <div className="mc-meta">
+                {c.listings?.titolo}
                 {c.match_pct !== null && ` · ${c.match_pct}% compatibile`}
               </div>
-            </button>
-          );
-        })}
-      </div>
-    </div>
+            </div>
+            <div className={`mc-pct ${BADGE[s]}`}>{LABEL[s]}</div>
+          </button>
+        );
+      })}
+    </>
   );
 }
 
 function DettaglioRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between text-sm border-b border-ink/10 pb-2">
-      <span className="text-ink/50">{label}</span>
-      <span className="font-semibold text-ink">{value}</span>
+    <div className="feat-row">
+      <span className="k">{label}</span>
+      <span className="v">{value}</span>
     </div>
   );
 }

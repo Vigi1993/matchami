@@ -16,6 +16,13 @@ import { Field } from "@/components/ui/Field";
 import { Stepper } from "@/components/ui/Stepper";
 import { PrivacySheet } from "@/components/PrivacySheet";
 import { FaqSheet } from "@/components/FaqSheet";
+import {
+  IconDomanda,
+  IconLente,
+  IconPersona,
+  IconScudo,
+  IconStella,
+} from "@/components/icons";
 
 type Props = {
   nome: string | null;
@@ -68,19 +75,18 @@ export function ProfiloClient({
   return (
     <PageContainer>
       {/* Avatar */}
-      <div className="flex items-center gap-3 mb-6">
-        <div className="w-12 h-12 rounded-full bg-ink text-paper flex items-center justify-center font-display font-bold">
-          {(nome ?? "?").slice(0, 2).toUpperCase()}
-        </div>
+      <div className="avatar-row">
+        <div className="avatar">{(nome ?? "?").slice(0, 2).toUpperCase()}</div>
         <div>
-          <div className="font-display font-bold text-ink">Il tuo profilo</div>
-          <div className="text-xs text-ink/50">In cerca a Milano</div>
+          <div className="avatar-name">Il tuo profilo</div>
+          <div className="avatar-sub">In cerca a Milano</div>
         </div>
       </div>
 
       {/* Affidabilità */}
       <Row
         color="var(--gold)"
+        icon={<IconStella className="fill-white stroke-none" />}
         title={`${affidabilita.punteggio}/100 · Affidabilità ${affidabilita.label}`}
         subtitle={
           affidabilita.hasRecensioni
@@ -92,21 +98,20 @@ export function ProfiloClient({
       />
 
       {/* Completezza */}
-      <div className="flex items-center gap-3 mb-6">
-        <div className="flex-1 h-2 rounded-full bg-ink/10 overflow-hidden">
+      <div className="completeness-row">
+        <div className="completeness-bar">
           <div
-            className="h-full bg-moss rounded-full transition-all"
+            className="completeness-fill"
             style={{ width: `${completezza}%` }}
           />
         </div>
-        <span className="text-xs text-ink/50 whitespace-nowrap">
-          {completezza}% completo
-        </span>
+        <span>{completezza}% completo</span>
       </div>
 
       {/* I tuoi dati */}
       <Row
         color="var(--ink)"
+        icon={<IconPersona className="fill-none stroke-white stroke-2" />}
         title="I tuoi dati"
         subtitle="Lavoro, reddito, garante, protesti e presentazione: quello che vedono i proprietari."
         cta="Vedi il dettaglio"
@@ -116,6 +121,7 @@ export function ProfiloClient({
       {/* La tua ricerca */}
       <Row
         color="var(--clay)"
+        icon={<IconLente className="fill-none stroke-white stroke-2" />}
         title="La tua ricerca"
         subtitle="Budget, zone, taglio e caratteristiche della casa che stai cercando."
         cta="Vedi il dettaglio"
@@ -125,6 +131,7 @@ export function ProfiloClient({
       {/* Privacy / FAQ */}
       <Row
         color="var(--moss)"
+        icon={<IconScudo className="fill-white stroke-none" />}
         title="Privacy e consensi"
         subtitle="Rivedi o modifica i consensi su marketing e condivisione dati con terzi."
         cta="Gestisci consensi"
@@ -132,14 +139,17 @@ export function ProfiloClient({
       />
       <Row
         color="var(--gold)"
+        icon={<IconDomanda className="fill-none stroke-[var(--ink)] stroke-2" />}
         title="FAQ e bonus affitto"
         subtitle="Bonus giovani, contributo Comune di Milano, detrazioni 730 e altre curiosità."
         cta="Vedi le domande frequenti"
         onClick={() => setSheetAperta("faq")}
       />
 
-      <form action={logout} className="mt-4">
-        <button className="text-xs text-ink/40 underline">Esci</button>
+      <form action={logout} className="mt-6">
+        <button className="redo-link" style={{ color: "var(--muted)" }}>
+          Esci
+        </button>
       </form>
 
       {/* ---- Sheet: Affidabilità (sola lettura) ---- */}
@@ -148,27 +158,25 @@ export function ProfiloClient({
         onClose={() => setSheetAperta(null)}
         title="Il tuo voto di affidabilità"
       >
-        <p className="text-xs text-ink/60 mb-4">
+        <p className="sheet-sub">
           Nasce dallo storico dei tuoi affitti su MatchAmI e dalle verifiche
-          sul tuo stato economico. I proprietari lo vedono quando valutano
-          una tua candidatura.
+          sul tuo stato economico. I proprietari lo vedono quando valutano una
+          tua candidatura.
         </p>
-        <div className="text-center mb-5">
-          <div className="text-3xl font-display font-bold text-ink">
-            {affidabilita.punteggio}/100
+        <div className="stat-grid" style={{ gridTemplateColumns: "1fr" }}>
+          <div className="stat-card">
+            <div className="v">{affidabilita.punteggio}/100</div>
+            <div className="l">{affidabilita.label}</div>
           </div>
-          <div className="text-xs text-ink/50">{affidabilita.label}</div>
         </div>
-        <div className="flex flex-col gap-2">
+        <div className="pref-label">
+          <span>Verifiche sullo stato economico</span>
+        </div>
+        <div className="match-checklist">
           {affidabilita.checks.map((c) => (
-            <div
-              key={c.label}
-              className={`text-xs rounded-lg px-3 py-2 ${
-                c.ok ? "bg-moss/10 text-moss" : "bg-clay/10 text-clay"
-              }`}
-            >
+            <span key={c.label} className={c.ok ? "ok" : "no"}>
               {c.label}
-            </div>
+            </span>
           ))}
         </div>
       </Sheet>
@@ -207,28 +215,29 @@ function Row({
   subtitle,
   cta,
   onClick,
+  icon,
 }: {
   color: string;
   title: string;
   subtitle: string;
   cta: string;
   onClick: () => void;
+  icon?: React.ReactNode;
 }) {
   return (
-    <button
-      onClick={onClick}
-      className="w-full flex items-start gap-3 text-left mb-4"
-    >
+    <button onClick={onClick} className="pv-row">
       <div
-        className="w-9 h-9 rounded-full shrink-0"
-        style={{ background: color }}
-      />
-      <div className="flex-1">
-        <div className="font-display font-bold text-sm text-ink">
-          {title}
+        className="pv-check"
+        style={{ background: color, borderColor: color }}
+      >
+        {icon}
+      </div>
+      <div className="pv-text">
+        <div className="pv-label-row">
+          <b>{title}</b>
         </div>
-        <p className="text-xs text-ink/55 leading-snug">{subtitle}</p>
-        <span className="text-xs text-moss font-semibold">{cta}</span>
+        <p>{subtitle}</p>
+        <span className="pv-readmore">{cta}</span>
       </div>
     </button>
   );
@@ -239,7 +248,8 @@ function SaveButton({ pending }: { pending: boolean }) {
     <button
       type="submit"
       disabled={pending}
-      className="w-full bg-gold text-ink font-bold text-sm py-3 rounded-xl mt-5 disabled:opacity-60"
+      className="opp-cta"
+      style={{ marginTop: 6 }}
     >
       {pending ? "Salvataggio..." : "Salva"}
     </button>
@@ -279,11 +289,11 @@ function DatiPersonaliSheet({
 
   return (
     <Sheet open={open} onClose={onClose} title="I tuoi dati">
-      <p className="text-xs text-ink/60 mb-4">
+      <p className="sheet-sub">
         Queste informazioni aiutano i proprietari a valutare la tua
         candidatura.
       </p>
-      <form action={formAction} className="flex flex-col gap-5">
+      <form action={formAction}>
         <input type="hidden" name="professione" value={professione} />
         <input type="hidden" name="reddito_mensile" value={reddito} />
         <input type="hidden" name="garante" value={String(garante)} />
@@ -299,7 +309,7 @@ function DatiPersonaliSheet({
         <input type="hidden" name="animali" value={String(animali)} />
 
         <Field label="Situazione lavorativa">
-          <div className="flex flex-wrap gap-2">
+          <div className="chip-row">
             {LAVORO_VOCAB.map((v) => (
               <Chip
                 key={v}
@@ -324,28 +334,28 @@ function DatiPersonaliSheet({
         </Field>
 
         <Field label="Hai un garante disponibile?">
-          <div className="flex gap-2">
+          <div className="chip-row">
             <Chip label="Sì" active={garante === true} onClick={() => setGarante(true)} />
             <Chip label="No" active={garante === false} onClick={() => setGarante(false)} />
           </div>
         </Field>
 
         <Field label="Hai protesti o segnalazioni in centrale rischi?">
-          <div className="flex gap-2">
+          <div className="chip-row">
             <Chip label="No" active={protestato === false} onClick={() => setProtestato(false)} />
             <Chip label="Sì" active={protestato === true} onClick={() => setProtestato(true)} />
           </div>
         </Field>
 
         <Field label="Disponibile a firmare una fideiussione?">
-          <div className="flex gap-2">
+          <div className="chip-row">
             <Chip label="Sì" active={fideiussione === true} onClick={() => setFideiussione(true)} />
             <Chip label="No" active={fideiussione === false} onClick={() => setFideiussione(false)} />
           </div>
         </Field>
 
         <Field label="Nucleo familiare">
-          <div className="flex gap-2">
+          <div className="chip-row">
             <Chip label="Single" active={nucleo === "single"} onClick={() => setNucleo("single")} />
             <Chip label="Coppia" active={nucleo === "coppia"} onClick={() => setNucleo("coppia")} />
           </div>
@@ -360,7 +370,7 @@ function DatiPersonaliSheet({
         </Field>
 
         <Field label="Animali domestici?">
-          <div className="flex gap-2">
+          <div className="chip-row">
             <Chip label="Sì" active={animali === true} onClick={() => setAnimali(true)} />
             <Chip label="No" active={animali === false} onClick={() => setAnimali(false)} />
           </div>
@@ -373,14 +383,12 @@ function DatiPersonaliSheet({
             onChange={(e) => setPresentazione(e.target.value)}
             placeholder="Es. Coppia di professionisti, non fumatori, cerchiamo casa per fine mese..."
             rows={4}
-            className="w-full bg-ink/5 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-gold"
+            className="ob-textarea"
           />
         </Field>
 
-        {state?.error && <p className="text-clay text-xs">{state.error}</p>}
-        {state?.ok && (
-          <p className="text-moss text-xs">Salvato — puoi chiudere.</p>
-        )}
+        {state?.error && <p className="note-error">{state.error}</p>}
+        {state?.ok && <p className="note-saved">Salvato — puoi chiudere.</p>}
         <SaveButton pending={pending} />
       </form>
     </Sheet>
@@ -429,11 +437,11 @@ function RicercaSheet({
 
   return (
     <Sheet open={open} onClose={onClose} title="La tua ricerca">
-      <p className="text-xs text-ink/60 mb-4">
+      <p className="sheet-sub">
         Le tue richieste possono cambiare nel tempo: aggiornale qui quando
         vuoi, il % di match si ricalcola subito.
       </p>
-      <form action={formAction} className="flex flex-col gap-5">
+      <form action={formAction}>
         <input type="hidden" name="budget_max" value={budget} />
         <input type="hidden" name="locali_min" value={locali} />
         <input type="hidden" name="mq_min" value={mq} />
@@ -457,7 +465,7 @@ function RicercaSheet({
         </Field>
 
         <Field label="Zone preferite">
-          <div className="flex flex-wrap gap-2">
+          <div className="chip-row">
             {ZONE_MILANO.map((z) => (
               <Chip
                 key={z}
@@ -478,7 +486,7 @@ function RicercaSheet({
         </Field>
 
         <Field label="Caratteristiche che ti interessano">
-          <div className="flex flex-wrap gap-2 mb-3">
+          <div className="chip-row" style={{ marginBottom: 14 }}>
             {ATTR_VOCAB.map((a) => (
               <Chip
                 key={a.key}
@@ -494,8 +502,10 @@ function RicercaSheet({
               if (!attr) return null;
               return (
                 <div key={key}>
-                  <div className="text-xs text-ink/60 mb-1">
-                    {attr.label} · {peso}/10
+                  <div className="pref-label" style={{ marginBottom: 4 }}>
+                    <span>
+                      {attr.label} · {peso}/10
+                    </span>
                   </div>
                   <input
                     type="range"
@@ -516,10 +526,8 @@ function RicercaSheet({
           </div>
         </Field>
 
-        {state?.error && <p className="text-clay text-xs">{state.error}</p>}
-        {state?.ok && (
-          <p className="text-moss text-xs">Salvato — puoi chiudere.</p>
-        )}
+        {state?.error && <p className="note-error">{state.error}</p>}
+        {state?.ok && <p className="note-saved">Salvato — puoi chiudere.</p>}
         <SaveButton pending={pending} />
       </form>
     </Sheet>

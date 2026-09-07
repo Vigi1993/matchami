@@ -19,14 +19,21 @@ export const metadata: Metadata = {
   },
 };
 
+// Stesse impostazioni del <meta viewport> del prototipo: niente zoom,
+// contenuto esteso fino ai bordi dello schermo.
 export const viewport: Viewport = {
   themeColor: "#10151A",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="it" className="h-full antialiased">
-      <body className="min-h-full flex flex-col">
+      <body className="h-full">
         {children}
         <RegisterSW />
       </body>

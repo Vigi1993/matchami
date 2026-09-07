@@ -37,13 +37,13 @@ export function PrivacySheet({
 
   return (
     <Sheet open={open} onClose={onClose} title="Privacy e consensi">
-      <p className="text-xs text-ink/60 mb-5">
+      <p className="sheet-sub">
         Il trattamento dei dati necessario al funzionamento di MatchAmI
         (creare il profilo, gestire candidature e contratti) è sempre
         attivo: senza non potremmo farti usare l&apos;app. Qui puoi
         decidere solo sui consensi facoltativi.
       </p>
-      <form action={formAction} className="flex flex-col gap-5">
+      <form action={formAction}>
         <input
           type="hidden"
           name="consenso_marketing"
@@ -52,29 +52,29 @@ export function PrivacySheet({
         <input type="hidden" name="consenso_terzi" value={String(terzi)} />
 
         <Field label="Marketing MatchAmI">
-          <p className="text-xs text-ink/50 mb-2">
+          <p className="field-note" style={{ margin: "-4px 0 10px 0" }}>
             Email e notifiche su nuovi annunci, promozioni e novità del
             servizio.
           </p>
-          <div className="flex gap-2">
+          <div className="chip-row">
             <Chip label="Sì" active={marketing} onClick={() => setMarketing(true)} />
             <Chip label="No" active={!marketing} onClick={() => setMarketing(false)} />
           </div>
         </Field>
 
         <Field label="Condivisione con partner terzi">
-          <p className="text-xs text-ink/50 mb-2">
+          <p className="field-note" style={{ margin: "-4px 0 10px 0" }}>
             Offerte di servizi collegati alla casa (utenze, assicurazioni,
             mutui) da parte di partner commerciali di MatchAmI.
           </p>
-          <div className="flex gap-2">
+          <div className="chip-row">
             <Chip label="Sì" active={terzi} onClick={() => setTerzi(true)} />
             <Chip label="No" active={!terzi} onClick={() => setTerzi(false)} />
           </div>
         </Field>
 
-        {state?.error && <p className="text-clay text-xs">{state.error}</p>}
-        {state?.ok && <p className="text-moss text-xs">Salvato.</p>}
+        {state?.error && <p className="note-error">{state.error}</p>}
+        {state?.ok && <p className="note-saved">Salvato.</p>}
 
         <Button type="submit" disabled={pending}>
           {pending ? "Salvataggio..." : "Salva preferenze"}

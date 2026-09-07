@@ -34,16 +34,14 @@ export function FaqSheet({
 }) {
   return (
     <Sheet open={open} onClose={onClose} title="FAQ e bonus affitto">
-      <div className="flex flex-col gap-5">
+      <div>
         {FAQ.map((item) => (
-          <div key={item.q}>
-            <div className="font-display font-bold text-sm text-ink mb-1">
-              {item.q}
-            </div>
-            <p className="text-xs text-ink/60 leading-relaxed">{item.a}</p>
+          <div key={item.q} className="faq-item">
+            <div className="faq-q">{item.q}</div>
+            <p className="faq-a">{item.a}</p>
           </div>
         ))}
-        <p className="text-[11px] text-ink/40 leading-relaxed border-t border-ink/10 pt-4">
+        <p className="field-note" style={{ marginTop: 18, lineHeight: 1.6 }}>
           Informazioni a scopo indicativo: requisiti e importi di bonus,
           detrazioni e contributi possono cambiare nel tempo. Per la tua
           situazione specifica verifica sempre le fonti ufficiali (Agenzia

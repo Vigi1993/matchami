@@ -10,6 +10,7 @@ import { Chip } from "@/components/ui/Chip";
 import { Field } from "@/components/ui/Field";
 import { PrivacySheet } from "@/components/PrivacySheet";
 import { FaqSheet } from "@/components/FaqSheet";
+import { IconDomanda, IconPersona, IconScudo } from "@/components/icons";
 
 const TIPO_VOCAB = [
   { value: "privato", label: "Privato" },
@@ -41,18 +42,17 @@ export function OwnerProfiloClient({
   return (
     <PageContainer>
       {/* Avatar */}
-      <div className="flex items-center gap-3 mb-6">
-        <div className="w-12 h-12 rounded-full bg-ink text-paper flex items-center justify-center font-display font-bold">
-          {(nome ?? "?").slice(0, 2).toUpperCase()}
-        </div>
+      <div className="avatar-row">
+        <div className="avatar">{(nome ?? "?").slice(0, 2).toUpperCase()}</div>
         <div>
-          <div className="font-display font-bold text-ink">Il tuo profilo</div>
-          <div className="text-xs text-ink/50">Proprietario</div>
+          <div className="avatar-name">Il tuo profilo</div>
+          <div className="avatar-sub">Proprietario a Milano</div>
         </div>
       </div>
 
       <Row
         color="var(--ink)"
+        icon={<IconPersona className="fill-none stroke-white stroke-2" />}
         title="I tuoi dati"
         subtitle="Tipo di proprietario, immobili gestiti e priorità."
         cta="Vedi il dettaglio"
@@ -60,6 +60,7 @@ export function OwnerProfiloClient({
       />
       <Row
         color="var(--moss)"
+        icon={<IconScudo className="fill-white stroke-none" />}
         title="Privacy e consensi"
         subtitle="Rivedi o modifica i consensi su marketing e condivisione dati con terzi."
         cta="Gestisci consensi"
@@ -67,14 +68,17 @@ export function OwnerProfiloClient({
       />
       <Row
         color="var(--gold)"
+        icon={<IconDomanda className="fill-none stroke-[var(--ink)] stroke-2" />}
         title="FAQ"
         subtitle="Domande frequenti su MatchAmI per i proprietari."
         cta="Vedi le domande frequenti"
         onClick={() => setFaqAperto(true)}
       />
 
-      <form action={logout} className="mt-4">
-        <button className="text-xs text-ink/40 underline">Esci</button>
+      <form action={logout} className="mt-6">
+        <button className="redo-link" style={{ color: "var(--muted)" }}>
+          Esci
+        </button>
       </form>
 
       <Sheet
@@ -120,13 +124,13 @@ function DatiProprietarioForm({
   }, [state, onSaved]);
 
   return (
-    <form action={formAction} className="flex flex-col gap-5">
+    <form action={formAction}>
       <input type="hidden" name="proprietario_tipo" value={tipo} />
       <input type="hidden" name="num_immobili" value={numImmobili} />
       <input type="hidden" name="obiettivo" value={obiettivo} />
 
       <Field label="Tipo di proprietario">
-        <div className="flex flex-wrap gap-2">
+        <div className="chip-row">
           {TIPO_VOCAB.map((t) => (
             <Chip
               key={t.value}
@@ -139,21 +143,17 @@ function DatiProprietarioForm({
       </Field>
 
       <Field label="Immobili gestiti su MatchAmI">
-        <div className="flex items-center gap-4">
+        <div className="stepper">
           <button
             type="button"
             onClick={() => setNumImmobili((n) => Math.max(1, n - 1))}
-            className="w-8 h-8 rounded-full bg-ink/10 text-ink font-bold"
           >
             −
           </button>
-          <div className="text-sm font-bold text-ink w-10 text-center">
-            {numImmobili}
-          </div>
+          <div className="val">{numImmobili}</div>
           <button
             type="button"
             onClick={() => setNumImmobili((n) => Math.min(50, n + 1))}
-            className="w-8 h-8 rounded-full bg-ink/10 text-ink font-bold"
           >
             +
           </button>
@@ -161,7 +161,7 @@ function DatiProprietarioForm({
       </Field>
 
       <Field label="Priorità">
-        <div className="flex flex-col gap-2">
+        <div className="chip-row" style={{ flexDirection: "column", alignItems: "flex-start" }}>
           {OBIETTIVO_VOCAB.map((o) => (
             <Chip
               key={o}
@@ -173,13 +173,13 @@ function DatiProprietarioForm({
         </div>
       </Field>
 
-      {state?.error && <p className="text-clay text-xs">{state.error}</p>}
-      {state?.ok && <p className="text-moss text-xs">Salvato.</p>}
+      {state?.error && <p className="note-error">{state.error}</p>}
+      {state?.ok && <p className="note-saved">Salvato.</p>}
 
       <button
         type="submit"
         disabled={pending}
-        className="w-full bg-gold text-ink font-bold text-sm py-3 rounded-xl disabled:opacity-60"
+        className="opp-cta"
       >
         {pending ? "Salvataggio..." : "Salva"}
       </button>
@@ -193,28 +193,29 @@ function Row({
   subtitle,
   cta,
   onClick,
+  icon,
 }: {
   color: string;
   title: string;
   subtitle: string;
   cta: string;
   onClick: () => void;
+  icon?: React.ReactNode;
 }) {
   return (
-    <button
-      onClick={onClick}
-      className="w-full flex items-start gap-3 text-left mb-4"
-    >
+    <button onClick={onClick} className="pv-row">
       <div
-        className="w-9 h-9 rounded-full shrink-0"
-        style={{ background: color }}
-      />
-      <div className="flex-1">
-        <div className="font-display font-bold text-sm text-ink">
-          {title}
+        className="pv-check"
+        style={{ background: color, borderColor: color }}
+      >
+        {icon}
+      </div>
+      <div className="pv-text">
+        <div className="pv-label-row">
+          <b>{title}</b>
         </div>
-        <p className="text-xs text-ink/55 leading-snug">{subtitle}</p>
-        <span className="text-xs text-moss font-semibold">{cta}</span>
+        <p>{subtitle}</p>
+        <span className="pv-readmore">{cta}</span>
       </div>
     </button>
   );

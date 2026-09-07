@@ -6,10 +6,8 @@ export function Field({
   children: React.ReactNode;
 }) {
   return (
-    <div>
-      <div className="text-xs font-bold uppercase tracking-wide text-ink/70 mb-2">
-        {label}
-      </div>
+    <div className="pref-section">
+      <div className="pref-label">{label}</div>
       {children}
     </div>
   );
