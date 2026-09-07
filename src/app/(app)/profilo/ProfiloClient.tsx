@@ -17,9 +17,11 @@ import { Stepper } from "@/components/ui/Stepper";
 import { PrivacySheet } from "@/components/PrivacySheet";
 import { FaqSheet } from "@/components/FaqSheet";
 import { AvatarUpload } from "@/components/AvatarUpload";
+import { AccountSheet } from "@/components/AccountSheet";
 import {
   IconDomanda,
   IconLente,
+  IconLucchetto,
   IconPersona,
   IconScudo,
   IconStella,
@@ -28,6 +30,7 @@ import {
 type Props = {
   nome: string | null;
   cognome: string | null;
+  email: string | null;
   tenant: TenantProfile;
   zoneIniziali: string[];
   interessiIniziali: Record<string, number>;
@@ -39,6 +42,8 @@ type Props = {
 
 export function ProfiloClient({
   nome,
+  cognome,
+  email,
   tenant,
   zoneIniziali,
   interessiIniziali,
@@ -48,7 +53,7 @@ export function ProfiloClient({
   consensoTerziIniziale,
 }: Props) {
   const [sheetAperta, setSheetAperta] = useState<
-    "affidabilita" | "dati" | "ricerca" | "privacy" | "faq" | null
+    "affidabilita" | "dati" | "ricerca" | "account" | "privacy" | "faq" | null
   >(null);
 
   const affidabilita = computeAffidabilita({
@@ -136,6 +141,16 @@ export function ProfiloClient({
         onClick={() => setSheetAperta("ricerca")}
       />
 
+      {/* Account */}
+      <Row
+        color="var(--ink-soft)"
+        icon={<IconLucchetto className="fill-none stroke-white stroke-2" />}
+        title="Account e accesso"
+        subtitle="Nome, email di accesso e password del tuo account MatchAmI."
+        cta="Gestisci l'account"
+        onClick={() => setSheetAperta("account")}
+      />
+
       {/* Privacy / FAQ */}
       <Row
         color="var(--moss)"
@@ -203,6 +218,15 @@ export function ProfiloClient({
         tenant={tenant}
         zoneIniziali={zoneIniziali}
         interessiIniziali={interessiIniziali}
+      />
+
+      {/* ---- Sheet: Account ---- */}
+      <AccountSheet
+        open={sheetAperta === "account"}
+        onClose={() => setSheetAperta(null)}
+        nome={nome}
+        cognome={cognome}
+        email={email}
       />
 
       {/* ---- Sheet: Privacy e FAQ ---- */}

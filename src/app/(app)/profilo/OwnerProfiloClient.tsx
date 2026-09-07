@@ -10,7 +10,13 @@ import { Chip } from "@/components/ui/Chip";
 import { Field } from "@/components/ui/Field";
 import { PrivacySheet } from "@/components/PrivacySheet";
 import { FaqSheet } from "@/components/FaqSheet";
-import { IconDomanda, IconPersona, IconScudo } from "@/components/icons";
+import { AccountSheet } from "@/components/AccountSheet";
+import {
+  IconDomanda,
+  IconLucchetto,
+  IconPersona,
+  IconScudo,
+} from "@/components/icons";
 
 const TIPO_VOCAB = [
   { value: "privato", label: "Privato" },
@@ -26,16 +32,21 @@ const OBIETTIVO_VOCAB = [
 
 export function OwnerProfiloClient({
   nome,
+  cognome,
+  email,
   owner,
   consensoMarketingIniziale,
   consensoTerziIniziale,
 }: {
   nome: string | null;
+  cognome: string | null;
+  email: string | null;
   owner: OwnerProfile;
   consensoMarketingIniziale: boolean;
   consensoTerziIniziale: boolean;
 }) {
   const [datiAperto, setDatiAperto] = useState(false);
+  const [accountAperto, setAccountAperto] = useState(false);
   const [privacyAperto, setPrivacyAperto] = useState(false);
   const [faqAperto, setFaqAperto] = useState(false);
 
@@ -57,6 +68,14 @@ export function OwnerProfiloClient({
         subtitle="Tipo di proprietario, immobili gestiti e priorità."
         cta="Vedi il dettaglio"
         onClick={() => setDatiAperto(true)}
+      />
+      <Row
+        color="var(--ink-soft)"
+        icon={<IconLucchetto className="fill-none stroke-white stroke-2" />}
+        title="Account e accesso"
+        subtitle="Nome, email di accesso e password del tuo account MatchAmI."
+        cta="Gestisci l'account"
+        onClick={() => setAccountAperto(true)}
       />
       <Row
         color="var(--moss)"
@@ -88,6 +107,14 @@ export function OwnerProfiloClient({
       >
         <DatiProprietarioForm owner={owner} onSaved={() => setDatiAperto(false)} />
       </Sheet>
+
+      <AccountSheet
+        open={accountAperto}
+        onClose={() => setAccountAperto(false)}
+        nome={nome}
+        cognome={cognome}
+        email={email}
+      />
 
       <PrivacySheet
         open={privacyAperto}

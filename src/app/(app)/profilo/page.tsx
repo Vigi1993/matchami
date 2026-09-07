@@ -25,6 +25,8 @@ export default async function ProfiloPage() {
     return (
       <OwnerProfiloClient
         nome={profile?.nome ?? null}
+        cognome={profile?.cognome ?? null}
+        email={user!.email ?? null}
         owner={owner as OwnerProfile}
         consensoMarketingIniziale={profile?.consenso_marketing ?? false}
         consensoTerziIniziale={profile?.consenso_terzi ?? false}
@@ -61,6 +63,7 @@ export default async function ProfiloPage() {
     <ProfiloClient
       nome={profile?.nome ?? null}
       cognome={profile?.cognome ?? null}
+      email={user!.email ?? null}
       tenant={tenant as TenantProfile}
       zoneIniziali={zoneIniziali}
       interessiIniziali={interessiIniziali}
