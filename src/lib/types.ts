@@ -18,6 +18,7 @@ export type TenantProfile = {
   budget_max: number | null;
   locali_min: number | null;
   mq_min: number | null;
+  avatar_url: string | null;
 };
 
 export type StatoContratto = "bozza" | "in_firma" | "firmato" | "concluso";
@@ -95,6 +96,7 @@ export type CandidaturaRicevuta = {
     reddito_mensile: number | null;
     verificato: boolean;
     presentazione: string | null;
+    avatar_url: string | null;
   } | null;
   // aggiunto lato client dopo il fetch separato di profiles
   nome?: string | null;

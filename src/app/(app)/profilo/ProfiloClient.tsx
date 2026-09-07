@@ -16,6 +16,7 @@ import { Field } from "@/components/ui/Field";
 import { Stepper } from "@/components/ui/Stepper";
 import { PrivacySheet } from "@/components/PrivacySheet";
 import { FaqSheet } from "@/components/FaqSheet";
+import { AvatarUpload } from "@/components/AvatarUpload";
 import {
   IconDomanda,
   IconLente,
@@ -76,7 +77,14 @@ export function ProfiloClient({
     <PageContainer>
       {/* Avatar */}
       <div className="avatar-row">
-        <div className="avatar">{(nome ?? "?").slice(0, 2).toUpperCase()}</div>
+        <div className="avatar">
+          {tenant.avatar_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={tenant.avatar_url} alt="" />
+          ) : (
+            (nome ?? "?").slice(0, 2).toUpperCase()
+          )}
+        </div>
         <div>
           <div className="avatar-name">Il tuo profilo</div>
           <div className="avatar-sub">In cerca a Milano</div>
@@ -286,6 +294,9 @@ function DatiPersonaliSheet({
   const [presentazione, setPresentazione] = useState(
     tenant.presentazione ?? ""
   );
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(
+    tenant.avatar_url
+  );
 
   return (
     <Sheet open={open} onClose={onClose} title="I tuoi dati">
@@ -307,6 +318,11 @@ function DatiPersonaliSheet({
         <input type="hidden" name="figli" value={figli} />
         <input type="hidden" name="redditi_nucleo" value={redditiNucleo} />
         <input type="hidden" name="animali" value={String(animali)} />
+        <input type="hidden" name="avatar_url" value={avatarUrl ?? ""} />
+
+        <Field label="La tua foto">
+          <AvatarUpload value={avatarUrl} onChange={setAvatarUrl} />
+        </Field>
 
         <Field label="Situazione lavorativa">
           <div className="chip-row">

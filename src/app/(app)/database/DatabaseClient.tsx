@@ -97,6 +97,17 @@ export function DatabaseClient({
       >
         {selezionata && (
           <>
+            {selezionata.tenant_profiles?.avatar_url && (
+              <div className="flex justify-center mb-4">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={selezionata.tenant_profiles.avatar_url}
+                  alt={`Foto di ${selezionata.nome ?? "inquilino"}`}
+                  className="w-24 h-24 rounded-full object-cover"
+                />
+              </div>
+            )}
+
             <p className="sheet-sub">
               Candidatura per <b>{selezionata.listings?.titolo}</b>
             </p>
@@ -203,7 +214,12 @@ function Gruppo({
         const iniziali = `${c.nome?.[0] ?? ""}${c.cognome?.[0] ?? ""}`.toUpperCase();
         return (
           <button key={c.id} onClick={() => onSelect(c)} className="match-card">
-            <div className="mc-avatar">{iniziali || "IN"}</div>
+            {c.tenant_profiles?.avatar_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={c.tenant_profiles.avatar_url} alt="" />
+            ) : (
+              <div className="mc-avatar">{iniziali || "IN"}</div>
+            )}
             <div className="mc-body">
               <div className="mc-zona">
                 {c.tenant_profiles?.professione ?? "Profilo inquilino"}

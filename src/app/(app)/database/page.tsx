@@ -14,7 +14,7 @@ export default async function DatabasePage() {
   const { data: candidature } = await supabase
     .from("candidature")
     .select(
-      "id, status, match_pct, created_at, tenant_id, listings!inner(owner_id, titolo, zona), tenant_profiles!inner(professione, reddito_mensile, verificato, presentazione)"
+      "id, status, match_pct, created_at, tenant_id, listings!inner(owner_id, titolo, zona), tenant_profiles!inner(professione, reddito_mensile, verificato, presentazione, avatar_url)"
     )
     .eq("listings.owner_id", user!.id)
     .order("created_at", { ascending: false });

@@ -32,6 +32,8 @@ export async function updateDatiPersonali(
   const figli = Number(formData.get("figli") || 0);
   const redditi_nucleo = Number(formData.get("redditi_nucleo") || 1);
   const presentazione = String(formData.get("presentazione") || "");
+  // stringa vuota = nessuna foto, così l'inquilino può anche rimuoverla
+  const avatar_url = String(formData.get("avatar_url") || "").trim() || null;
 
   const { error } = await supabase
     .from("tenant_profiles")
@@ -46,6 +48,7 @@ export async function updateDatiPersonali(
       figli,
       redditi_nucleo,
       presentazione,
+      avatar_url,
       updated_at: new Date().toISOString(),
     })
     .eq("profile_id", user.id);
