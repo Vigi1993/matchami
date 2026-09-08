@@ -55,26 +55,28 @@ export function GestioneAffittiClient({
           <div className="pref-label" style={{ marginTop: 8 }}>
             <span>Da avviare — {candidatureSenzaContratto.length}</span>
           </div>
-          {candidatureSenzaContratto.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => setNuovaDa(c)}
-              className="match-card"
-            >
-              <div className="mc-avatar">
-                {`${c.nome?.[0] ?? ""}${c.cognome?.[0] ?? ""}`.toUpperCase() ||
-                  "IN"}
-              </div>
-              <div className="mc-body">
-                <div className="mc-zona">{c.listings?.zona}</div>
-                <div className="mc-title">
-                  {c.nome} {c.cognome}
+          <div className="card-grid">
+            {candidatureSenzaContratto.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => setNuovaDa(c)}
+                className="match-card"
+              >
+                <div className="mc-avatar">
+                  {`${c.nome?.[0] ?? ""}${c.cognome?.[0] ?? ""}`.toUpperCase() ||
+                    "IN"}
                 </div>
-                <div className="mc-meta">{c.listings?.titolo}</div>
-              </div>
-              <div className="mc-pct is-wait">Crea contratto</div>
-            </button>
-          ))}
+                <div className="mc-body">
+                  <div className="mc-zona">{c.listings?.zona}</div>
+                  <div className="mc-title">
+                    {c.nome} {c.cognome}
+                  </div>
+                  <div className="mc-meta">{c.listings?.titolo}</div>
+                </div>
+                <div className="mc-pct is-wait">Crea contratto</div>
+              </button>
+            ))}
+          </div>
         </>
       )}
 
@@ -94,30 +96,32 @@ export function GestioneAffittiClient({
           </p>
         </div>
       ) : (
-        contratti.map((c) => (
-          <button
-            key={c.id}
-            onClick={() => setSelezionato(c)}
-            className="match-card"
-          >
-            <div className="mc-avatar">
-              {`${c.nome?.[0] ?? ""}${c.cognome?.[0] ?? ""}`.toUpperCase() ||
-                "IN"}
-            </div>
-            <div className="mc-body">
-              <div className="mc-zona">{c.candidature?.listings?.titolo}</div>
-              <div className="mc-title">
-                {c.nome} {c.cognome}
+        <div className="card-grid">
+          {contratti.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => setSelezionato(c)}
+              className="match-card"
+            >
+              <div className="mc-avatar">
+                {`${c.nome?.[0] ?? ""}${c.cognome?.[0] ?? ""}`.toUpperCase() ||
+                  "IN"}
               </div>
-              <div className="mc-meta">
-                {c.canone ? `€${c.canone.toLocaleString("it-IT")}/mese` : "—"}
+              <div className="mc-body">
+                <div className="mc-zona">{c.candidature?.listings?.titolo}</div>
+                <div className="mc-title">
+                  {c.nome} {c.cognome}
+                </div>
+                <div className="mc-meta">
+                  {c.canone ? `€${c.canone.toLocaleString("it-IT")}/mese` : "—"}
+                </div>
               </div>
-            </div>
-            <div className={`mc-pct ${STATO_BADGE[c.stato]}`}>
-              {STATO_LABEL[c.stato]}
-            </div>
-          </button>
-        ))
+              <div className={`mc-pct ${STATO_BADGE[c.stato]}`}>
+                {STATO_LABEL[c.stato]}
+              </div>
+            </button>
+          ))}
+        </div>
       )}
 
       {/* ---- Sheet: crea contratto da candidatura accettata ---- */}

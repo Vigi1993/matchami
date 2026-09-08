@@ -209,33 +209,35 @@ function Gruppo({
           {titolo} — {items.length}
         </span>
       </div>
-      {items.map((c) => {
-        const s = stato(c);
-        const iniziali = `${c.nome?.[0] ?? ""}${c.cognome?.[0] ?? ""}`.toUpperCase();
-        return (
-          <button key={c.id} onClick={() => onSelect(c)} className="match-card">
-            {c.tenant_profiles?.avatar_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={c.tenant_profiles.avatar_url} alt="" />
-            ) : (
-              <div className="mc-avatar">{iniziali || "IN"}</div>
-            )}
-            <div className="mc-body">
-              <div className="mc-zona">
-                {c.tenant_profiles?.professione ?? "Profilo inquilino"}
+      <div className="card-grid">
+        {items.map((c) => {
+          const s = stato(c);
+          const iniziali = `${c.nome?.[0] ?? ""}${c.cognome?.[0] ?? ""}`.toUpperCase();
+          return (
+            <button key={c.id} onClick={() => onSelect(c)} className="match-card">
+              {c.tenant_profiles?.avatar_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={c.tenant_profiles.avatar_url} alt="" />
+              ) : (
+                <div className="mc-avatar">{iniziali || "IN"}</div>
+              )}
+              <div className="mc-body">
+                <div className="mc-zona">
+                  {c.tenant_profiles?.professione ?? "Profilo inquilino"}
+                </div>
+                <div className="mc-title">
+                  {c.nome} {c.cognome}
+                </div>
+                <div className="mc-meta">
+                  {c.listings?.titolo}
+                  {c.match_pct !== null && ` · ${c.match_pct}% compatibile`}
+                </div>
               </div>
-              <div className="mc-title">
-                {c.nome} {c.cognome}
-              </div>
-              <div className="mc-meta">
-                {c.listings?.titolo}
-                {c.match_pct !== null && ` · ${c.match_pct}% compatibile`}
-              </div>
-            </div>
-            <div className={`mc-pct ${BADGE[s]}`}>{LABEL[s]}</div>
-          </button>
-        );
-      })}
+              <div className={`mc-pct ${BADGE[s]}`}>{LABEL[s]}</div>
+            </button>
+          );
+        })}
+      </div>
     </>
   );
 }

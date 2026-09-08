@@ -63,29 +63,31 @@ export function GestioneClient({
           </p>
         </div>
       ) : (
-        contratti.map((c) => (
-          <button
-            key={c.id}
-            onClick={() => setSelezionato(c)}
-            className="match-card"
-          >
-            <div className="mc-avatar">
-              {(c.candidature?.listings?.titolo ?? "IM").slice(0, 2).toUpperCase()}
-            </div>
-            <div className="mc-body">
-              <div className="mc-zona">{c.candidature?.listings?.zona ?? ""}</div>
-              <div className="mc-title">
-                {c.candidature?.listings?.titolo ?? "Immobile"}
+        <div className="card-grid">
+          {contratti.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => setSelezionato(c)}
+              className="match-card"
+            >
+              <div className="mc-avatar">
+                {(c.candidature?.listings?.titolo ?? "IM").slice(0, 2).toUpperCase()}
               </div>
-              <div className="mc-meta">
-                {c.canone ? `€${c.canone.toLocaleString("it-IT")}/mese` : "—"}
+              <div className="mc-body">
+                <div className="mc-zona">{c.candidature?.listings?.zona ?? ""}</div>
+                <div className="mc-title">
+                  {c.candidature?.listings?.titolo ?? "Immobile"}
+                </div>
+                <div className="mc-meta">
+                  {c.canone ? `€${c.canone.toLocaleString("it-IT")}/mese` : "—"}
+                </div>
               </div>
-            </div>
-            <div className={`mc-pct ${STATO_BADGE[c.stato]}`}>
-              {STATO_LABEL[c.stato]}
-            </div>
-          </button>
-        ))
+              <div className={`mc-pct ${STATO_BADGE[c.stato]}`}>
+                {STATO_LABEL[c.stato]}
+              </div>
+            </button>
+          ))}
+        </div>
       )}
 
       {/* ---- Bollette e utenze ---- */}

@@ -61,38 +61,40 @@ export function OwnerProfiloClient({
         </div>
       </div>
 
-      <Row
-        color="var(--ink)"
-        icon={<IconPersona className="fill-none stroke-white stroke-2" />}
-        title="I tuoi dati"
-        subtitle="Tipo di proprietario, immobili gestiti e priorità."
-        cta="Vedi il dettaglio"
-        onClick={() => setDatiAperto(true)}
-      />
-      <Row
-        color="var(--ink-soft)"
-        icon={<IconLucchetto className="fill-none stroke-white stroke-2" />}
-        title="Account e accesso"
-        subtitle="Nome, email di accesso e password del tuo account MatchAmI."
-        cta="Gestisci l'account"
-        onClick={() => setAccountAperto(true)}
-      />
-      <Row
-        color="var(--moss)"
-        icon={<IconScudo className="fill-white stroke-none" />}
-        title="Privacy e consensi"
-        subtitle="Rivedi o modifica i consensi su marketing e condivisione dati con terzi."
-        cta="Gestisci consensi"
-        onClick={() => setPrivacyAperto(true)}
-      />
-      <Row
-        color="var(--gold)"
-        icon={<IconDomanda className="fill-none stroke-[var(--ink)] stroke-2" />}
-        title="FAQ"
-        subtitle="Domande frequenti su MatchAmI per i proprietari."
-        cta="Vedi le domande frequenti"
-        onClick={() => setFaqAperto(true)}
-      />
+      <div className="card-grid">
+        <Row
+          color="var(--ink)"
+          icon={<IconPersona className="fill-none stroke-white stroke-2" />}
+          title="I tuoi dati"
+          subtitle="Tipo di proprietario, immobili gestiti e priorità."
+          cta="Vedi il dettaglio"
+          onClick={() => setDatiAperto(true)}
+        />
+        <Row
+          color="var(--ink-soft)"
+          icon={<IconLucchetto className="fill-none stroke-white stroke-2" />}
+          title="Account e accesso"
+          subtitle="Nome, email di accesso e password del tuo account MatchAmI."
+          cta="Gestisci l'account"
+          onClick={() => setAccountAperto(true)}
+        />
+        <Row
+          color="var(--moss)"
+          icon={<IconScudo className="fill-white stroke-none" />}
+          title="Privacy e consensi"
+          subtitle="Rivedi o modifica i consensi su marketing e condivisione dati con terzi."
+          cta="Gestisci consensi"
+          onClick={() => setPrivacyAperto(true)}
+        />
+        <Row
+          color="var(--gold)"
+          icon={<IconDomanda className="fill-none stroke-[var(--ink)] stroke-2" />}
+          title="FAQ"
+          subtitle="Domande frequenti su MatchAmI per i proprietari."
+          cta="Vedi le domande frequenti"
+          onClick={() => setFaqAperto(true)}
+        />
+      </div>
 
       <form action={logout} className="mt-6">
         <button className="redo-link" style={{ color: "var(--muted)" }}>

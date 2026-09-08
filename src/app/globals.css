@@ -482,6 +482,13 @@ input[type="range"]::-moz-range-thumb {
   color: var(--clay);
 }
 
+/* Su mobile il wrapper delle griglie è trasparente: le card restano
+   figlie dirette della schermata, esattamente come nel prototipo.
+   Da 768px in su diventa una griglia a due colonne. */
+.card-grid {
+  display: contents;
+}
+
 .empty-inline {
   display: flex;
   flex-direction: column;
@@ -856,6 +863,7 @@ input[type="range"]::-moz-range-thumb {
 }
 .sheet-scroll {
   overflow-y: auto;
+  min-height: 0;
   -webkit-overflow-scrolling: touch;
   padding: 4px 26px 40px 26px;
   flex: 1;
@@ -941,6 +949,9 @@ input[type="range"]::-moz-range-thumb {
 }
 .tab-btn.active {
   color: var(--moss);
+}
+.tabbar-brand {
+  display: none;
 }
 .tab-badge {
   position: absolute;
@@ -1650,4 +1661,245 @@ input[type="range"]::-moz-range-thumb {
   border-style: solid;
   border-color: var(--moss);
   background: rgba(62, 107, 87, 0.06);
+}
+
+/* ============================================================
+   DESKTOP — da 768px in su
+   Sotto questa soglia non cambia nulla: resta il telaio da 480px
+   con la tab bar in basso, identico al prototipo. Sopra, il telaio
+   si apre in un layout da sito: sidebar a sinistra, contenuto largo,
+   elenchi su due colonne, sheet come finestre centrate.
+   ============================================================ */
+
+@media (min-width: 768px) {
+  html,
+  body {
+    background: var(--paper);
+  }
+
+  /* ---- guscio: da cornice a pagina intera ---- */
+  .app-shell {
+    max-width: none;
+    display: flex;
+    background: var(--paper);
+  }
+
+  .screens {
+    position: relative;
+    inset: auto;
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* ---- tab bar → sidebar ---- */
+  .tabbar {
+    position: static;
+    order: -1; /* nel DOM sta dopo le schermate, qui va a sinistra */
+    width: 248px;
+    flex-shrink: 0;
+    height: auto;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 4px;
+    border-top: none;
+    border-right: 1px solid rgba(16, 21, 26, 0.08);
+    padding: 26px 16px;
+  }
+  .tabbar-brand {
+    display: block;
+    font-family: var(--font-display);
+    font-style: italic;
+    font-weight: 700;
+    font-size: 25px;
+    color: var(--ink);
+    padding: 0 12px;
+    margin-bottom: 26px;
+  }
+  .tabbar-brand b {
+    color: var(--gold);
+    font-style: normal;
+  }
+  .tab-btn {
+    flex: 0 0 auto;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 12px;
+    padding: 11px 12px;
+    border-radius: 12px;
+    font-size: 13.5px;
+    text-align: left;
+  }
+  .tab-btn svg {
+    width: 19px;
+    height: 19px;
+  }
+  .tab-btn:hover {
+    background: rgba(16, 21, 26, 0.04);
+  }
+  .tab-btn.active {
+    background: rgba(62, 107, 87, 0.1);
+  }
+  .tab-badge {
+    position: static;
+    margin-left: auto;
+  }
+
+  /* ---- schermate chiare ---- */
+  .screen-wrap {
+    padding: 44px 44px 64px 44px;
+  }
+  .screen-inner {
+    max-width: 920px;
+    margin: 0 auto;
+  }
+  .screen-title {
+    font-size: 32px;
+  }
+  .screen-sub {
+    font-size: 14px;
+    margin-bottom: 28px;
+  }
+
+  /* ---- elenchi su due colonne ----
+     `.card-grid` è `display: contents` sul telefono, quindi lì non
+     esiste proprio; qui diventa la griglia. */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    align-items: start;
+    margin-bottom: 8px;
+  }
+  .card-grid .match-card,
+  .card-grid .pv-row {
+    margin-bottom: 0;
+  }
+  .match-card:hover,
+  .pv-row:hover {
+    box-shadow: 0 10px 26px rgba(16, 21, 26, 0.1);
+  }
+
+  /* ---- sheet → finestra centrata ---- */
+  .sheet {
+    left: 50%;
+    top: 50%;
+    bottom: auto;
+    transform: translate(-50%, -50%);
+    width: min(640px, 92vw);
+    max-width: none;
+    height: auto;
+    max-height: 84vh;
+    border-radius: 22px;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.4);
+    animation: sheet-in 0.26s cubic-bezier(0.22, 0.8, 0.32, 1);
+  }
+  @keyframes sheet-in {
+    from {
+      opacity: 0;
+      transform: translate(-50%, -46%) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1);
+    }
+  }
+  /* la maniglia serve a trascinare: senza trascinamento non ha senso */
+  .sheet-handle-area {
+    display: none;
+  }
+  .sheet-scroll {
+    padding: 26px 34px 34px 34px;
+  }
+
+  /* ---- deck inquilino ----
+     Resta una pila di card da sfogliare (il trascinamento funziona
+     anche col mouse), ma diventa un pannello centrato. */
+  .deck {
+    inset: 150px auto 130px 50%;
+    width: 460px;
+    transform: translateX(-50%);
+  }
+  .card {
+    border-radius: 22px;
+    box-shadow: 0 30px 70px rgba(0, 0, 0, 0.5);
+  }
+  .card-info {
+    bottom: 64px;
+  }
+  /* i pulsanti non coprono più la card: il suggerimento scende in fondo */
+  .swipe-hint {
+    bottom: 20px;
+  }
+  .empty-state {
+    border-radius: 22px;
+  }
+  .home-intro {
+    top: 72px;
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    width: 460px;
+  }
+  .topbar {
+    padding-top: 22px;
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    width: 460px;
+  }
+  .actions {
+    bottom: 42px;
+  }
+  .toast-inline {
+    bottom: 120px;
+  }
+
+  /* ---- login: foto a sinistra, form a destra ---- */
+  .login-view {
+    max-width: none;
+  }
+  .login-scrim {
+    background: linear-gradient(
+      90deg,
+      rgba(10, 13, 16, 0.35) 0%,
+      rgba(10, 13, 16, 0.55) 55%,
+      rgba(10, 13, 16, 0.75) 100%
+    );
+  }
+  .login-content {
+    inset: 0 0 0 auto;
+    width: min(560px, 55%);
+    background: rgba(16, 21, 26, 0.94);
+    backdrop-filter: blur(10px);
+    padding: 48px 56px;
+    justify-content: center;
+  }
+  .login-content > *:first-child {
+    margin-top: 0;
+  }
+  .login-brand {
+    font-size: 44px;
+  }
+
+  /* ---- chat: colonna centrata, non a tutta larghezza ---- */
+  .chat-view {
+    max-width: 780px;
+    border-left: 1px solid rgba(16, 21, 26, 0.08);
+    border-right: 1px solid rgba(16, 21, 26, 0.08);
+  }
+  .chat-msg {
+    max-width: 62%;
+  }
+}
+
+/* Schermi molto larghi: il contenuto smette di allargarsi */
+@media (min-width: 1280px) {
+  .screen-wrap {
+    padding: 52px 64px 72px 64px;
+  }
+  .screen-inner {
+    max-width: 1040px;
+  }
 }

@@ -53,37 +53,39 @@ export function OwnerHomeClient({
           </p>
         </div>
       ) : (
-        listings.map((l) => (
-          <div key={l.id} className="match-card" style={{ cursor: "default" }}>
-            <div className="mc-avatar">
-              {l.titolo.slice(0, 2).toUpperCase()}
-            </div>
-            <div className="mc-body">
-              <div className="mc-zona">{l.zona}</div>
-              <div className="mc-title">{l.titolo}</div>
-              <div className="mc-meta">
-                €{l.prezzo.toLocaleString("it-IT")}/mese
-                {!l.pubblicato && " · non pubblicato"}
+        <div className="card-grid">
+          {listings.map((l) => (
+            <div key={l.id} className="match-card" style={{ cursor: "default" }}>
+              <div className="mc-avatar">
+                {l.titolo.slice(0, 2).toUpperCase()}
+              </div>
+              <div className="mc-body">
+                <div className="mc-zona">{l.zona}</div>
+                <div className="mc-title">{l.titolo}</div>
+                <div className="mc-meta">
+                  €{l.prezzo.toLocaleString("it-IT")}/mese
+                  {!l.pubblicato && " · non pubblicato"}
+                </div>
+              </div>
+              <div
+                className={`mc-pct ${
+                  l.nCandidature > 0 ? "is-match" : "is-off"
+                }`}
+              >
+                {l.nCandidature > 0 ? (
+                  <>
+                    {l.nCandidature}
+                    <span>
+                      candidatur{l.nCandidature === 1 ? "a" : "e"}
+                    </span>
+                  </>
+                ) : (
+                  "Nessuna candidatura"
+                )}
               </div>
             </div>
-            <div
-              className={`mc-pct ${
-                l.nCandidature > 0 ? "is-match" : "is-off"
-              }`}
-            >
-              {l.nCandidature > 0 ? (
-                <>
-                  {l.nCandidature}
-                  <span>
-                    candidatur{l.nCandidature === 1 ? "a" : "e"}
-                  </span>
-                </>
-              ) : (
-                "Nessuna candidatura"
-              )}
-            </div>
-          </div>
-        ))
+          ))}
+        </div>
       )}
     </PageContainer>
   );

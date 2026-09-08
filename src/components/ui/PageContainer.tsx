@@ -14,5 +14,10 @@ export function PageContainer({
    *  varianti "wide" come nel layout desktop precedente. */
   wide?: boolean;
 }) {
-  return <div className="screen-wrap">{children}</div>;
+  return (
+    <div className="screen-wrap">
+      {/* su desktop limita la riga di lettura; su mobile non fa nulla */}
+      <div className="screen-inner">{children}</div>
+    </div>
+  );
 }

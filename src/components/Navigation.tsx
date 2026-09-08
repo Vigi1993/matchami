@@ -44,6 +44,10 @@ export function Navigation({
 
   return (
     <nav className="tabbar">
+      {/* visibile solo nella sidebar desktop */}
+      <div className="tabbar-brand">
+        Match<b>AmI</b>
+      </div>
       {tabs.map(({ href, label, Icon }) => {
         const active = pathname === href;
         return (

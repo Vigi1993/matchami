@@ -54,46 +54,48 @@ export function ImmobiliClient({
           </p>
         </div>
       ) : (
-        immobili.map((im) => (
-          <button
-            key={im.id}
-            onClick={() => setSelezionato(im)}
-            className="match-card"
-          >
-            {im.fotoUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={im.fotoUrl} alt="" />
-            ) : (
-              <div className="mc-avatar">
-                {im.titolo.slice(0, 2).toUpperCase()}
-              </div>
-            )}
-            <div className="mc-body">
-              <div className="mc-zona">{im.zona}</div>
-              <div className="mc-title">{im.titolo}</div>
-              <div className="mc-meta">
-                €{im.prezzo.toLocaleString("it-IT")}/mese
-                {!im.pubblicato && " · non pubblicato"}
-              </div>
-            </div>
-            <div
-              className={`mc-pct ${
-                im.nCandidature > 0 ? "is-match" : "is-off"
-              }`}
+        <div className="card-grid">
+          {immobili.map((im) => (
+            <button
+              key={im.id}
+              onClick={() => setSelezionato(im)}
+              className="match-card"
             >
-              {im.nCandidature > 0 ? (
-                <>
-                  {im.nCandidature}
-                  <span>candidatur{im.nCandidature === 1 ? "a" : "e"}</span>
-                </>
-              ) : im.pubblicato ? (
-                "Nessuna candidatura"
+              {im.fotoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={im.fotoUrl} alt="" />
               ) : (
-                "Non pubblicato"
+                <div className="mc-avatar">
+                  {im.titolo.slice(0, 2).toUpperCase()}
+                </div>
               )}
-            </div>
-          </button>
-        ))
+              <div className="mc-body">
+                <div className="mc-zona">{im.zona}</div>
+                <div className="mc-title">{im.titolo}</div>
+                <div className="mc-meta">
+                  €{im.prezzo.toLocaleString("it-IT")}/mese
+                  {!im.pubblicato && " · non pubblicato"}
+                </div>
+              </div>
+              <div
+                className={`mc-pct ${
+                  im.nCandidature > 0 ? "is-match" : "is-off"
+                }`}
+              >
+                {im.nCandidature > 0 ? (
+                  <>
+                    {im.nCandidature}
+                    <span>candidatur{im.nCandidature === 1 ? "a" : "e"}</span>
+                  </>
+                ) : im.pubblicato ? (
+                  "Nessuna candidatura"
+                ) : (
+                  "Non pubblicato"
+                )}
+              </div>
+            </button>
+          ))}
+        </div>
       )}
 
       <Sheet

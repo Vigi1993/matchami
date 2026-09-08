@@ -157,31 +157,33 @@ function Gruppo({
           {titolo} — {items.length}
         </span>
       </div>
-      {items.map((c) => (
-        <button
-          key={c.id}
-          onClick={() => onSelect(c)}
-          className="match-card"
-          style={c.status === "rifiutata" ? { opacity: 0.55 } : undefined}
-        >
-          <div className="mc-avatar">
-            {(c.listings?.titolo ?? "IM").slice(0, 2).toUpperCase()}
-          </div>
-          <div className="mc-body">
-            <div className="mc-zona">{c.listings?.zona ?? ""}</div>
-            <div className="mc-title">{c.listings?.titolo ?? "Immobile"}</div>
-            <div className="mc-meta">
-              {c.listings?.prezzo
-                ? `€${c.listings.prezzo.toLocaleString("it-IT")}/mese`
-                : "—"}
-              {c.match_pct !== null && ` · ${c.match_pct}% compatibile`}
+      <div className="card-grid">
+        {items.map((c) => (
+          <button
+            key={c.id}
+            onClick={() => onSelect(c)}
+            className="match-card"
+            style={c.status === "rifiutata" ? { opacity: 0.55 } : undefined}
+          >
+            <div className="mc-avatar">
+              {(c.listings?.titolo ?? "IM").slice(0, 2).toUpperCase()}
             </div>
-          </div>
-          <div className={`mc-pct ${STATO_BADGE[c.status]}`}>
-            {STATO_LABEL[c.status]}
-          </div>
-        </button>
-      ))}
+            <div className="mc-body">
+              <div className="mc-zona">{c.listings?.zona ?? ""}</div>
+              <div className="mc-title">{c.listings?.titolo ?? "Immobile"}</div>
+              <div className="mc-meta">
+                {c.listings?.prezzo
+                  ? `€${c.listings.prezzo.toLocaleString("it-IT")}/mese`
+                  : "—"}
+                {c.match_pct !== null && ` · ${c.match_pct}% compatibile`}
+              </div>
+            </div>
+            <div className={`mc-pct ${STATO_BADGE[c.status]}`}>
+              {STATO_LABEL[c.status]}
+            </div>
+          </button>
+        ))}
+      </div>
     </>
   );
 }
