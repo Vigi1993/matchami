@@ -14,6 +14,16 @@ function parseAttributi(raw: FormDataEntryValue | null): Record<string, boolean>
   }
 }
 
+/** Le foto arrivano dal modulo come array JSON di URL, già ordinate. */
+function parseFoto(valore: FormDataEntryValue | null): string[] {
+  try {
+    const v = JSON.parse(String(valore || "[]"));
+    return Array.isArray(v) ? v.filter((u) => typeof u === "string" && u) : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function creaImmobile(
   _prevState: SaveState,
   formData: FormData
@@ -36,7 +46,7 @@ export async function creaImmobile(
   const mq = Number(formData.get("mq") || 0) || null;
   const attributi = parseAttributi(formData.get("attributi"));
   const pubblicato = formData.get("pubblicato") === "true";
-  const fotoUrl = String(formData.get("fotoUrl") || "").trim();
+  const foto = parseFoto(formData.get("foto"));
 
   const { data: listing, error } = await supabase
     .from("listings")
@@ -56,10 +66,10 @@ export async function creaImmobile(
 
   if (error) return { error: error.message };
 
-  if (fotoUrl && listing) {
-    const { error: eFoto } = await supabase
-      .from("listing_photos")
-      .insert({ listing_id: listing.id, url: fotoUrl, ordine: 0 });
+  if (foto.length > 0 && listing) {
+    const { error: eFoto } = await supabase.from("listing_photos").insert(
+      foto.map((url, i) => ({ listing_id: listing.id, url, ordine: i }))
+    );
     if (eFoto) return { error: eFoto.message };
   }
 
@@ -93,7 +103,7 @@ export async function aggiornaImmobile(
   const mq = Number(formData.get("mq") || 0) || null;
   const attributi = parseAttributi(formData.get("attributi"));
   const pubblicato = formData.get("pubblicato") === "true";
-  const fotoUrl = String(formData.get("fotoUrl") || "").trim();
+  const foto = parseFoto(formData.get("foto"));
 
   const { error } = await supabase
     .from("listings")
@@ -113,17 +123,18 @@ export async function aggiornaImmobile(
 
   if (error) return { error: error.message };
 
-  // Sostituiamo la foto principale (approccio semplice: cancella e reinserisci)
+  // Riscriviamo l'intera galleria: l'ordine delle foto è quello in cui
+  // il proprietario le ha lasciate nel modulo.
   const { error: eDel } = await supabase
     .from("listing_photos")
     .delete()
     .eq("listing_id", id);
   if (eDel) return { error: eDel.message };
 
-  if (fotoUrl) {
-    const { error: eFoto } = await supabase
-      .from("listing_photos")
-      .insert({ listing_id: id, url: fotoUrl, ordine: 0 });
+  if (foto.length > 0) {
+    const { error: eFoto } = await supabase.from("listing_photos").insert(
+      foto.map((url, i) => ({ listing_id: id, url, ordine: i }))
+    );
     if (eFoto) return { error: eFoto.message };
   }
 

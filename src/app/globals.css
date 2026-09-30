@@ -1903,3 +1903,175 @@ input[type="range"]::-moz-range-thumb {
     max-width: 1040px;
   }
 }
+
+/* ============================================================
+   CAROSELLO FOTO E SCHEDA IMMOBILE
+   ============================================================ */
+
+/* Segmenti in cima alla card, uno per foto. */
+.photo-dots {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  right: 12px;
+  z-index: 26;
+  display: flex;
+  gap: 4px;
+  pointer-events: none;
+}
+.photo-dots i {
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(247, 244, 236, 0.3);
+}
+.photo-dots i.on {
+  background: var(--paper);
+}
+
+/* Pulsante che apre la scheda completa. */
+.card-dettagli {
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 12px;
+  padding: 9px 15px;
+  border-radius: 999px;
+  background: rgba(247, 244, 236, 0.14);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(247, 244, 236, 0.28);
+  color: var(--paper);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.card-dettagli svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* le informazioni in basso non intercettano il trascinamento, il
+   pulsante sì */
+.card-info {
+  pointer-events: none;
+}
+.card-info .card-dettagli {
+  pointer-events: auto;
+}
+
+/* Galleria dentro la scheda: scorre in orizzontale con lo scatto. */
+.galleria {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  margin: 0 -26px 18px -26px;
+  padding: 0 26px;
+}
+.galleria img {
+  flex: 0 0 auto;
+  width: 78%;
+  max-width: 320px;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 16px;
+  scroll-snap-align: center;
+}
+.galleria-vuota {
+  height: 150px;
+  border-radius: 16px;
+  background: var(--paper-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 18px;
+}
+
+/* Riga di pulsanti in fondo alla scheda. */
+.scheda-azioni {
+  display: flex;
+  gap: 10px;
+  margin-top: 26px;
+}
+
+@media (min-width: 768px) {
+  .galleria {
+    margin: 0 -34px 18px -34px;
+    padding: 0 34px;
+  }
+  .galleria img {
+    width: 62%;
+  }
+}
+
+/* Galleria nel modulo dell'immobile: miniature riordinabili. */
+.foto-lista {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(86px, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.foto-item {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--paper-dim);
+}
+.foto-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.foto-azioni {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  gap: 3px;
+}
+.foto-azioni button {
+  -webkit-appearance: none;
+  appearance: none;
+  border: none;
+  cursor: pointer;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: rgba(16, 21, 26, 0.68);
+  color: var(--paper);
+  font-size: 13px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.foto-azioni button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.foto-azioni button.rimuovi {
+  background: rgba(201, 105, 78, 0.9);
+}
+.foto-copertina {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  background: rgba(16, 21, 26, 0.72);
+  color: var(--paper);
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 999px;
+}

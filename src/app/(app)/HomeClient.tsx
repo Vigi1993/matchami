@@ -4,9 +4,17 @@ import { useRef, useState, useTransition } from "react";
 import type { AffidabilitaResult } from "@/lib/affidabilita";
 import type { ListingConFoto } from "@/lib/types";
 import { candidati } from "./actions";
-import { IconChevronSu, IconCuore, IconX, IconCasa } from "@/components/icons";
+import {
+  IconChevronSu,
+  IconCuore,
+  IconX,
+  IconCasa,
+  IconInfo,
+} from "@/components/icons";
+import { SchedaImmobile } from "./SchedaImmobile";
 
 const SOGLIA_SWIPE = 100; // px di trascinamento oltre cui la scelta è "decisa"
+const SOGLIA_TOCCO = 8; // sotto questo spostamento è un tocco, non un trascinamento
 
 export function HomeClient({
   affidabilita,
@@ -22,15 +30,22 @@ export function HomeClient({
   const [pending, startTransition] = useTransition();
 
   // ---- stato del trascinamento della card ----
+  const [fotoIdx, setFotoIdx] = useState(0);
+  const [schedaAperta, setSchedaAperta] = useState(false);
   const [drag, setDrag] = useState({ x: 0, y: 0, dragging: false });
   const [exiting, setExiting] = useState<"left" | "right" | null>(null);
   const startPos = useRef({ x: 0, y: 0 });
+  // Il tocco è partito dal pulsante "dettagli"? Serve saperlo al
+  // rilascio: con la cattura del puntatore il click del pulsante può
+  // non scattare, e senza questo il tocco finirebbe nella zona foto.
+  const daPulsante = useRef(false);
 
   const attuale = listings[index];
   const finito = index >= listings.length;
 
   function scarta() {
     setIndex((i) => i + 1);
+    setFotoIdx(0);
   }
 
   function candidati_(listing: ListingConFoto) {
@@ -40,6 +55,7 @@ export function HomeClient({
         setCandidatureInviate((prev) => new Set(prev).add(listing.id));
       }
       setIndex((i) => i + 1);
+      setFotoIdx(0);
     });
   }
 
@@ -47,6 +63,7 @@ export function HomeClient({
   // "volare via" la card nella direzione scelta, poi passa alla prossima.
   function swipe(direzione: "left" | "right") {
     if (!attuale || pending) return;
+    setSchedaAperta(false);
     setExiting(direzione);
     setTimeout(() => {
       if (direzione === "right") candidati_(attuale);
@@ -59,6 +76,7 @@ export function HomeClient({
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     if (exiting) return;
     e.currentTarget.setPointerCapture(e.pointerId);
+    daPulsante.current = !!(e.target as HTMLElement).closest(".card-dettagli");
     startPos.current = { x: e.clientX, y: e.clientY };
     setDrag({ x: 0, y: 0, dragging: true });
   }
@@ -72,11 +90,44 @@ export function HomeClient({
     });
   }
 
-  function onPointerUp() {
+  function onPointerUp(e: React.PointerEvent<HTMLDivElement>) {
     if (!drag.dragging) return;
-    if (drag.x > SOGLIA_SWIPE) swipe("right");
-    else if (drag.x < -SOGLIA_SWIPE) swipe("left");
-    else setDrag({ x: 0, y: 0, dragging: false });
+
+    if (drag.x > SOGLIA_SWIPE) {
+      swipe("right");
+      return;
+    }
+    if (drag.x < -SOGLIA_SWIPE) {
+      swipe("left");
+      return;
+    }
+
+    // Spostamento minimo: è stato un tocco. Dove si è toccato decide
+    // cosa fare — i lati scorrono le foto, il centro apre la scheda.
+    if (
+      Math.abs(drag.x) < SOGLIA_TOCCO &&
+      Math.abs(drag.y) < SOGLIA_TOCCO
+    ) {
+      if (daPulsante.current) {
+        setSchedaAperta(true);
+      } else {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const posizione = (e.clientX - rect.left) / rect.width;
+        if (posizione < 0.32) fotoPrecedente();
+        else if (posizione > 0.68) fotoSuccessiva();
+        else setSchedaAperta(true);
+      }
+    }
+
+    setDrag({ x: 0, y: 0, dragging: false });
+  }
+
+  function fotoPrecedente() {
+    setFotoIdx((i) => (i > 0 ? i - 1 : i));
+  }
+
+  function fotoSuccessiva() {
+    setFotoIdx((i) => (i < numeroFoto - 1 ? i + 1 : i));
   }
 
   const rotazione = drag.x / 18;
@@ -89,7 +140,10 @@ export function HomeClient({
   const likeOpacity = Math.min(Math.max(drag.x / SOGLIA_SWIPE, 0), 1);
   const nopeOpacity = Math.min(Math.max(-drag.x / SOGLIA_SWIPE, 0), 1);
 
-  const foto = attuale?.listing_photos?.[0]?.url;
+  const foto = attuale?.listing_photos ?? [];
+  const numeroFoto = foto.length;
+  const fotoCorrente = foto[Math.min(fotoIdx, Math.max(numeroFoto - 1, 0))]?.url;
+  const fotoSuccessivaUrl = foto[fotoIdx + 1]?.url;
 
   return (
     <div className="screen-dark">
@@ -171,17 +225,33 @@ export function HomeClient({
             }}
             className="card"
           >
-            {foto ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={foto}
-                alt={attuale.titolo}
-                draggable={false}
-                className="photo"
-              />
+            {fotoCorrente ? (
+              <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={fotoCorrente}
+                  alt={`${attuale.titolo}, foto ${fotoIdx + 1} di ${numeroFoto}`}
+                  draggable={false}
+                  className="photo"
+                />
+                {/* scarica in anticipo la prossima, così non lampeggia */}
+                {fotoSuccessivaUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={fotoSuccessivaUrl} alt="" hidden />
+                )}
+              </>
             ) : (
               <div className="photo-placeholder">
                 <span>{attuale.titolo.slice(0, 2).toUpperCase()}</span>
+              </div>
+            )}
+
+            {/* un segmento per foto */}
+            {numeroFoto > 1 && (
+              <div className="photo-dots">
+                {foto.map((f, i) => (
+                  <i key={f.url} className={i === fotoIdx ? "on" : ""} />
+                ))}
               </div>
             )}
 
@@ -207,11 +277,25 @@ export function HomeClient({
                 {attuale.locali && <span>{attuale.locali} locali</span>}
                 {attuale.mq && <span>{attuale.mq} m²</span>}
               </div>
+
+              <button
+                type="button"
+                className="card-dettagli"
+                // l'apertura è gestita al rilascio del puntatore sulla card
+                tabIndex={-1}
+              >
+                <IconInfo />
+                Tutte le foto e i dettagli
+              </button>
             </div>
 
             <div className="swipe-hint">
               <IconChevronSu className="w-5 h-5 fill-none stroke-current stroke-2" />
-              <span>Trascina per scegliere</span>
+              <span>
+                {numeroFoto > 1
+                  ? "Tocca ai lati per le foto, al centro per i dettagli"
+                  : "Tocca per i dettagli, trascina per scegliere"}
+              </span>
             </div>
           </div>
         )}
@@ -238,6 +322,14 @@ export function HomeClient({
           </button>
         </div>
       )}
+
+      <SchedaImmobile
+        listing={schedaAperta ? attuale : null}
+        onClose={() => setSchedaAperta(false)}
+        onPassa={() => swipe("left")}
+        onCandidati={() => swipe("right")}
+        inCorso={pending}
+      />
 
       {candidatureInviate.size > 0 && (
         <div className="toast-inline">

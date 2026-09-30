@@ -61,7 +61,9 @@ async function TenantHome({ userId }: { userId: string }) {
   // comportamento corretto, non un errore.
   let query = supabase
     .from("listings")
-    .select("id, titolo, zona, prezzo, locali, mq, descrizione, listing_photos(url)")
+    .select(
+      "id, titolo, zona, prezzo, locali, mq, descrizione, attributi, listing_photos(url, ordine)"
+    )
     .eq("pubblicato", true);
 
   if (tenantProfile.budget_max) query = query.lte("prezzo", tenantProfile.budget_max);
@@ -76,10 +78,19 @@ async function TenantHome({ userId }: { userId: string }) {
 
   const { data: listings } = await query.order("created_at", { ascending: false });
 
+  // Le foto arrivano senza garanzia di ordine: le riordino qui una volta
+  // sola, così la card non deve pensarci a ogni render.
+  const listingsOrdinati = (listings ?? []).map((l) => ({
+    ...l,
+    listing_photos: [...(l.listing_photos ?? [])].sort(
+      (a, b) => (a.ordine ?? 0) - (b.ordine ?? 0)
+    ),
+  }));
+
   return (
     <HomeClient
       affidabilita={affidabilita}
-      listings={(listings ?? []) as unknown as ListingConFoto[]}
+      listings={listingsOrdinati as unknown as ListingConFoto[]}
     />
   );
 }

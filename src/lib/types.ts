@@ -51,7 +51,8 @@ export type ImmobileDettaglio = {
   mq: number | null;
   attributi: Record<string, boolean>;
   pubblicato: boolean;
-  fotoUrl: string | null;
+  /** galleria dell'annuncio, già ordinata */
+  foto: string[];
   nCandidature: number;
 };
 
@@ -125,7 +126,9 @@ export type ListingConFoto = {
   locali: number | null;
   mq: number | null;
   descrizione: string | null;
-  listing_photos: { url: string }[];
+  /** caratteristiche dell'immobile, chiavi di ATTR_VOCAB */
+  attributi: Record<string, boolean> | null;
+  listing_photos: { url: string; ordine: number }[];
 };
 
 export type ContrattoConAnnuncio = {

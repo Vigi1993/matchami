@@ -154,6 +154,16 @@ export function IconLucchetto({ className }: IconProps) {
   );
 }
 
+export function IconInfo({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden>
+      <circle cx="12" cy="12" r="9" />
+      <line x1="12" y1="11" x2="12" y2="16.5" />
+      <line x1="12" y1="7.6" x2="12" y2="7.7" />
+    </svg>
+  );
+}
+
 export function IconCheck({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" className={className} aria-hidden>

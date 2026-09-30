@@ -12,7 +12,7 @@ export default async function ImmobiliPage() {
     supabase
       .from("listings")
       .select(
-        "id, titolo, descrizione, zona, prezzo, locali, mq, attributi, pubblicato, listing_photos(url)"
+        "id, titolo, descrizione, zona, prezzo, locali, mq, attributi, pubblicato, listing_photos(url, ordine)"
       )
       .eq("owner_id", user!.id)
       .order("created_at", { ascending: false }),
@@ -38,7 +38,9 @@ export default async function ImmobiliPage() {
     mq: l.mq,
     attributi: (l.attributi as Record<string, boolean>) ?? {},
     pubblicato: l.pubblicato,
-    fotoUrl: (l.listing_photos as { url: string }[])?.[0]?.url ?? null,
+    foto: [...((l.listing_photos as { url: string; ordine: number }[]) ?? [])]
+      .sort((a, b) => (a.ordine ?? 0) - (b.ordine ?? 0))
+      .map((f) => f.url),
     nCandidature: nCandidaturePerListing.get(l.id) ?? 0,
   }));
 
