@@ -1,0 +1,983 @@
+From 52ede1513b0a03ec1c6bb42d61c8a07156847c3d Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 30 Sep 2026 09:12:44 +0000
+Subject: [PATCH] feat(deck): tutte le foto e scheda completa prima dello swipe
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Lato inquilino:
+- carosello sulla card: segmenti in alto, tocco ai lati per scorrere
+- tocco al centro (o pulsante) apre la scheda con galleria, canone,
+  zona, locali, superficie, descrizione e caratteristiche
+- dalla scheda si può passare o candidarsi senza tornare indietro
+- il tocco si distingue dal trascinamento sotto gli 8 px
+
+Lato proprietario, senza cui il carosello resterebbe a una foto sola:
+- caricamento multiplo, riordino con le frecce, rimozione
+- la prima foto è la copertina; l'ordine si conserva in listing_photos
+
+Nessuna migrazione: listing_photos era già una lista ordinata.
+---
+ src/app/(app)/HomeClient.tsx              | 122 +++++++++++++--
+ src/app/(app)/SchedaImmobile.tsx          | 138 +++++++++++++++++
+ src/app/(app)/immobili/ImmobiliClient.tsx | 164 +++++++++++++++------
+ src/app/(app)/immobili/actions.ts         |  33 +++--
+ src/app/(app)/immobili/page.tsx           |   6 +-
+ src/app/(app)/page.tsx                    |  15 +-
+ src/app/globals.css                       | 172 ++++++++++++++++++++++
+ src/components/icons.tsx                  |  10 ++
+ src/lib/types.ts                          |   7 +-
+ 9 files changed, 593 insertions(+), 74 deletions(-)
+ create mode 100644 src/app/(app)/SchedaImmobile.tsx
+
+diff --git a/src/app/(app)/HomeClient.tsx b/src/app/(app)/HomeClient.tsx
+index 7b810b8..7fca3ff 100644
+--- a/src/app/(app)/HomeClient.tsx
++++ b/src/app/(app)/HomeClient.tsx
+@@ -4,9 +4,17 @@ import { useRef, useState, useTransition } from "react";
+ import type { AffidabilitaResult } from "@/lib/affidabilita";
+ import type { ListingConFoto } from "@/lib/types";
+ import { candidati } from "./actions";
+-import { IconChevronSu, IconCuore, IconX, IconCasa } from "@/components/icons";
++import {
++  IconChevronSu,
++  IconCuore,
++  IconX,
++  IconCasa,
++  IconInfo,
++} from "@/components/icons";
++import { SchedaImmobile } from "./SchedaImmobile";
+ 
+ const SOGLIA_SWIPE = 100; // px di trascinamento oltre cui la scelta è "decisa"
++const SOGLIA_TOCCO = 8; // sotto questo spostamento è un tocco, non un trascinamento
+ 
+ export function HomeClient({
+   affidabilita,
+@@ -22,15 +30,22 @@ export function HomeClient({
+   const [pending, startTransition] = useTransition();
+ 
+   // ---- stato del trascinamento della card ----
++  const [fotoIdx, setFotoIdx] = useState(0);
++  const [schedaAperta, setSchedaAperta] = useState(false);
+   const [drag, setDrag] = useState({ x: 0, y: 0, dragging: false });
+   const [exiting, setExiting] = useState<"left" | "right" | null>(null);
+   const startPos = useRef({ x: 0, y: 0 });
++  // Il tocco è partito dal pulsante "dettagli"? Serve saperlo al
++  // rilascio: con la cattura del puntatore il click del pulsante può
++  // non scattare, e senza questo il tocco finirebbe nella zona foto.
++  const daPulsante = useRef(false);
+ 
+   const attuale = listings[index];
+   const finito = index >= listings.length;
+ 
+   function scarta() {
+     setIndex((i) => i + 1);
++    setFotoIdx(0);
+   }
+ 
+   function candidati_(listing: ListingConFoto) {
+@@ -40,6 +55,7 @@ export function HomeClient({
+         setCandidatureInviate((prev) => new Set(prev).add(listing.id));
+       }
+       setIndex((i) => i + 1);
++      setFotoIdx(0);
+     });
+   }
+ 
+@@ -47,6 +63,7 @@ export function HomeClient({
+   // "volare via" la card nella direzione scelta, poi passa alla prossima.
+   function swipe(direzione: "left" | "right") {
+     if (!attuale || pending) return;
++    setSchedaAperta(false);
+     setExiting(direzione);
+     setTimeout(() => {
+       if (direzione === "right") candidati_(attuale);
+@@ -59,6 +76,7 @@ export function HomeClient({
+   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+     if (exiting) return;
+     e.currentTarget.setPointerCapture(e.pointerId);
++    daPulsante.current = !!(e.target as HTMLElement).closest(".card-dettagli");
+     startPos.current = { x: e.clientX, y: e.clientY };
+     setDrag({ x: 0, y: 0, dragging: true });
+   }
+@@ -72,11 +90,44 @@ export function HomeClient({
+     });
+   }
+ 
+-  function onPointerUp() {
++  function onPointerUp(e: React.PointerEvent<HTMLDivElement>) {
+     if (!drag.dragging) return;
+-    if (drag.x > SOGLIA_SWIPE) swipe("right");
+-    else if (drag.x < -SOGLIA_SWIPE) swipe("left");
+-    else setDrag({ x: 0, y: 0, dragging: false });
++
++    if (drag.x > SOGLIA_SWIPE) {
++      swipe("right");
++      return;
++    }
++    if (drag.x < -SOGLIA_SWIPE) {
++      swipe("left");
++      return;
++    }
++
++    // Spostamento minimo: è stato un tocco. Dove si è toccato decide
++    // cosa fare — i lati scorrono le foto, il centro apre la scheda.
++    if (
++      Math.abs(drag.x) < SOGLIA_TOCCO &&
++      Math.abs(drag.y) < SOGLIA_TOCCO
++    ) {
++      if (daPulsante.current) {
++        setSchedaAperta(true);
++      } else {
++        const rect = e.currentTarget.getBoundingClientRect();
++        const posizione = (e.clientX - rect.left) / rect.width;
++        if (posizione < 0.32) fotoPrecedente();
++        else if (posizione > 0.68) fotoSuccessiva();
++        else setSchedaAperta(true);
++      }
++    }
++
++    setDrag({ x: 0, y: 0, dragging: false });
++  }
++
++  function fotoPrecedente() {
++    setFotoIdx((i) => (i > 0 ? i - 1 : i));
++  }
++
++  function fotoSuccessiva() {
++    setFotoIdx((i) => (i < numeroFoto - 1 ? i + 1 : i));
+   }
+ 
+   const rotazione = drag.x / 18;
+@@ -89,7 +140,10 @@ export function HomeClient({
+   const likeOpacity = Math.min(Math.max(drag.x / SOGLIA_SWIPE, 0), 1);
+   const nopeOpacity = Math.min(Math.max(-drag.x / SOGLIA_SWIPE, 0), 1);
+ 
+-  const foto = attuale?.listing_photos?.[0]?.url;
++  const foto = attuale?.listing_photos ?? [];
++  const numeroFoto = foto.length;
++  const fotoCorrente = foto[Math.min(fotoIdx, Math.max(numeroFoto - 1, 0))]?.url;
++  const fotoSuccessivaUrl = foto[fotoIdx + 1]?.url;
+ 
+   return (
+     <div className="screen-dark">
+@@ -171,20 +225,36 @@ export function HomeClient({
+             }}
+             className="card"
+           >
+-            {foto ? (
+-              // eslint-disable-next-line @next/next/no-img-element
+-              <img
+-                src={foto}
+-                alt={attuale.titolo}
+-                draggable={false}
+-                className="photo"
+-              />
++            {fotoCorrente ? (
++              <>
++                {/* eslint-disable-next-line @next/next/no-img-element */}
++                <img
++                  src={fotoCorrente}
++                  alt={`${attuale.titolo}, foto ${fotoIdx + 1} di ${numeroFoto}`}
++                  draggable={false}
++                  className="photo"
++                />
++                {/* scarica in anticipo la prossima, così non lampeggia */}
++                {fotoSuccessivaUrl && (
++                  // eslint-disable-next-line @next/next/no-img-element
++                  <img src={fotoSuccessivaUrl} alt="" hidden />
++                )}
++              </>
+             ) : (
+               <div className="photo-placeholder">
+                 <span>{attuale.titolo.slice(0, 2).toUpperCase()}</span>
+               </div>
+             )}
+ 
++            {/* un segmento per foto */}
++            {numeroFoto > 1 && (
++              <div className="photo-dots">
++                {foto.map((f, i) => (
++                  <i key={f.url} className={i === fotoIdx ? "on" : ""} />
++                ))}
++              </div>
++            )}
++
+             <div className="scrim-top" />
+             <div className="scrim-bottom" />
+ 
+@@ -207,11 +277,25 @@ export function HomeClient({
+                 {attuale.locali && <span>{attuale.locali} locali</span>}
+                 {attuale.mq && <span>{attuale.mq} m²</span>}
+               </div>
++
++              <button
++                type="button"
++                className="card-dettagli"
++                // l'apertura è gestita al rilascio del puntatore sulla card
++                tabIndex={-1}
++              >
++                <IconInfo />
++                Tutte le foto e i dettagli
++              </button>
+             </div>
+ 
+             <div className="swipe-hint">
+               <IconChevronSu className="w-5 h-5 fill-none stroke-current stroke-2" />
+-              <span>Trascina per scegliere</span>
++              <span>
++                {numeroFoto > 1
++                  ? "Tocca ai lati per le foto, al centro per i dettagli"
++                  : "Tocca per i dettagli, trascina per scegliere"}
++              </span>
+             </div>
+           </div>
+         )}
+@@ -239,6 +323,14 @@ export function HomeClient({
+         </div>
+       )}
+ 
++      <SchedaImmobile
++        listing={schedaAperta ? attuale : null}
++        onClose={() => setSchedaAperta(false)}
++        onPassa={() => swipe("left")}
++        onCandidati={() => swipe("right")}
++        inCorso={pending}
++      />
++
+       {candidatureInviate.size > 0 && (
+         <div className="toast-inline">
+           Candidatura inviata — la trovi in &quot;Candidature&quot;.
+diff --git a/src/app/(app)/SchedaImmobile.tsx b/src/app/(app)/SchedaImmobile.tsx
+new file mode 100644
+index 0000000..8bae188
+--- /dev/null
++++ b/src/app/(app)/SchedaImmobile.tsx
+@@ -0,0 +1,138 @@
++"use client";
++
++import { Sheet } from "@/components/Sheet";
++import { ATTR_VOCAB } from "@/lib/constants";
++import type { ListingConFoto } from "@/lib/types";
++
++/**
++ * Tutto quello che si sa di un immobile, aperto dal mazzo prima di
++ * decidere. I due pulsanti in fondo fanno le stesse cose dei pulsanti
++ * sulla card: chiudono la scheda e passano alla casa successiva.
++ */
++export function SchedaImmobile({
++  listing,
++  onClose,
++  onPassa,
++  onCandidati,
++  inCorso,
++}: {
++  listing: ListingConFoto | null;
++  onClose: () => void;
++  onPassa: () => void;
++  onCandidati: () => void;
++  inCorso: boolean;
++}) {
++  if (!listing) return null;
++
++  const foto = listing.listing_photos ?? [];
++  const attributi = listing.attributi ?? {};
++  const presenti = ATTR_VOCAB.filter((a) => attributi[a.key]);
++
++  return (
++    <Sheet open onClose={onClose} title={listing.titolo}>
++      <p className="sheet-sub">
++        {listing.zona} · €{listing.prezzo.toLocaleString("it-IT")} al mese
++      </p>
++
++      {foto.length > 0 ? (
++        <div className="galleria">
++          {foto.map((f, i) => (
++            // eslint-disable-next-line @next/next/no-img-element
++            <img
++              key={f.url}
++              src={f.url}
++              alt={`${listing.titolo}, foto ${i + 1} di ${foto.length}`}
++            />
++          ))}
++        </div>
++      ) : (
++        <div className="galleria-vuota">
++          Questo annuncio non ha ancora foto
++        </div>
++      )}
++
++      <Riga etichetta="Canone" valore={`€${listing.prezzo.toLocaleString("it-IT")} / mese`} />
++      <Riga etichetta="Zona" valore={listing.zona} />
++      <Riga
++        etichetta="Locali"
++        valore={listing.locali ? String(listing.locali) : "Non indicato"}
++      />
++      <Riga
++        etichetta="Superficie"
++        valore={listing.mq ? `${listing.mq} m²` : "Non indicata"}
++      />
++      {listing.locali && listing.mq && (
++        <Riga
++          etichetta="Media per locale"
++          valore={`${Math.round(listing.mq / listing.locali)} m²`}
++        />
++      )}
++
++      {listing.descrizione && (
++        <div style={{ marginTop: 22 }}>
++          <div className="pref-label">
++            <span>Descrizione</span>
++          </div>
++          <p
++            style={{
++              margin: 0,
++              fontSize: 13.5,
++              lineHeight: 1.65,
++              color: "var(--body-text)",
++            }}
++          >
++            {listing.descrizione}
++          </p>
++        </div>
++      )}
++
++      {presenti.length > 0 && (
++        <div style={{ marginTop: 22 }}>
++          <div className="pref-label">
++            <span>Caratteristiche</span>
++          </div>
++          <div className="match-checklist">
++            {presenti.map((a) => (
++              <span key={a.key} className="ok">
++                {a.label}
++              </span>
++            ))}
++          </div>
++        </div>
++      )}
++
++      <div className="scheda-azioni">
++        <button
++          type="button"
++          onClick={onPassa}
++          disabled={inCorso}
++          className="btn-danger-outline"
++        >
++          Passo
++        </button>
++        <button
++          type="button"
++          onClick={onCandidati}
++          disabled={inCorso}
++          className="opp-cta"
++        >
++          Mi interessa
++        </button>
++      </div>
++
++      <p className="field-note" style={{ marginTop: 12 }}>
++        Candidandoti il proprietario riceve il tuo profilo e decide se
++        accettarti.
++      </p>
++    </Sheet>
++  );
++}
++
++function Riga({ etichetta, valore }: { etichetta: string; valore: string }) {
++  return (
++    <div className="feat-row">
++      <span className="k">{etichetta}</span>
++      <span className="v">{valore}</span>
++    </div>
++  );
++}
+diff --git a/src/app/(app)/immobili/ImmobiliClient.tsx b/src/app/(app)/immobili/ImmobiliClient.tsx
+index df54b75..2d29323 100644
+--- a/src/app/(app)/immobili/ImmobiliClient.tsx
++++ b/src/app/(app)/immobili/ImmobiliClient.tsx
+@@ -1,6 +1,12 @@
+ "use client";
+ 
+-import { useActionState, useEffect, useState, useTransition } from "react";
++import {
++  useActionState,
++  useEffect,
++  useRef,
++  useState,
++  useTransition,
++} from "react";
+ import { Sheet } from "@/components/Sheet";
+ import { ATTR_VOCAB, ZONE_MILANO } from "@/lib/constants";
+ import type { ImmobileDettaglio } from "@/lib/types";
+@@ -61,9 +67,9 @@ export function ImmobiliClient({
+               onClick={() => setSelezionato(im)}
+               className="match-card"
+             >
+-              {im.fotoUrl ? (
++              {im.foto[0] ? (
+                 // eslint-disable-next-line @next/next/no-img-element
+-                <img src={im.fotoUrl} alt="" />
++                <img src={im.foto[0]} alt="" />
+               ) : (
+                 <div className="mc-avatar">
+                   {im.titolo.slice(0, 2).toUpperCase()}
+@@ -147,13 +153,14 @@ function ImmobileForm({
+     immobile?.attributi ?? {}
+   );
+   const [pubblicato, setPubblicato] = useState(immobile?.pubblicato ?? true);
+-  const [fotoUrl, setFotoUrl] = useState(immobile?.fotoUrl ?? "");
++  const [foto, setFoto] = useState<string[]>(immobile?.foto ?? []);
++  const inputFotoRef = useRef<HTMLInputElement>(null);
+   const [caricamentoFoto, setCaricamentoFoto] = useState(false);
+   const [erroreFoto, setErroreFoto] = useState<string | null>(null);
+ 
+   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+-    const file = e.target.files?.[0];
+-    if (!file) return;
++    const files = Array.from(e.target.files ?? []);
++    if (files.length === 0) return;
+ 
+     setCaricamentoFoto(true);
+     setErroreFoto(null);
+@@ -168,25 +175,50 @@ function ImmobileForm({
+       return;
+     }
+ 
+-    const estensione = file.name.split(".").pop() || "jpg";
+-    const percorso = `${user.id}/${crypto.randomUUID()}.${estensione}`;
++    const nuove: string[] = [];
++    for (const file of files) {
++      if (!file.type.startsWith("image/")) continue;
++      if (file.size > 10 * 1024 * 1024) {
++        setErroreFoto(`"${file.name}" supera i 10 MB e non è stata caricata.`);
++        continue;
++      }
+ 
+-    const { error } = await supabase.storage
+-      .from("immobili-foto")
+-      .upload(percorso, file, { upsert: true });
++      const estensione = file.name.split(".").pop() || "jpg";
++      const percorso = `${user.id}/${crypto.randomUUID()}.${estensione}`;
+ 
+-    if (error) {
+-      setErroreFoto(error.message);
+-      setCaricamentoFoto(false);
+-      return;
+-    }
++      const { error } = await supabase.storage
++        .from("immobili-foto")
++        .upload(percorso, file, { upsert: true });
+ 
+-    const { data } = supabase.storage
+-      .from("immobili-foto")
+-      .getPublicUrl(percorso);
++      if (error) {
++        setErroreFoto(error.message);
++        continue;
++      }
++
++      const { data } = supabase.storage
++        .from("immobili-foto")
++        .getPublicUrl(percorso);
++      nuove.push(data.publicUrl);
++    }
+ 
+-    setFotoUrl(data.publicUrl);
++    setFoto((prec) => [...prec, ...nuove]);
+     setCaricamentoFoto(false);
++    e.target.value = ""; // permette di ricaricare lo stesso file
++  }
++
++  function rimuoviFoto(url: string) {
++    setFoto((prec) => prec.filter((u) => u !== url));
++  }
++
++  function spostaFoto(url: string, direzione: -1 | 1) {
++    setFoto((prec) => {
++      const i = prec.indexOf(url);
++      const j = i + direzione;
++      if (i < 0 || j < 0 || j >= prec.length) return prec;
++      const copia = [...prec];
++      [copia[i], copia[j]] = [copia[j], copia[i]];
++      return copia;
++    });
+   }
+ 
+   function toggleAttributo(key: string) {
+@@ -224,7 +256,7 @@ function ImmobileForm({
+       <input type="hidden" name="mq" value={mq} />
+       <input type="hidden" name="attributi" value={JSON.stringify(attributi)} />
+       <input type="hidden" name="pubblicato" value={String(pubblicato)} />
+-      <input type="hidden" name="fotoUrl" value={fotoUrl} />
++      <input type="hidden" name="foto" value={JSON.stringify(foto)} />
+ 
+       <Field label="Titolo annuncio">
+         <input
+@@ -278,29 +310,77 @@ function ImmobileForm({
+         <Stepper value={mq} onChange={setMq} min={15} max={250} step={5} suffix=" m²" />
+       </Field>
+ 
+-      <Field label="Foto principale">
+-        <div className={`doc-upload ${fotoUrl ? "filled" : ""} flex items-center gap-4 text-left`}>
+-          {fotoUrl ? (
+-            // eslint-disable-next-line @next/next/no-img-element
+-            <img
+-              src={fotoUrl}
+-              alt="Anteprima"
+-              className="w-20 h-20 rounded-xl object-cover shrink-0"
+-            />
++      <Field label="Foto dell'annuncio">
++        <div className={`doc-upload ${foto.length > 0 ? "filled" : ""}`}>
++          {foto.length === 0 ? (
++            <p className="field-note" style={{ margin: "0 0 12px 0" }}>
++              Nessuna foto. Gli annunci con più immagini ricevono molte più
++              candidature: caricane almeno tre.
++            </p>
+           ) : (
+-            <div className="w-20 h-20 rounded-xl bg-[var(--paper-dim)] shrink-0" />
++            <div className="foto-lista">
++              {foto.map((url, i) => (
++                <div key={url} className="foto-item">
++                  {/* eslint-disable-next-line @next/next/no-img-element */}
++                  <img src={url} alt={`Foto ${i + 1}`} />
++                  <div className="foto-azioni">
++                    <button
++                      type="button"
++                      onClick={() => spostaFoto(url, -1)}
++                      disabled={i === 0}
++                      aria-label="Sposta prima"
++                    >
++                      ↑
++                    </button>
++                    <button
++                      type="button"
++                      onClick={() => spostaFoto(url, 1)}
++                      disabled={i === foto.length - 1}
++                      aria-label="Sposta dopo"
++                    >
++                      ↓
++                    </button>
++                    <button
++                      type="button"
++                      onClick={() => rimuoviFoto(url)}
++                      aria-label="Rimuovi"
++                      className="rimuovi"
++                    >
++                      ×
++                    </button>
++                  </div>
++                  {i === 0 && <span className="foto-copertina">Copertina</span>}
++                </div>
++              ))}
++            </div>
+           )}
+-          <div className="flex-1 min-w-0">
+-            <input
+-              type="file"
+-              accept="image/*"
+-              onChange={handleFileChange}
+-              disabled={caricamentoFoto}
+-              className="text-xs text-[var(--body-soft)] file:mr-3 file:py-2 file:px-3 file:rounded-full file:border-0 file:bg-[var(--paper-dim)] file:text-xs file:font-bold file:text-[var(--ink)]"
+-            />
+-            {caricamentoFoto && <p className="field-note">Caricamento...</p>}
+-            {erroreFoto && <p className="note-error mt-1">{erroreFoto}</p>}
+-          </div>
++
++          <input
++            ref={inputFotoRef}
++            type="file"
++            accept="image/*"
++            multiple
++            onChange={handleFileChange}
++            disabled={caricamentoFoto}
++            className="hidden"
++          />
++          <button
++            type="button"
++            onClick={() => inputFotoRef.current?.click()}
++            disabled={caricamentoFoto}
++            className="chip"
++          >
++            {caricamentoFoto
++              ? "Caricamento..."
++              : foto.length > 0
++                ? "Aggiungi altre foto"
++                : "Scegli le foto"}
++          </button>
++          <p className="field-note">
++            La prima è la copertina, quella che si vede nel mazzo. Usa le
++            frecce per cambiare ordine.
++          </p>
++          {erroreFoto && <p className="note-error mt-1">{erroreFoto}</p>}
+         </div>
+       </Field>
+ 
+diff --git a/src/app/(app)/immobili/actions.ts b/src/app/(app)/immobili/actions.ts
+index f59fd58..bcfe393 100644
+--- a/src/app/(app)/immobili/actions.ts
++++ b/src/app/(app)/immobili/actions.ts
+@@ -14,6 +14,16 @@ function parseAttributi(raw: FormDataEntryValue | null): Record<string, boolean>
+   }
+ }
+ 
++/** Le foto arrivano dal modulo come array JSON di URL, già ordinate. */
++function parseFoto(valore: FormDataEntryValue | null): string[] {
++  try {
++    const v = JSON.parse(String(valore || "[]"));
++    return Array.isArray(v) ? v.filter((u) => typeof u === "string" && u) : [];
++  } catch {
++    return [];
++  }
++}
++
+ export async function creaImmobile(
+   _prevState: SaveState,
+   formData: FormData
+@@ -36,7 +46,7 @@ export async function creaImmobile(
+   const mq = Number(formData.get("mq") || 0) || null;
+   const attributi = parseAttributi(formData.get("attributi"));
+   const pubblicato = formData.get("pubblicato") === "true";
+-  const fotoUrl = String(formData.get("fotoUrl") || "").trim();
++  const foto = parseFoto(formData.get("foto"));
+ 
+   const { data: listing, error } = await supabase
+     .from("listings")
+@@ -56,10 +66,10 @@ export async function creaImmobile(
+ 
+   if (error) return { error: error.message };
+ 
+-  if (fotoUrl && listing) {
+-    const { error: eFoto } = await supabase
+-      .from("listing_photos")
+-      .insert({ listing_id: listing.id, url: fotoUrl, ordine: 0 });
++  if (foto.length > 0 && listing) {
++    const { error: eFoto } = await supabase.from("listing_photos").insert(
++      foto.map((url, i) => ({ listing_id: listing.id, url, ordine: i }))
++    );
+     if (eFoto) return { error: eFoto.message };
+   }
+ 
+@@ -93,7 +103,7 @@ export async function aggiornaImmobile(
+   const mq = Number(formData.get("mq") || 0) || null;
+   const attributi = parseAttributi(formData.get("attributi"));
+   const pubblicato = formData.get("pubblicato") === "true";
+-  const fotoUrl = String(formData.get("fotoUrl") || "").trim();
++  const foto = parseFoto(formData.get("foto"));
+ 
+   const { error } = await supabase
+     .from("listings")
+@@ -113,17 +123,18 @@ export async function aggiornaImmobile(
+ 
+   if (error) return { error: error.message };
+ 
+-  // Sostituiamo la foto principale (approccio semplice: cancella e reinserisci)
++  // Riscriviamo l'intera galleria: l'ordine delle foto è quello in cui
++  // il proprietario le ha lasciate nel modulo.
+   const { error: eDel } = await supabase
+     .from("listing_photos")
+     .delete()
+     .eq("listing_id", id);
+   if (eDel) return { error: eDel.message };
+ 
+-  if (fotoUrl) {
+-    const { error: eFoto } = await supabase
+-      .from("listing_photos")
+-      .insert({ listing_id: id, url: fotoUrl, ordine: 0 });
++  if (foto.length > 0) {
++    const { error: eFoto } = await supabase.from("listing_photos").insert(
++      foto.map((url, i) => ({ listing_id: id, url, ordine: i }))
++    );
+     if (eFoto) return { error: eFoto.message };
+   }
+ 
+diff --git a/src/app/(app)/immobili/page.tsx b/src/app/(app)/immobili/page.tsx
+index fcea664..a7e2a82 100644
+--- a/src/app/(app)/immobili/page.tsx
++++ b/src/app/(app)/immobili/page.tsx
+@@ -12,7 +12,7 @@ export default async function ImmobiliPage() {
+     supabase
+       .from("listings")
+       .select(
+-        "id, titolo, descrizione, zona, prezzo, locali, mq, attributi, pubblicato, listing_photos(url)"
++        "id, titolo, descrizione, zona, prezzo, locali, mq, attributi, pubblicato, listing_photos(url, ordine)"
+       )
+       .eq("owner_id", user!.id)
+       .order("created_at", { ascending: false }),
+@@ -38,7 +38,9 @@ export default async function ImmobiliPage() {
+     mq: l.mq,
+     attributi: (l.attributi as Record<string, boolean>) ?? {},
+     pubblicato: l.pubblicato,
+-    fotoUrl: (l.listing_photos as { url: string }[])?.[0]?.url ?? null,
++    foto: [...((l.listing_photos as { url: string; ordine: number }[]) ?? [])]
++      .sort((a, b) => (a.ordine ?? 0) - (b.ordine ?? 0))
++      .map((f) => f.url),
+     nCandidature: nCandidaturePerListing.get(l.id) ?? 0,
+   }));
+ 
+diff --git a/src/app/(app)/page.tsx b/src/app/(app)/page.tsx
+index 04e455c..a1f5609 100644
+--- a/src/app/(app)/page.tsx
++++ b/src/app/(app)/page.tsx
+@@ -61,7 +61,9 @@ async function TenantHome({ userId }: { userId: string }) {
+   // comportamento corretto, non un errore.
+   let query = supabase
+     .from("listings")
+-    .select("id, titolo, zona, prezzo, locali, mq, descrizione, listing_photos(url)")
++    .select(
++      "id, titolo, zona, prezzo, locali, mq, descrizione, attributi, listing_photos(url, ordine)"
++    )
+     .eq("pubblicato", true);
+ 
+   if (tenantProfile.budget_max) query = query.lte("prezzo", tenantProfile.budget_max);
+@@ -76,10 +78,19 @@ async function TenantHome({ userId }: { userId: string }) {
+ 
+   const { data: listings } = await query.order("created_at", { ascending: false });
+ 
++  // Le foto arrivano senza garanzia di ordine: le riordino qui una volta
++  // sola, così la card non deve pensarci a ogni render.
++  const listingsOrdinati = (listings ?? []).map((l) => ({
++    ...l,
++    listing_photos: [...(l.listing_photos ?? [])].sort(
++      (a, b) => (a.ordine ?? 0) - (b.ordine ?? 0)
++    ),
++  }));
++
+   return (
+     <HomeClient
+       affidabilita={affidabilita}
+-      listings={(listings ?? []) as unknown as ListingConFoto[]}
++      listings={listingsOrdinati as unknown as ListingConFoto[]}
+     />
+   );
+ }
+diff --git a/src/app/globals.css b/src/app/globals.css
+index c893010..2761d79 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -1903,3 +1903,175 @@ input[type="range"]::-moz-range-thumb {
+     max-width: 1040px;
+   }
+ }
++
++/* ============================================================
++   CAROSELLO FOTO E SCHEDA IMMOBILE
++   ============================================================ */
++
++/* Segmenti in cima alla card, uno per foto. */
++.photo-dots {
++  position: absolute;
++  top: 10px;
++  left: 12px;
++  right: 12px;
++  z-index: 26;
++  display: flex;
++  gap: 4px;
++  pointer-events: none;
++}
++.photo-dots i {
++  flex: 1;
++  height: 3px;
++  border-radius: 2px;
++  background: rgba(247, 244, 236, 0.3);
++}
++.photo-dots i.on {
++  background: var(--paper);
++}
++
++/* Pulsante che apre la scheda completa. */
++.card-dettagli {
++  -webkit-appearance: none;
++  appearance: none;
++  cursor: pointer;
++  display: inline-flex;
++  align-items: center;
++  gap: 7px;
++  margin-top: 12px;
++  padding: 9px 15px;
++  border-radius: 999px;
++  background: rgba(247, 244, 236, 0.14);
++  backdrop-filter: blur(8px);
++  border: 1px solid rgba(247, 244, 236, 0.28);
++  color: var(--paper);
++  font-family: var(--font-sans);
++  font-size: 12.5px;
++  font-weight: 700;
++}
++.card-dettagli svg {
++  width: 14px;
++  height: 14px;
++  fill: none;
++  stroke: currentColor;
++  stroke-width: 2;
++  stroke-linecap: round;
++  stroke-linejoin: round;
++}
++/* le informazioni in basso non intercettano il trascinamento, il
++   pulsante sì */
++.card-info {
++  pointer-events: none;
++}
++.card-info .card-dettagli {
++  pointer-events: auto;
++}
++
++/* Galleria dentro la scheda: scorre in orizzontale con lo scatto. */
++.galleria {
++  display: flex;
++  gap: 8px;
++  overflow-x: auto;
++  scroll-snap-type: x mandatory;
++  -webkit-overflow-scrolling: touch;
++  margin: 0 -26px 18px -26px;
++  padding: 0 26px;
++}
++.galleria img {
++  flex: 0 0 auto;
++  width: 78%;
++  max-width: 320px;
++  aspect-ratio: 4 / 3;
++  object-fit: cover;
++  border-radius: 16px;
++  scroll-snap-align: center;
++}
++.galleria-vuota {
++  height: 150px;
++  border-radius: 16px;
++  background: var(--paper-dim);
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  color: var(--muted);
++  font-size: 13px;
++  margin-bottom: 18px;
++}
++
++/* Riga di pulsanti in fondo alla scheda. */
++.scheda-azioni {
++  display: flex;
++  gap: 10px;
++  margin-top: 26px;
++}
++
++@media (min-width: 768px) {
++  .galleria {
++    margin: 0 -34px 18px -34px;
++    padding: 0 34px;
++  }
++  .galleria img {
++    width: 62%;
++  }
++}
++
++/* Galleria nel modulo dell'immobile: miniature riordinabili. */
++.foto-lista {
++  display: grid;
++  grid-template-columns: repeat(auto-fill, minmax(86px, 1fr));
++  gap: 8px;
++  margin-bottom: 14px;
++}
++.foto-item {
++  position: relative;
++  aspect-ratio: 1;
++  border-radius: 12px;
++  overflow: hidden;
++  background: var(--paper-dim);
++}
++.foto-item img {
++  width: 100%;
++  height: 100%;
++  object-fit: cover;
++  display: block;
++}
++.foto-azioni {
++  position: absolute;
++  top: 4px;
++  right: 4px;
++  display: flex;
++  gap: 3px;
++}
++.foto-azioni button {
++  -webkit-appearance: none;
++  appearance: none;
++  border: none;
++  cursor: pointer;
++  width: 22px;
++  height: 22px;
++  border-radius: 6px;
++  background: rgba(16, 21, 26, 0.68);
++  color: var(--paper);
++  font-size: 13px;
++  line-height: 1;
++  display: flex;
++  align-items: center;
++  justify-content: center;
++}
++.foto-azioni button:disabled {
++  opacity: 0.35;
++  cursor: default;
++}
++.foto-azioni button.rimuovi {
++  background: rgba(201, 105, 78, 0.9);
++}
++.foto-copertina {
++  position: absolute;
++  left: 4px;
++  bottom: 4px;
++  background: rgba(16, 21, 26, 0.72);
++  color: var(--paper);
++  font-size: 9px;
++  font-weight: 700;
++  padding: 2px 6px;
++  border-radius: 999px;
++}
+diff --git a/src/components/icons.tsx b/src/components/icons.tsx
+index 5d8e1aa..c13ad22 100644
+--- a/src/components/icons.tsx
++++ b/src/components/icons.tsx
+@@ -154,6 +154,16 @@ export function IconLucchetto({ className }: IconProps) {
+   );
+ }
+ 
++export function IconInfo({ className }: IconProps) {
++  return (
++    <svg viewBox="0 0 24 24" className={className} aria-hidden>
++      <circle cx="12" cy="12" r="9" />
++      <line x1="12" y1="11" x2="12" y2="16.5" />
++      <line x1="12" y1="7.6" x2="12" y2="7.7" />
++    </svg>
++  );
++}
++
+ export function IconCheck({ className }: IconProps) {
+   return (
+     <svg viewBox="0 0 24 24" className={className} aria-hidden>
+diff --git a/src/lib/types.ts b/src/lib/types.ts
+index dff9dd5..defc93a 100644
+--- a/src/lib/types.ts
++++ b/src/lib/types.ts
+@@ -51,7 +51,8 @@ export type ImmobileDettaglio = {
+   mq: number | null;
+   attributi: Record<string, boolean>;
+   pubblicato: boolean;
+-  fotoUrl: string | null;
++  /** galleria dell'annuncio, già ordinata */
++  foto: string[];
+   nCandidature: number;
+ };
+ 
+@@ -125,7 +126,9 @@ export type ListingConFoto = {
+   locali: number | null;
+   mq: number | null;
+   descrizione: string | null;
+-  listing_photos: { url: string }[];
++  /** caratteristiche dell'immobile, chiavi di ATTR_VOCAB */
++  attributi: Record<string, boolean> | null;
++  listing_photos: { url: string; ordine: number }[];
+ };
+ 
+ export type ContrattoConAnnuncio = {
+-- 
+2.43.0
+

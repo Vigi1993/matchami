@@ -1,0 +1,1205 @@
+From cb42baeb74169476d8c9605eb8accb363b9f0bb6 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 30 Sep 2026 08:44:22 +0000
+Subject: [PATCH] =?UTF-8?q?feat(inviti):=20l'inquilino=20pu=C3=B2=20invita?=
+ =?UTF-8?q?re=20il=20proprio=20proprietario?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Chi ha già una casa in affitto genera un link, lo manda al proprietario
+come preferisce, e il proprietario si registra e lascia un feedback che
+entra nel punteggio di affidabilità come tutti gli altri.
+
+- migrazione 0007: tabella inviti_proprietario, colonna
+  recensioni.invito_id, funzioni invito_pubblico e completa_invito
+- sheet 'Invita il tuo proprietario' nel profilo, con messaggio già
+  scritto, condivisione nativa e stato degli inviti mandati
+- pagina pubblica /invito/[token] con i quattro esiti possibili
+- login e registrazione ora rispettano ?next=, così dopo la conferma
+  email si torna all'invito invece che alla home
+---
+ src/app/(app)/profilo/ProfiloClient.tsx       |  38 ++-
+ src/app/(app)/profilo/invito-actions.ts       | 131 ++++++++++
+ src/app/(app)/profilo/page.tsx                |   9 +-
+ src/app/invito/[token]/InvitoClient.tsx       | 128 +++++++++
+ src/app/invito/[token]/page.tsx               | 151 +++++++++++
+ src/app/login/actions.ts                      |  28 +-
+ src/app/login/page.tsx                        |   3 +
+ src/components/InvitaProprietarioSheet.tsx    | 243 ++++++++++++++++++
+ src/lib/constants.ts                          |  11 +
+ src/lib/supabase/middleware.ts                |   6 +-
+ src/lib/types.ts                              |  12 +
+ .../migrations/0007_invita_proprietario.sql   | 178 +++++++++++++
+ 12 files changed, 932 insertions(+), 6 deletions(-)
+ create mode 100644 src/app/(app)/profilo/invito-actions.ts
+ create mode 100644 src/app/invito/[token]/InvitoClient.tsx
+ create mode 100644 src/app/invito/[token]/page.tsx
+ create mode 100644 src/components/InvitaProprietarioSheet.tsx
+ create mode 100644 supabase/migrations/0007_invita_proprietario.sql
+
+diff --git a/src/app/(app)/profilo/ProfiloClient.tsx b/src/app/(app)/profilo/ProfiloClient.tsx
+index 407a82b..3179028 100644
+--- a/src/app/(app)/profilo/ProfiloClient.tsx
++++ b/src/app/(app)/profilo/ProfiloClient.tsx
+@@ -7,7 +7,7 @@ import {
+   computeAffidabilita,
+   computeProfileCompleteness,
+ } from "@/lib/affidabilita";
+-import type { TenantProfile } from "@/lib/types";
++import type { TenantProfile, Invito } from "@/lib/types";
+ import { updateDatiPersonali, updateRicerca, type SaveState } from "./actions";
+ import { logout } from "@/app/login/actions";
+ import { PageContainer } from "@/components/ui/PageContainer";
+@@ -18,11 +18,13 @@ import { PrivacySheet } from "@/components/PrivacySheet";
+ import { FaqSheet } from "@/components/FaqSheet";
+ import { AvatarUpload } from "@/components/AvatarUpload";
+ import { AccountSheet } from "@/components/AccountSheet";
++import { InvitaProprietarioSheet } from "@/components/InvitaProprietarioSheet";
+ import {
+   IconDomanda,
+   IconLente,
+   IconLucchetto,
+   IconPersona,
++  IconPersone,
+   IconScudo,
+   IconStella,
+ } from "@/components/icons";
+@@ -32,6 +34,7 @@ type Props = {
+   cognome: string | null;
+   email: string | null;
+   tenant: TenantProfile;
++  inviti: Invito[];
+   zoneIniziali: string[];
+   interessiIniziali: Record<string, number>;
+   mediaRecensioni: number | null;
+@@ -45,6 +48,7 @@ export function ProfiloClient({
+   cognome,
+   email,
+   tenant,
++  inviti,
+   zoneIniziali,
+   interessiIniziali,
+   mediaRecensioni,
+@@ -53,7 +57,14 @@ export function ProfiloClient({
+   consensoTerziIniziale,
+ }: Props) {
+   const [sheetAperta, setSheetAperta] = useState<
+-    "affidabilita" | "dati" | "ricerca" | "account" | "privacy" | "faq" | null
++    | "affidabilita"
++    | "dati"
++    | "ricerca"
++    | "invito"
++    | "account"
++    | "privacy"
++    | "faq"
++    | null
+   >(null);
+ 
+   const affidabilita = computeAffidabilita({
+@@ -142,7 +153,20 @@ export function ProfiloClient({
+           onClick={() => setSheetAperta("ricerca")}
+         />
+ 
+-        {/* Account */}
++        <Row
++        color="var(--gold)"
++        icon={<IconPersone className="fill-none stroke-[var(--ink)] stroke-2" />}
++        title="Invita il tuo proprietario"
++        subtitle="Hai già una casa in affitto? Chiedi al tuo proprietario un commento su com'è andata: alza il tuo punteggio di affidabilità."
++        cta={
++          inviti.some((i) => i.stato === "inviato")
++            ? "Gestisci gli inviti"
++            : "Manda l'invito"
++        }
++        onClick={() => setSheetAperta("invito")}
++      />
++
++      {/* Account */}
+         <Row
+           color="var(--ink-soft)"
+           icon={<IconLucchetto className="fill-none stroke-white stroke-2" />}
+@@ -222,6 +246,14 @@ export function ProfiloClient({
+         interessiIniziali={interessiIniziali}
+       />
+ 
++      {/* ---- Sheet: Invita il proprietario ---- */}
++      <InvitaProprietarioSheet
++        open={sheetAperta === "invito"}
++        onClose={() => setSheetAperta(null)}
++        nomeInquilino={nome}
++        inviti={inviti}
++      />
++
+       {/* ---- Sheet: Account ---- */}
+       <AccountSheet
+         open={sheetAperta === "account"}
+diff --git a/src/app/(app)/profilo/invito-actions.ts b/src/app/(app)/profilo/invito-actions.ts
+new file mode 100644
+index 0000000..2632e52
+--- /dev/null
++++ b/src/app/(app)/profilo/invito-actions.ts
+@@ -0,0 +1,131 @@
++"use server";
++
++import { revalidatePath } from "next/cache";
++import { headers } from "next/headers";
++import { createClient } from "@/lib/supabase/server";
++
++export type InvitoState = {
++  error?: string;
++  ok?: boolean;
++  /** link da condividere, restituito subito dopo la creazione */
++  link?: string;
++} | null;
++
++/** Codice segreto del link: 32 caratteri esadecimali. */
++function nuovoToken(): string {
++  return crypto.randomUUID().replace(/-/g, "");
++}
++
++async function origine(): Promise<string> {
++  const h = await headers();
++  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "";
++  const proto = h.get("x-forwarded-proto") ?? "https";
++  return `${proto}://${host}`;
++}
++
++// ------------------------------------------------------------
++
++export async function creaInvito(
++  _prevState: InvitoState,
++  formData: FormData
++): Promise<InvitoState> {
++  const supabase = await createClient();
++  const {
++    data: { user },
++  } = await supabase.auth.getUser();
++  if (!user) return { error: "Non autenticato." };
++
++  const nome_proprietario = String(formData.get("nome_proprietario") || "").trim();
++  const email_proprietario =
++    String(formData.get("email_proprietario") || "").trim().toLowerCase() || null;
++  const indirizzo = String(formData.get("indirizzo") || "").trim() || null;
++  const periodo = String(formData.get("periodo") || "").trim() || null;
++
++  if (!nome_proprietario) {
++    return { error: "Scrivi almeno il nome del proprietario." };
++  }
++  if (email_proprietario && !email_proprietario.includes("@")) {
++    return { error: "L'email non sembra valida." };
++  }
++
++  const token = nuovoToken();
++
++  const { error } = await supabase.from("inviti_proprietario").insert({
++    tenant_id: user.id,
++    token,
++    nome_proprietario,
++    email_proprietario,
++    indirizzo,
++    periodo,
++  });
++
++  if (error) return { error: error.message };
++
++  revalidatePath("/profilo");
++  return { ok: true, link: `${await origine()}/invito/${token}` };
++}
++
++// ------------------------------------------------------------
++
++export async function annullaInvito(id: string) {
++  const supabase = await createClient();
++  const {
++    data: { user },
++  } = await supabase.auth.getUser();
++  if (!user) return { error: "Non autenticato." };
++
++  const { error } = await supabase
++    .from("inviti_proprietario")
++    .update({ stato: "annullato" })
++    .eq("id", id)
++    .eq("tenant_id", user.id)
++    .eq("stato", "inviato"); // un invito già completato non si tocca
++
++  if (error) return { error: error.message };
++
++  revalidatePath("/profilo");
++  return { ok: true };
++}
++
++// ------------------------------------------------------------
++
++export type RecensioneState = { error?: string; ok?: boolean } | null;
++
++/** Messaggi leggibili per gli errori sollevati dalla funzione SQL. */
++const MESSAGGI: Record<string, string> = {
++  NON_AUTENTICATO: "Devi accedere per lasciare il feedback.",
++  VOTO_NON_VALIDO: "Scegli un voto da 1 a 5.",
++  INVITO_INESISTENTE: "Questo link non è valido.",
++  INVITO_NON_PIU_VALIDO:
++    "Questo invito è già stato usato o è stato annullato.",
++  NON_PROPRIETARIO:
++    "Il tuo account è registrato come inquilino. Per lasciare un feedback serve un account proprietario.",
++  AUTO_INVITO: "Non puoi rispondere a un invito che hai creato tu.",
++};
++
++export async function completaInvito(
++  _prevState: RecensioneState,
++  formData: FormData
++): Promise<RecensioneState> {
++  const supabase = await createClient();
++
++  const token = String(formData.get("token") || "");
++  const voto = Number(formData.get("voto") || 0);
++  const tag = formData.getAll("tag").map(String);
++
++  if (!voto) return { error: "Scegli un voto da 1 a 5." };
++
++  const { error } = await supabase.rpc("completa_invito", {
++    p_token: token,
++    p_voto: voto,
++    p_tag: tag,
++  });
++
++  if (error) {
++    const chiave = Object.keys(MESSAGGI).find((k) => error.message.includes(k));
++    return { error: chiave ? MESSAGGI[chiave] : error.message };
++  }
++
++  revalidatePath("/profilo");
++  return { ok: true };
++}
+diff --git a/src/app/(app)/profilo/page.tsx b/src/app/(app)/profilo/page.tsx
+index 1e2e8af..a3c6fc4 100644
+--- a/src/app/(app)/profilo/page.tsx
++++ b/src/app/(app)/profilo/page.tsx
+@@ -1,7 +1,7 @@
+ import { createClient } from "@/lib/supabase/server";
+ import { ProfiloClient } from "./ProfiloClient";
+ import { OwnerProfiloClient } from "./OwnerProfiloClient";
+-import type { TenantProfile, OwnerProfile } from "@/lib/types";
++import type { TenantProfile, OwnerProfile, Invito } from "@/lib/types";
+ 
+ export default async function ProfiloPage() {
+   const supabase = await createClient();
+@@ -39,6 +39,7 @@ export default async function ProfiloPage() {
+     { data: zoneRows },
+     { data: interessiRows },
+     { data: recensioni },
++    { data: inviti },
+   ] = await Promise.all([
+     supabase.from("tenant_profiles").select("*").eq("profile_id", user!.id).single(),
+     supabase.from("tenant_zone_interesse").select("zona").eq("tenant_id", user!.id),
+@@ -47,6 +48,11 @@ export default async function ProfiloPage() {
+       .select("attributo_key, peso")
+       .eq("tenant_id", user!.id),
+     supabase.from("recensioni").select("voto").eq("tenant_id", user!.id),
++    supabase
++      .from("inviti_proprietario")
++      .select("id, token, nome_proprietario, email_proprietario, indirizzo, periodo, stato, created_at")
++      .eq("tenant_id", user!.id)
++      .order("created_at", { ascending: false }),
+   ]);
+ 
+   const zoneIniziali = (zoneRows ?? []).map((r) => r.zona as string);
+@@ -65,6 +71,7 @@ export default async function ProfiloPage() {
+       cognome={profile?.cognome ?? null}
+       email={user!.email ?? null}
+       tenant={tenant as TenantProfile}
++      inviti={(inviti ?? []) as Invito[]}
+       zoneIniziali={zoneIniziali}
+       interessiIniziali={interessiIniziali}
+       mediaRecensioni={mediaRecensioni}
+diff --git a/src/app/invito/[token]/InvitoClient.tsx b/src/app/invito/[token]/InvitoClient.tsx
+new file mode 100644
+index 0000000..8decccf
+--- /dev/null
++++ b/src/app/invito/[token]/InvitoClient.tsx
+@@ -0,0 +1,128 @@
++"use client";
++
++import { useActionState, useState } from "react";
++import Link from "next/link";
++import {
++  completaInvito,
++  type RecensioneState,
++} from "@/app/(app)/profilo/invito-actions";
++import { TAG_RECENSIONE } from "@/lib/constants";
++
++export function InvitoClient({
++  token,
++  inquilino,
++  indirizzo,
++  periodo,
++}: {
++  token: string;
++  inquilino: string;
++  indirizzo: string | null;
++  periodo: string | null;
++}) {
++  const [state, formAction, pending] = useActionState<RecensioneState, FormData>(
++    completaInvito,
++    null
++  );
++  const [voto, setVoto] = useState(0);
++  const [tag, setTag] = useState<string[]>([]);
++
++  function toggleTag(t: string) {
++    setTag((prec) =>
++      prec.includes(t) ? prec.filter((x) => x !== t) : [...prec, t]
++    );
++  }
++
++  if (state?.ok) {
++    return (
++      <main className="screen-wrap" style={{ position: "static", minHeight: "100dvh" }}>
++        <div className="screen-inner">
++          <div className="empty-inline" style={{ paddingTop: 90 }}>
++            <h3>Grazie.</h3>
++            <p>
++              Il tuo commento è stato registrato e da oggi fa parte del
++              punteggio di affidabilità di {inquilino}.
++            </p>
++            <Link href="/" className="opp-cta" style={{ textAlign: "center" }}>
++              Scopri MatchAmI
++            </Link>
++          </div>
++        </div>
++      </main>
++    );
++  }
++
++  return (
++    <main className="screen-wrap" style={{ position: "static", minHeight: "100dvh" }}>
++      <div className="screen-inner" style={{ maxWidth: 560 }}>
++        <h1 className="screen-title">Com&apos;è andata con {inquilino}?</h1>
++        <p className="screen-sub">
++          {indirizzo ? `${indirizzo}` : "La casa che gli hai affittato"}
++          {periodo ? ` · ${periodo}` : ""}. Il tuo commento resta legato al
++          suo profilo e lo vedranno gli altri proprietari quando valuterà una
++          candidatura.
++        </p>
++
++        <form action={formAction}>
++          <input type="hidden" name="token" value={token} />
++          <input type="hidden" name="voto" value={voto} />
++          {tag.map((t) => (
++            <input key={t} type="hidden" name="tag" value={t} />
++          ))}
++
++          <div className="pref-section">
++            <div className="pref-label">
++              <span>Il tuo voto</span>
++            </div>
++            <div className="chip-row">
++              {[1, 2, 3, 4, 5].map((n) => (
++                <button
++                  key={n}
++                  type="button"
++                  onClick={() => setVoto(n)}
++                  className={`chip ${voto === n ? "on" : ""}`}
++                  style={{ minWidth: 46, textAlign: "center" }}
++                >
++                  {n}
++                </button>
++              ))}
++            </div>
++            <p className="field-note">1 è pessimo, 5 è ottimo.</p>
++          </div>
++
++          <div className="pref-section">
++            <div className="pref-label">
++              <span>Cosa gli riconosci</span>
++            </div>
++            <div className="chip-row">
++              {TAG_RECENSIONE.map((t) => (
++                <button
++                  key={t}
++                  type="button"
++                  onClick={() => toggleTag(t)}
++                  className={`chip ${tag.includes(t) ? "on" : ""}`}
++                >
++                  {t}
++                </button>
++              ))}
++            </div>
++            <p className="field-note">Facoltativo, scegline quante vuoi.</p>
++          </div>
++
++          {state?.error && <p className="note-error">{state.error}</p>}
++
++          <button
++            type="submit"
++            disabled={pending || voto === 0}
++            className="opp-cta"
++          >
++            {pending ? "Invio..." : "Lascia il feedback"}
++          </button>
++
++          <p className="field-note" style={{ marginTop: 14 }}>
++            Una volta inviato non è più modificabile.
++          </p>
++        </form>
++      </div>
++    </main>
++  );
++}
+diff --git a/src/app/invito/[token]/page.tsx b/src/app/invito/[token]/page.tsx
+new file mode 100644
+index 0000000..68cc5a9
+--- /dev/null
++++ b/src/app/invito/[token]/page.tsx
+@@ -0,0 +1,151 @@
++import Link from "next/link";
++import { createClient } from "@/lib/supabase/server";
++import { InvitoClient } from "./InvitoClient";
++
++type InvitoPubblico = {
++  nome_inquilino: string | null;
++  cognome_inquilino: string | null;
++  nome_proprietario: string | null;
++  indirizzo: string | null;
++  periodo: string | null;
++  stato: string;
++};
++
++export default async function InvitoPage({
++  params,
++}: {
++  params: Promise<{ token: string }>;
++}) {
++  const { token } = await params;
++  const supabase = await createClient();
++
++  // Funzione SQL: legge l'invito anche per chi non ha ancora un account,
++  // restituendo solo i campi che servono a questa pagina.
++  const { data } = await supabase.rpc("invito_pubblico", { p_token: token });
++  const invito = (data?.[0] ?? null) as InvitoPubblico | null;
++
++  if (!invito) {
++    return (
++      <Cornice titolo="Link non valido">
++        <p>
++          Questo invito non esiste. Controlla di aver aperto il link per
++          intero: a volte i messaggi lo spezzano su due righe.
++        </p>
++      </Cornice>
++    );
++  }
++
++  if (invito.stato !== "inviato") {
++    return (
++      <Cornice
++        titolo={
++          invito.stato === "completato"
++            ? "Feedback già lasciato"
++            : "Invito annullato"
++        }
++      >
++        <p>
++          {invito.stato === "completato"
++            ? "Questo invito è già stato usato. Grazie del tempo che ci hai dedicato."
++            : "Chi ti ha invitato ha annullato la richiesta."}
++        </p>
++      </Cornice>
++    );
++  }
++
++  const inquilino = [invito.nome_inquilino, invito.cognome_inquilino]
++    .filter(Boolean)
++    .join(" ");
++
++  // Chi sta guardando la pagina?
++  const {
++    data: { user },
++  } = await supabase.auth.getUser();
++
++  let ruolo: string | null = null;
++  if (user) {
++    const { data: profile } = await supabase
++      .from("profiles")
++      .select("ruolo")
++      .eq("id", user.id)
++      .single();
++    ruolo = profile?.ruolo ?? null;
++  }
++
++  // Non autenticato: prima deve registrarsi come proprietario.
++  if (!user) {
++    return (
++      <Cornice titolo={`${inquilino} ti ha invitato`}>
++        <p>
++          {inquilino} sta usando MatchAmI e vorrebbe un tuo commento su
++          com&apos;è andata con lui come inquilino
++          {invito.indirizzo ? ` a ${invito.indirizzo}` : ""}
++          {invito.periodo ? `, ${invito.periodo}` : ""}.
++        </p>
++        <p>
++          Per lasciarlo ti serve un account proprietario: bastano un minuto e
++          un indirizzo email. Da lì potrai anche pubblicare i tuoi immobili,
++          se un giorno ti servirà.
++        </p>
++        <Link
++          href={`/login?next=${encodeURIComponent(`/invito/${token}`)}`}
++          className="login-cta"
++          style={{ display: "block", textAlign: "center", marginTop: 8 }}
++        >
++          Registrati e lascia il feedback
++        </Link>
++      </Cornice>
++    );
++  }
++
++  // Autenticato come inquilino: non può recensire.
++  if (ruolo !== "proprietario") {
++    return (
++      <Cornice titolo="Serve un account proprietario">
++        <p>
++          Il tuo account è registrato come inquilino, quindi non può lasciare
++          un feedback su un altro inquilino. Esci e registrati come
++          proprietario con un&apos;altra email, oppure riapri questo link dal
++          dispositivo del proprietario.
++        </p>
++      </Cornice>
++    );
++  }
++
++  return (
++    <InvitoClient
++      token={token}
++      inquilino={inquilino || "l'inquilino"}
++      indirizzo={invito.indirizzo}
++      periodo={invito.periodo}
++    />
++  );
++}
++
++/** Schermata a tutta pagina usata per tutti gli esiti senza modulo. */
++function Cornice({
++  titolo,
++  children,
++}: {
++  titolo: string;
++  children: React.ReactNode;
++}) {
++  return (
++    <main className="login-view">
++      <div
++        className="login-bg"
++        style={{ backgroundImage: "url(/login-bg.jpg)" }}
++      />
++      <div className="login-scrim" />
++      <div className="login-content">
++        <div className="login-brand">
++          Match<b>AmI</b>
++        </div>
++        <h1 className="login-title">{titolo}</h1>
++        <div className="login-tag" style={{ display: "grid", gap: 14 }}>
++          {children}
++        </div>
++      </div>
++    </main>
++  );
++}
+diff --git a/src/app/login/actions.ts b/src/app/login/actions.ts
+index 0dbb010..0220b2c 100644
+--- a/src/app/login/actions.ts
++++ b/src/app/login/actions.ts
+@@ -1,8 +1,26 @@
+ "use server";
+ 
+ import { redirect } from "next/navigation";
++import { headers } from "next/headers";
+ import { createClient } from "@/lib/supabase/server";
+ 
++/**
++ * Accetta solo percorsi interni: senza questo controllo `?next=` sarebbe
++ * un redirect aperto verso qualunque sito.
++ */
++function destinazioneSicura(valore: FormDataEntryValue | null): string {
++  const s = String(valore || "");
++  return s.startsWith("/") && !s.startsWith("//") ? s : "/";
++}
++
++async function origine(): Promise<string | null> {
++  const h = await headers();
++  const host = h.get("x-forwarded-host") ?? h.get("host");
++  if (!host) return null;
++  const proto = h.get("x-forwarded-proto") ?? "https";
++  return `${proto}://${host}`;
++}
++
+ export type AuthState = { error?: string } | null;
+ 
+ export async function signup(
+@@ -15,6 +33,7 @@ export async function signup(
+   const cognome = String(formData.get("cognome") || "");
+   const ruolo = String(formData.get("ruolo") || "inquilino");
+   const privacyAccettata = formData.get("privacy") === "on";
++  const next = destinazioneSicura(formData.get("next"));
+ 
+   if (!privacyAccettata) {
+     return { error: "Devi accettare la privacy per continuare." };
+@@ -25,10 +44,16 @@ export async function signup(
+ 
+   const supabase = await createClient();
+ 
++  const base = await origine();
++
+   const { error } = await supabase.auth.signUp({
+     email,
+     password,
+     options: {
++      // dopo la conferma email l'utente torna dove stava andando
++      emailRedirectTo: base
++        ? `${base}/auth/callback?next=${encodeURIComponent(next)}`
++        : undefined,
+       data: {
+         nome,
+         cognome,
+@@ -51,6 +76,7 @@ export async function login(
+ ): Promise<AuthState> {
+   const email = String(formData.get("email") || "");
+   const password = String(formData.get("password") || "");
++  const next = destinazioneSicura(formData.get("next"));
+ 
+   const supabase = await createClient();
+   const { error } = await supabase.auth.signInWithPassword({ email, password });
+@@ -59,7 +85,7 @@ export async function login(
+     return { error: "Email o password non corrette." };
+   }
+ 
+-  redirect("/");
++  redirect(next);
+ }
+ 
+ export async function logout() {
+diff --git a/src/app/login/page.tsx b/src/app/login/page.tsx
+index 0524a62..56a32e7 100644
+--- a/src/app/login/page.tsx
++++ b/src/app/login/page.tsx
+@@ -18,6 +18,7 @@ export default function LoginPage() {
+ function LoginForm() {
+   const searchParams = useSearchParams();
+   const erroreConferma = searchParams.get("errore");
++  const next = searchParams.get("next") ?? "/";
+ 
+   const [tab, setTab] = useState<"registrati" | "accedi">("registrati");
+   const [ruolo, setRuolo] = useState<Ruolo>("inquilino");
+@@ -89,6 +90,7 @@ function LoginForm() {
+               />
+             </div>
+             <input type="hidden" name="ruolo" value={ruolo} />
++            <input type="hidden" name="next" value={next} />
+ 
+             <div className="flex gap-3">
+               <Input name="nome" placeholder="Nome" />
+@@ -118,6 +120,7 @@ function LoginForm() {
+           </form>
+         ) : (
+           <form action={loginAction} className="flex flex-col gap-3">
++            <input type="hidden" name="next" value={next} />
+             <Input name="email" type="email" placeholder="Email" required />
+             <Input
+               name="password"
+diff --git a/src/components/InvitaProprietarioSheet.tsx b/src/components/InvitaProprietarioSheet.tsx
+new file mode 100644
+index 0000000..bf70a89
+--- /dev/null
++++ b/src/components/InvitaProprietarioSheet.tsx
+@@ -0,0 +1,243 @@
++"use client";
++
++import { useActionState, useState, useTransition } from "react";
++import { Sheet } from "@/components/Sheet";
++import { Field } from "@/components/ui/Field";
++import {
++  creaInvito,
++  annullaInvito,
++  type InvitoState,
++} from "@/app/(app)/profilo/invito-actions";
++import type { Invito } from "@/lib/types";
++
++const STATO_LABEL: Record<Invito["stato"], string> = {
++  inviato: "In attesa",
++  completato: "Feedback ricevuto",
++  annullato: "Annullato",
++};
++const STATO_BADGE: Record<Invito["stato"], string> = {
++  inviato: "is-wait",
++  completato: "is-match",
++  annullato: "is-off",
++};
++
++/** Messaggio già pronto: all'inquilino resta solo da premere invia. */
++function messaggio(nomeInquilino: string | null, link: string) {
++  const io = nomeInquilino ? ` Sono ${nomeInquilino}.` : "";
++  return (
++    `Ciao!${io} Sto usando MatchAmI per la casa e mi piacerebbe che ` +
++    `lasciassi un tuo commento su com'è andata con me come inquilino. ` +
++    `Ci vuole un minuto: ${link}`
++  );
++}
++
++export function InvitaProprietarioSheet({
++  open,
++  onClose,
++  nomeInquilino,
++  inviti,
++}: {
++  open: boolean;
++  onClose: () => void;
++  nomeInquilino: string | null;
++  inviti: Invito[];
++}) {
++  const [state, formAction, pending] = useActionState<InvitoState, FormData>(
++    creaInvito,
++    null
++  );
++  const [annullaPending, startAnnulla] = useTransition();
++
++  // link appena creato (arriva dalla action) oppure ricostruito da un
++  // invito già presente su cui l'utente ha premuto "Rivedi il link"
++  const [linkAperto, setLinkAperto] = useState<string | null>(null);
++  const link = state?.link ?? linkAperto;
++
++  return (
++    <Sheet open={open} onClose={onClose} title="Invita il tuo proprietario">
++      <p className="sheet-sub">
++        Se hai già una casa in affitto, il tuo proprietario può lasciare un
++        commento su com&apos;è andata con te. Conta sul tuo punteggio di
++        affidabilità come qualsiasi altro feedback, e vale anche per gli
++        affitti iniziati fuori da MatchAmI.
++      </p>
++
++      {link ? (
++        <LinkPronto
++          link={link}
++          nomeInquilino={nomeInquilino}
++          onIndietro={() => setLinkAperto(null)}
++        />
++      ) : (
++        <form action={formAction}>
++          <Field label="Nome del proprietario">
++            <input
++              name="nome_proprietario"
++              placeholder="Come lo chiami di solito"
++              required
++              className="contract-input"
++            />
++          </Field>
++
++          <Field label="La sua email">
++            <input
++              name="email_proprietario"
++              type="email"
++              placeholder="Facoltativa"
++              className="contract-input"
++            />
++            <p className="field-note">
++              Non gli scriviamo noi: il link glielo mandi tu. L&apos;email
++              serve per ricontattarlo se il primo messaggio si perde.
++            </p>
++          </Field>
++
++          <Field label="Di quale casa si tratta">
++            <input
++              name="indirizzo"
++              placeholder="Via e città, o come la chiamate voi"
++              className="contract-input"
++            />
++          </Field>
++
++          <Field label="Da quando ci abiti">
++            <input
++              name="periodo"
++              placeholder="Es. da marzo 2023"
++              className="contract-input"
++            />
++          </Field>
++
++          {state?.error && <p className="note-error">{state.error}</p>}
++
++          <button type="submit" disabled={pending} className="opp-cta">
++            {pending ? "Preparo il link..." : "Crea il link d'invito"}
++          </button>
++        </form>
++      )}
++
++      {inviti.length > 0 && (
++        <>
++          <div className="pref-label" style={{ marginTop: 30 }}>
++            <span>Inviti mandati — {inviti.length}</span>
++          </div>
++
++          {inviti.map((i) => (
++            <div key={i.id} className="pv-row" style={{ cursor: "default" }}>
++              <div className="pv-text">
++                <div className="pv-label-row">
++                  <b>{i.nome_proprietario}</b>
++                  <span className={`mc-pct ${STATO_BADGE[i.stato]}`}>
++                    {STATO_LABEL[i.stato]}
++                  </span>
++                </div>
++                <p>
++                  {i.indirizzo ?? "Casa non specificata"}
++                  {i.periodo ? ` · ${i.periodo}` : ""}
++                </p>
++
++                {i.stato === "inviato" && (
++                  <div className="flex gap-4">
++                    <button
++                      type="button"
++                      className="pv-readmore"
++                      onClick={() =>
++                        setLinkAperto(
++                          `${window.location.origin}/invito/${i.token}`
++                        )
++                      }
++                    >
++                      Rivedi il link
++                    </button>
++                    <button
++                      type="button"
++                      className="redo-link"
++                      style={{ color: "var(--clay)" }}
++                      disabled={annullaPending}
++                      onClick={() =>
++                        startAnnulla(() => {
++                          void annullaInvito(i.id);
++                        })
++                      }
++                    >
++                      Annulla
++                    </button>
++                  </div>
++                )}
++              </div>
++            </div>
++          ))}
++        </>
++      )}
++    </Sheet>
++  );
++}
++
++// ------------------------------------------------------------
++
++function LinkPronto({
++  link,
++  nomeInquilino,
++  onIndietro,
++}: {
++  link: string;
++  nomeInquilino: string | null;
++  onIndietro: () => void;
++}) {
++  const [copiato, setCopiato] = useState(false);
++  const testo = messaggio(nomeInquilino, link);
++
++  async function copia() {
++    try {
++      await navigator.clipboard.writeText(testo);
++      setCopiato(true);
++      setTimeout(() => setCopiato(false), 2500);
++    } catch {
++      setCopiato(false);
++    }
++  }
++
++  function condividi() {
++    if (navigator.share) {
++      navigator.share({ text: testo }).catch(() => {});
++    } else {
++      window.open(
++        `https://wa.me/?text=${encodeURIComponent(testo)}`,
++        "_blank",
++        "noopener"
++      );
++    }
++  }
++
++  return (
++    <div>
++      <div className="note-ok" style={{ marginBottom: 16 }}>
++        Link pronto. Mandalo tu al proprietario: arrivando da te ha molte
++        più probabilità di essere aperto.
++      </div>
++
++      <Field label="Il messaggio da mandare">
++        <textarea readOnly value={testo} className="ob-textarea" rows={4} />
++      </Field>
++
++      <div className="flex gap-3">
++        <button type="button" onClick={condividi} className="opp-cta">
++          Condividi
++        </button>
++        <button type="button" onClick={copia} className="btn-danger-outline"
++          style={{ borderColor: "rgba(16,21,26,.14)", color: "var(--ink)" }}>
++          {copiato ? "Copiato" : "Copia"}
++        </button>
++      </div>
++
++      <button
++        type="button"
++        onClick={onIndietro}
++        className="redo-link"
++        style={{ marginTop: 18 }}
++      >
++        Invita un altro proprietario
++      </button>
++    </div>
++  );
++}
+diff --git a/src/lib/constants.ts b/src/lib/constants.ts
+index dbf4538..de0eddc 100644
+--- a/src/lib/constants.ts
++++ b/src/lib/constants.ts
+@@ -37,3 +37,14 @@ export const ZONE_MILANO = [
+   "Certosa, Milano",
+   "Lambrate, Milano",
+ ] as const;
++
++// Qualità che un proprietario può riconoscere a un inquilino. Sono le
++// stesse etichette che finiscono in `recensioni.tag`.
++export const TAG_RECENSIONE = [
++  "Puntuale nei pagamenti",
++  "Casa lasciata in ottimo stato",
++  "Comunicazione facile",
++  "Rispettoso del vicinato",
++  "Segnala subito i problemi",
++  "Rinnoverei il contratto",
++] as const;
+diff --git a/src/lib/supabase/middleware.ts b/src/lib/supabase/middleware.ts
+index 7017d13..31773e1 100644
+--- a/src/lib/supabase/middleware.ts
++++ b/src/lib/supabase/middleware.ts
+@@ -1,7 +1,9 @@
+ import { createServerClient } from "@supabase/ssr";
+ import { NextResponse, type NextRequest } from "next/server";
+ 
+-const PUBLIC_PATHS = ["/login", "/auth"];
++// "/invito" è pubblico: il proprietario che riceve il link non ha
++// ancora un account quando lo apre.
++const PUBLIC_PATHS = ["/login", "/auth", "/invito"];
+ 
+ /**
+  * Rinfresca il token di sessione Supabase ad ogni richiesta e protegge
+@@ -43,6 +45,8 @@ export async function updateSession(request: NextRequest) {
+   if (!user && !isPublicPath) {
+     const loginUrl = request.nextUrl.clone();
+     loginUrl.pathname = "/login";
++    // ricorda dove stava andando, così dopo l'accesso ci torna
++    loginUrl.searchParams.set("next", path + request.nextUrl.search);
+     return NextResponse.redirect(loginUrl);
+   }
+ 
+diff --git a/src/lib/types.ts b/src/lib/types.ts
+index 62389c3..dff9dd5 100644
+--- a/src/lib/types.ts
++++ b/src/lib/types.ts
+@@ -139,3 +139,15 @@ export type ContrattoConAnnuncio = {
+     listings: { titolo: string; zona: string } | null;
+   } | null;
+ };
++
++/** Invito mandato da un inquilino al proprio proprietario. */
++export type Invito = {
++  id: string;
++  token: string;
++  nome_proprietario: string;
++  email_proprietario: string | null;
++  indirizzo: string | null;
++  periodo: string | null;
++  stato: "inviato" | "completato" | "annullato";
++  created_at: string;
++};
+diff --git a/supabase/migrations/0007_invita_proprietario.sql b/supabase/migrations/0007_invita_proprietario.sql
+new file mode 100644
+index 0000000..9fde84c
+--- /dev/null
++++ b/supabase/migrations/0007_invita_proprietario.sql
+@@ -0,0 +1,178 @@
++-- ============================================================
++-- MatchAmI — "Invita il tuo proprietario"
++--
++-- Un inquilino che ha già una casa in affitto può invitare il proprio
++-- proprietario a iscriversi e a lasciare un feedback sull'esperienza.
++-- L'invito è un link con un codice segreto che l'inquilino condivide
++-- come preferisce (WhatsApp, messaggio, email dal suo client).
++--
++-- Cosa aggiunge:
++--   1. tabella `inviti_proprietario`
++--   2. colonna `recensioni.invito_id` (da dove arriva la recensione)
++--   3. due funzioni: una per leggere l'invito dal link, una per
++--      completarlo scrivendo la recensione
++--
++-- NOTA SUL PUNTEGGIO: queste recensioni pesano sull'affidabilità come
++-- tutte le altre, come deciso. `invito_id` resta però registrato, così
++-- se un domani si volesse dare loro un peso diverso il dato c'è già.
++-- ============================================================
++
++-- ------------------------------------------------------------
++-- 1. Tabella degli inviti
++-- ------------------------------------------------------------
++
++create table if not exists inviti_proprietario (
++  id uuid primary key default gen_random_uuid(),
++  tenant_id uuid not null references tenant_profiles(profile_id) on delete cascade,
++
++  -- codice segreto che compare nel link
++  token text not null unique,
++
++  -- dati raccolti dall'inquilino: sono il contatto del proprietario
++  nome_proprietario text not null,
++  email_proprietario text,
++  indirizzo text,          -- di quale casa si parla
++  periodo text,            -- es. "da marzo 2023"
++
++  stato text not null default 'inviato'
++    check (stato in ('inviato', 'completato', 'annullato')),
++
++  -- chi ha accettato l'invito, valorizzato al completamento
++  owner_id uuid references owner_profiles(profile_id) on delete set null,
++
++  created_at timestamptz not null default now(),
++  completato_at timestamptz
++);
++
++create index if not exists idx_inviti_tenant on inviti_proprietario(tenant_id);
++create index if not exists idx_inviti_token on inviti_proprietario(token);
++
++alter table inviti_proprietario enable row level security;
++
++-- L'inquilino vede e gestisce solo i propri inviti.
++create policy "inviti: l'inquilino legge i suoi" on inviti_proprietario
++  for select using (auth.uid() = tenant_id);
++
++create policy "inviti: l'inquilino crea i suoi" on inviti_proprietario
++  for insert with check (auth.uid() = tenant_id);
++
++create policy "inviti: l'inquilino annulla i suoi" on inviti_proprietario
++  for update using (auth.uid() = tenant_id);
++
++-- Nessuna policy di lettura pubblica: chi apre il link legge l'invito
++-- attraverso la funzione `invito_pubblico` qui sotto, che restituisce
++-- solo i campi necessari alla pagina di atterraggio.
++
++-- ------------------------------------------------------------
++-- 2. Provenienza della recensione
++-- ------------------------------------------------------------
++
++alter table recensioni
++  add column if not exists invito_id uuid
++  references inviti_proprietario(id) on delete set null;
++
++-- ------------------------------------------------------------
++-- 3. Lettura dell'invito dal link
++--
++-- Serve anche a chi non ha ancora un account, quindi gira come
++-- `security definer`. Restituisce il minimo indispensabile: chi invita,
++-- per quale casa, e se l'invito è ancora valido.
++-- ------------------------------------------------------------
++
++create or replace function invito_pubblico(p_token text)
++returns table (
++  nome_inquilino text,
++  cognome_inquilino text,
++  nome_proprietario text,
++  indirizzo text,
++  periodo text,
++  stato text
++)
++language sql
++security definer
++set search_path = public
++stable
++as $$
++  select p.nome, p.cognome, i.nome_proprietario, i.indirizzo, i.periodo, i.stato
++  from inviti_proprietario i
++  join profiles p on p.id = i.tenant_id
++  where i.token = p_token;
++$$;
++
++grant execute on function invito_pubblico(text) to anon, authenticated;
++
++-- ------------------------------------------------------------
++-- 4. Completamento dell'invito
++--
++-- Scrive la recensione e chiude l'invito in un colpo solo. È
++-- `security definer` perché deve aggiornare un invito che non
++-- appartiene a chi sta scrivendo; tutti i controlli sono espliciti
++-- qui dentro.
++-- ------------------------------------------------------------
++
++create or replace function completa_invito(
++  p_token text,
++  p_voto smallint,
++  p_tag text[]
++)
++returns uuid
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_invito inviti_proprietario;
++  v_recensione_id uuid;
++begin
++  if auth.uid() is null then
++    raise exception 'NON_AUTENTICATO';
++  end if;
++
++  if p_voto is null or p_voto < 1 or p_voto > 5 then
++    raise exception 'VOTO_NON_VALIDO';
++  end if;
++
++  select * into v_invito from inviti_proprietario where token = p_token;
++  if not found then
++    raise exception 'INVITO_INESISTENTE';
++  end if;
++
++  if v_invito.stato <> 'inviato' then
++    raise exception 'INVITO_NON_PIU_VALIDO';
++  end if;
++
++  -- deve essersi registrato come proprietario
++  if not exists (select 1 from owner_profiles where profile_id = auth.uid()) then
++    raise exception 'NON_PROPRIETARIO';
++  end if;
++
++  -- nessuno si recensisce da solo
++  if v_invito.tenant_id = auth.uid() then
++    raise exception 'AUTO_INVITO';
++  end if;
++
++  insert into recensioni (tenant_id, autore_id, voto, tag, invito_id)
++  values (v_invito.tenant_id, auth.uid(), p_voto, coalesce(p_tag, '{}'), v_invito.id)
++  returning id into v_recensione_id;
++
++  update inviti_proprietario
++     set stato = 'completato',
++         owner_id = auth.uid(),
++         completato_at = now()
++   where id = v_invito.id;
++
++  return v_recensione_id;
++end;
++$$;
++
++grant execute on function completa_invito(text, smallint, text[]) to authenticated;
++
++-- ------------------------------------------------------------
++-- Verifica
++-- ------------------------------------------------------------
++
++select table_name from information_schema.tables
++where table_name = 'inviti_proprietario';
++
++select routine_name from information_schema.routines
++where routine_name in ('invito_pubblico', 'completa_invito');
+-- 
+2.43.0
+

@@ -1,0 +1,983 @@
+From 8b7da4cab47abbf083c864b23949fc4eac7cb9da Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 8 Sep 2026 15:47:34 +0000
+Subject: [PATCH] feat(ui): layout desktop da 768px in su
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Sotto i 768px non cambia nulla: resta il telaio da 480px con la tab
+bar in basso. Sopra, l'app si apre in un layout da sito.
+
+- tab bar → sidebar fissa a sinistra (248px) con il marchio in cima
+- contenuto largo, centrato, con larghezza massima di lettura
+- elenchi e righe del profilo su due colonne (.card-grid, che sotto
+  la soglia è display:contents e quindi non esiste)
+- sheet → finestra modale centrata, senza maniglia di trascinamento
+- deck inquilino: pannello centrato da 460px, pulsanti sotto la card
+- login: foto a sinistra, form in un pannello a destra
+---
+ src/app/(app)/OwnerHomeClient.tsx             |  60 +++--
+ .../(app)/candidature/CandidatureClient.tsx   |  50 ++--
+ src/app/(app)/database/DatabaseClient.tsx     |  54 ++--
+ .../GestioneAffittiClient.tsx                 |  86 +++---
+ src/app/(app)/gestione/GestioneClient.tsx     |  44 +--
+ src/app/(app)/immobili/ImmobiliClient.tsx     |  76 +++---
+ src/app/(app)/profilo/OwnerProfiloClient.tsx  |  66 ++---
+ src/app/(app)/profilo/ProfiloClient.tsx       |  90 ++++---
+ src/app/globals.css                           | 252 ++++++++++++++++++
+ src/components/Navigation.tsx                 |   4 +
+ src/components/ui/PageContainer.tsx           |   7 +-
+ 11 files changed, 534 insertions(+), 255 deletions(-)
+
+diff --git a/src/app/(app)/OwnerHomeClient.tsx b/src/app/(app)/OwnerHomeClient.tsx
+index 35caf73..f4c6983 100644
+--- a/src/app/(app)/OwnerHomeClient.tsx
++++ b/src/app/(app)/OwnerHomeClient.tsx
+@@ -53,37 +53,39 @@ export function OwnerHomeClient({
+           </p>
+         </div>
+       ) : (
+-        listings.map((l) => (
+-          <div key={l.id} className="match-card" style={{ cursor: "default" }}>
+-            <div className="mc-avatar">
+-              {l.titolo.slice(0, 2).toUpperCase()}
+-            </div>
+-            <div className="mc-body">
+-              <div className="mc-zona">{l.zona}</div>
+-              <div className="mc-title">{l.titolo}</div>
+-              <div className="mc-meta">
+-                €{l.prezzo.toLocaleString("it-IT")}/mese
+-                {!l.pubblicato && " · non pubblicato"}
++        <div className="card-grid">
++          {listings.map((l) => (
++            <div key={l.id} className="match-card" style={{ cursor: "default" }}>
++              <div className="mc-avatar">
++                {l.titolo.slice(0, 2).toUpperCase()}
++              </div>
++              <div className="mc-body">
++                <div className="mc-zona">{l.zona}</div>
++                <div className="mc-title">{l.titolo}</div>
++                <div className="mc-meta">
++                  €{l.prezzo.toLocaleString("it-IT")}/mese
++                  {!l.pubblicato && " · non pubblicato"}
++                </div>
++              </div>
++              <div
++                className={`mc-pct ${
++                  l.nCandidature > 0 ? "is-match" : "is-off"
++                }`}
++              >
++                {l.nCandidature > 0 ? (
++                  <>
++                    {l.nCandidature}
++                    <span>
++                      candidatur{l.nCandidature === 1 ? "a" : "e"}
++                    </span>
++                  </>
++                ) : (
++                  "Nessuna candidatura"
++                )}
+               </div>
+             </div>
+-            <div
+-              className={`mc-pct ${
+-                l.nCandidature > 0 ? "is-match" : "is-off"
+-              }`}
+-            >
+-              {l.nCandidature > 0 ? (
+-                <>
+-                  {l.nCandidature}
+-                  <span>
+-                    candidatur{l.nCandidature === 1 ? "a" : "e"}
+-                  </span>
+-                </>
+-              ) : (
+-                "Nessuna candidatura"
+-              )}
+-            </div>
+-          </div>
+-        ))
++          ))}
++        </div>
+       )}
+     </PageContainer>
+   );
+diff --git a/src/app/(app)/candidature/CandidatureClient.tsx b/src/app/(app)/candidature/CandidatureClient.tsx
+index e0deda4..cc5765f 100644
+--- a/src/app/(app)/candidature/CandidatureClient.tsx
++++ b/src/app/(app)/candidature/CandidatureClient.tsx
+@@ -157,31 +157,33 @@ function Gruppo({
+           {titolo} — {items.length}
+         </span>
+       </div>
+-      {items.map((c) => (
+-        <button
+-          key={c.id}
+-          onClick={() => onSelect(c)}
+-          className="match-card"
+-          style={c.status === "rifiutata" ? { opacity: 0.55 } : undefined}
+-        >
+-          <div className="mc-avatar">
+-            {(c.listings?.titolo ?? "IM").slice(0, 2).toUpperCase()}
+-          </div>
+-          <div className="mc-body">
+-            <div className="mc-zona">{c.listings?.zona ?? ""}</div>
+-            <div className="mc-title">{c.listings?.titolo ?? "Immobile"}</div>
+-            <div className="mc-meta">
+-              {c.listings?.prezzo
+-                ? `€${c.listings.prezzo.toLocaleString("it-IT")}/mese`
+-                : "—"}
+-              {c.match_pct !== null && ` · ${c.match_pct}% compatibile`}
++      <div className="card-grid">
++        {items.map((c) => (
++          <button
++            key={c.id}
++            onClick={() => onSelect(c)}
++            className="match-card"
++            style={c.status === "rifiutata" ? { opacity: 0.55 } : undefined}
++          >
++            <div className="mc-avatar">
++              {(c.listings?.titolo ?? "IM").slice(0, 2).toUpperCase()}
+             </div>
+-          </div>
+-          <div className={`mc-pct ${STATO_BADGE[c.status]}`}>
+-            {STATO_LABEL[c.status]}
+-          </div>
+-        </button>
+-      ))}
++            <div className="mc-body">
++              <div className="mc-zona">{c.listings?.zona ?? ""}</div>
++              <div className="mc-title">{c.listings?.titolo ?? "Immobile"}</div>
++              <div className="mc-meta">
++                {c.listings?.prezzo
++                  ? `€${c.listings.prezzo.toLocaleString("it-IT")}/mese`
++                  : "—"}
++                {c.match_pct !== null && ` · ${c.match_pct}% compatibile`}
++              </div>
++            </div>
++            <div className={`mc-pct ${STATO_BADGE[c.status]}`}>
++              {STATO_LABEL[c.status]}
++            </div>
++          </button>
++        ))}
++      </div>
+     </>
+   );
+ }
+diff --git a/src/app/(app)/database/DatabaseClient.tsx b/src/app/(app)/database/DatabaseClient.tsx
+index bc6e297..c31869a 100644
+--- a/src/app/(app)/database/DatabaseClient.tsx
++++ b/src/app/(app)/database/DatabaseClient.tsx
+@@ -209,33 +209,35 @@ function Gruppo({
+           {titolo} — {items.length}
+         </span>
+       </div>
+-      {items.map((c) => {
+-        const s = stato(c);
+-        const iniziali = `${c.nome?.[0] ?? ""}${c.cognome?.[0] ?? ""}`.toUpperCase();
+-        return (
+-          <button key={c.id} onClick={() => onSelect(c)} className="match-card">
+-            {c.tenant_profiles?.avatar_url ? (
+-              // eslint-disable-next-line @next/next/no-img-element
+-              <img src={c.tenant_profiles.avatar_url} alt="" />
+-            ) : (
+-              <div className="mc-avatar">{iniziali || "IN"}</div>
+-            )}
+-            <div className="mc-body">
+-              <div className="mc-zona">
+-                {c.tenant_profiles?.professione ?? "Profilo inquilino"}
+-              </div>
+-              <div className="mc-title">
+-                {c.nome} {c.cognome}
+-              </div>
+-              <div className="mc-meta">
+-                {c.listings?.titolo}
+-                {c.match_pct !== null && ` · ${c.match_pct}% compatibile`}
++      <div className="card-grid">
++        {items.map((c) => {
++          const s = stato(c);
++          const iniziali = `${c.nome?.[0] ?? ""}${c.cognome?.[0] ?? ""}`.toUpperCase();
++          return (
++            <button key={c.id} onClick={() => onSelect(c)} className="match-card">
++              {c.tenant_profiles?.avatar_url ? (
++                // eslint-disable-next-line @next/next/no-img-element
++                <img src={c.tenant_profiles.avatar_url} alt="" />
++              ) : (
++                <div className="mc-avatar">{iniziali || "IN"}</div>
++              )}
++              <div className="mc-body">
++                <div className="mc-zona">
++                  {c.tenant_profiles?.professione ?? "Profilo inquilino"}
++                </div>
++                <div className="mc-title">
++                  {c.nome} {c.cognome}
++                </div>
++                <div className="mc-meta">
++                  {c.listings?.titolo}
++                  {c.match_pct !== null && ` · ${c.match_pct}% compatibile`}
++                </div>
+               </div>
+-            </div>
+-            <div className={`mc-pct ${BADGE[s]}`}>{LABEL[s]}</div>
+-          </button>
+-        );
+-      })}
++              <div className={`mc-pct ${BADGE[s]}`}>{LABEL[s]}</div>
++            </button>
++          );
++        })}
++      </div>
+     </>
+   );
+ }
+diff --git a/src/app/(app)/gestione-affitti/GestioneAffittiClient.tsx b/src/app/(app)/gestione-affitti/GestioneAffittiClient.tsx
+index 8778d42..e5567c5 100644
+--- a/src/app/(app)/gestione-affitti/GestioneAffittiClient.tsx
++++ b/src/app/(app)/gestione-affitti/GestioneAffittiClient.tsx
+@@ -55,26 +55,28 @@ export function GestioneAffittiClient({
+           <div className="pref-label" style={{ marginTop: 8 }}>
+             <span>Da avviare — {candidatureSenzaContratto.length}</span>
+           </div>
+-          {candidatureSenzaContratto.map((c) => (
+-            <button
+-              key={c.id}
+-              onClick={() => setNuovaDa(c)}
+-              className="match-card"
+-            >
+-              <div className="mc-avatar">
+-                {`${c.nome?.[0] ?? ""}${c.cognome?.[0] ?? ""}`.toUpperCase() ||
+-                  "IN"}
+-              </div>
+-              <div className="mc-body">
+-                <div className="mc-zona">{c.listings?.zona}</div>
+-                <div className="mc-title">
+-                  {c.nome} {c.cognome}
++          <div className="card-grid">
++            {candidatureSenzaContratto.map((c) => (
++              <button
++                key={c.id}
++                onClick={() => setNuovaDa(c)}
++                className="match-card"
++              >
++                <div className="mc-avatar">
++                  {`${c.nome?.[0] ?? ""}${c.cognome?.[0] ?? ""}`.toUpperCase() ||
++                    "IN"}
+                 </div>
+-                <div className="mc-meta">{c.listings?.titolo}</div>
+-              </div>
+-              <div className="mc-pct is-wait">Crea contratto</div>
+-            </button>
+-          ))}
++                <div className="mc-body">
++                  <div className="mc-zona">{c.listings?.zona}</div>
++                  <div className="mc-title">
++                    {c.nome} {c.cognome}
++                  </div>
++                  <div className="mc-meta">{c.listings?.titolo}</div>
++                </div>
++                <div className="mc-pct is-wait">Crea contratto</div>
++              </button>
++            ))}
++          </div>
+         </>
+       )}
+ 
+@@ -94,30 +96,32 @@ export function GestioneAffittiClient({
+           </p>
+         </div>
+       ) : (
+-        contratti.map((c) => (
+-          <button
+-            key={c.id}
+-            onClick={() => setSelezionato(c)}
+-            className="match-card"
+-          >
+-            <div className="mc-avatar">
+-              {`${c.nome?.[0] ?? ""}${c.cognome?.[0] ?? ""}`.toUpperCase() ||
+-                "IN"}
+-            </div>
+-            <div className="mc-body">
+-              <div className="mc-zona">{c.candidature?.listings?.titolo}</div>
+-              <div className="mc-title">
+-                {c.nome} {c.cognome}
++        <div className="card-grid">
++          {contratti.map((c) => (
++            <button
++              key={c.id}
++              onClick={() => setSelezionato(c)}
++              className="match-card"
++            >
++              <div className="mc-avatar">
++                {`${c.nome?.[0] ?? ""}${c.cognome?.[0] ?? ""}`.toUpperCase() ||
++                  "IN"}
+               </div>
+-              <div className="mc-meta">
+-                {c.canone ? `€${c.canone.toLocaleString("it-IT")}/mese` : "—"}
++              <div className="mc-body">
++                <div className="mc-zona">{c.candidature?.listings?.titolo}</div>
++                <div className="mc-title">
++                  {c.nome} {c.cognome}
++                </div>
++                <div className="mc-meta">
++                  {c.canone ? `€${c.canone.toLocaleString("it-IT")}/mese` : "—"}
++                </div>
+               </div>
+-            </div>
+-            <div className={`mc-pct ${STATO_BADGE[c.stato]}`}>
+-              {STATO_LABEL[c.stato]}
+-            </div>
+-          </button>
+-        ))
++              <div className={`mc-pct ${STATO_BADGE[c.stato]}`}>
++                {STATO_LABEL[c.stato]}
++              </div>
++            </button>
++          ))}
++        </div>
+       )}
+ 
+       {/* ---- Sheet: crea contratto da candidatura accettata ---- */}
+diff --git a/src/app/(app)/gestione/GestioneClient.tsx b/src/app/(app)/gestione/GestioneClient.tsx
+index e6fc952..b7b500c 100644
+--- a/src/app/(app)/gestione/GestioneClient.tsx
++++ b/src/app/(app)/gestione/GestioneClient.tsx
+@@ -63,29 +63,31 @@ export function GestioneClient({
+           </p>
+         </div>
+       ) : (
+-        contratti.map((c) => (
+-          <button
+-            key={c.id}
+-            onClick={() => setSelezionato(c)}
+-            className="match-card"
+-          >
+-            <div className="mc-avatar">
+-              {(c.candidature?.listings?.titolo ?? "IM").slice(0, 2).toUpperCase()}
+-            </div>
+-            <div className="mc-body">
+-              <div className="mc-zona">{c.candidature?.listings?.zona ?? ""}</div>
+-              <div className="mc-title">
+-                {c.candidature?.listings?.titolo ?? "Immobile"}
++        <div className="card-grid">
++          {contratti.map((c) => (
++            <button
++              key={c.id}
++              onClick={() => setSelezionato(c)}
++              className="match-card"
++            >
++              <div className="mc-avatar">
++                {(c.candidature?.listings?.titolo ?? "IM").slice(0, 2).toUpperCase()}
+               </div>
+-              <div className="mc-meta">
+-                {c.canone ? `€${c.canone.toLocaleString("it-IT")}/mese` : "—"}
++              <div className="mc-body">
++                <div className="mc-zona">{c.candidature?.listings?.zona ?? ""}</div>
++                <div className="mc-title">
++                  {c.candidature?.listings?.titolo ?? "Immobile"}
++                </div>
++                <div className="mc-meta">
++                  {c.canone ? `€${c.canone.toLocaleString("it-IT")}/mese` : "—"}
++                </div>
+               </div>
+-            </div>
+-            <div className={`mc-pct ${STATO_BADGE[c.stato]}`}>
+-              {STATO_LABEL[c.stato]}
+-            </div>
+-          </button>
+-        ))
++              <div className={`mc-pct ${STATO_BADGE[c.stato]}`}>
++                {STATO_LABEL[c.stato]}
++              </div>
++            </button>
++          ))}
++        </div>
+       )}
+ 
+       {/* ---- Bollette e utenze ---- */}
+diff --git a/src/app/(app)/immobili/ImmobiliClient.tsx b/src/app/(app)/immobili/ImmobiliClient.tsx
+index 0640f35..df54b75 100644
+--- a/src/app/(app)/immobili/ImmobiliClient.tsx
++++ b/src/app/(app)/immobili/ImmobiliClient.tsx
+@@ -54,46 +54,48 @@ export function ImmobiliClient({
+           </p>
+         </div>
+       ) : (
+-        immobili.map((im) => (
+-          <button
+-            key={im.id}
+-            onClick={() => setSelezionato(im)}
+-            className="match-card"
+-          >
+-            {im.fotoUrl ? (
+-              // eslint-disable-next-line @next/next/no-img-element
+-              <img src={im.fotoUrl} alt="" />
+-            ) : (
+-              <div className="mc-avatar">
+-                {im.titolo.slice(0, 2).toUpperCase()}
+-              </div>
+-            )}
+-            <div className="mc-body">
+-              <div className="mc-zona">{im.zona}</div>
+-              <div className="mc-title">{im.titolo}</div>
+-              <div className="mc-meta">
+-                €{im.prezzo.toLocaleString("it-IT")}/mese
+-                {!im.pubblicato && " · non pubblicato"}
+-              </div>
+-            </div>
+-            <div
+-              className={`mc-pct ${
+-                im.nCandidature > 0 ? "is-match" : "is-off"
+-              }`}
++        <div className="card-grid">
++          {immobili.map((im) => (
++            <button
++              key={im.id}
++              onClick={() => setSelezionato(im)}
++              className="match-card"
+             >
+-              {im.nCandidature > 0 ? (
+-                <>
+-                  {im.nCandidature}
+-                  <span>candidatur{im.nCandidature === 1 ? "a" : "e"}</span>
+-                </>
+-              ) : im.pubblicato ? (
+-                "Nessuna candidatura"
++              {im.fotoUrl ? (
++                // eslint-disable-next-line @next/next/no-img-element
++                <img src={im.fotoUrl} alt="" />
+               ) : (
+-                "Non pubblicato"
++                <div className="mc-avatar">
++                  {im.titolo.slice(0, 2).toUpperCase()}
++                </div>
+               )}
+-            </div>
+-          </button>
+-        ))
++              <div className="mc-body">
++                <div className="mc-zona">{im.zona}</div>
++                <div className="mc-title">{im.titolo}</div>
++                <div className="mc-meta">
++                  €{im.prezzo.toLocaleString("it-IT")}/mese
++                  {!im.pubblicato && " · non pubblicato"}
++                </div>
++              </div>
++              <div
++                className={`mc-pct ${
++                  im.nCandidature > 0 ? "is-match" : "is-off"
++                }`}
++              >
++                {im.nCandidature > 0 ? (
++                  <>
++                    {im.nCandidature}
++                    <span>candidatur{im.nCandidature === 1 ? "a" : "e"}</span>
++                  </>
++                ) : im.pubblicato ? (
++                  "Nessuna candidatura"
++                ) : (
++                  "Non pubblicato"
++                )}
++              </div>
++            </button>
++          ))}
++        </div>
+       )}
+ 
+       <Sheet
+diff --git a/src/app/(app)/profilo/OwnerProfiloClient.tsx b/src/app/(app)/profilo/OwnerProfiloClient.tsx
+index 00226f3..4325bda 100644
+--- a/src/app/(app)/profilo/OwnerProfiloClient.tsx
++++ b/src/app/(app)/profilo/OwnerProfiloClient.tsx
+@@ -61,38 +61,40 @@ export function OwnerProfiloClient({
+         </div>
+       </div>
+ 
+-      <Row
+-        color="var(--ink)"
+-        icon={<IconPersona className="fill-none stroke-white stroke-2" />}
+-        title="I tuoi dati"
+-        subtitle="Tipo di proprietario, immobili gestiti e priorità."
+-        cta="Vedi il dettaglio"
+-        onClick={() => setDatiAperto(true)}
+-      />
+-      <Row
+-        color="var(--ink-soft)"
+-        icon={<IconLucchetto className="fill-none stroke-white stroke-2" />}
+-        title="Account e accesso"
+-        subtitle="Nome, email di accesso e password del tuo account MatchAmI."
+-        cta="Gestisci l'account"
+-        onClick={() => setAccountAperto(true)}
+-      />
+-      <Row
+-        color="var(--moss)"
+-        icon={<IconScudo className="fill-white stroke-none" />}
+-        title="Privacy e consensi"
+-        subtitle="Rivedi o modifica i consensi su marketing e condivisione dati con terzi."
+-        cta="Gestisci consensi"
+-        onClick={() => setPrivacyAperto(true)}
+-      />
+-      <Row
+-        color="var(--gold)"
+-        icon={<IconDomanda className="fill-none stroke-[var(--ink)] stroke-2" />}
+-        title="FAQ"
+-        subtitle="Domande frequenti su MatchAmI per i proprietari."
+-        cta="Vedi le domande frequenti"
+-        onClick={() => setFaqAperto(true)}
+-      />
++      <div className="card-grid">
++        <Row
++          color="var(--ink)"
++          icon={<IconPersona className="fill-none stroke-white stroke-2" />}
++          title="I tuoi dati"
++          subtitle="Tipo di proprietario, immobili gestiti e priorità."
++          cta="Vedi il dettaglio"
++          onClick={() => setDatiAperto(true)}
++        />
++        <Row
++          color="var(--ink-soft)"
++          icon={<IconLucchetto className="fill-none stroke-white stroke-2" />}
++          title="Account e accesso"
++          subtitle="Nome, email di accesso e password del tuo account MatchAmI."
++          cta="Gestisci l'account"
++          onClick={() => setAccountAperto(true)}
++        />
++        <Row
++          color="var(--moss)"
++          icon={<IconScudo className="fill-white stroke-none" />}
++          title="Privacy e consensi"
++          subtitle="Rivedi o modifica i consensi su marketing e condivisione dati con terzi."
++          cta="Gestisci consensi"
++          onClick={() => setPrivacyAperto(true)}
++        />
++        <Row
++          color="var(--gold)"
++          icon={<IconDomanda className="fill-none stroke-[var(--ink)] stroke-2" />}
++          title="FAQ"
++          subtitle="Domande frequenti su MatchAmI per i proprietari."
++          cta="Vedi le domande frequenti"
++          onClick={() => setFaqAperto(true)}
++        />
++      </div>
+ 
+       <form action={logout} className="mt-6">
+         <button className="redo-link" style={{ color: "var(--muted)" }}>
+diff --git a/src/app/(app)/profilo/ProfiloClient.tsx b/src/app/(app)/profilo/ProfiloClient.tsx
+index 8b59a21..407a82b 100644
+--- a/src/app/(app)/profilo/ProfiloClient.tsx
++++ b/src/app/(app)/profilo/ProfiloClient.tsx
+@@ -121,53 +121,55 @@ export function ProfiloClient({
+         <span>{completezza}% completo</span>
+       </div>
+ 
+-      {/* I tuoi dati */}
+-      <Row
+-        color="var(--ink)"
+-        icon={<IconPersona className="fill-none stroke-white stroke-2" />}
+-        title="I tuoi dati"
+-        subtitle="Lavoro, reddito, garante, protesti e presentazione: quello che vedono i proprietari."
+-        cta="Vedi il dettaglio"
+-        onClick={() => setSheetAperta("dati")}
+-      />
++      <div className="card-grid">
++        {/* I tuoi dati */}
++        <Row
++          color="var(--ink)"
++          icon={<IconPersona className="fill-none stroke-white stroke-2" />}
++          title="I tuoi dati"
++          subtitle="Lavoro, reddito, garante, protesti e presentazione: quello che vedono i proprietari."
++          cta="Vedi il dettaglio"
++          onClick={() => setSheetAperta("dati")}
++        />
+ 
+-      {/* La tua ricerca */}
+-      <Row
+-        color="var(--clay)"
+-        icon={<IconLente className="fill-none stroke-white stroke-2" />}
+-        title="La tua ricerca"
+-        subtitle="Budget, zone, taglio e caratteristiche della casa che stai cercando."
+-        cta="Vedi il dettaglio"
+-        onClick={() => setSheetAperta("ricerca")}
+-      />
++        {/* La tua ricerca */}
++        <Row
++          color="var(--clay)"
++          icon={<IconLente className="fill-none stroke-white stroke-2" />}
++          title="La tua ricerca"
++          subtitle="Budget, zone, taglio e caratteristiche della casa che stai cercando."
++          cta="Vedi il dettaglio"
++          onClick={() => setSheetAperta("ricerca")}
++        />
+ 
+-      {/* Account */}
+-      <Row
+-        color="var(--ink-soft)"
+-        icon={<IconLucchetto className="fill-none stroke-white stroke-2" />}
+-        title="Account e accesso"
+-        subtitle="Nome, email di accesso e password del tuo account MatchAmI."
+-        cta="Gestisci l'account"
+-        onClick={() => setSheetAperta("account")}
+-      />
++        {/* Account */}
++        <Row
++          color="var(--ink-soft)"
++          icon={<IconLucchetto className="fill-none stroke-white stroke-2" />}
++          title="Account e accesso"
++          subtitle="Nome, email di accesso e password del tuo account MatchAmI."
++          cta="Gestisci l'account"
++          onClick={() => setSheetAperta("account")}
++        />
+ 
+-      {/* Privacy / FAQ */}
+-      <Row
+-        color="var(--moss)"
+-        icon={<IconScudo className="fill-white stroke-none" />}
+-        title="Privacy e consensi"
+-        subtitle="Rivedi o modifica i consensi su marketing e condivisione dati con terzi."
+-        cta="Gestisci consensi"
+-        onClick={() => setSheetAperta("privacy")}
+-      />
+-      <Row
+-        color="var(--gold)"
+-        icon={<IconDomanda className="fill-none stroke-[var(--ink)] stroke-2" />}
+-        title="FAQ e bonus affitto"
+-        subtitle="Bonus giovani, contributo Comune di Milano, detrazioni 730 e altre curiosità."
+-        cta="Vedi le domande frequenti"
+-        onClick={() => setSheetAperta("faq")}
+-      />
++        {/* Privacy / FAQ */}
++        <Row
++          color="var(--moss)"
++          icon={<IconScudo className="fill-white stroke-none" />}
++          title="Privacy e consensi"
++          subtitle="Rivedi o modifica i consensi su marketing e condivisione dati con terzi."
++          cta="Gestisci consensi"
++          onClick={() => setSheetAperta("privacy")}
++        />
++        <Row
++          color="var(--gold)"
++          icon={<IconDomanda className="fill-none stroke-[var(--ink)] stroke-2" />}
++          title="FAQ e bonus affitto"
++          subtitle="Bonus giovani, contributo Comune di Milano, detrazioni 730 e altre curiosità."
++          cta="Vedi le domande frequenti"
++          onClick={() => setSheetAperta("faq")}
++        />
++      </div>
+ 
+       <form action={logout} className="mt-6">
+         <button className="redo-link" style={{ color: "var(--muted)" }}>
+diff --git a/src/app/globals.css b/src/app/globals.css
+index d6ad8d9..c893010 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -482,6 +482,13 @@ input[type="range"]::-moz-range-thumb {
+   color: var(--clay);
+ }
+ 
++/* Su mobile il wrapper delle griglie è trasparente: le card restano
++   figlie dirette della schermata, esattamente come nel prototipo.
++   Da 768px in su diventa una griglia a due colonne. */
++.card-grid {
++  display: contents;
++}
++
+ .empty-inline {
+   display: flex;
+   flex-direction: column;
+@@ -856,6 +863,7 @@ input[type="range"]::-moz-range-thumb {
+ }
+ .sheet-scroll {
+   overflow-y: auto;
++  min-height: 0;
+   -webkit-overflow-scrolling: touch;
+   padding: 4px 26px 40px 26px;
+   flex: 1;
+@@ -942,6 +950,9 @@ input[type="range"]::-moz-range-thumb {
+ .tab-btn.active {
+   color: var(--moss);
+ }
++.tabbar-brand {
++  display: none;
++}
+ .tab-badge {
+   position: absolute;
+   top: -2px;
+@@ -1651,3 +1662,244 @@ input[type="range"]::-moz-range-thumb {
+   border-color: var(--moss);
+   background: rgba(62, 107, 87, 0.06);
+ }
++
++/* ============================================================
++   DESKTOP — da 768px in su
++   Sotto questa soglia non cambia nulla: resta il telaio da 480px
++   con la tab bar in basso, identico al prototipo. Sopra, il telaio
++   si apre in un layout da sito: sidebar a sinistra, contenuto largo,
++   elenchi su due colonne, sheet come finestre centrate.
++   ============================================================ */
++
++@media (min-width: 768px) {
++  html,
++  body {
++    background: var(--paper);
++  }
++
++  /* ---- guscio: da cornice a pagina intera ---- */
++  .app-shell {
++    max-width: none;
++    display: flex;
++    background: var(--paper);
++  }
++
++  .screens {
++    position: relative;
++    inset: auto;
++    flex: 1;
++    min-width: 0;
++  }
++
++  /* ---- tab bar → sidebar ---- */
++  .tabbar {
++    position: static;
++    order: -1; /* nel DOM sta dopo le schermate, qui va a sinistra */
++    width: 248px;
++    flex-shrink: 0;
++    height: auto;
++    flex-direction: column;
++    align-items: stretch;
++    justify-content: flex-start;
++    gap: 4px;
++    border-top: none;
++    border-right: 1px solid rgba(16, 21, 26, 0.08);
++    padding: 26px 16px;
++  }
++  .tabbar-brand {
++    display: block;
++    font-family: var(--font-display);
++    font-style: italic;
++    font-weight: 700;
++    font-size: 25px;
++    color: var(--ink);
++    padding: 0 12px;
++    margin-bottom: 26px;
++  }
++  .tabbar-brand b {
++    color: var(--gold);
++    font-style: normal;
++  }
++  .tab-btn {
++    flex: 0 0 auto;
++    flex-direction: row;
++    align-items: center;
++    justify-content: flex-start;
++    gap: 12px;
++    padding: 11px 12px;
++    border-radius: 12px;
++    font-size: 13.5px;
++    text-align: left;
++  }
++  .tab-btn svg {
++    width: 19px;
++    height: 19px;
++  }
++  .tab-btn:hover {
++    background: rgba(16, 21, 26, 0.04);
++  }
++  .tab-btn.active {
++    background: rgba(62, 107, 87, 0.1);
++  }
++  .tab-badge {
++    position: static;
++    margin-left: auto;
++  }
++
++  /* ---- schermate chiare ---- */
++  .screen-wrap {
++    padding: 44px 44px 64px 44px;
++  }
++  .screen-inner {
++    max-width: 920px;
++    margin: 0 auto;
++  }
++  .screen-title {
++    font-size: 32px;
++  }
++  .screen-sub {
++    font-size: 14px;
++    margin-bottom: 28px;
++  }
++
++  /* ---- elenchi su due colonne ----
++     `.card-grid` è `display: contents` sul telefono, quindi lì non
++     esiste proprio; qui diventa la griglia. */
++  .card-grid {
++    display: grid;
++    grid-template-columns: repeat(2, minmax(0, 1fr));
++    gap: 14px;
++    align-items: start;
++    margin-bottom: 8px;
++  }
++  .card-grid .match-card,
++  .card-grid .pv-row {
++    margin-bottom: 0;
++  }
++  .match-card:hover,
++  .pv-row:hover {
++    box-shadow: 0 10px 26px rgba(16, 21, 26, 0.1);
++  }
++
++  /* ---- sheet → finestra centrata ---- */
++  .sheet {
++    left: 50%;
++    top: 50%;
++    bottom: auto;
++    transform: translate(-50%, -50%);
++    width: min(640px, 92vw);
++    max-width: none;
++    height: auto;
++    max-height: 84vh;
++    border-radius: 22px;
++    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.4);
++    animation: sheet-in 0.26s cubic-bezier(0.22, 0.8, 0.32, 1);
++  }
++  @keyframes sheet-in {
++    from {
++      opacity: 0;
++      transform: translate(-50%, -46%) scale(0.98);
++    }
++    to {
++      opacity: 1;
++      transform: translate(-50%, -50%) scale(1);
++    }
++  }
++  /* la maniglia serve a trascinare: senza trascinamento non ha senso */
++  .sheet-handle-area {
++    display: none;
++  }
++  .sheet-scroll {
++    padding: 26px 34px 34px 34px;
++  }
++
++  /* ---- deck inquilino ----
++     Resta una pila di card da sfogliare (il trascinamento funziona
++     anche col mouse), ma diventa un pannello centrato. */
++  .deck {
++    inset: 150px auto 130px 50%;
++    width: 460px;
++    transform: translateX(-50%);
++  }
++  .card {
++    border-radius: 22px;
++    box-shadow: 0 30px 70px rgba(0, 0, 0, 0.5);
++  }
++  .card-info {
++    bottom: 64px;
++  }
++  /* i pulsanti non coprono più la card: il suggerimento scende in fondo */
++  .swipe-hint {
++    bottom: 20px;
++  }
++  .empty-state {
++    border-radius: 22px;
++  }
++  .home-intro {
++    top: 72px;
++    left: 50%;
++    right: auto;
++    transform: translateX(-50%);
++    width: 460px;
++  }
++  .topbar {
++    padding-top: 22px;
++    left: 50%;
++    right: auto;
++    transform: translateX(-50%);
++    width: 460px;
++  }
++  .actions {
++    bottom: 42px;
++  }
++  .toast-inline {
++    bottom: 120px;
++  }
++
++  /* ---- login: foto a sinistra, form a destra ---- */
++  .login-view {
++    max-width: none;
++  }
++  .login-scrim {
++    background: linear-gradient(
++      90deg,
++      rgba(10, 13, 16, 0.35) 0%,
++      rgba(10, 13, 16, 0.55) 55%,
++      rgba(10, 13, 16, 0.75) 100%
++    );
++  }
++  .login-content {
++    inset: 0 0 0 auto;
++    width: min(560px, 55%);
++    background: rgba(16, 21, 26, 0.94);
++    backdrop-filter: blur(10px);
++    padding: 48px 56px;
++    justify-content: center;
++  }
++  .login-content > *:first-child {
++    margin-top: 0;
++  }
++  .login-brand {
++    font-size: 44px;
++  }
++
++  /* ---- chat: colonna centrata, non a tutta larghezza ---- */
++  .chat-view {
++    max-width: 780px;
++    border-left: 1px solid rgba(16, 21, 26, 0.08);
++    border-right: 1px solid rgba(16, 21, 26, 0.08);
++  }
++  .chat-msg {
++    max-width: 62%;
++  }
++}
++
++/* Schermi molto larghi: il contenuto smette di allargarsi */
++@media (min-width: 1280px) {
++  .screen-wrap {
++    padding: 52px 64px 72px 64px;
++  }
++  .screen-inner {
++    max-width: 1040px;
++  }
++}
+diff --git a/src/components/Navigation.tsx b/src/components/Navigation.tsx
+index 045786d..e32066a 100644
+--- a/src/components/Navigation.tsx
++++ b/src/components/Navigation.tsx
+@@ -44,6 +44,10 @@ export function Navigation({
+ 
+   return (
+     <nav className="tabbar">
++      {/* visibile solo nella sidebar desktop */}
++      <div className="tabbar-brand">
++        Match<b>AmI</b>
++      </div>
+       {tabs.map(({ href, label, Icon }) => {
+         const active = pathname === href;
+         return (
+diff --git a/src/components/ui/PageContainer.tsx b/src/components/ui/PageContainer.tsx
+index 91f04e0..fa6b184 100644
+--- a/src/components/ui/PageContainer.tsx
++++ b/src/components/ui/PageContainer.tsx
+@@ -14,5 +14,10 @@ export function PageContainer({
+    *  varianti "wide" come nel layout desktop precedente. */
+   wide?: boolean;
+ }) {
+-  return <div className="screen-wrap">{children}</div>;
++  return (
++    <div className="screen-wrap">
++      {/* su desktop limita la riga di lettura; su mobile non fa nulla */}
++      <div className="screen-inner">{children}</div>
++    </div>
++  );
+ }
+-- 
+2.43.0
+

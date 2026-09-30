@@ -1,0 +1,422 @@
+From 2ef173b9d8169480b8c3ce7ec747e8e7aeb765cd Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 7 Sep 2026 09:46:42 +0000
+Subject: [PATCH] feat(profilo): foto profilo caricabile dall'inquilino
+
+- migrazione 0006: colonna tenant_profiles.avatar_url + bucket
+  Storage 'avatar-inquilini' con policy per cartella utente
+- AvatarUpload: nuovo componente di caricamento (max 5 MB, solo immagini)
+- Profilo inquilino: campo foto in 'I tuoi dati', avatar in intestazione
+- Database proprietario: foto in elenco e nel dettaglio candidatura
+---
+ src/app/(app)/database/DatabaseClient.tsx     |  18 ++-
+ src/app/(app)/database/page.tsx               |   2 +-
+ src/app/(app)/profilo/ProfiloClient.tsx       |  18 ++-
+ src/app/(app)/profilo/actions.ts              |   3 +
+ src/app/globals.css                           |   8 ++
+ src/components/AvatarUpload.tsx               | 131 ++++++++++++++++++
+ src/lib/types.ts                              |   2 +
+ supabase/migrations/0006_avatar_inquilini.sql |  87 ++++++++++++
+ 8 files changed, 266 insertions(+), 3 deletions(-)
+ create mode 100644 src/components/AvatarUpload.tsx
+ create mode 100644 supabase/migrations/0006_avatar_inquilini.sql
+
+diff --git a/src/app/(app)/database/DatabaseClient.tsx b/src/app/(app)/database/DatabaseClient.tsx
+index 94cb42d..bc6e297 100644
+--- a/src/app/(app)/database/DatabaseClient.tsx
++++ b/src/app/(app)/database/DatabaseClient.tsx
+@@ -97,6 +97,17 @@ export function DatabaseClient({
+       >
+         {selezionata && (
+           <>
++            {selezionata.tenant_profiles?.avatar_url && (
++              <div className="flex justify-center mb-4">
++                {/* eslint-disable-next-line @next/next/no-img-element */}
++                <img
++                  src={selezionata.tenant_profiles.avatar_url}
++                  alt={`Foto di ${selezionata.nome ?? "inquilino"}`}
++                  className="w-24 h-24 rounded-full object-cover"
++                />
++              </div>
++            )}
++
+             <p className="sheet-sub">
+               Candidatura per <b>{selezionata.listings?.titolo}</b>
+             </p>
+@@ -203,7 +214,12 @@ function Gruppo({
+         const iniziali = `${c.nome?.[0] ?? ""}${c.cognome?.[0] ?? ""}`.toUpperCase();
+         return (
+           <button key={c.id} onClick={() => onSelect(c)} className="match-card">
+-            <div className="mc-avatar">{iniziali || "IN"}</div>
++            {c.tenant_profiles?.avatar_url ? (
++              // eslint-disable-next-line @next/next/no-img-element
++              <img src={c.tenant_profiles.avatar_url} alt="" />
++            ) : (
++              <div className="mc-avatar">{iniziali || "IN"}</div>
++            )}
+             <div className="mc-body">
+               <div className="mc-zona">
+                 {c.tenant_profiles?.professione ?? "Profilo inquilino"}
+diff --git a/src/app/(app)/database/page.tsx b/src/app/(app)/database/page.tsx
+index 368b631..5cf5820 100644
+--- a/src/app/(app)/database/page.tsx
++++ b/src/app/(app)/database/page.tsx
+@@ -14,7 +14,7 @@ export default async function DatabasePage() {
+   const { data: candidature } = await supabase
+     .from("candidature")
+     .select(
+-      "id, status, match_pct, created_at, tenant_id, listings!inner(owner_id, titolo, zona), tenant_profiles!inner(professione, reddito_mensile, verificato, presentazione)"
++      "id, status, match_pct, created_at, tenant_id, listings!inner(owner_id, titolo, zona), tenant_profiles!inner(professione, reddito_mensile, verificato, presentazione, avatar_url)"
+     )
+     .eq("listings.owner_id", user!.id)
+     .order("created_at", { ascending: false });
+diff --git a/src/app/(app)/profilo/ProfiloClient.tsx b/src/app/(app)/profilo/ProfiloClient.tsx
+index cda96aa..95590a6 100644
+--- a/src/app/(app)/profilo/ProfiloClient.tsx
++++ b/src/app/(app)/profilo/ProfiloClient.tsx
+@@ -16,6 +16,7 @@ import { Field } from "@/components/ui/Field";
+ import { Stepper } from "@/components/ui/Stepper";
+ import { PrivacySheet } from "@/components/PrivacySheet";
+ import { FaqSheet } from "@/components/FaqSheet";
++import { AvatarUpload } from "@/components/AvatarUpload";
+ import {
+   IconDomanda,
+   IconLente,
+@@ -76,7 +77,14 @@ export function ProfiloClient({
+     <PageContainer>
+       {/* Avatar */}
+       <div className="avatar-row">
+-        <div className="avatar">{(nome ?? "?").slice(0, 2).toUpperCase()}</div>
++        <div className="avatar">
++          {tenant.avatar_url ? (
++            // eslint-disable-next-line @next/next/no-img-element
++            <img src={tenant.avatar_url} alt="" />
++          ) : (
++            (nome ?? "?").slice(0, 2).toUpperCase()
++          )}
++        </div>
+         <div>
+           <div className="avatar-name">Il tuo profilo</div>
+           <div className="avatar-sub">In cerca a Milano</div>
+@@ -286,6 +294,9 @@ function DatiPersonaliSheet({
+   const [presentazione, setPresentazione] = useState(
+     tenant.presentazione ?? ""
+   );
++  const [avatarUrl, setAvatarUrl] = useState<string | null>(
++    tenant.avatar_url
++  );
+ 
+   return (
+     <Sheet open={open} onClose={onClose} title="I tuoi dati">
+@@ -307,6 +318,11 @@ function DatiPersonaliSheet({
+         <input type="hidden" name="figli" value={figli} />
+         <input type="hidden" name="redditi_nucleo" value={redditiNucleo} />
+         <input type="hidden" name="animali" value={String(animali)} />
++        <input type="hidden" name="avatar_url" value={avatarUrl ?? ""} />
++
++        <Field label="La tua foto">
++          <AvatarUpload value={avatarUrl} onChange={setAvatarUrl} />
++        </Field>
+ 
+         <Field label="Situazione lavorativa">
+           <div className="chip-row">
+diff --git a/src/app/(app)/profilo/actions.ts b/src/app/(app)/profilo/actions.ts
+index bbf0c24..94cfcdb 100644
+--- a/src/app/(app)/profilo/actions.ts
++++ b/src/app/(app)/profilo/actions.ts
+@@ -32,6 +32,8 @@ export async function updateDatiPersonali(
+   const figli = Number(formData.get("figli") || 0);
+   const redditi_nucleo = Number(formData.get("redditi_nucleo") || 1);
+   const presentazione = String(formData.get("presentazione") || "");
++  // stringa vuota = nessuna foto, così l'inquilino può anche rimuoverla
++  const avatar_url = String(formData.get("avatar_url") || "").trim() || null;
+ 
+   const { error } = await supabase
+     .from("tenant_profiles")
+@@ -46,6 +48,7 @@ export async function updateDatiPersonali(
+       figli,
+       redditi_nucleo,
+       presentazione,
++      avatar_url,
+       updated_at: new Date().toISOString(),
+     })
+     .eq("profile_id", user.id);
+diff --git a/src/app/globals.css b/src/app/globals.css
+index 5e7fc7b..d6ad8d9 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -419,6 +419,7 @@ input[type="range"]::-moz-range-thumb {
+   font-family: var(--font-display);
+   font-weight: 700;
+   font-size: 22px;
++  overflow: hidden;
+ }
+ .match-card .mc-body {
+   flex: 1;
+@@ -540,6 +541,13 @@ input[type="range"]::-moz-range-thumb {
+   font-weight: 700;
+   font-size: 22px;
+   flex-shrink: 0;
++  overflow: hidden;
++}
++/* quando c'è una foto profilo prende il posto delle iniziali */
++.avatar img {
++  width: 100%;
++  height: 100%;
++  object-fit: cover;
+ }
+ .avatar-name {
+   font-family: var(--font-display);
+diff --git a/src/components/AvatarUpload.tsx b/src/components/AvatarUpload.tsx
+new file mode 100644
+index 0000000..e65080a
+--- /dev/null
++++ b/src/components/AvatarUpload.tsx
+@@ -0,0 +1,131 @@
++"use client";
++
++import { useRef, useState } from "react";
++import { createClient } from "@/lib/supabase/client";
++
++const MAX_MB = 5;
++
++/**
++ * Caricamento della foto profilo dell'inquilino.
++ *
++ * Il file finisce nel bucket "avatar-inquilini", dentro una cartella che
++ * ha come nome l'id dell'utente: è la condizione richiesta dalle policy
++ * dello Storage (vedi migrazione 0006). Il componente non salva niente
++ * nel database: restituisce l'URL al form che lo contiene, che lo invia
++ * insieme al resto dei dati.
++ */
++export function AvatarUpload({
++  value,
++  onChange,
++}: {
++  value: string | null;
++  onChange: (url: string | null) => void;
++}) {
++  const inputRef = useRef<HTMLInputElement>(null);
++  const [caricamento, setCaricamento] = useState(false);
++  const [errore, setErrore] = useState<string | null>(null);
++
++  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
++    const file = e.target.files?.[0];
++    if (!file) return;
++
++    if (!file.type.startsWith("image/")) {
++      setErrore("Scegli un file immagine.");
++      return;
++    }
++    if (file.size > MAX_MB * 1024 * 1024) {
++      setErrore(`L'immagine non può superare ${MAX_MB} MB.`);
++      return;
++    }
++
++    setCaricamento(true);
++    setErrore(null);
++
++    const supabase = createClient();
++    const {
++      data: { user },
++    } = await supabase.auth.getUser();
++    if (!user) {
++      setErrore("Devi essere autenticato.");
++      setCaricamento(false);
++      return;
++    }
++
++    const estensione = file.name.split(".").pop() || "jpg";
++    const percorso = `${user.id}/${crypto.randomUUID()}.${estensione}`;
++
++    const { error } = await supabase.storage
++      .from("avatar-inquilini")
++      .upload(percorso, file, { upsert: true });
++
++    if (error) {
++      setErrore(error.message);
++      setCaricamento(false);
++      return;
++    }
++
++    const { data } = supabase.storage
++      .from("avatar-inquilini")
++      .getPublicUrl(percorso);
++
++    onChange(data.publicUrl);
++    setCaricamento(false);
++  }
++
++  return (
++    <div>
++      <div className={`doc-upload ${value ? "filled" : ""} flex items-center gap-4`}>
++        {value ? (
++          // eslint-disable-next-line @next/next/no-img-element
++          <img
++            src={value}
++            alt="La tua foto profilo"
++            className="w-20 h-20 rounded-full object-cover shrink-0"
++          />
++        ) : (
++          <div className="avatar shrink-0" style={{ width: 80, height: 80 }}>
++            ?
++          </div>
++        )}
++
++        <div className="flex-1 min-w-0">
++          <input
++            ref={inputRef}
++            type="file"
++            accept="image/*"
++            onChange={handleFileChange}
++            disabled={caricamento}
++            className="hidden"
++          />
++          <button
++            type="button"
++            onClick={() => inputRef.current?.click()}
++            disabled={caricamento}
++            className="chip"
++          >
++            {caricamento
++              ? "Caricamento..."
++              : value
++                ? "Cambia foto"
++                : "Scegli una foto"}
++          </button>
++          {value && !caricamento && (
++            <button
++              type="button"
++              onClick={() => onChange(null)}
++              className="redo-link ml-3"
++              style={{ color: "var(--clay)" }}
++            >
++              Rimuovi
++            </button>
++          )}
++          <p className="field-note">
++            JPG o PNG, massimo {MAX_MB} MB. La vedono i proprietari quando
++            valutano la tua candidatura.
++          </p>
++          {errore && <p className="note-error mt-1">{errore}</p>}
++        </div>
++      </div>
++    </div>
++  );
++}
+diff --git a/src/lib/types.ts b/src/lib/types.ts
+index f5e248d..62389c3 100644
+--- a/src/lib/types.ts
++++ b/src/lib/types.ts
+@@ -18,6 +18,7 @@ export type TenantProfile = {
+   budget_max: number | null;
+   locali_min: number | null;
+   mq_min: number | null;
++  avatar_url: string | null;
+ };
+ 
+ export type StatoContratto = "bozza" | "in_firma" | "firmato" | "concluso";
+@@ -95,6 +96,7 @@ export type CandidaturaRicevuta = {
+     reddito_mensile: number | null;
+     verificato: boolean;
+     presentazione: string | null;
++    avatar_url: string | null;
+   } | null;
+   // aggiunto lato client dopo il fetch separato di profiles
+   nome?: string | null;
+diff --git a/supabase/migrations/0006_avatar_inquilini.sql b/supabase/migrations/0006_avatar_inquilini.sql
+new file mode 100644
+index 0000000..46fb863
+--- /dev/null
++++ b/supabase/migrations/0006_avatar_inquilini.sql
+@@ -0,0 +1,87 @@
++-- ============================================================
++-- MatchAmI — foto profilo dell'inquilino
++--
++-- Aggiunge:
++--   1. la colonna `avatar_url` su tenant_profiles
++--   2. il bucket Storage "avatar-inquilini" con le sue policy
++--
++-- Il bucket segue lo stesso schema di "immobili-foto" (migrazione 0005):
++-- pubblico in lettura, scrittura consentita solo dentro una cartella
++-- che ha come nome l'id dell'utente.
++--
++-- NOTA SULLA PRIVACY: il bucket è pubblico, quindi chi conosce l'URL
++-- vede la foto anche senza account. Il percorso contiene un UUID casuale,
++-- quindi non è indovinabile, ma non è nemmeno protetto da autenticazione.
++-- È lo stesso compromesso già adottato per le foto degli annunci. Se per
++-- le foto delle persone preferisci una tutela maggiore, in fondo al file
++-- trovi cosa cambierebbe.
++--
++-- NOTA: la parte "storage" funziona solo su un progetto Supabase vero,
++-- non su un Postgres locale.
++-- ============================================================
++
++-- ------------------------------------------------------------
++-- 1. Colonna sulla tabella del profilo inquilino
++-- ------------------------------------------------------------
++
++alter table tenant_profiles
++  add column if not exists avatar_url text;
++
++-- ------------------------------------------------------------
++-- 2. Bucket Storage
++-- ------------------------------------------------------------
++
++insert into storage.buckets (id, name, public)
++values ('avatar-inquilini', 'avatar-inquilini', true)
++on conflict (id) do nothing;
++
++-- Lettura: aperta. Serve perché il proprietario deve vedere la foto di
++-- chi si è candidato, e perché il bucket pubblico è servito via CDN.
++create policy "avatar-inquilini: lettura pubblica" on storage.objects
++  for select using (bucket_id = 'avatar-inquilini');
++
++-- Scrittura: solo nella propria cartella, cioè "<uid>/nomefile.jpg".
++create policy "avatar-inquilini: upload nella propria cartella" on storage.objects
++  for insert to authenticated
++  with check (
++    bucket_id = 'avatar-inquilini'
++    and (storage.foldername(name))[1] = auth.uid()::text
++  );
++
++create policy "avatar-inquilini: aggiorna nella propria cartella" on storage.objects
++  for update to authenticated
++  using (
++    bucket_id = 'avatar-inquilini'
++    and (storage.foldername(name))[1] = auth.uid()::text
++  );
++
++create policy "avatar-inquilini: elimina dalla propria cartella" on storage.objects
++  for delete to authenticated
++  using (
++    bucket_id = 'avatar-inquilini'
++    and (storage.foldername(name))[1] = auth.uid()::text
++  );
++
++-- ------------------------------------------------------------
++-- Verifica
++-- ------------------------------------------------------------
++
++select column_name, data_type
++from information_schema.columns
++where table_name = 'tenant_profiles' and column_name = 'avatar_url';
++
++select id, name, public from storage.buckets where id = 'avatar-inquilini';
++
++
++-- ============================================================
++-- SE IN FUTURO VUOI RENDERE LE FOTO PRIVATE
++--
++-- 1. update storage.buckets set public = false where id = 'avatar-inquilini';
++-- 2. sostituisci la policy di lettura con una che consenta l'accesso solo
++--    al diretto interessato e ai proprietari con una candidatura in corso;
++-- 3. lato app, invece di salvare l'URL pubblico, genera una signed URL
++--    con `supabase.storage.from(...).createSignedUrl(percorso, secondi)`
++--    nelle pagine server che mostrano la foto (profilo/page.tsx e
++--    database/page.tsx). In `avatar_url` salveresti il percorso e non
++--    l'indirizzo completo.
++-- ============================================================
+-- 
+2.43.0
+
