@@ -1,7 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/auth"];
+// "/invito" è pubblico: il proprietario che riceve il link non ha
+// ancora un account quando lo apre.
+const PUBLIC_PATHS = ["/login", "/auth", "/invito"];
 
 /**
  * Rinfresca il token di sessione Supabase ad ogni richiesta e protegge
@@ -43,6 +45,8 @@ export async function updateSession(request: NextRequest) {
   if (!user && !isPublicPath) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
+    // ricorda dove stava andando, così dopo l'accesso ci torna
+    loginUrl.searchParams.set("next", path + request.nextUrl.search);
     return NextResponse.redirect(loginUrl);
   }
 

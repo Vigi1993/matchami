@@ -7,7 +7,7 @@ import {
   computeAffidabilita,
   computeProfileCompleteness,
 } from "@/lib/affidabilita";
-import type { TenantProfile } from "@/lib/types";
+import type { TenantProfile, Invito } from "@/lib/types";
 import { updateDatiPersonali, updateRicerca, type SaveState } from "./actions";
 import { logout } from "@/app/login/actions";
 import { PageContainer } from "@/components/ui/PageContainer";
@@ -18,11 +18,13 @@ import { PrivacySheet } from "@/components/PrivacySheet";
 import { FaqSheet } from "@/components/FaqSheet";
 import { AvatarUpload } from "@/components/AvatarUpload";
 import { AccountSheet } from "@/components/AccountSheet";
+import { InvitaProprietarioSheet } from "@/components/InvitaProprietarioSheet";
 import {
   IconDomanda,
   IconLente,
   IconLucchetto,
   IconPersona,
+  IconPersone,
   IconScudo,
   IconStella,
 } from "@/components/icons";
@@ -32,6 +34,7 @@ type Props = {
   cognome: string | null;
   email: string | null;
   tenant: TenantProfile;
+  inviti: Invito[];
   zoneIniziali: string[];
   interessiIniziali: Record<string, number>;
   mediaRecensioni: number | null;
@@ -45,6 +48,7 @@ export function ProfiloClient({
   cognome,
   email,
   tenant,
+  inviti,
   zoneIniziali,
   interessiIniziali,
   mediaRecensioni,
@@ -53,7 +57,14 @@ export function ProfiloClient({
   consensoTerziIniziale,
 }: Props) {
   const [sheetAperta, setSheetAperta] = useState<
-    "affidabilita" | "dati" | "ricerca" | "account" | "privacy" | "faq" | null
+    | "affidabilita"
+    | "dati"
+    | "ricerca"
+    | "invito"
+    | "account"
+    | "privacy"
+    | "faq"
+    | null
   >(null);
 
   const affidabilita = computeAffidabilita({
@@ -142,7 +153,20 @@ export function ProfiloClient({
           onClick={() => setSheetAperta("ricerca")}
         />
 
-        {/* Account */}
+        <Row
+        color="var(--gold)"
+        icon={<IconPersone className="fill-none stroke-[var(--ink)] stroke-2" />}
+        title="Invita il tuo proprietario"
+        subtitle="Hai già una casa in affitto? Chiedi al tuo proprietario un commento su com'è andata: alza il tuo punteggio di affidabilità."
+        cta={
+          inviti.some((i) => i.stato === "inviato")
+            ? "Gestisci gli inviti"
+            : "Manda l'invito"
+        }
+        onClick={() => setSheetAperta("invito")}
+      />
+
+      {/* Account */}
         <Row
           color="var(--ink-soft)"
           icon={<IconLucchetto className="fill-none stroke-white stroke-2" />}
@@ -220,6 +244,14 @@ export function ProfiloClient({
         tenant={tenant}
         zoneIniziali={zoneIniziali}
         interessiIniziali={interessiIniziali}
+      />
+
+      {/* ---- Sheet: Invita il proprietario ---- */}
+      <InvitaProprietarioSheet
+        open={sheetAperta === "invito"}
+        onClose={() => setSheetAperta(null)}
+        nomeInquilino={nome}
+        inviti={inviti}
       />
 
       {/* ---- Sheet: Account ---- */}

@@ -37,3 +37,14 @@ export const ZONE_MILANO = [
   "Certosa, Milano",
   "Lambrate, Milano",
 ] as const;
+
+// Qualità che un proprietario può riconoscere a un inquilino. Sono le
+// stesse etichette che finiscono in `recensioni.tag`.
+export const TAG_RECENSIONE = [
+  "Puntuale nei pagamenti",
+  "Casa lasciata in ottimo stato",
+  "Comunicazione facile",
+  "Rispettoso del vicinato",
+  "Segnala subito i problemi",
+  "Rinnoverei il contratto",
+] as const;

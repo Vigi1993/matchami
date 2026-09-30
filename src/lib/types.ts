@@ -139,3 +139,15 @@ export type ContrattoConAnnuncio = {
     listings: { titolo: string; zona: string } | null;
   } | null;
 };
+
+/** Invito mandato da un inquilino al proprio proprietario. */
+export type Invito = {
+  id: string;
+  token: string;
+  nome_proprietario: string;
+  email_proprietario: string | null;
+  indirizzo: string | null;
+  periodo: string | null;
+  stato: "inviato" | "completato" | "annullato";
+  created_at: string;
+};

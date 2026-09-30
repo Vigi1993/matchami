@@ -1,7 +1,25 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
+
+/**
+ * Accetta solo percorsi interni: senza questo controllo `?next=` sarebbe
+ * un redirect aperto verso qualunque sito.
+ */
+function destinazioneSicura(valore: FormDataEntryValue | null): string {
+  const s = String(valore || "");
+  return s.startsWith("/") && !s.startsWith("//") ? s : "/";
+}
+
+async function origine(): Promise<string | null> {
+  const h = await headers();
+  const host = h.get("x-forwarded-host") ?? h.get("host");
+  if (!host) return null;
+  const proto = h.get("x-forwarded-proto") ?? "https";
+  return `${proto}://${host}`;
+}
 
 export type AuthState = { error?: string } | null;
 
@@ -15,6 +33,7 @@ export async function signup(
   const cognome = String(formData.get("cognome") || "");
   const ruolo = String(formData.get("ruolo") || "inquilino");
   const privacyAccettata = formData.get("privacy") === "on";
+  const next = destinazioneSicura(formData.get("next"));
 
   if (!privacyAccettata) {
     return { error: "Devi accettare la privacy per continuare." };
@@ -25,10 +44,16 @@ export async function signup(
 
   const supabase = await createClient();
 
+  const base = await origine();
+
   const { error } = await supabase.auth.signUp({
     email,
     password,
     options: {
+      // dopo la conferma email l'utente torna dove stava andando
+      emailRedirectTo: base
+        ? `${base}/auth/callback?next=${encodeURIComponent(next)}`
+        : undefined,
       data: {
         nome,
         cognome,
@@ -51,6 +76,7 @@ export async function login(
 ): Promise<AuthState> {
   const email = String(formData.get("email") || "");
   const password = String(formData.get("password") || "");
+  const next = destinazioneSicura(formData.get("next"));
 
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -59,7 +85,7 @@ export async function login(
     return { error: "Email o password non corrette." };
   }
 
-  redirect("/");
+  redirect(next);
 }
 
 export async function logout() {

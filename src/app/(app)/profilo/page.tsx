@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { ProfiloClient } from "./ProfiloClient";
 import { OwnerProfiloClient } from "./OwnerProfiloClient";
-import type { TenantProfile, OwnerProfile } from "@/lib/types";
+import type { TenantProfile, OwnerProfile, Invito } from "@/lib/types";
 
 export default async function ProfiloPage() {
   const supabase = await createClient();
@@ -39,6 +39,7 @@ export default async function ProfiloPage() {
     { data: zoneRows },
     { data: interessiRows },
     { data: recensioni },
+    { data: inviti },
   ] = await Promise.all([
     supabase.from("tenant_profiles").select("*").eq("profile_id", user!.id).single(),
     supabase.from("tenant_zone_interesse").select("zona").eq("tenant_id", user!.id),
@@ -47,6 +48,11 @@ export default async function ProfiloPage() {
       .select("attributo_key, peso")
       .eq("tenant_id", user!.id),
     supabase.from("recensioni").select("voto").eq("tenant_id", user!.id),
+    supabase
+      .from("inviti_proprietario")
+      .select("id, token, nome_proprietario, email_proprietario, indirizzo, periodo, stato, created_at")
+      .eq("tenant_id", user!.id)
+      .order("created_at", { ascending: false }),
   ]);
 
   const zoneIniziali = (zoneRows ?? []).map((r) => r.zona as string);
@@ -65,6 +71,7 @@ export default async function ProfiloPage() {
       cognome={profile?.cognome ?? null}
       email={user!.email ?? null}
       tenant={tenant as TenantProfile}
+      inviti={(inviti ?? []) as Invito[]}
       zoneIniziali={zoneIniziali}
       interessiIniziali={interessiIniziali}
       mediaRecensioni={mediaRecensioni}

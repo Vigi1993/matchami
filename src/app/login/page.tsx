@@ -18,6 +18,7 @@ export default function LoginPage() {
 function LoginForm() {
   const searchParams = useSearchParams();
   const erroreConferma = searchParams.get("errore");
+  const next = searchParams.get("next") ?? "/";
 
   const [tab, setTab] = useState<"registrati" | "accedi">("registrati");
   const [ruolo, setRuolo] = useState<Ruolo>("inquilino");
@@ -89,6 +90,7 @@ function LoginForm() {
               />
             </div>
             <input type="hidden" name="ruolo" value={ruolo} />
+            <input type="hidden" name="next" value={next} />
 
             <div className="flex gap-3">
               <Input name="nome" placeholder="Nome" />
@@ -118,6 +120,7 @@ function LoginForm() {
           </form>
         ) : (
           <form action={loginAction} className="flex flex-col gap-3">
+            <input type="hidden" name="next" value={next} />
             <Input name="email" type="email" placeholder="Email" required />
             <Input
               name="password"
