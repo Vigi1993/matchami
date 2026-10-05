@@ -131,6 +131,11 @@ export type ListingConFoto = {
   listing_photos: { url: string; ordine: number }[];
 };
 
+/** Un annuncio del mazzo, con il calcolo di quanto va bene a questo inquilino. */
+export type ListingConMatch = ListingConFoto & {
+  match: import("@/lib/match").RisultatoInquilino;
+};
+
 export type ContrattoConAnnuncio = {
   id: string;
   stato: StatoContratto;

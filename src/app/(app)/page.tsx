@@ -2,7 +2,9 @@ import { createClient } from "@/lib/supabase/server";
 import { HomeClient } from "./HomeClient";
 import { OwnerHomeClient } from "./OwnerHomeClient";
 import { computeAffidabilita } from "@/lib/affidabilita";
-import type { TenantProfile, ListingConFoto, ListingProprietario } from "@/lib/types";
+import { haCriteriDiRicerca, preparaMazzo } from "@/lib/match";
+import type { ProfiloRicerca } from "@/lib/match";
+import type { TenantProfile, ListingConMatch, ListingProprietario } from "@/lib/types";
 
 export default async function Home() {
   const supabase = await createClient();
@@ -26,13 +28,22 @@ export default async function Home() {
 async function TenantHome({ userId }: { userId: string }) {
   const supabase = await createClient();
 
-  const [{ data: tenant }, { data: zoneRows }, { data: recensioni }, { data: giaCandidato }] =
-    await Promise.all([
-      supabase.from("tenant_profiles").select("*").eq("profile_id", userId).single(),
-      supabase.from("tenant_zone_interesse").select("zona").eq("tenant_id", userId),
-      supabase.from("recensioni").select("voto").eq("tenant_id", userId),
-      supabase.from("candidature").select("listing_id").eq("tenant_id", userId),
-    ]);
+  const [
+    { data: tenant },
+    { data: zoneRows },
+    { data: interessiRows },
+    { data: recensioni },
+    { data: giaCandidato },
+  ] = await Promise.all([
+    supabase.from("tenant_profiles").select("*").eq("profile_id", userId).single(),
+    supabase.from("tenant_zone_interesse").select("zona").eq("tenant_id", userId),
+    supabase
+      .from("tenant_interessi")
+      .select("attributo_key, peso")
+      .eq("tenant_id", userId),
+    supabase.from("recensioni").select("voto").eq("tenant_id", userId),
+    supabase.from("candidature").select("listing_id").eq("tenant_id", userId),
+  ]);
 
   const zone = (zoneRows ?? []).map((r) => r.zona as string);
   const numeroRecensioni = recensioni?.length ?? 0;
@@ -54,22 +65,17 @@ async function TenantHome({ userId }: { userId: string }) {
     numeroRecensioni,
   });
 
-  // ---- Costruisco la query "case in linea con la tua ricerca" ----
-  // Stessa logica del prototipo (listingsAfterFilters): budget, locali,
-  // metratura minima e zone preferite. Se non ci sono ancora annunci nel
-  // database, questa query restituisce semplicemente 0 risultati — è il
-  // comportamento corretto, non un errore.
+  // ---- Tutti gli annunci pubblicati che l'inquilino non ha già scelto ----
+  // Budget, locali, metratura e zone NON filtrano più la query: li valuta
+  // calcolaMatchInquilino, che decide se un annuncio è in ricerca, oltre la
+  // ricerca (compare in fondo, marcato) o escluso (oltre la tolleranza sul
+  // budget). Se non ci sono annunci, la query restituisce 0 risultati.
   let query = supabase
     .from("listings")
     .select(
       "id, titolo, zona, prezzo, locali, mq, descrizione, attributi, listing_photos(url, ordine)"
     )
     .eq("pubblicato", true);
-
-  if (tenantProfile.budget_max) query = query.lte("prezzo", tenantProfile.budget_max);
-  if (tenantProfile.locali_min) query = query.gte("locali", tenantProfile.locali_min);
-  if (tenantProfile.mq_min) query = query.gte("mq", tenantProfile.mq_min);
-  if (zone.length > 0) query = query.in("zona", zone);
 
   const listingIdsEsclusi = (giaCandidato ?? []).map((c) => c.listing_id as string);
   if (listingIdsEsclusi.length > 0) {
@@ -87,10 +93,26 @@ async function TenantHome({ userId }: { userId: string }) {
     ),
   }));
 
+  // Criteri di ricerca dell'inquilino. Un valore 0 o vuoto vale "nessuna
+  // preferenza", come nel filtro che c'era prima.
+  const profiloRicerca: ProfiloRicerca = {
+    budgetMax: tenantProfile.budget_max || null,
+    localiMin: tenantProfile.locali_min || null,
+    mqMin: tenantProfile.mq_min || null,
+    zone,
+    interessi: Object.fromEntries(
+      (interessiRows ?? []).map((r) => [r.attributo_key as string, r.peso as number])
+    ),
+  };
+
+  const { mazzo, esclusi } = preparaMazzo(listingsOrdinati, profiloRicerca);
+
   return (
     <HomeClient
       affidabilita={affidabilita}
-      listings={listingsOrdinati as unknown as ListingConFoto[]}
+      listings={mazzo as unknown as ListingConMatch[]}
+      esclusi={esclusi}
+      mostraMatch={haCriteriDiRicerca(profiloRicerca)}
     />
   );
 }

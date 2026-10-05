@@ -52,7 +52,9 @@ export function calcolaMatchInquilino(
   let punti = 0;
   let fuoriRicerca = false;
   let escluso = false;
+  let sforoBudgetPct: number | null = null;
   const criteri: VoceCriterio[] = [];
+  const motivi: string[] = [];
   const avvisi: string[] = [];
 
   // ---------------- Budget ----------------
@@ -73,9 +75,10 @@ export function calcolaMatchInquilino(
         Math.max(0, 1 - sforo / CURVA_BUDGET.sforoAZero);
 
       const pct = Math.max(1, Math.round(sforo * 100));
+      sforoBudgetPct = pct;
       if (sforo <= TOLLERANZA_BUDGET + EPS) {
         fuoriRicerca = true;
-        avvisi.push(`Oltre il tuo budget del ${pct}%`);
+        motivi.push(`Oltre il tuo budget del ${pct}%`);
       } else {
         escluso = true;
       }
@@ -98,6 +101,7 @@ export function calcolaMatchInquilino(
   } else {
     punti += W.zona * PENALITA.zonaFuori;
     fuoriRicerca = true;
+    motivi.push("Fuori dalle tue zone");
     criteri.push({
       chiave: "zona",
       etichetta: "Zona preferita",
@@ -127,6 +131,7 @@ export function calcolaMatchInquilino(
   } else {
     punti += W.locali * PENALITA.localiSotto;
     fuoriRicerca = true;
+    motivi.push("Meno locali del tuo minimo");
     criteri.push({
       chiave: "locali",
       etichetta: `${profilo.localiMin}+ locali`,
@@ -160,6 +165,7 @@ export function calcolaMatchInquilino(
       W.mq * rapporto - W.mq * PENALITA.mqSottoDetrazione
     );
     fuoriRicerca = true;
+    motivi.push("Sotto la tua metratura minima");
     criteri.push({
       chiave: "mq",
       etichetta: `${profilo.mqMin}+ m²`,
@@ -207,7 +213,9 @@ export function calcolaMatchInquilino(
     punteggio,
     etichetta: etichettaPer(punteggio),
     fascia,
+    sforoBudgetPct,
     criteri,
+    motivi,
     avvisi,
   };
 }

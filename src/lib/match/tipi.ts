@@ -55,8 +55,15 @@ export type RisultatoInquilino = {
   punteggio: number;
   etichetta: EtichettaMatch;
   fascia: Fascia;
+  /** di quanto il canone supera il budget, in % arrotondata; `null` se non lo supera */
+  sforoBudgetPct: number | null;
   criteri: VoceCriterio[];
-  /** frasi per l'interfaccia, es. "Oltre il tuo budget del 6%" */
+  /**
+   * Perché l'annuncio è `oltre_ricerca`, in frasi per l'interfaccia
+   * (es. "Oltre il tuo budget del 6%"). Vuoto se è `in_ricerca`.
+   */
+  motivi: string[];
+  /** Dati che mancano nell'annuncio e rendono il punteggio meno preciso. */
   avvisi: string[];
 };
 

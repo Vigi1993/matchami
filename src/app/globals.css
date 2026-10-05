@@ -2075,3 +2075,143 @@ input[type="range"]::-moz-range-thumb {
   padding: 2px 6px;
   border-radius: 999px;
 }
+
+/* ============================================================
+   MATCH: percentuale sulla card, separatore, spiegazione nella scheda
+   ============================================================ */
+
+/* Riga sopra la zona, sulla card. */
+.match-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.match-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(16, 21, 26, 0.6);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(92, 140, 116, 0.65);
+  color: rgba(247, 244, 236, 0.86);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.match-pill b {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  color: #8fe3b8;
+}
+.match-pill.oltre {
+  border-color: rgba(201, 161, 90, 0.7);
+}
+.match-pill.oltre b {
+  color: var(--gold);
+}
+.match-tag {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(201, 161, 90, 0.2);
+  border: 1px solid rgba(201, 161, 90, 0.5);
+  color: var(--gold);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.match-motivi {
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gold);
+}
+
+/* Link discreti nel riquadro in alto e nelle schermate di passaggio. */
+.home-intro .hi-link,
+.empty-state .link-quiet {
+  color: var(--gold);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.empty-state .link-quiet {
+  display: block;
+  margin-top: 16px;
+  font-size: 12.5px;
+}
+.empty-state .opp-cta {
+  width: auto;
+  min-width: 220px;
+  padding-left: 28px;
+  padding-right: 28px;
+}
+
+/* Spiegazione nella scheda. */
+.match-box {
+  background: var(--paper-dim);
+  border-radius: 18px;
+  padding: 16px 16px 14px 16px;
+  margin-bottom: 18px;
+}
+.match-box-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+.match-box-pct {
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 700;
+  color: var(--moss);
+  line-height: 1;
+}
+.match-box-label {
+  font-weight: 700;
+  font-size: 13.5px;
+  color: var(--ink);
+}
+.match-box-sub {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-top: 1px;
+}
+.perche-lista {
+  display: grid;
+  gap: 2px;
+}
+.perche-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 5px 0;
+  font-size: 13px;
+  color: var(--body-text);
+}
+.perche-simbolo {
+  flex: 0 0 16px;
+  text-align: center;
+  font-weight: 700;
+}
+.perche-row.ok .perche-simbolo {
+  color: var(--moss);
+}
+.perche-row.no {
+  color: var(--muted);
+}
+.perche-row.no .perche-simbolo {
+  color: var(--clay);
+}
+.perche-row.non_indicato .perche-simbolo {
+  color: var(--gold-ink);
+}
+.perche-testo small {
+  display: block;
+  font-size: 11.5px;
+  color: var(--muted);
+}

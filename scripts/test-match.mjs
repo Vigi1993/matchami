@@ -59,6 +59,9 @@ const {
   ordinaCandidati,
   etichettaPer,
   CHIAVI_CRITERI,
+  preparaMazzo,
+  haCriteriDiRicerca,
+  statoMazzo,
 } = m;
 
 // ---- dati di prova
@@ -125,10 +128,30 @@ test("D1: fasce del budget con tolleranza del 10%", () => {
   assert.equal(f(2200), "escluso");
 });
 
-test("lo sforamento entro tolleranza genera un avviso leggibile", () => {
+test("lo sforamento entro tolleranza ha un motivo leggibile, non un avviso", () => {
   const r = calcolaMatchInquilino(casa({ prezzo: 1590 }), profilo());
   assert.equal(r.fascia, "oltre_ricerca");
-  assert.deepEqual(r.avvisi, ["Oltre il tuo budget del 6%"]);
+  assert.deepEqual(r.motivi, ["Oltre il tuo budget del 6%"]);
+  assert.deepEqual(r.avvisi, [], "gli avvisi sono solo per i dati mancanti");
+});
+
+test("ogni motivo di fuori-ricerca è spiegato, e in ricerca non ne ha", () => {
+  const motivi = (a) => calcolaMatchInquilino(a, profilo()).motivi;
+  assert.deepEqual(motivi(casa()), []);
+  assert.deepEqual(motivi(casa({ zona: "Bicocca, Milano" })), ["Fuori dalle tue zone"]);
+  assert.deepEqual(motivi(casa({ locali: 1 })), ["Meno locali del tuo minimo"]);
+  assert.deepEqual(motivi(casa({ mq: 40 })), ["Sotto la tua metratura minima"]);
+  // più motivi insieme
+  assert.equal(motivi(casa({ prezzo: 1560, locali: 1, zona: "Bicocca, Milano" })).length, 3);
+});
+
+test("lo sforamento del budget è esposto come numero, per chi deve contarlo", () => {
+  const sforo = (prezzo) => calcolaMatchInquilino(casa({ prezzo }), profilo()).sforoBudgetPct;
+  assert.equal(sforo(1400), null);
+  assert.equal(sforo(1500), null);
+  assert.equal(sforo(1590), 6);
+  assert.equal(sforo(1650), 10);
+  assert.equal(sforo(2000), 33, "anche gli esclusi lo riportano");
 });
 
 test("senza budget impostato non c'è limite e nessuna fascia penalizzante", () => {
@@ -349,4 +372,148 @@ test("D4: i candidati si ordinano per blocco, percentuale e, a parità, affidabi
     "sessanta-affidabile-50",
     "bloccato-alto",
   ]);
+});
+
+// ============================================================
+// Il mazzo dell'inquilino (quello che la pagina Home passa al deck)
+// ============================================================
+
+// annunci con campi in più rispetto al calcolo, come arrivano dal database
+const riga = (id, o = {}) => ({ id, titolo: `Casa ${id}`, ...casa(o) });
+
+test("preparaMazzo: ordina per fascia, toglie gli esclusi e li conta", () => {
+  const { mazzo, inRicerca, esclusi } = preparaMazzo(
+    [
+      riga("fuoriZona", { zona: "Bicocca, Milano" }), // oltre_ricerca
+      riga("perfetta", { prezzo: 1200 }), // in_ricerca, punteggio alto
+      riga("troppoCara", { prezzo: 2000 }), // escluso
+      riga("ok", { prezzo: 1500 }), // in_ricerca
+    ],
+    profilo()
+  );
+
+  assert.deepEqual(mazzo.map((v) => v.id), ["perfetta", "ok", "fuoriZona"]);
+  assert.equal(inRicerca, 2);
+  assert.equal(esclusi, 1);
+});
+
+test("preparaMazzo conserva i campi dell'annuncio e aggiunge il match", () => {
+  const { mazzo } = preparaMazzo([riga("x")], profilo());
+  assert.equal(mazzo[0].id, "x");
+  assert.equal(mazzo[0].titolo, "Casa x");
+  assert.equal(typeof mazzo[0].match.punteggio, "number");
+});
+
+test("preparaMazzo: i primi `inRicerca` annunci sono davvero quelli in ricerca", () => {
+  // il deck si fida di questo per decidere dove mettere il separatore
+  const { mazzo, inRicerca } = preparaMazzo(
+    [
+      riga("a", { zona: "Bicocca, Milano", prezzo: 1000 }),
+      riga("b", { prezzo: 1500 }),
+      riga("c", { prezzo: 1580 }),
+      riga("d", { prezzo: 1100 }),
+    ],
+    profilo()
+  );
+  mazzo.forEach((v, i) => {
+    assert.equal(
+      v.match.fascia === "in_ricerca",
+      i < inRicerca,
+      `posizione ${i} (${v.id}) è ${v.match.fascia}`
+    );
+  });
+});
+
+test("preparaMazzo: mazzo vuoto e tutti esclusi", () => {
+  assert.deepEqual(preparaMazzo([], profilo()), { mazzo: [], inRicerca: 0, esclusi: 0 });
+  const r = preparaMazzo([riga("a", { prezzo: 9000 }), riga("b", { prezzo: 8000 })], profilo());
+  assert.equal(r.mazzo.length, 0);
+  assert.equal(r.esclusi, 2);
+});
+
+test("senza criteri di ricerca nessuna percentuale è significativa e l'ordine resta quello d'arrivo", () => {
+  const vuoto = { budgetMax: null, localiMin: null, mqMin: null, zone: [], interessi: {} };
+  assert.equal(haCriteriDiRicerca(vuoto), false);
+
+  const { mazzo, inRicerca } = preparaMazzo(
+    [riga("1", { prezzo: 3000 }), riga("2", { zona: "Bicocca, Milano" }), riga("3")],
+    vuoto
+  );
+  assert.deepEqual(mazzo.map((v) => v.id), ["1", "2", "3"]);
+  assert.equal(inRicerca, 3);
+  assert.equal(new Set(mazzo.map((v) => v.match.punteggio)).size, 1, "tutti lo stesso punteggio");
+});
+
+test("haCriteriDiRicerca: basta un criterio qualsiasi", () => {
+  const base = { budgetMax: null, localiMin: null, mqMin: null, zone: [], interessi: {} };
+  assert.equal(haCriteriDiRicerca({ ...base, budgetMax: 1500 }), true);
+  assert.equal(haCriteriDiRicerca({ ...base, localiMin: 2 }), true);
+  assert.equal(haCriteriDiRicerca({ ...base, mqMin: 50 }), true);
+  assert.equal(haCriteriDiRicerca({ ...base, zone: ["Isola, Milano"] }), true);
+  assert.equal(haCriteriDiRicerca({ ...base, interessi: { balcone: 5 } }), true);
+});
+
+// ============================================================
+// Il separatore tra "in linea" e "oltre la ricerca"
+// ============================================================
+
+const IN = "in_ricerca";
+const OLTRE = "oltre_ricerca";
+const opz = (o = {}) => ({ mostraMatch: true, separatoreVisto: false, ...o });
+
+test("il separatore compare esattamente al primo annuncio della seconda fascia", () => {
+  const fasce = [IN, IN, OLTRE, OLTRE];
+  const compare = (i, o) => statoMazzo(fasce, i, opz(o)).mostraSeparatore;
+
+  assert.equal(compare(0), false);
+  assert.equal(compare(1), false);
+  assert.equal(compare(2), true, "dopo i due in ricerca");
+  assert.equal(compare(3), false);
+  assert.equal(compare(4), false, "mazzo finito");
+});
+
+test("il separatore sparisce dopo che l'inquilino lo ha superato", () => {
+  const fasce = [IN, OLTRE];
+  assert.equal(statoMazzo(fasce, 1, opz()).mostraSeparatore, true);
+  assert.equal(statoMazzo(fasce, 1, opz({ separatoreVisto: true })).mostraSeparatore, false);
+});
+
+test("se nessun annuncio è in ricerca il separatore apre il mazzo", () => {
+  const s = statoMazzo([OLTRE, OLTRE], 0, opz());
+  assert.equal(s.mostraSeparatore, true);
+  assert.equal(s.inRicerca, 0);
+  assert.equal(s.oltre, 2);
+});
+
+test("senza fascia 'oltre' o senza criteri non c'è mai separatore", () => {
+  for (let i = 0; i <= 3; i++) {
+    assert.equal(statoMazzo([IN, IN, IN], i, opz()).mostraSeparatore, false);
+    assert.equal(statoMazzo([IN, OLTRE], i, opz({ mostraMatch: false })).mostraSeparatore, false);
+  }
+});
+
+test("sequenza completa di swipe: il separatore compare una volta sola", () => {
+  const fasce = [IN, IN, OLTRE, OLTRE, OLTRE];
+  let visto = false;
+  const comparse = [];
+  for (let indice = 0; indice < fasce.length; indice++) {
+    if (statoMazzo(fasce, indice, opz({ separatoreVisto: visto })).mostraSeparatore) {
+      comparse.push(indice);
+      visto = true; // l'inquilino preme "Vedi le altre case"
+    }
+  }
+  assert.deepEqual(comparse, [2]);
+  assert.equal(statoMazzo(fasce, 5, opz({ separatoreVisto: visto })).finito, true);
+});
+
+test("il separatore cade dove preparaMazzo mette il primo annuncio fuori ricerca", () => {
+  const { mazzo } = preparaMazzo(
+    [riga("a", { zona: "Bicocca, Milano" }), riga("b", { prezzo: 1200 }), riga("c", { prezzo: 1590 }), riga("d")],
+    profilo()
+  );
+  const fasce = mazzo.map((v) => v.match.fascia);
+  const i = fasce.findIndex((f) => f === "oltre_ricerca");
+  assert.ok(i > 0);
+  assert.equal(statoMazzo(fasce, i, opz()).mostraSeparatore, true);
+  assert.equal(statoMazzo(fasce, i - 1, opz()).mostraSeparatore, false);
 });

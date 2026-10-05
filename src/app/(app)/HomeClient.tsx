@@ -1,8 +1,10 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import type { AffidabilitaResult } from "@/lib/affidabilita";
-import type { ListingConFoto } from "@/lib/types";
+import type { ListingConMatch } from "@/lib/types";
+import { TOLLERANZA_BUDGET, statoMazzo } from "@/lib/match";
 import { candidati } from "./actions";
 import {
   IconChevronSu,
@@ -19,11 +21,24 @@ const SOGLIA_TOCCO = 8; // sotto questo spostamento è un tocco, non un trascina
 export function HomeClient({
   affidabilita,
   listings,
+  esclusi,
+  mostraMatch,
 }: {
   affidabilita: AffidabilitaResult;
-  listings: ListingConFoto[];
+  /** il mazzo già ordinato: prima gli annunci in ricerca, poi gli altri */
+  listings: ListingConMatch[];
+  /** annunci tolti perché oltre la tolleranza sul budget */
+  esclusi: number;
+  /** false se l'inquilino non ha impostato nessun criterio di ricerca */
+  mostraMatch: boolean;
 }) {
+  // Il mazzo si congela alla prima visualizzazione. Dopo una candidatura
+  // la pagina viene rigenerata dal server senza l'annuncio appena scelto:
+  // se il deck seguisse quella lista, il suo indice salterebbe una casa e
+  // il punto del separatore si sposterebbe a metà sessione.
+  const [mazzo] = useState(listings);
   const [index, setIndex] = useState(0);
+  const [separatoreVisto, setSeparatoreVisto] = useState(false);
   const [candidatureInviate, setCandidatureInviate] = useState<Set<string>>(
     new Set()
   );
@@ -40,15 +55,24 @@ export function HomeClient({
   // non scattare, e senza questo il tocco finirebbe nella zona foto.
   const daPulsante = useRef(false);
 
-  const attuale = listings[index];
-  const finito = index >= listings.length;
+  const attuale = mazzo[index];
+
+  // Gli annunci in ricerca sono i primi del mazzo; poi comincia la fascia
+  // "oltre la tua ricerca", che si apre con una schermata di passaggio.
+  const { inRicerca, oltre, finito, mostraSeparatore } = statoMazzo(
+    mazzo.map((l) => l.match.fascia),
+    index,
+    { mostraMatch, separatoreVisto }
+  );
+  const oltreBudget = mazzo.filter((l) => l.match.sforoBudgetPct !== null).length;
+  const tolleranzaPct = Math.round(TOLLERANZA_BUDGET * 100);
 
   function scarta() {
     setIndex((i) => i + 1);
     setFotoIdx(0);
   }
 
-  function candidati_(listing: ListingConFoto) {
+  function candidati_(listing: ListingConMatch) {
     startTransition(async () => {
       const res = await candidati(listing.id);
       if (!res?.error) {
@@ -62,7 +86,7 @@ export function HomeClient({
   // Azionata sia dal rilascio del trascinamento sia dai pulsanti: fa
   // "volare via" la card nella direzione scelta, poi passa alla prossima.
   function swipe(direzione: "left" | "right") {
-    if (!attuale || pending) return;
+    if (!attuale || pending || mostraSeparatore) return;
     setSchedaAperta(false);
     setExiting(direzione);
     setTimeout(() => {
@@ -152,9 +176,9 @@ export function HomeClient({
         <div className="brand">
           Match<b>AmI</b>
         </div>
-        {listings.length > 0 && !finito && (
+        {mazzo.length > 0 && !finito && (
           <div className="counter">
-            {index + 1} / {listings.length}
+            {index + 1} / {mazzo.length}
           </div>
         )}
       </div>
@@ -171,49 +195,92 @@ export function HomeClient({
             </div>
           </div>
           <div className="hi-count">
-            <b>{listings.length}</b>
-            casa{listings.length === 1 ? "" : "e"} in linea
-            <br />
-            con la tua ricerca
+            {mostraMatch ? (
+              <>
+                <b>{inRicerca}</b>
+                {inRicerca === 1 ? "casa in linea" : "case in linea"}
+                <br />
+                {oltre > 0 ? `+ ${oltre} oltre la ricerca` : "con la tua ricerca"}
+              </>
+            ) : (
+              <>
+                <b>{mazzo.length}</b>
+                {mazzo.length === 1 ? "casa disponibile" : "case disponibili"}
+                <br />
+                <Link href="/profilo" className="hi-link">
+                  Imposta la ricerca
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </div>
 
       <div className="deck">
         {/* ---- Nessun annuncio ---- */}
-        {listings.length === 0 && (
+        {mazzo.length === 0 && (
           <div className="empty-state">
             <div className="ring">
-              <IconCasa
-                className="icon-ring"
-              />
+              <IconCasa className="icon-ring" />
             </div>
-            <h2>Nessun annuncio in linea con la tua ricerca</h2>
+            <h2>
+              {esclusi > 0
+                ? "Nessuna casa nel tuo budget"
+                : "Nessun annuncio per la tua ricerca"}
+            </h2>
             <p>
-              Appena ci saranno immobili pubblicati che rientrano nei tuoi
-              criteri, li vedrai qui. Nel frattempo puoi aggiornare i criteri
-              in Profilo → La tua ricerca.
+              {esclusi > 0
+                ? `Ci sono ${esclusi} ${esclusi === 1 ? "casa" : "case"} oltre il ${tolleranzaPct}% del tuo budget, che non ti mostriamo. Se vuoi vederle, aggiorna il budget in Profilo → La tua ricerca.`
+                : "Appena ci saranno immobili pubblicati che rientrano nei tuoi criteri, li vedrai qui. Nel frattempo puoi aggiornare i criteri in Profilo → La tua ricerca."}
             </p>
           </div>
         )}
 
         {/* ---- Deck esaurito ---- */}
-        {listings.length > 0 && finito && (
+        {mazzo.length > 0 && finito && (
           <div className="empty-state">
             <div className="ring">
-              <IconCuore
-                className="icon-ring"
-              />
+              <IconCuore className="icon-ring" />
             </div>
             <h2>Hai visto tutti gli annunci disponibili</h2>
             <p>
               Torna più tardi: ne arrivano di nuovi appena vengono pubblicati.
+              {esclusi > 0 &&
+                ` Altre ${esclusi} ${esclusi === 1 ? "casa è" : "case sono"} oltre il ${tolleranzaPct}% del tuo budget e non te ${esclusi === 1 ? "la" : "le"} mostriamo: se vuoi vederle, aggiorna il budget in Profilo.`}
             </p>
           </div>
         )}
 
+        {/* ---- Passaggio tra "in linea" e "oltre la ricerca" ---- */}
+        {mostraSeparatore && (
+          <div className="empty-state">
+            <div className="ring">
+              <IconChevronSu className="icon-ring" />
+            </div>
+            <h2>
+              {inRicerca > 0
+                ? "Hai visto le case in linea con la tua ricerca"
+                : "Nessuna casa rispetta tutti i tuoi criteri"}
+            </h2>
+            <p>
+              {descriviOltre(oltre, oltreBudget, tolleranzaPct, inRicerca > 0)} Puoi
+              guardarle comunque: le trovi segnate come &quot;oltre la tua ricerca&quot;.
+            </p>
+            <button
+              type="button"
+              className="opp-cta"
+              onClick={() => setSeparatoreVisto(true)}
+            >
+              Vedi le altre case
+            </button>
+            <Link href="/profilo" className="link-quiet">
+              Modifica la tua ricerca
+            </Link>
+          </div>
+        )}
+
         {/* ---- Card corrente (trascinabile) ---- */}
-        {attuale && !finito && (
+        {attuale && !finito && !mostraSeparatore && (
           <div
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
@@ -267,6 +334,21 @@ export function HomeClient({
             </div>
 
             <div className="card-info">
+              {mostraMatch && (
+                <div className="match-row">
+                  <span
+                    className={`match-pill ${
+                      attuale.match.fascia === "oltre_ricerca" ? "oltre" : ""
+                    }`}
+                  >
+                    <b>{attuale.match.punteggio}%</b>
+                    {attuale.match.etichetta}
+                  </span>
+                  {attuale.match.fascia === "oltre_ricerca" && (
+                    <span className="match-tag">Oltre la tua ricerca</span>
+                  )}
+                </div>
+              )}
               <div className="zona">{attuale.zona}</div>
               <h1>{attuale.titolo}</h1>
               <div className="meta-row">
@@ -277,6 +359,12 @@ export function HomeClient({
                 {attuale.locali && <span>{attuale.locali} locali</span>}
                 {attuale.mq && <span>{attuale.mq} m²</span>}
               </div>
+
+              {mostraMatch && attuale.match.motivi.length > 0 && (
+                <div className="match-motivi">
+                  {attuale.match.motivi.join(" · ")}
+                </div>
+              )}
 
               <button
                 type="button"
@@ -302,7 +390,7 @@ export function HomeClient({
       </div>
 
       {/* ---- Pulsanti scarta / candidati ---- */}
-      {attuale && !finito && (
+      {attuale && !finito && !mostraSeparatore && (
         <div className="actions">
           <button
             className="btn-pass"
@@ -325,6 +413,7 @@ export function HomeClient({
 
       <SchedaImmobile
         listing={schedaAperta ? attuale : null}
+        mostraMatch={mostraMatch}
         onClose={() => setSchedaAperta(false)}
         onPassa={() => swipe("left")}
         onCandidati={() => swipe("right")}
@@ -338,4 +427,30 @@ export function HomeClient({
       )}
     </div>
   );
+}
+
+/** Frase che spiega perché le case che restano si discostano dalla ricerca. */
+function descriviOltre(
+  oltre: number,
+  oltreBudget: number,
+  tolleranzaPct: number,
+  haAltre: boolean
+): string {
+  const altre = oltre - oltreBudget;
+  const quante =
+    oltre === 1
+      ? haAltre
+        ? "Ce n'è un'altra"
+        : "Ce n'è una"
+      : haAltre
+        ? `Ce ne sono altre ${oltre}`
+        : `Ce ne sono ${oltre}`;
+
+  if (oltreBudget > 0 && altre > 0) {
+    return `${quante} che si discostano un po': ${oltreBudget} sopra il budget (al massimo del ${tolleranzaPct}%), ${altre} che ${altre === 1 ? "non rispetta" : "non rispettano"} zona, locali o metratura.`;
+  }
+  if (oltreBudget > 0) {
+    return `${quante}, sopra il tuo budget di non più del ${tolleranzaPct}%.`;
+  }
+  return `${quante} che ${oltre === 1 ? "non rispetta" : "non rispettano"} zona, locali o metratura.`;
 }
