@@ -1,6 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { ImmobiliClient } from "./ImmobiliClient";
 import type { ImmobileDettaglio } from "@/lib/types";
+import { criteriDaRighe } from "@/lib/match";
+import type { RigaCriterioDb } from "@/lib/match";
 
 export default async function ImmobiliPage() {
   const supabase = await createClient();
@@ -12,7 +14,7 @@ export default async function ImmobiliPage() {
     supabase
       .from("listings")
       .select(
-        "id, titolo, descrizione, zona, prezzo, locali, mq, attributi, pubblicato, listing_photos(url, ordine)"
+        "id, titolo, descrizione, zona, prezzo, locali, mq, attributi, pubblicato, listing_photos(url, ordine), listing_criteri(chiave, peso, modo, soglia_pct)"
       )
       .eq("owner_id", user!.id)
       .order("created_at", { ascending: false }),
@@ -41,6 +43,7 @@ export default async function ImmobiliPage() {
     foto: [...((l.listing_photos as { url: string; ordine: number }[]) ?? [])]
       .sort((a, b) => (a.ordine ?? 0) - (b.ordine ?? 0))
       .map((f) => f.url),
+    criteri: criteriDaRighe(l.listing_criteri as RigaCriterioDb[] | null),
     nCandidature: nCandidaturePerListing.get(l.id) ?? 0,
   }));
 

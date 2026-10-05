@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { normalizzaCriteri, righeDaCriteri } from "@/lib/match";
+import type { CriterioRichiesto } from "@/lib/match";
 
 export type SaveState = { error?: string; ok?: boolean } | null;
 
@@ -12,6 +14,38 @@ function parseAttributi(raw: FormDataEntryValue | null): Record<string, boolean>
   } catch {
     return {};
   }
+}
+
+type Supabase = Awaited<ReturnType<typeof createClient>>;
+
+/**
+ * Riscrive i criteri di un annuncio. Prima scrive quelli richiesti (upsert)
+ * e solo dopo toglie quelli non più richiesti: se la scrittura fallisce, i
+ * criteri precedenti restano dove sono invece di sparire.
+ * Restituisce il messaggio d'errore, o null.
+ */
+async function salvaCriteri(
+  supabase: Supabase,
+  listingId: string,
+  criteri: CriterioRichiesto[]
+): Promise<string | null> {
+  if (criteri.length > 0) {
+    const { error } = await supabase
+      .from("listing_criteri")
+      .upsert(righeDaCriteri(listingId, criteri), {
+        onConflict: "listing_id,chiave",
+      });
+    if (error) return error.message;
+  }
+
+  // Le chiavi arrivano da normalizzaCriteri, cioè dal catalogo: nessun
+  // carattere speciale, si possono mettere nel filtro senza escape.
+  let togli = supabase.from("listing_criteri").delete().eq("listing_id", listingId);
+  if (criteri.length > 0) {
+    togli = togli.not("chiave", "in", `(${criteri.map((c) => c.chiave).join(",")})`);
+  }
+  const { error: eDel } = await togli;
+  return eDel ? eDel.message : null;
 }
 
 /** Le foto arrivano dal modulo come array JSON di URL, già ordinate. */
@@ -47,6 +81,7 @@ export async function creaImmobile(
   const attributi = parseAttributi(formData.get("attributi"));
   const pubblicato = formData.get("pubblicato") === "true";
   const foto = parseFoto(formData.get("foto"));
+  const criteri = normalizzaCriteri(formData.get("criteri"));
 
   const { data: listing, error } = await supabase
     .from("listings")
@@ -71,6 +106,11 @@ export async function creaImmobile(
       foto.map((url, i) => ({ listing_id: listing.id, url, ordine: i }))
     );
     if (eFoto) return { error: eFoto.message };
+  }
+
+  if (listing) {
+    const eCriteri = await salvaCriteri(supabase, listing.id, criteri);
+    if (eCriteri) return { error: eCriteri };
   }
 
   revalidatePath("/immobili");
@@ -104,6 +144,7 @@ export async function aggiornaImmobile(
   const attributi = parseAttributi(formData.get("attributi"));
   const pubblicato = formData.get("pubblicato") === "true";
   const foto = parseFoto(formData.get("foto"));
+  const criteri = normalizzaCriteri(formData.get("criteri"));
 
   const { error } = await supabase
     .from("listings")
@@ -137,6 +178,9 @@ export async function aggiornaImmobile(
     );
     if (eFoto) return { error: eFoto.message };
   }
+
+  const eCriteri = await salvaCriteri(supabase, id, criteri);
+  if (eCriteri) return { error: eCriteri };
 
   revalidatePath("/immobili");
   revalidatePath("/");

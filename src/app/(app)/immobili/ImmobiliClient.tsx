@@ -10,6 +10,8 @@ import {
 import { Sheet } from "@/components/Sheet";
 import { ATTR_VOCAB, ZONE_MILANO } from "@/lib/constants";
 import type { ImmobileDettaglio } from "@/lib/types";
+import type { CriterioRichiesto } from "@/lib/match";
+import { CriteriCandidati } from "@/components/CriteriCandidati";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { Chip } from "@/components/ui/Chip";
 import { Field } from "@/components/ui/Field";
@@ -154,6 +156,7 @@ function ImmobileForm({
   );
   const [pubblicato, setPubblicato] = useState(immobile?.pubblicato ?? true);
   const [foto, setFoto] = useState<string[]>(immobile?.foto ?? []);
+  const [criteri, setCriteri] = useState<CriterioRichiesto[]>(immobile?.criteri ?? []);
   const inputFotoRef = useRef<HTMLInputElement>(null);
   const [caricamentoFoto, setCaricamentoFoto] = useState(false);
   const [erroreFoto, setErroreFoto] = useState<string | null>(null);
@@ -257,6 +260,7 @@ function ImmobileForm({
       <input type="hidden" name="attributi" value={JSON.stringify(attributi)} />
       <input type="hidden" name="pubblicato" value={String(pubblicato)} />
       <input type="hidden" name="foto" value={JSON.stringify(foto)} />
+      <input type="hidden" name="criteri" value={JSON.stringify(criteri)} />
 
       <Field label="Titolo annuncio">
         <input
@@ -395,6 +399,10 @@ function ImmobileForm({
             />
           ))}
         </div>
+      </Field>
+
+      <Field label="Cosa chiedi ai candidati">
+        <CriteriCandidati value={criteri} onChange={setCriteri} />
       </Field>
 
       <Field label="Visibilità">

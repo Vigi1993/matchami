@@ -82,6 +82,7 @@ export function ProfiloClient({
     hasZone: zoneIniziali.length > 0,
     professione: tenant.professione,
     reddito_mensile: tenant.reddito_mensile,
+    reddito_nucleo: tenant.reddito_nucleo,
     garante: tenant.garante,
     animali: tenant.animali,
     presentazione: tenant.presentazione,
@@ -338,6 +339,7 @@ function DatiPersonaliSheet({
 
   const [professione, setProfessione] = useState(tenant.professione ?? "");
   const [reddito, setReddito] = useState(tenant.reddito_mensile ?? 0);
+  const [redditoNucleo, setRedditoNucleo] = useState(tenant.reddito_nucleo ?? 0);
   const [garante, setGarante] = useState<boolean | null>(tenant.garante);
   const [protestato, setProtestato] = useState<boolean | null>(
     tenant.protestato
@@ -365,6 +367,7 @@ function DatiPersonaliSheet({
       <form action={formAction}>
         <input type="hidden" name="professione" value={professione} />
         <input type="hidden" name="reddito_mensile" value={reddito} />
+        <input type="hidden" name="reddito_nucleo" value={redditoNucleo} />
         <input type="hidden" name="garante" value={String(garante)} />
         <input type="hidden" name="protestato" value={String(protestato)} />
         <input
@@ -441,6 +444,39 @@ function DatiPersonaliSheet({
 
         <Field label="Persone con reddito nel nucleo familiare">
           <Stepper value={redditiNucleo} onChange={setRedditiNucleo} min={1} max={6} />
+        </Field>
+
+        <Field
+          label={
+            redditoNucleo > 0
+              ? `Reddito netto mensile di tutto il nucleo · €${redditoNucleo.toLocaleString("it-IT")}`
+              : "Reddito netto mensile di tutto il nucleo · non indicato"
+          }
+        >
+          <input
+            type="range"
+            min={0}
+            max={15000}
+            step={50}
+            value={redditoNucleo}
+            onChange={(e) => setRedditoNucleo(Number(e.target.value))}
+            className="w-full"
+          />
+          <p className="field-note">
+            La somma dei redditi di tutte le persone che vivono nella casa. I
+            proprietari lo usano per capire quanto pesa l&apos;affitto sul
+            vostro bilancio.
+          </p>
+          {reddito > 0 && redditoNucleo === 0 && (
+            <button
+              type="button"
+              className="redo-link"
+              style={{ marginTop: 8 }}
+              onClick={() => setRedditoNucleo(reddito)}
+            >
+              Vivo da solo: uso €{reddito.toLocaleString("it-IT")}
+            </button>
+          )}
         </Field>
 
         <Field label="Animali domestici?">

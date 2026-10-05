@@ -81,6 +81,8 @@ export type CompletenessInput = {
   presentazione: string | null;
   nucleo: string | null;
   fideiussione: boolean | null;
+  /** facoltativo: i chiamanti precedenti non lo passano */
+  reddito_nucleo?: number | null;
 };
 
 export function computeProfileCompleteness(p: CompletenessInput): number {
@@ -88,6 +90,7 @@ export function computeProfileCompleteness(p: CompletenessInput): number {
     p.hasZone,
     !!p.professione,
     !!p.reddito_mensile,
+    !!p.reddito_nucleo,
     p.garante !== null,
     p.animali !== null,
     (p.presentazione ?? "").trim().length > 10,

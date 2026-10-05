@@ -62,6 +62,14 @@ const {
   preparaMazzo,
   haCriteriDiRicerca,
   statoMazzo,
+  normalizzaCriteri,
+  criteriDaRighe,
+  righeDaCriteri,
+  profiloRicercaDaRighe,
+  completezzaProfiloPersonale,
+  datiCandidatoDaProfilo,
+  valutaCandidato,
+  leggiFotografia,
 } = m;
 
 // ---- dati di prova
@@ -516,4 +524,166 @@ test("il separatore cade dove preparaMazzo mette il primo annuncio fuori ricerca
   assert.ok(i > 0);
   assert.equal(statoMazzo(fasce, i, opz()).mostraSeparatore, true);
   assert.equal(statoMazzo(fasce, i - 1, opz()).mostraSeparatore, false);
+});
+
+// ============================================================
+// Criteri del proprietario: validazione di ciò che arriva dal modulo
+// ============================================================
+
+test("normalizzaCriteri: riporta tutto a valori validi e scarta il resto", () => {
+  const r = normalizzaCriteri(JSON.stringify([
+    { chiave: "garante", peso: 99, modo: "obbligatorio" },
+    { chiave: "redditoCanone", peso: 0, modo: "preferenziale", sogliaPct: 90 },
+    { chiave: "nessunProtesto", peso: "7", modo: "boh" },
+    { chiave: "criterioInventato", peso: 5, modo: "obbligatorio" },
+    { chiave: "garante", peso: 1, modo: "preferenziale" }, // doppione
+    "stringa", null, 42,
+  ]));
+  assert.deepEqual(r, [
+    { chiave: "garante", peso: 10, modo: "obbligatorio" },
+    { chiave: "redditoCanone", peso: 1, modo: "preferenziale", sogliaPct: 60 },
+    { chiave: "nessunProtesto", peso: 7, modo: "preferenziale" },
+  ]);
+});
+
+test("normalizzaCriteri: chiavi del prototipo di JavaScript non passano per criteri validi", () => {
+  const r = normalizzaCriteri([
+    { chiave: "constructor", peso: 5, modo: "obbligatorio" },
+    { chiave: "toString", peso: 5, modo: "obbligatorio" },
+    { chiave: "__proto__", peso: 5, modo: "obbligatorio" },
+    { chiave: "hasOwnProperty", peso: 5, modo: "obbligatorio" },
+  ]);
+  assert.deepEqual(r, []);
+});
+
+test("normalizzaCriteri: input rovinato non fa mai fallire", () => {
+  for (const x of [undefined, null, "", "{non json", "42", 42, {}, "[]", [[]], [{}]]) {
+    assert.deepEqual(normalizzaCriteri(x), []);
+  }
+});
+
+test("normalizzaCriteri: un modo sconosciuto diventa il più prudente, preferenziale", () => {
+  const r = normalizzaCriteri([{ chiave: "garante", peso: 5, modo: "OBBLIGATORIO" }]);
+  assert.equal(r[0].modo, "preferenziale");
+});
+
+test("normalizzaCriteri: peso mancante prende il valore proposto, la soglia solo dove serve", () => {
+  const r = normalizzaCriteri([{ chiave: "garante" }, { chiave: "redditoCanone" }]);
+  assert.equal(r[0].peso, 5);
+  assert.equal(r[0].sogliaPct, undefined, "garante non ha soglia");
+  assert.equal(r[1].sogliaPct, 33, "soglia predefinita");
+});
+
+test("criteri: andata e ritorno col database non perde nulla", () => {
+  const criteri = [
+    { chiave: "redditoCanone", peso: 8, modo: "obbligatorio", sogliaPct: 40 },
+    { chiave: "garante", peso: 3, modo: "preferenziale" },
+  ];
+  const righe = righeDaCriteri("L1", criteri);
+  assert.deepEqual(righe[0], { listing_id: "L1", chiave: "redditoCanone", peso: 8, modo: "obbligatorio", soglia_pct: 40 });
+  assert.equal(righe[1].soglia_pct, null, "solo il reddito ha una soglia");
+  assert.deepEqual(criteriDaRighe(righe), criteri);
+});
+
+test("criteriDaRighe: righe di criteri non più nel catalogo si ignorano", () => {
+  const r = criteriDaRighe([
+    { chiave: "garante", peso: 5, modo: "preferenziale", soglia_pct: null },
+    { chiave: "nessunAnimale", peso: 5, modo: "obbligatorio", soglia_pct: null },
+  ]);
+  assert.deepEqual(r.map((c) => c.chiave), ["garante"]);
+  assert.deepEqual(criteriDaRighe(null), []);
+});
+
+// ============================================================
+// Il candidato visto dal proprietario
+// ============================================================
+
+const profiloDb = (o = {}) => ({
+  professione: "Dipendente indeterminato",
+  reddito_mensile: 1800,
+  reddito_nucleo: 3200,
+  garante: true,
+  fideiussione: false,
+  protestato: false,
+  animali: false,
+  nucleo: "coppia",
+  presentazione: "Una presentazione abbastanza lunga.",
+  verificato: false,
+  ...o,
+});
+
+test("reddito del nucleo a zero vale 'non indicato', non 'nessun reddito'", () => {
+  assert.equal(datiCandidatoDaProfilo(profiloDb({ reddito_nucleo: 0 })).redditoMensileNucleo, null);
+  assert.equal(datiCandidatoDaProfilo(profiloDb({ reddito_nucleo: null })).redditoMensileNucleo, null);
+  assert.equal(datiCandidatoDaProfilo(profiloDb({ reddito_nucleo: 3200 })).redditoMensileNucleo, 3200);
+});
+
+test("senza reddito del nucleo il criterio sul reddito risulta 'non indicato'", () => {
+  const r = valutaCandidato({
+    criteri: [{ chiave: "redditoCanone", peso: 5, modo: "obbligatorio" }],
+    canone: 900,
+    profilo: profiloDb({ reddito_nucleo: 0 }),
+    mediaRecensioni: null,
+    numeroRecensioni: 0,
+  }).match;
+  assert.equal(r.criteri[0].stato, "non_indicato");
+  assert.equal(r.bloccato, true);
+  assert.equal(r.incompleto, true);
+});
+
+test("completezza del profilo personale: otto campi, nessuna zona", () => {
+  assert.equal(completezzaProfiloPersonale(profiloDb()), 100);
+  assert.equal(completezzaProfiloPersonale(profiloDb({ reddito_nucleo: null })), 88);
+  // sei su otto = 75: sotto la soglia del 'profilo completo'
+  assert.equal(completezzaProfiloPersonale(profiloDb({ reddito_nucleo: null, animali: null })), 75);
+  assert.equal(completezzaProfiloPersonale(profiloDb({ presentazione: "corta" })), 88);
+});
+
+test("valutaCandidato: affidabilità accanto al match, mai dentro", () => {
+  const criteri = [{ chiave: "garante", peso: 5, modo: "preferenziale" }];
+  const base = { criteri, canone: 1000, mediaRecensioni: null, numeroRecensioni: 0 };
+  const senza = valutaCandidato({ ...base, profilo: profiloDb({ verificato: false }) });
+  const con = valutaCandidato({ ...base, profilo: profiloDb({ verificato: true }) });
+
+  assert.ok(con.affidabilita > senza.affidabilita, "la verifica alza l'affidabilità");
+  assert.equal(con.match.punteggio, senza.match.punteggio, "ma non il match, che non la chiede");
+});
+
+test("il canone reale dell'annuncio decide il criterio sul reddito", () => {
+  const val = (canone) => valutaCandidato({
+    criteri: [{ chiave: "redditoCanone", peso: 5, modo: "preferenziale" }],
+    canone,
+    profilo: profiloDb({ reddito_nucleo: 3000 }),
+    mediaRecensioni: null,
+    numeroRecensioni: 0,
+  }).match.criteri[0].stato;
+  assert.equal(val(900), "ok");   // 30%
+  assert.equal(val(1500), "no");  // 50%
+});
+
+test("leggiFotografia: accetta quella salvata, rifiuta forme rovinate", () => {
+  const v = valutaCandidato({
+    criteri: [{ chiave: "garante", peso: 5, modo: "obbligatorio" }],
+    canone: 1000, profilo: profiloDb(), mediaRecensioni: null, numeroRecensioni: 0,
+  });
+  // come esce dal database: serializzata e riletta. JSON toglie le chiavi
+  // `undefined`, quindi il confronto è con la versione già serializzata.
+  const salvata = JSON.parse(JSON.stringify(v));
+  assert.deepEqual(leggiFotografia(salvata), salvata);
+
+  for (const x of [null, undefined, 5, "x", {}, { match: null, affidabilita: 5 },
+                   { match: { punteggio: "80" }, affidabilita: 5 },
+                   { match: { punteggio: 80, bloccato: false, incompleto: false, criteri: [], mancanti: [] } }]) {
+    assert.equal(leggiFotografia(x), null);
+  }
+});
+
+test("profiloRicercaDaRighe: 0 e vuoto valgono 'nessuna preferenza'", () => {
+  const p = profiloRicercaDaRighe(
+    { budget_max: 0, locali_min: null, mq_min: 60 },
+    [{ zona: "Isola, Milano" }],
+    [{ attributo_key: "balcone", peso: 8 }]
+  );
+  assert.deepEqual(p, { budgetMax: null, localiMin: null, mqMin: 60, zone: ["Isola, Milano"], interessi: { balcone: 8 } });
+  assert.equal(profiloRicercaDaRighe({ budget_max: null, locali_min: null, mq_min: null }, null, undefined).zone.length, 0);
 });

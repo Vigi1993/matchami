@@ -104,7 +104,7 @@ export const CATALOGO_CRITERI: Record<ChiaveCriterio, DefinizioneCriterio> = {
 
 export const CHIAVI_CRITERI = Object.keys(CATALOGO_CRITERI) as ChiaveCriterio[];
 
-function sogliaValida(sogliaPct: number | undefined): number {
+export function sogliaValida(sogliaPct: number | undefined): number {
   const { predefinita, min, max } = SOGLIA_REDDITO_CANONE;
   if (sogliaPct === undefined || !Number.isFinite(sogliaPct)) return predefinita;
   return Math.max(min, Math.min(max, Math.round(sogliaPct)));

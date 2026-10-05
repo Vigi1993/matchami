@@ -6,6 +6,33 @@ import type {
   RisultatoInquilino,
 } from "./tipi";
 
+/** Le colonne di ricerca di `tenant_profiles`, come arrivano dal database. */
+export type RigaRicerca = {
+  budget_max: number | null;
+  locali_min: number | null;
+  mq_min: number | null;
+};
+
+/**
+ * Dai dati salvati ai criteri di ricerca che il calcolo legge. Un valore
+ * 0 o vuoto vale "nessuna preferenza", come nel filtro che c'era prima.
+ */
+export function profiloRicercaDaRighe(
+  riga: RigaRicerca,
+  zone: { zona: string }[] | null | undefined,
+  interessi: { attributo_key: string; peso: number }[] | null | undefined
+): ProfiloRicerca {
+  return {
+    budgetMax: riga.budget_max || null,
+    localiMin: riga.locali_min || null,
+    mqMin: riga.mq_min || null,
+    zone: (zone ?? []).map((z) => z.zona),
+    interessi: Object.fromEntries(
+      (interessi ?? []).map((r) => [r.attributo_key, r.peso])
+    ),
+  };
+}
+
 export type VoceMazzo<T> = T & { match: RisultatoInquilino };
 
 export type Mazzo<T> = {

@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { HomeClient } from "./HomeClient";
 import { OwnerHomeClient } from "./OwnerHomeClient";
 import { computeAffidabilita } from "@/lib/affidabilita";
-import { haCriteriDiRicerca, preparaMazzo } from "@/lib/match";
+import { haCriteriDiRicerca, preparaMazzo, profiloRicercaDaRighe } from "@/lib/match";
 import type { ProfiloRicerca } from "@/lib/match";
 import type { TenantProfile, ListingConMatch, ListingProprietario } from "@/lib/types";
 
@@ -45,7 +45,6 @@ async function TenantHome({ userId }: { userId: string }) {
     supabase.from("candidature").select("listing_id").eq("tenant_id", userId),
   ]);
 
-  const zone = (zoneRows ?? []).map((r) => r.zona as string);
   const numeroRecensioni = recensioni?.length ?? 0;
   const mediaRecensioni =
     numeroRecensioni > 0
@@ -93,17 +92,11 @@ async function TenantHome({ userId }: { userId: string }) {
     ),
   }));
 
-  // Criteri di ricerca dell'inquilino. Un valore 0 o vuoto vale "nessuna
-  // preferenza", come nel filtro che c'era prima.
-  const profiloRicerca: ProfiloRicerca = {
-    budgetMax: tenantProfile.budget_max || null,
-    localiMin: tenantProfile.locali_min || null,
-    mqMin: tenantProfile.mq_min || null,
-    zone,
-    interessi: Object.fromEntries(
-      (interessiRows ?? []).map((r) => [r.attributo_key as string, r.peso as number])
-    ),
-  };
+  const profiloRicerca: ProfiloRicerca = profiloRicercaDaRighe(
+    tenantProfile,
+    zoneRows,
+    interessiRows
+  );
 
   const { mazzo, esclusi } = preparaMazzo(listingsOrdinati, profiloRicerca);
 

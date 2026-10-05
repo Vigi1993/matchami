@@ -5,6 +5,8 @@ export type TenantProfile = {
   profile_id: string;
   professione: string | null;
   reddito_mensile: number | null;
+  /** reddito mensile di TUTTO il nucleo, chiesto esplicitamente */
+  reddito_nucleo: number | null;
   garante: boolean | null;
   fideiussione: boolean | null;
   protestato: boolean | null;
@@ -53,6 +55,8 @@ export type ImmobileDettaglio = {
   pubblicato: boolean;
   /** galleria dell'annuncio, già ordinata */
   foto: string[];
+  /** cosa chiede il proprietario ai candidati, con peso e obbligatorietà */
+  criteri: import("@/lib/match").CriterioRichiesto[];
   nCandidature: number;
 };
 
@@ -88,20 +92,29 @@ export type Messaggio = {
 export type CandidaturaRicevuta = {
   id: string;
   status: StatoCandidatura;
+  /** compatibilità vista dall'INQUILINO al momento della candidatura: il
+   *  proprietario non la usa, vede la propria in `valutazione` */
   match_pct: number | null;
   created_at: string;
   tenant_id: string;
-  listings: { titolo: string; zona: string } | null;
+  listing_id: string;
+  listings: { titolo: string; zona: string; prezzo: number } | null;
   tenant_profiles: {
     professione: string | null;
     reddito_mensile: number | null;
+    reddito_nucleo: number | null;
     verificato: boolean;
     presentazione: string | null;
     avatar_url: string | null;
   } | null;
-  // aggiunto lato client dopo il fetch separato di profiles
+  // aggiunto lato server dopo il fetch separato di profiles
   nome?: string | null;
   cognome?: string | null;
+  /** il match visto dal proprietario sui criteri che ha chiesto, e
+   *  l'affidabilità accanto. `congelata`: fotografia scattata alla decisione. */
+  valutazione?: import("@/lib/match").ValutazioneCandidato & {
+    congelata: boolean;
+  };
 };
 
 export type CandidaturaConAnnuncio = {

@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { Sheet } from "@/components/Sheet";
 import type { CandidaturaRicevuta } from "@/lib/types";
+import { ordinaCandidati } from "@/lib/match";
 import { valutaCandidatura } from "./actions";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { IconPersone } from "@/components/icons";
@@ -18,6 +19,21 @@ const LABEL: Record<string, string> = {
   accettata: "Accettata",
   rifiutata: "Rifiutata",
 };
+const SIMBOLO = { ok: "✓", no: "–", non_indicato: "?" } as const;
+
+/** Colore del badge in base alla percentuale, con le stesse soglie delle etichette. */
+function classePercentuale(pct: number): string {
+  if (pct >= 70) return "is-match";
+  if (pct >= 50) return "is-wait";
+  return "is-off";
+}
+
+type Annuncio = {
+  id: string;
+  titolo: string;
+  zona: string;
+  candidature: CandidaturaRicevuta[];
+};
 
 export function DatabaseClient({
   candidature,
@@ -28,6 +44,7 @@ export function DatabaseClient({
     null
   );
   const [pending, startTransition] = useTransition();
+  const [errore, setErrore] = useState<string | null>(null);
   const [aggiornate, setAggiornate] = useState<
     Record<string, "accettata" | "rifiutata">
   >({});
@@ -37,17 +54,40 @@ export function DatabaseClient({
   }
 
   function valuta(c: CandidaturaRicevuta, nuovo: "accettata" | "rifiutata") {
+    setErrore(null);
     startTransition(async () => {
       const res = await valutaCandidatura(c.id, nuovo);
-      if (!res?.error) {
-        setAggiornate((prev) => ({ ...prev, [c.id]: nuovo }));
-        setSelezionata(null);
+      if (res?.error) {
+        setErrore(res.error);
+        return;
       }
+      setAggiornate((prev) => ({ ...prev, [c.id]: nuovo }));
+      setSelezionata(null);
     });
   }
 
-  const inAttesa = candidature.filter((c) => stato(c) === "in_attesa");
-  const valutate = candidature.filter((c) => stato(c) !== "in_attesa");
+  // ---- raggruppo per annuncio ----
+  const perAnnuncio = new Map<string, Annuncio>();
+  for (const c of candidature) {
+    const gruppo = perAnnuncio.get(c.listing_id) ?? {
+      id: c.listing_id,
+      titolo: c.listings?.titolo ?? "Annuncio",
+      zona: c.listings?.zona ?? "",
+      candidature: [],
+    };
+    gruppo.candidature.push(c);
+    perAnnuncio.set(c.listing_id, gruppo);
+  }
+
+  const daValutare = (a: Annuncio) =>
+    a.candidature.filter((c) => stato(c) === "in_attesa").length;
+
+  // prima gli annunci con più candidati in attesa
+  const annunci = [...perAnnuncio.values()].sort(
+    (a, b) => daValutare(b) - daValutare(a) || a.titolo.localeCompare(b.titolo)
+  );
+
+  const totaleInAttesa = candidature.filter((c) => stato(c) === "in_attesa").length;
 
   return (
     <PageContainer wide>
@@ -55,7 +95,7 @@ export function DatabaseClient({
       <p className="screen-sub">
         {candidature.length === 0
           ? "Le candidature ricevute sui tuoi annunci arrivano qui."
-          : `${candidature.length} candidatur${candidature.length === 1 ? "a ricevuta" : "e ricevute"} · ${inAttesa.length} da valutare.`}
+          : `${candidature.length} candidatur${candidature.length === 1 ? "a ricevuta" : "e ricevute"} · ${totaleInAttesa} da valutare.`}
       </p>
 
       {candidature.length === 0 && (
@@ -69,26 +109,21 @@ export function DatabaseClient({
         </div>
       )}
 
-      {inAttesa.length > 0 && (
-        <Gruppo
-          titolo="Da valutare"
-          items={inAttesa}
-          onSelect={setSelezionata}
+      {annunci.map((a) => (
+        <SezioneAnnuncio
+          key={a.id}
+          annuncio={a}
           stato={stato}
-        />
-      )}
-      {valutate.length > 0 && (
-        <Gruppo
-          titolo="Valutate"
-          items={valutate}
           onSelect={setSelezionata}
-          stato={stato}
         />
-      )}
+      ))}
 
       <Sheet
         open={selezionata !== null}
-        onClose={() => setSelezionata(null)}
+        onClose={() => {
+          setSelezionata(null);
+          setErrore(null);
+        }}
         title={
           selezionata
             ? `${selezionata.nome ?? "Inquilino"} ${selezionata.cognome ?? ""}`
@@ -112,6 +147,10 @@ export function DatabaseClient({
               Candidatura per <b>{selezionata.listings?.titolo}</b>
             </p>
 
+            {selezionata.valutazione && (
+              <PercheMatchProprietario valutazione={selezionata.valutazione} />
+            )}
+
             <DettaglioRow
               label="Situazione lavorativa"
               value={selezionata.tenant_profiles?.professione ?? "—"}
@@ -125,13 +164,21 @@ export function DatabaseClient({
               }
             />
             <DettaglioRow
+              label="Reddito del nucleo"
+              value={
+                selezionata.tenant_profiles?.reddito_nucleo
+                  ? `€${selezionata.tenant_profiles.reddito_nucleo.toLocaleString("it-IT")}/mese`
+                  : "Non indicato"
+              }
+            />
+            <DettaglioRow
               label="Reddito verificato"
               value={selezionata.tenant_profiles?.verificato ? "Sì" : "No"}
             />
-            {selezionata.match_pct !== null && (
+            {selezionata.valutazione && (
               <DettaglioRow
-                label="Compatibilità"
-                value={`${selezionata.match_pct}%`}
+                label="Affidabilità"
+                value={`${selezionata.valutazione.affidabilita}/100`}
               />
             )}
             {selezionata.tenant_profiles?.presentazione && (
@@ -143,6 +190,12 @@ export function DatabaseClient({
                   &quot;{selezionata.tenant_profiles.presentazione}&quot;
                 </p>
               </div>
+            )}
+
+            {errore && (
+              <p className="note-error" style={{ marginTop: 14 }}>
+                {errore}
+              </p>
             )}
 
             {stato(selezionata) === "in_attesa" ? (
@@ -191,54 +244,191 @@ export function DatabaseClient({
   );
 }
 
-function Gruppo({
-  titolo,
-  items,
-  onSelect,
+// ------------------------------------------------------------
+
+function SezioneAnnuncio({
+  annuncio,
   stato,
+  onSelect,
 }: {
-  titolo: string;
-  items: CandidaturaRicevuta[];
-  onSelect: (c: CandidaturaRicevuta) => void;
+  annuncio: Annuncio;
   stato: (c: CandidaturaRicevuta) => string;
+  onSelect: (c: CandidaturaRicevuta) => void;
 }) {
+  const attesa = annuncio.candidature.filter((c) => stato(c) === "in_attesa");
+  const valutate = annuncio.candidature.filter((c) => stato(c) !== "in_attesa");
+
+  // In attesa: prima chi soddisfa i criteri obbligatori, poi per percentuale,
+  // a parità per affidabilità. Se manca la valutazione resta l'ordine di arrivo.
+  const ordinate = attesa.every((c) => c.valutazione)
+    ? ordinaCandidati(
+        attesa.map((c) => ({
+          c,
+          match: c.valutazione!.match,
+          affidabilita: c.valutazione!.affidabilita,
+        }))
+      ).map((v) => v.c)
+    : attesa;
+
   return (
     <>
-      <div className="pref-label" style={{ marginTop: 20 }}>
+      <div className="pref-label" style={{ marginTop: 26 }}>
         <span>
-          {titolo} — {items.length}
+          {annuncio.titolo}
+          {annuncio.zona && ` · ${annuncio.zona.replace(", Milano", "")}`}
         </span>
+        <b>
+          {attesa.length} da valutare
+        </b>
       </div>
-      <div className="card-grid">
-        {items.map((c) => {
-          const s = stato(c);
-          const iniziali = `${c.nome?.[0] ?? ""}${c.cognome?.[0] ?? ""}`.toUpperCase();
-          return (
-            <button key={c.id} onClick={() => onSelect(c)} className="match-card">
-              {c.tenant_profiles?.avatar_url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={c.tenant_profiles.avatar_url} alt="" />
-              ) : (
-                <div className="mc-avatar">{iniziali || "IN"}</div>
-              )}
-              <div className="mc-body">
-                <div className="mc-zona">
-                  {c.tenant_profiles?.professione ?? "Profilo inquilino"}
-                </div>
-                <div className="mc-title">
-                  {c.nome} {c.cognome}
-                </div>
-                <div className="mc-meta">
-                  {c.listings?.titolo}
-                  {c.match_pct !== null && ` · ${c.match_pct}% compatibile`}
-                </div>
-              </div>
-              <div className={`mc-pct ${BADGE[s]}`}>{LABEL[s]}</div>
-            </button>
-          );
-        })}
-      </div>
+
+      {ordinate.length > 0 && (
+        <div className="card-grid">
+          {ordinate.map((c) => (
+            <Scheda key={c.id} c={c} stato={stato(c)} onSelect={onSelect} />
+          ))}
+        </div>
+      )}
+
+      {valutate.length > 0 && (
+        <>
+          <div className="sotto-label">Già valutate — {valutate.length}</div>
+          <div className="card-grid">
+            {valutate.map((c) => (
+              <Scheda key={c.id} c={c} stato={stato(c)} onSelect={onSelect} />
+            ))}
+          </div>
+        </>
+      )}
     </>
+  );
+}
+
+function Scheda({
+  c,
+  stato,
+  onSelect,
+}: {
+  c: CandidaturaRicevuta;
+  stato: string;
+  onSelect: (c: CandidaturaRicevuta) => void;
+}) {
+  const iniziali = `${c.nome?.[0] ?? ""}${c.cognome?.[0] ?? ""}`.toUpperCase();
+  const v = c.valutazione;
+  const inAttesa = stato === "in_attesa";
+
+  let badge = (
+    <div className={`mc-pct ${BADGE[stato]}`}>{LABEL[stato]}</div>
+  );
+  if (inAttesa && v) {
+    if (v.match.bloccato) {
+      badge = (
+        <div className="mc-pct is-alert">
+          Bloccato<span>obbligatorio</span>
+        </div>
+      );
+    } else if (v.match.punteggio !== null) {
+      badge = (
+        <div className={`mc-pct ${classePercentuale(v.match.punteggio)}`}>
+          {v.match.punteggio}%<span>compatibile</span>
+        </div>
+      );
+    }
+  }
+
+  return (
+    <button onClick={() => onSelect(c)} className="match-card">
+      {c.tenant_profiles?.avatar_url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={c.tenant_profiles.avatar_url} alt="" />
+      ) : (
+        <div className="mc-avatar">{iniziali || "IN"}</div>
+      )}
+      <div className="mc-body">
+        <div className="mc-zona">
+          {c.tenant_profiles?.professione ?? "Profilo inquilino"}
+        </div>
+        <div className="mc-title">
+          {c.nome} {c.cognome}
+        </div>
+        <div className="mc-meta">
+          {v ? `Affidabilità ${v.affidabilita}` : ""}
+          {v?.match.incompleto && inAttesa && " · dati incompleti"}
+          {!inAttesa && v?.match.punteggio != null && ` · compatibilità ${v.match.punteggio}%`}
+        </div>
+      </div>
+      {badge}
+    </button>
+  );
+}
+
+// ------------------------------------------------------------
+
+/**
+ * "Perché vedi questo numero", dal lato del proprietario: i criteri che ha
+ * chiesto, quali il candidato soddisfa, e se qualcuno obbligatorio manca.
+ */
+export function PercheMatchProprietario({
+  valutazione,
+}: {
+  valutazione: NonNullable<CandidaturaRicevuta["valutazione"]>;
+}) {
+  const { match, congelata } = valutazione;
+
+  if (match.punteggio === null) {
+    return (
+      <div className="note-box" style={{ marginTop: 0, marginBottom: 18 }}>
+        Per questo annuncio non hai chiesto nessun criterio, quindi non c&apos;è
+        una percentuale. Puoi aggiungerli da Immobili.
+      </div>
+    );
+  }
+
+  return (
+    <div className="match-box">
+      <div className="match-box-top">
+        <div className="match-box-pct">{match.punteggio}%</div>
+        <div>
+          <div className="match-box-label">{match.etichetta}</div>
+          <div className="match-box-sub">
+            {congelata
+              ? "Fotografia al momento della tua decisione"
+              : "Sui criteri che hai chiesto, con i dati attuali"}
+          </div>
+        </div>
+      </div>
+
+      {match.bloccato && (
+        <div className="note-stop">
+          Non soddisfa un criterio obbligatorio: {match.mancanti.join(", ")}.
+        </div>
+      )}
+
+      <div className="perche-lista">
+        {match.criteri.map((c) => (
+          <div key={c.chiave} className={`perche-row ${c.stato}`}>
+            <span className="perche-simbolo">{SIMBOLO[c.stato]}</span>
+            <span className="perche-testo">
+              {c.etichetta}
+              {c.obbligatorio && <em className="tag-obbl">obbligatorio</em>}
+              {c.dettaglio && <small>{c.dettaglio}</small>}
+              {c.stato === "non_indicato" && <small>Non indicato dal candidato</small>}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {match.incompleto && !congelata && (
+        <p className="field-note" style={{ marginTop: 8 }}>
+          Il candidato non ha indicato alcuni dati: se li compila, la
+          percentuale può salire.
+        </p>
+      )}
+      <p className="field-note" style={{ marginTop: 8 }}>
+        È una compatibilità sui dati dichiarati dal candidato, non una
+        valutazione della persona né una previsione.
+      </p>
+    </div>
   );
 }
 

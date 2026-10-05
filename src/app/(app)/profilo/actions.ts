@@ -24,6 +24,13 @@ export async function updateDatiPersonali(
   const professione = String(formData.get("professione") || "") || null;
   const redditoRaw = formData.get("reddito_mensile");
   const reddito_mensile = redditoRaw ? Number(redditoRaw) : null;
+  // Lo slider parte da 0 e 0 vuol dire "non indicato": chi non lo tocca non
+  // ha dichiarato di non avere reddito.
+  const redditoNucleoRaw = Number(formData.get("reddito_nucleo") || 0);
+  const reddito_nucleo =
+    Number.isFinite(redditoNucleoRaw) && redditoNucleoRaw > 0
+      ? Math.round(redditoNucleoRaw)
+      : null;
   const garante = parseBool(formData.get("garante"));
   const protestato = parseBool(formData.get("protestato"));
   const fideiussione = parseBool(formData.get("fideiussione"));
@@ -40,6 +47,7 @@ export async function updateDatiPersonali(
     .update({
       professione,
       reddito_mensile,
+      reddito_nucleo,
       garante,
       protestato,
       fideiussione,
