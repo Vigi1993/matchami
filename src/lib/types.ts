@@ -55,6 +55,9 @@ export type ImmobileDettaglio = {
   pubblicato: boolean;
   /** galleria dell'annuncio, già ordinata */
   foto: string[];
+  /** stato della verifica dell'immobile e, se respinto, il motivo */
+  verifica_stato: "non_avviata" | "in_verifica" | "verificato";
+  verifica_esito_note: string | null;
   /** cosa chiede il proprietario ai candidati, con peso e obbligatorietà */
   criteri: import("@/lib/match").CriterioRichiesto[];
   nCandidature: number;

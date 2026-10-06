@@ -12,6 +12,7 @@ import { ATTR_VOCAB, ZONE_MILANO } from "@/lib/constants";
 import type { ImmobileDettaglio } from "@/lib/types";
 import type { CriterioRichiesto } from "@/lib/match";
 import { CriteriCandidati } from "@/components/CriteriCandidati";
+import { descriviStato } from "@/lib/verifica";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { Chip } from "@/components/ui/Chip";
 import { Field } from "@/components/ui/Field";
@@ -81,7 +82,8 @@ export function ImmobiliClient({
                 <div className="mc-zona">{im.zona}</div>
                 <div className="mc-title">{im.titolo}</div>
                 <div className="mc-meta">
-                  €{im.prezzo.toLocaleString("it-IT")}/mese
+                  €{im.prezzo.toLocaleString("it-IT")}/mese ·{" "}
+                  {descriviStato(im.verifica_stato, im.verifica_esito_note).etichetta.toLowerCase()}
                   {!im.pubblicato && " · non pubblicato"}
                 </div>
               </div>
@@ -410,6 +412,13 @@ function ImmobileForm({
           <Chip label="Pubblicato" active={pubblicato} onClick={() => setPubblicato(true)} />
           <Chip label="Non pubblicato" active={!pubblicato} onClick={() => setPubblicato(false)} />
         </div>
+        {immobile?.verifica_stato !== "verificato" && (
+          <p className="field-note">
+            Gli inquilini vedono un annuncio solo dopo che l&apos;immobile è
+            stato verificato, anche se è pubblicato. Puoi seguire la verifica
+            dalla Home.
+          </p>
+        )}
       </Field>
 
       {state?.error && <p className="note-error">{state.error}</p>}

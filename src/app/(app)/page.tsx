@@ -1,6 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { HomeClient } from "./HomeClient";
 import { OwnerHomeClient } from "./OwnerHomeClient";
+import { VerificaHome } from "./VerificaHome";
+import type { ImmobileVerifica } from "@/lib/verifica";
 import { computeAffidabilita } from "@/lib/affidabilita";
 import { haCriteriDiRicerca, preparaMazzo, profiloRicercaDaRighe } from "@/lib/match";
 import type { ProfiloRicerca } from "@/lib/match";
@@ -112,6 +114,50 @@ async function TenantHome({ userId }: { userId: string }) {
 
 async function OwnerHome({ userId }: { userId: string }) {
   const supabase = await createClient();
+
+  // Un proprietario è verificato se ha almeno un immobile verificato. Finché
+  // non lo è, la Home spiega cosa manca e permette di farlo. Se la domanda al
+  // database non riesce si resta su questa schermata: meglio mostrare la
+  // verifica a chi non serve che il resto dell'app a chi non l'ha ancora fatta.
+  const { data: verificato } = await supabase.rpc("proprietario_verificato", {
+    p_owner: userId,
+  });
+  if (verificato !== true) {
+    const [{ data: miei }, { data: documenti }] = await Promise.all([
+      supabase
+        .from("listings")
+        .select("id, titolo, zona, verifica_stato, verifica_esito_note")
+        .eq("owner_id", userId)
+        .order("created_at", { ascending: false }),
+      supabase.from("documenti_verifica").select("tipo, listing_id").eq("owner_id", userId),
+    ]);
+
+    const proprietaPerImmobile = new Map<string, number>();
+    for (const d of documenti ?? []) {
+      if (d.tipo === "proprieta" && d.listing_id) {
+        proprietaPerImmobile.set(
+          d.listing_id as string,
+          (proprietaPerImmobile.get(d.listing_id as string) ?? 0) + 1
+        );
+      }
+    }
+
+    const immobili: ImmobileVerifica[] = (miei ?? []).map((l) => ({
+      id: l.id as string,
+      titolo: l.titolo as string,
+      zona: l.zona as string,
+      stato: l.verifica_stato as ImmobileVerifica["stato"],
+      note: (l.verifica_esito_note as string | null) ?? null,
+      nProprieta: proprietaPerImmobile.get(l.id as string) ?? 0,
+    }));
+
+    return (
+      <VerificaHome
+        haIdentita={(documenti ?? []).some((d) => d.tipo === "identita")}
+        immobili={immobili}
+      />
+    );
+  }
 
   const [{ data: listings }, { data: candidature }] = await Promise.all([
     supabase

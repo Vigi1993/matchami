@@ -19,7 +19,11 @@ export function confermaEliminazioneValida(testo: string): boolean {
  * perché i file nello Storage NON si cancellano insieme all'utente: restano
  * lì, orfani, e sono dati personali di chi ha chiesto di essere cancellato.
  */
-export const BUCKET_FILE_UTENTE = ["avatar-inquilini", "immobili-foto"] as const;
+export const BUCKET_FILE_UTENTE = [
+  "avatar-inquilini",
+  "immobili-foto",
+  "documenti-verifica",
+] as const;
 
 /** La parte della libreria di Storage che serve qui: permette di provarla con un finto. */
 export type StorageAmministratore = {
