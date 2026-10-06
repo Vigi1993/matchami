@@ -147,3 +147,104 @@ test("messaggioErroreAccesso: link scaduto o già usato, e qualunque altra cosa"
     assert.ok(!/xyz/.test(m), "un messaggio sconosciuto non viene mostrato tale e quale");
   }
 });
+
+// ============================================================
+// Cancellazione dell'account
+// ============================================================
+
+import fs from "node:fs";
+const { CONFERMA_ELIMINAZIONE, confermaEliminazioneValida, BUCKET_FILE_UTENTE, eliminaFileUtente } =
+  caricaTs(path.join(radice, "src", "lib", "account.ts"));
+
+test("conferma: serve la parola giusta, non importa maiuscole e spazi", () => {
+  assert.equal(CONFERMA_ELIMINAZIONE, "ELIMINA");
+  for (const ok of ["ELIMINA", "elimina", "  Elimina  ", "eLiMiNa\n"]) assert.equal(confermaEliminazioneValida(ok), true, ok);
+  for (const no of ["", " ", "ELIMINA!", "elimina tutto", "SI", "cancella", "ELIM", "E L I M I N A"]) {
+    assert.equal(confermaEliminazioneValida(no), false, JSON.stringify(no));
+  }
+});
+
+test("OGNI bucket creato nelle migrazioni è nella lista dei file da cancellare", () => {
+  // Un bucket dimenticato lascerebbe nello Storage foto e documenti di
+  // persone che hanno chiesto di essere cancellate.
+  const cartella = path.join(radice, "supabase", "migrations");
+  const creati = new Set();
+  for (const f of fs.readdirSync(cartella).filter((x) => x.endsWith(".sql"))) {
+    const sql = fs.readFileSync(path.join(cartella, f), "utf8");
+    // insert into storage.buckets (id, name, public) values ('id', 'nome', ...)
+    for (const m of sql.matchAll(/insert\s+into\s+storage\.buckets[^;]*?values\s*\(\s*'([^']+)'/gis)) creati.add(m[1]);
+  }
+  assert.ok(creati.size >= 2, "dovrei aver trovato almeno i due bucket noti, ne ho trovati " + creati.size);
+  for (const b of creati) {
+    assert.ok(BUCKET_FILE_UTENTE.includes(b), `il bucket "${b}" non è in BUCKET_FILE_UTENTE (src/lib/account.ts): i suoi file resterebbero dopo la cancellazione`);
+  }
+});
+
+// un finto Storage: tiene i file in memoria e registra cosa gli viene chiesto
+function finto(file, { erroreLista = null, erroreRimozione = null } = {}) {
+  const chiamate = [];
+  const admin = { storage: { from: (bucket) => ({
+    list: async (cartella, opz) => {
+      chiamate.push(["list", bucket, cartella]);
+      if (erroreLista === bucket) return { data: null, error: { message: "boom" } };
+      const dentro = (file[bucket] ?? []).filter((p) => p.startsWith(cartella + "/")).map((p) => ({ name: p.slice(cartella.length + 1) }));
+      return { data: dentro.slice(0, opz?.limit ?? 100), error: null };
+    },
+    remove: async (percorsi) => {
+      chiamate.push(["remove", bucket, percorsi.length]);
+      if (erroreRimozione === bucket) return { error: { message: "boom" } };
+      file[bucket] = (file[bucket] ?? []).filter((p) => !percorsi.includes(p));
+      return { error: null };
+    },
+  }) } };
+  return { admin, chiamate };
+}
+
+test("eliminaFileUtente: toglie i file della persona e solo i suoi", async () => {
+  const file = {
+    "avatar-inquilini": ["utente-1/a.jpg", "utente-2/b.jpg"],
+    "immobili-foto": ["utente-1/c.jpg", "utente-1/d.jpg", "utente-2/e.jpg"],
+  };
+  const { admin } = finto(file);
+  assert.equal(await eliminaFileUtente(admin, "utente-1"), null);
+  assert.deepEqual(file["avatar-inquilini"], ["utente-2/b.jpg"]);
+  assert.deepEqual(file["immobili-foto"], ["utente-2/e.jpg"]);
+});
+
+test("eliminaFileUtente: un prefisso simile non si porta via i file di un altro", async () => {
+  // "utente-1" e "utente-10": la cartella giusta è "utente-1/", non il prefisso
+  const file = { "avatar-inquilini": ["utente-1/a.jpg", "utente-10/b.jpg"], "immobili-foto": [] };
+  await eliminaFileUtente(finto(file).admin, "utente-1");
+  assert.deepEqual(file["avatar-inquilini"], ["utente-10/b.jpg"]);
+});
+
+test("eliminaFileUtente: più di una pagina di file si svuota tutta", async () => {
+  const molti = Array.from({ length: 2500 }, (_, i) => `u/${i}.jpg`);
+  const file = { "avatar-inquilini": [], "immobili-foto": molti };
+  const { admin, chiamate } = finto(file);
+  assert.equal(await eliminaFileUtente(admin, "u"), null);
+  assert.equal(file["immobili-foto"].length, 0);
+  assert.ok(chiamate.filter((c) => c[0] === "remove").length >= 3, "doveva rimuovere a gruppi");
+});
+
+test("eliminaFileUtente: nessun file, nessun errore", async () => {
+  assert.equal(await eliminaFileUtente(finto({}).admin, "u"), null);
+});
+
+test("eliminaFileUtente: se lo Storage non risponde restituisce un errore, senza fingere di aver finito", async () => {
+  const file = { "avatar-inquilini": ["u/a.jpg"], "immobili-foto": ["u/b.jpg"] };
+  const r1 = await eliminaFileUtente(finto(file, { erroreLista: "immobili-foto" }).admin, "u");
+  assert.match(r1, /immobili-foto/);
+  const r2 = await eliminaFileUtente(finto({ "avatar-inquilini": ["u/a.jpg"] }, { erroreRimozione: "avatar-inquilini" }).admin, "u");
+  assert.match(r2, /avatar-inquilini/);
+});
+
+test("eliminaFileUtente: lo Storage che non toglie mai i file non fa girare per sempre", async () => {
+  let giri = 0;
+  const admin = { storage: { from: () => ({
+    list: async () => { giri++; return { data: [{ name: "a.jpg" }], error: null }; },
+    remove: async () => ({ error: null }),
+  }) } };
+  await eliminaFileUtente(admin, "u", ["un-bucket"]);
+  assert.ok(giri <= 51, "dopo " + giri + " giri non si è fermato");
+});

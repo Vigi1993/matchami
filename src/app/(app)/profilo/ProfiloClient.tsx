@@ -262,6 +262,7 @@ export function ProfiloClient({
         nome={nome}
         cognome={cognome}
         email={email}
+        ruolo="inquilino"
       />
 
       {/* ---- Sheet: Privacy e FAQ ---- */}

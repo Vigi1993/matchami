@@ -116,6 +116,7 @@ export function OwnerProfiloClient({
         nome={nome}
         cognome={cognome}
         email={email}
+        ruolo="proprietario"
       />
 
       <PrivacySheet

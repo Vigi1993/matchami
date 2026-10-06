@@ -2,9 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
-import { createClient as createPlainClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { validaNuovaPassword } from "@/lib/password";
+import { passwordCorretta } from "@/lib/supabase/password";
 
 export type AccountState = {
   error?: string;
@@ -12,29 +12,6 @@ export type AccountState = {
   /** messaggio esteso da mostrare dopo un'operazione riuscita */
   messaggio?: string;
 } | null;
-
-/**
- * Verifica che chi sta facendo la modifica conosca la password attuale.
- *
- * Supabase non la richiede per `updateUser`, ma senza questo controllo
- * chiunque trovasse una sessione aperta potrebbe cambiare email e
- * password e prendersi l'account. Uso un client separato con
- * `persistSession: false` così il login di verifica non tocca i cookie
- * della sessione in corso.
- */
-async function passwordCorretta(
-  email: string,
-  password: string
-): Promise<boolean> {
-  const verifica = createPlainClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { auth: { persistSession: false, autoRefreshToken: false } }
-  );
-
-  const { error } = await verifica.auth.signInWithPassword({ email, password });
-  return !error;
-}
 
 /** Origine pubblica del sito, per costruire il link di conferma email. */
 async function origine(): Promise<string> {

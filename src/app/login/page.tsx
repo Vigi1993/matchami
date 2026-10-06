@@ -19,6 +19,7 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const erroreConferma = searchParams.get("errore");
   const next = searchParams.get("next") ?? "/";
+  const eliminato = searchParams.get("eliminato") === "1";
 
   const [tab, setTab] = useState<"registrati" | "accedi" | "recupero">("registrati");
   const [ruolo, setRuolo] = useState<Ruolo>("inquilino");
@@ -50,6 +51,13 @@ function LoginForm() {
           Ogni casa ha un inquilino perfetto che la aspetta. Scorri, matcha,
           affitta. Tutto verificato, su MatchAmI.
         </p>
+
+        {eliminato && (
+          <p className="login-consent mb-4" style={{ lineHeight: 1.55 }}>
+            Il tuo account è stato eliminato, insieme ai tuoi dati. Se vuoi
+            tornare, puoi registrarti di nuovo.
+          </p>
+        )}
 
         {erroreConferma && (
           <p className="login-error mb-4">
