@@ -101,6 +101,11 @@ const MESSAGGI: Record<string, string> = {
   NON_PROPRIETARIO:
     "Il tuo account è registrato come inquilino. Per lasciare un feedback serve un account proprietario.",
   AUTO_INVITO: "Non puoi rispondere a un invito che hai creato tu.",
+  PROPRIETARIO_NON_VERIFICATO:
+    "Per lasciare un feedback serve un tuo immobile verificato su MatchAmI.",
+  RAPPORTO_NON_VERIFICATO:
+    "Per lasciare un feedback serve un contratto verificato con questa persona.",
+  RAPPORTO_GIA_RECENSITO: "Hai già lasciato il feedback per questo contratto.",
 };
 
 export async function completaInvito(

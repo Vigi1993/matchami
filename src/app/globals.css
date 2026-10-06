@@ -2340,3 +2340,36 @@ input[type="range"]::-moz-range-thumb {
   color: var(--body-text);
   margin: 0 0 14px 0;
 }
+
+/* Requisiti per lasciare un feedback (pagina d'invito, su fondo scuro). */
+.requisiti {
+  list-style: none;
+  margin: 4px 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.requisiti li {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  font-size: 14px;
+  color: rgba(247, 244, 236, 0.85);
+}
+.requisito-simbolo {
+  flex: 0 0 20px;
+  text-align: center;
+  font-weight: 700;
+  color: var(--clay);
+}
+.requisiti li.ok .requisito-simbolo {
+  color: #8fe3b8;
+}
+.requisiti li.in_verifica .requisito-simbolo {
+  color: var(--gold);
+}
+.requisiti small {
+  display: block;
+  font-size: 11.5px;
+  color: var(--gold);
+}

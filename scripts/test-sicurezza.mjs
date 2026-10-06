@@ -248,3 +248,71 @@ test("eliminaFileUtente: lo Storage che non toglie mai i file non fa girare per 
   await eliminaFileUtente(admin, "u", ["un-bucket"]);
   assert.ok(giri <= 51, "dopo " + giri + " giri non si è fermato");
 });
+
+// ============================================================
+// Feedback del proprietario invitato: cosa si mostra
+// ============================================================
+
+const { descriviRequisiti, messaggioInvito } = caricaTs(path.join(radice, "src", "lib", "invito.ts"));
+const req = (v, r, iv = false) => ({ proprietario_verificato: v, rapporto_verificato: r, rapporto_in_verifica: iv });
+
+test("requisiti: il modulo compare SOLO con entrambi, in tutte e quattro le combinazioni", () => {
+  assert.equal(descriviRequisiti(req(true, true), "Tina").completi, true);
+  assert.equal(descriviRequisiti(req(true, false), "Tina").completi, false);
+  assert.equal(descriviRequisiti(req(false, true), "Tina").completi, false);
+  assert.equal(descriviRequisiti(req(false, false), "Tina").completi, false);
+});
+
+test("requisiti: se non si riesce a sapere, il modulo NON compare (si fallisce chiusi)", () => {
+  for (const x of [null, undefined, {}, { proprietario_verificato: "true", rapporto_verificato: 1 }]) {
+    assert.equal(descriviRequisiti(x, "Tina").completi, false, JSON.stringify(x));
+  }
+});
+
+test("requisiti: ogni voce dice a che punto è, e quella del contratto nomina l'inquilino", () => {
+  const d = descriviRequisiti(req(true, false, true), "Tina Rossi");
+  assert.deepEqual(d.voci.map((v) => [v.chiave, v.stato]), [["immobile", "ok"], ["contratto", "in_verifica"]]);
+  assert.match(d.voci[1].testo, /Tina Rossi/);
+  const niente = descriviRequisiti(req(false, false), "Tina");
+  assert.deepEqual(niente.voci.map((v) => v.stato), ["no", "no"]);
+});
+
+test("requisiti: un rapporto già verificato non appare mai 'in verifica'", () => {
+  assert.equal(descriviRequisiti(req(true, true, true), "T").voci[1].stato, "ok");
+});
+
+test("messaggioInvito: dice la verità, con il link e senza promettere 'un minuto'", () => {
+  const m = messaggioInvito("Tina", "https://sito.it/invito/abc");
+  assert.match(m, /https:\/\/sito\.it\/invito\/abc$/);
+  assert.match(m, /Sono Tina/);
+  assert.match(m, /verificat/);
+  assert.ok(!/un minuto/i.test(m), "promette un minuto");
+  assert.ok(!messaggioInvito(null, "x").includes("Sono "), "senza nome non deve scrivere 'Sono'");
+});
+
+test("i testi dell'invito non presumono il genere di nessuno", () => {
+  // Legge i file veri: l'inquilino può essere una donna, un uomo o altro, e un
+  // "lui" o un "gli riconosci" in una pagina rivolta a un estraneo sarebbe
+  // sbagliato. Controlla pronomi tonici e atoni di terza persona.
+  const file = [
+    path.join(radice, "src", "lib", "invito.ts"),
+    path.join(radice, "src", "components", "InvitaProprietarioSheet.tsx"),
+    path.join(radice, "src", "app", "invito", "[token]", "page.tsx"),
+    path.join(radice, "src", "app", "invito", "[token]", "InvitoClient.tsx"),
+  ];
+  for (const f of file) {
+    const testo = fs.readFileSync(f, "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")          // commenti a blocco
+      .replace(/^\s*\/\/.*$/gm, "");               // commenti di riga
+    // sia il testo tra i tag sia le stringhe di codice
+    const pezzi = [...testo.matchAll(/>([^<>{}]*)</g)].map((m) => m[1])
+      .concat([...testo.matchAll(/(["'`])((?:\\.|(?!\1).)*)\1/g)].map((m) => m[2]));
+    for (const t of pezzi) {
+      assert.ok(
+        !/\b(lui|lei)\b/i.test(t) && !/\bgli (riconosci|dai|scrivi|vedi|hai)\b/i.test(t) && !/\bche gli\b/i.test(t),
+        `${path.basename(f)}: "${t.trim()}"`
+      );
+    }
+  }
+  assert.ok(!/\blui\b|\blei\b/i.test(messaggioInvito("Tina", "x")));
+});

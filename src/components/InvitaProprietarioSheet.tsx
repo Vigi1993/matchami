@@ -9,6 +9,7 @@ import {
   type InvitoState,
 } from "@/app/(app)/profilo/invito-actions";
 import type { Invito } from "@/lib/types";
+import { messaggioInvito } from "@/lib/invito";
 
 const STATO_LABEL: Record<Invito["stato"], string> = {
   inviato: "In attesa",
@@ -20,16 +21,6 @@ const STATO_BADGE: Record<Invito["stato"], string> = {
   completato: "is-match",
   annullato: "is-off",
 };
-
-/** Messaggio già pronto: all'inquilino resta solo da premere invia. */
-function messaggio(nomeInquilino: string | null, link: string) {
-  const io = nomeInquilino ? ` Sono ${nomeInquilino}.` : "";
-  return (
-    `Ciao!${io} Sto usando MatchAmI per la casa e mi piacerebbe che ` +
-    `lasciassi un tuo commento su com'è andata con me come inquilino. ` +
-    `Ci vuole un minuto: ${link}`
-  );
-}
 
 export function InvitaProprietarioSheet({
   open,
@@ -57,8 +48,10 @@ export function InvitaProprietarioSheet({
     <Sheet open={open} onClose={onClose} title="Invita il tuo proprietario">
       <p className="sheet-sub">
         Se hai già una casa in affitto, il tuo proprietario può lasciare un
-        commento su com&apos;è andata con te. Conta sul tuo punteggio di
-        affidabilità come qualsiasi altro feedback, e vale anche per gli
+        commento su com&apos;è andata con te, e conta sul tuo punteggio di
+        affidabilità. Per tenerlo affidabile, MatchAmI lo accetta solo da
+        proprietari verificati, con un immobile verificato sul portale, e solo
+        se esiste un contratto verificato tra voi due. Vale anche per gli
         affitti iniziati fuori da MatchAmI.
       </p>
 
@@ -185,7 +178,7 @@ function LinkPronto({
   onIndietro: () => void;
 }) {
   const [copiato, setCopiato] = useState(false);
-  const testo = messaggio(nomeInquilino, link);
+  const testo = messaggioInvito(nomeInquilino, link);
 
   async function copia() {
     try {
@@ -213,7 +206,8 @@ function LinkPronto({
     <div>
       <div className="note-ok" style={{ marginBottom: 16 }}>
         Link pronto. Mandalo tu al proprietario: arrivando da te ha molte
-        più probabilità di essere aperto.
+        più probabilità di essere aperto. Per lasciare il commento dovrà
+        verificare l&apos;immobile e il vostro contratto.
       </div>
 
       <Field label="Il messaggio da mandare">

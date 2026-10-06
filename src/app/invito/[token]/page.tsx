@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { InvitoClient } from "./InvitoClient";
+import { descriviRequisiti } from "@/lib/invito";
+import type { RequisitiFeedback } from "@/lib/invito";
 
 type InvitoPubblico = {
   nome_inquilino: string | null;
@@ -77,22 +79,23 @@ export default async function InvitoPage({
     return (
       <Cornice titolo={`${inquilino} ti ha invitato`}>
         <p>
-          {inquilino} sta usando MatchAmI e vorrebbe un tuo commento su
-          com&apos;è andata con lui come inquilino
+          {inquilino} ti ha chiesto un commento su com&apos;è andata come
+          inquilino
           {invito.indirizzo ? ` a ${invito.indirizzo}` : ""}
           {invito.periodo ? `, ${invito.periodo}` : ""}.
         </p>
         <p>
-          Per lasciarlo ti serve un account proprietario: bastano un minuto e
-          un indirizzo email. Da lì potrai anche pubblicare i tuoi immobili,
-          se un giorno ti servirà.
+          Su MatchAmI i commenti sono affidabili perché chi li scrive è
+          verificato. Per lasciarlo servono un account proprietario, un tuo
+          immobile verificato sul portale e un contratto verificato con{" "}
+          {inquilino}. Puoi cominciare registrandoti.
         </p>
         <Link
           href={`/login?next=${encodeURIComponent(`/invito/${token}`)}`}
           className="login-cta"
           style={{ display: "block", textAlign: "center", marginTop: 8 }}
         >
-          Registrati e lascia il feedback
+          Registrati come proprietario
         </Link>
       </Cornice>
     );
@@ -107,6 +110,46 @@ export default async function InvitoPage({
           un feedback su un altro inquilino. Esci e registrati come
           proprietario con un&apos;altra email, oppure riapri questo link dal
           dispositivo del proprietario.
+        </p>
+      </Cornice>
+    );
+  }
+
+  // Un proprietario invitato è un proprietario come gli altri: per lasciare
+  // il feedback deve essere verificato e avere un contratto verificato con
+  // chi lo ha invitato. La regola vera sta nel database; qui si spiega.
+  const { data: righeRequisiti } = await supabase.rpc("requisiti_feedback_invito", {
+    p_token: token,
+  });
+  const { completi, voci } = descriviRequisiti(
+    (righeRequisiti?.[0] ?? null) as RequisitiFeedback | null,
+    inquilino || "l'inquilino"
+  );
+
+  if (!completi) {
+    return (
+      <Cornice titolo="Per lasciare il feedback serve ancora qualcosa">
+        <p>
+          MatchAmI accetta un commento su un inquilino solo da un proprietario
+          verificato, e solo se esiste un contratto verificato tra voi due.
+          Vale per tutti i proprietari.
+        </p>
+        <ul className="requisiti">
+          {voci.map((v) => (
+            <li key={v.chiave} className={v.stato}>
+              <span className="requisito-simbolo">
+                {v.stato === "ok" ? "✓" : v.stato === "in_verifica" ? "…" : "–"}
+              </span>
+              <span>
+                {v.testo}
+                {v.stato === "in_verifica" && <small>In verifica</small>}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <p>
+          La verifica di immobili e contratti non è ancora attiva su MatchAmI.
+          Quando lo sarà potrai avviarla e poi tornare a questo link.
         </p>
       </Cornice>
     );

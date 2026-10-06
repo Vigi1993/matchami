@@ -56,7 +56,7 @@ export function InvitoClient({
       <div className="screen-inner" style={{ maxWidth: 560 }}>
         <h1 className="screen-title">Com&apos;è andata con {inquilino}?</h1>
         <p className="screen-sub">
-          {indirizzo ? `${indirizzo}` : "La casa che gli hai affittato"}
+          {indirizzo ? `${indirizzo}` : `La casa che hai affittato a ${inquilino}`}
           {periodo ? ` · ${periodo}` : ""}. Il tuo commento resta legato al
           suo profilo e lo vedranno gli altri proprietari quando valuterà una
           candidatura.
@@ -91,7 +91,7 @@ export function InvitoClient({
 
           <div className="pref-section">
             <div className="pref-label">
-              <span>Cosa gli riconosci</span>
+              <span>Cosa riconosci a {inquilino}</span>
             </div>
             <div className="chip-row">
               {TAG_RECENSIONE.map((t) => (
