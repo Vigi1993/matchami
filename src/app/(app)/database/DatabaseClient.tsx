@@ -7,6 +7,9 @@ import type { CandidaturaRicevuta } from "@/lib/types";
 import { ordinaCandidati } from "@/lib/match";
 import { valutaCandidatura } from "./actions";
 import { PageContainer } from "@/components/ui/PageContainer";
+import { Chip } from "@/components/ui/Chip";
+import { MOTIVI_RIFIUTO } from "@/lib/motivi-rifiuto";
+import type { ChiaveMotivoRifiuto } from "@/lib/motivi-rifiuto";
 import { IconPersone } from "@/components/icons";
 
 const BADGE: Record<string, string> = {
@@ -45,6 +48,10 @@ export function DatabaseClient({
   );
   const [pending, startTransition] = useTransition();
   const [errore, setErrore] = useState<string | null>(null);
+  // Accettare e rifiutare non si annullano: prima si chiede conferma, e per
+  // il rifiuto anche il motivo, che l'inquilino leggerà.
+  const [confermando, setConfermando] = useState<"accettata" | "rifiutata" | null>(null);
+  const [motivo, setMotivo] = useState<ChiaveMotivoRifiuto | null>(null);
   const [aggiornate, setAggiornate] = useState<
     Record<string, "accettata" | "rifiutata">
   >({});
@@ -53,16 +60,34 @@ export function DatabaseClient({
     return aggiornate[c.id] ?? c.status;
   }
 
+  function chiudi() {
+    setSelezionata(null);
+    setErrore(null);
+    setConfermando(null);
+    setMotivo(null);
+  }
+
+  function apri(c: CandidaturaRicevuta) {
+    setErrore(null);
+    setConfermando(null);
+    setMotivo(null);
+    setSelezionata(c);
+  }
+
   function valuta(c: CandidaturaRicevuta, nuovo: "accettata" | "rifiutata") {
     setErrore(null);
     startTransition(async () => {
-      const res = await valutaCandidatura(c.id, nuovo);
+      const res = await valutaCandidatura(
+        c.id,
+        nuovo,
+        nuovo === "rifiutata" ? (motivo ?? undefined) : undefined
+      );
       if (res?.error) {
         setErrore(res.error);
         return;
       }
       setAggiornate((prev) => ({ ...prev, [c.id]: nuovo }));
-      setSelezionata(null);
+      chiudi();
     });
   }
 
@@ -114,16 +139,13 @@ export function DatabaseClient({
           key={a.id}
           annuncio={a}
           stato={stato}
-          onSelect={setSelezionata}
+          onSelect={apri}
         />
       ))}
 
       <Sheet
         open={selezionata !== null}
-        onClose={() => {
-          setSelezionata(null);
-          setErrore(null);
-        }}
+        onClose={chiudi}
         title={
           selezionata
             ? `${selezionata.nome ?? "Inquilino"} ${selezionata.cognome ?? ""}`
@@ -199,22 +221,91 @@ export function DatabaseClient({
             )}
 
             {stato(selezionata) === "in_attesa" ? (
-              <div className="flex gap-3 mt-6">
-                <button
-                  onClick={() => valuta(selezionata, "rifiutata")}
-                  disabled={pending}
-                  className="btn-danger-outline"
-                >
-                  Rifiuta
-                </button>
-                <button
-                  onClick={() => valuta(selezionata, "accettata")}
-                  disabled={pending}
-                  className="opp-cta"
-                >
-                  Accetta
-                </button>
-              </div>
+              confermando === null ? (
+                <div className="flex gap-3 mt-6">
+                  <button
+                    onClick={() => setConfermando("rifiutata")}
+                    className="btn-danger-outline"
+                  >
+                    Rifiuta
+                  </button>
+                  <button
+                    onClick={() => setConfermando("accettata")}
+                    className="opp-cta"
+                  >
+                    Accetta
+                  </button>
+                </div>
+              ) : confermando === "accettata" ? (
+                <div className="conferma">
+                  <p className="conferma-titolo">
+                    Accettare {selezionata.nome ?? "questo candidato"}?
+                  </p>
+                  <p className="conferma-testo">
+                    Si apre la chat con il candidato. La decisione non si può
+                    annullare.
+                  </p>
+                  {selezionata.valutazione?.match.bloccato && (
+                    <div className="note-stop">
+                      Attenzione: non soddisfa un criterio obbligatorio che hai
+                      chiesto ({selezionata.valutazione.match.mancanti.join(", ")}).
+                    </div>
+                  )}
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setConfermando(null)}
+                      disabled={pending}
+                      className="btn-danger-outline"
+                      style={{ borderColor: "rgba(16,21,26,.14)", color: "var(--ink)" }}
+                    >
+                      Annulla
+                    </button>
+                    <button
+                      onClick={() => valuta(selezionata, "accettata")}
+                      disabled={pending}
+                      className="opp-cta"
+                    >
+                      {pending ? "Un momento..." : "Sì, accetta"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="conferma">
+                  <p className="conferma-titolo">Perché rifiuti?</p>
+                  <p className="conferma-testo">
+                    L&apos;inquilino leggerà il motivo che scegli. La decisione
+                    non si può annullare.
+                  </p>
+                  <div className="chip-row" style={{ marginBottom: 16 }}>
+                    {MOTIVI_RIFIUTO.map((m) => (
+                      <Chip
+                        key={m.chiave}
+                        label={m.scelta}
+                        active={motivo === m.chiave}
+                        onClick={() => setMotivo(m.chiave)}
+                      />
+                    ))}
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setConfermando(null)}
+                      disabled={pending}
+                      className="btn-danger-outline"
+                      style={{ borderColor: "rgba(16,21,26,.14)", color: "var(--ink)" }}
+                    >
+                      Annulla
+                    </button>
+                    <button
+                      onClick={() => valuta(selezionata, "rifiutata")}
+                      disabled={pending || motivo === null}
+                      className="opp-cta"
+                      style={{ background: motivo ? "var(--clay)" : undefined }}
+                    >
+                      {pending ? "Un momento..." : "Conferma il rifiuto"}
+                    </button>
+                  </div>
+                </div>
+              )
             ) : (
               <div className="flex flex-col gap-3 mt-6">
                 <div

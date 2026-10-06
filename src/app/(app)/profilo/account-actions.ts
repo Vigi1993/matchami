@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { createClient as createPlainClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
+import { validaNuovaPassword } from "@/lib/password";
 
 export type AccountState = {
   error?: string;
@@ -138,12 +139,8 @@ export async function updatePassword(
   const nuova = String(formData.get("password_nuova") || "");
   const ripeti = String(formData.get("password_ripeti") || "");
 
-  if (nuova.length < 8) {
-    return { error: "La nuova password deve avere almeno 8 caratteri." };
-  }
-  if (nuova !== ripeti) {
-    return { error: "Le due password non coincidono." };
-  }
+  const erroreRegole = validaNuovaPassword(nuova, ripeti);
+  if (erroreRegole) return { error: erroreRegole };
   if (nuova === attuale) {
     return { error: "La nuova password è uguale a quella attuale." };
   }

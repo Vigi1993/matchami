@@ -121,6 +121,8 @@ export type CandidaturaConAnnuncio = {
   id: string;
   status: StatoCandidatura;
   match_pct: number | null;
+  /** chiave della lista chiusa in lib/motivi-rifiuto.ts; null se non rifiutata o rifiutata prima che esistesse */
+  motivo_rifiuto: string | null;
   created_at: string;
   listings: {
     titolo: string;

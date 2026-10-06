@@ -3,15 +3,8 @@
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
-
-/**
- * Accetta solo percorsi interni: senza questo controllo `?next=` sarebbe
- * un redirect aperto verso qualunque sito.
- */
-function destinazioneSicura(valore: FormDataEntryValue | null): string {
-  const s = String(valore || "");
-  return s.startsWith("/") && !s.startsWith("//") ? s : "/";
-}
+import { percorsoInterno } from "@/lib/percorso";
+import { PERCORSO_RESET } from "@/lib/recupero";
 
 async function origine(): Promise<string | null> {
   const h = await headers();
@@ -33,7 +26,7 @@ export async function signup(
   const cognome = String(formData.get("cognome") || "");
   const ruolo = String(formData.get("ruolo") || "inquilino");
   const privacyAccettata = formData.get("privacy") === "on";
-  const next = destinazioneSicura(formData.get("next"));
+  const next = percorsoInterno(String(formData.get("next") ?? ""));
 
   if (!privacyAccettata) {
     return { error: "Devi accettare la privacy per continuare." };
@@ -76,7 +69,7 @@ export async function login(
 ): Promise<AuthState> {
   const email = String(formData.get("email") || "");
   const password = String(formData.get("password") || "");
-  const next = destinazioneSicura(formData.get("next"));
+  const next = percorsoInterno(String(formData.get("next") ?? ""));
 
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -92,4 +85,47 @@ export async function logout() {
   const supabase = await createClient();
   await supabase.auth.signOut();
   redirect("/login");
+}
+
+export type RecuperoState = { messaggio?: string; error?: string } | null;
+
+/**
+ * Manda il link per reimpostare la password.
+ *
+ * La risposta è SEMPRE la stessa, che l'indirizzo sia registrato o no:
+ * altrimenti questo modulo permetterebbe a chiunque di scoprire se una
+ * persona ha un account.
+ */
+export async function richiediReset(
+  _prevState: RecuperoState,
+  formData: FormData
+): Promise<RecuperoState> {
+  const email = String(formData.get("email") || "").trim().toLowerCase();
+  if (!email.includes("@")) {
+    return { error: "Inserisci un indirizzo email valido." };
+  }
+
+  const supabase = await createClient();
+  const base = await origine();
+
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: base
+      ? `${base}/auth/callback?next=${encodeURIComponent(PERCORSO_RESET)}`
+      : undefined,
+  });
+
+  // Un errore qui è quasi sempre il limite di invii di Supabase. Non si
+  // distingue "indirizzo sconosciuto" da "riuscito": per quello Supabase
+  // non restituisce errore.
+  if (error) {
+    return {
+      error:
+        "Non riesco a mandare l'email in questo momento. Riprova tra qualche minuto.",
+    };
+  }
+
+  return {
+    messaggio:
+      "Se l'indirizzo è registrato, riceverai un'email con il link per scegliere una nuova password. Aprilo dallo stesso browser da cui l'hai chiesto.",
+  };
 }

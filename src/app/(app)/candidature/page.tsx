@@ -10,7 +10,9 @@ export default async function CandidaturePage() {
 
   const { data: candidature } = await supabase
     .from("candidature")
-    .select("id, status, match_pct, created_at, listings(titolo, zona, prezzo, locali, mq)")
+    .select(
+      "id, status, match_pct, motivo_rifiuto, created_at, listings(titolo, zona, prezzo, locali, mq)"
+    )
     .eq("tenant_id", user!.id)
     .order("created_at", { ascending: false });
 

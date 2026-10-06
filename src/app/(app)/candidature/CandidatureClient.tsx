@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Sheet } from "@/components/Sheet";
 import type { CandidaturaConAnnuncio, StatoCandidatura } from "@/lib/types";
 import { PageContainer } from "@/components/ui/PageContainer";
+import { messaggioMotivoRifiuto } from "@/lib/motivi-rifiuto";
 import { IconChat } from "@/components/icons";
 
 const STATO_LABEL: Record<StatoCandidatura, string> = {
@@ -131,7 +132,7 @@ export function CandidatureClient({
             )}
             {selezionata.status === "rifiutata" && (
               <div className="note-box mt-5">
-                Il proprietario ha scelto un altro profilo per questo annuncio.
+                {messaggioMotivoRifiuto(selezionata.motivo_rifiuto)}
               </div>
             )}
           </>

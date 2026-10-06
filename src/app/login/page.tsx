@@ -2,7 +2,7 @@
 
 import { Suspense, useActionState, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { signup, login } from "./actions";
+import { signup, login, richiediReset } from "./actions";
 import { IconCasa, IconPalazzo } from "@/components/icons";
 
 type Ruolo = "inquilino" | "proprietario";
@@ -20,7 +20,7 @@ function LoginForm() {
   const erroreConferma = searchParams.get("errore");
   const next = searchParams.get("next") ?? "/";
 
-  const [tab, setTab] = useState<"registrati" | "accedi">("registrati");
+  const [tab, setTab] = useState<"registrati" | "accedi" | "recupero">("registrati");
   const [ruolo, setRuolo] = useState<Ruolo>("inquilino");
 
   const [signupState, signupAction, signupPending] = useActionState(
@@ -28,6 +28,10 @@ function LoginForm() {
     null
   );
   const [loginState, loginAction, loginPending] = useActionState(login, null);
+  const [recuperoState, recuperoAction, recuperoPending] = useActionState(
+    richiediReset,
+    null
+  );
 
   return (
     <main className="login-view">
@@ -49,11 +53,12 @@ function LoginForm() {
 
         {erroreConferma && (
           <p className="login-error mb-4">
-            Conferma email non riuscita: {erroreConferma}
+            {erroreConferma}
           </p>
         )}
 
-        {/* Tab Registrati / Accedi */}
+        {/* Tab Registrati / Accedi (non durante il recupero della password) */}
+        {tab !== "recupero" && (
         <div className="login-switch">
           <button
             type="button"
@@ -70,6 +75,7 @@ function LoginForm() {
             Accedi
           </button>
         </div>
+        )}
 
         {tab === "registrati" ? (
           <form action={signupAction} className="flex flex-col gap-3">
@@ -118,6 +124,51 @@ function LoginForm() {
               {signupPending ? "Creazione account..." : "Crea il tuo account"}
             </button>
           </form>
+        ) : tab === "recupero" ? (
+          <form action={recuperoAction} className="flex flex-col gap-3">
+            <h2 className="login-title" style={{ fontSize: 19, marginBottom: 2 }}>
+              Recupera la password
+            </h2>
+            <p className="login-tag" style={{ fontSize: 13, margin: "0 0 6px 0" }}>
+              Scrivi l&apos;email con cui ti sei registrato: ti mandiamo un link
+              per scegliere una nuova password.
+            </p>
+
+            {recuperoState?.messaggio ? (
+              <p className="login-consent" style={{ lineHeight: 1.55 }}>
+                {recuperoState.messaggio}
+              </p>
+            ) : (
+              <>
+                <Input name="email" type="email" placeholder="Email" required />
+                {recuperoState?.error && (
+                  <p className="login-error">{recuperoState.error}</p>
+                )}
+                <button
+                  type="submit"
+                  disabled={recuperoPending}
+                  className="login-cta mt-2"
+                >
+                  {recuperoPending ? "Invio..." : "Mandami il link"}
+                </button>
+              </>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setTab("accedi")}
+              className="login-fine"
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                textDecoration: "underline",
+                marginTop: 4,
+              }}
+            >
+              Torna all&apos;accesso
+            </button>
+          </form>
         ) : (
           <form action={loginAction} className="flex flex-col gap-3">
             <input type="hidden" name="next" value={next} />
@@ -135,6 +186,21 @@ function LoginForm() {
 
             <button type="submit" disabled={loginPending} className="login-cta mt-2">
               {loginPending ? "Accesso..." : "Accedi"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setTab("recupero")}
+              className="login-fine"
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                textDecoration: "underline",
+                marginTop: 2,
+              }}
+            >
+              Password dimenticata?
             </button>
           </form>
         )}

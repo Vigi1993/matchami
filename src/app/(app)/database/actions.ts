@@ -4,16 +4,24 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { criteriDaRighe, valutaCandidato } from "@/lib/match";
 import type { ProfiloCandidato, RigaCriterioDb } from "@/lib/match";
+import { motivoRifiutoValido } from "@/lib/motivi-rifiuto";
 
 export async function valutaCandidatura(
   candidaturaId: string,
-  nuovoStato: "accettata" | "rifiutata"
+  nuovoStato: "accettata" | "rifiutata",
+  motivo?: string
 ) {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { error: "Non autenticato." };
+
+  // Rifiutare richiede un motivo, scelto da una lista chiusa: l'inquilino
+  // ha diritto di sapere perché, e un testo libero non lo vogliamo ospitare.
+  if (nuovoStato === "rifiutata" && !motivoRifiutoValido(motivo)) {
+    return { error: "Scegli un motivo per il rifiuto." };
+  }
 
   // La decisione registra una fotografia del match di quel momento (D7):
   // da qui in poi l'inquilino può cambiare il profilo, ma il proprietario
@@ -59,11 +67,15 @@ export async function valutaCandidatura(
     fotografia = null;
   }
 
-  const { error } = await supabase
+  // La decisione si prende una volta sola: si aggiorna solo se la
+  // candidatura è ancora in attesa. Il database lo impone anche da sé
+  // (migrazione 0009), qui serve a dare un messaggio chiaro.
+  const { data: aggiornate, error } = await supabase
     .from("candidature")
     .update({
       status: nuovoStato,
       updated_at: new Date().toISOString(),
+      motivo_rifiuto: nuovoStato === "rifiutata" ? motivo : null,
       ...(fotografia
         ? {
             match_proprietario: fotografia,
@@ -71,9 +83,20 @@ export async function valutaCandidatura(
           }
         : {}),
     })
-    .eq("id", candidaturaId);
+    .eq("id", candidaturaId)
+    .eq("status", "in_attesa")
+    .select("id");
 
-  if (error) return { error: error.message };
+  if (error) {
+    return {
+      error: error.message.includes("DECISIONE_DEFINITIVA")
+        ? "Questa candidatura è già stata valutata."
+        : error.message,
+    };
+  }
+  if (!aggiornate || aggiornate.length === 0) {
+    return { error: "Questa candidatura è già stata valutata." };
+  }
 
   revalidatePath("/database");
   return { ok: true };
