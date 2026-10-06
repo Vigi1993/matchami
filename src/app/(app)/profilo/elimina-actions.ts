@@ -46,7 +46,7 @@ export async function eliminaAccount(
 
   const admin = clienteAmministratore();
   if (!admin) {
-    console.error("eliminaAccount: SUPABASE_SERVICE_ROLE_KEY non configurata");
+    console.error("eliminaAccount: chiave di servizio (SUPABASE_SECRET_KEY) non configurata o non valida");
     return {
       error:
         "L'eliminazione dell'account non è ancora attiva su questo ambiente.",

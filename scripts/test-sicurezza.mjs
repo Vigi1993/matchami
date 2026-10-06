@@ -316,3 +316,95 @@ test("i testi dell'invito non presumono il genere di nessuno", () => {
   }
   assert.ok(!/\blui\b|\blei\b/i.test(messaggioInvito("Tina", "x")));
 });
+
+// ============================================================
+// Chiave di servizio di Supabase: si usa solo quella giusta
+// ============================================================
+
+const { controllaChiaveDiServizio, chiaveDiServizioDaAmbiente } = caricaTs(path.join(radice, "src", "lib", "chiavi.ts"));
+const jwt = (ruolo) => {
+  const b = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  return `${b({ alg: "HS256", typ: "JWT" })}.${b({ role: ruolo, iss: "supabase" })}.firma`;
+};
+
+test("chiave: la chiave segreta nuova va bene", () => {
+  const r = controllaChiaveDiServizio("sb_secret_abcdef123456");
+  assert.equal(r.ok, true);
+  assert.equal(r.tipo, "segreta");
+});
+
+test("chiave: la vecchia service_role, in formato JWT, va ancora bene", () => {
+  const r = controllaChiaveDiServizio(jwt("service_role"));
+  assert.equal(r.ok, true);
+  assert.equal(r.tipo, "service_role_legacy");
+});
+
+test("chiave: la chiave PUBBLICA incollata per errore viene rifiutata, con un motivo chiaro", () => {
+  // Il caso più probabile: la finestra "Connect" mostra per prima questa
+  const r = controllaChiaveDiServizio("sb_publishable_abcdef123456");
+  assert.equal(r.ok, false);
+  assert.match(r.motivo, /PUBBLICA/);
+  assert.match(r.motivo, /sb_secret_/, "deve dire cosa cercare");
+});
+
+test("chiave: la vecchia anon (JWT pubblico) viene rifiutata", () => {
+  const r = controllaChiaveDiServizio(jwt("anon"));
+  assert.equal(r.ok, false);
+  assert.match(r.motivo, /anon/);
+});
+
+test("chiave: un JWT con un ruolo qualunque non passa per service_role", () => {
+  for (const ruolo of ["authenticated", "supabase_admin", "", undefined, 42]) {
+    assert.equal(controllaChiaveDiServizio(jwt(ruolo)).ok, false, String(ruolo));
+  }
+});
+
+test("chiave: vuota, spazi, rovinata o di un altro tipo: mai accettata", () => {
+  for (const x of [undefined, null, "", "   ", "abc", "eyJ.rotto", "eyJ.eyJ.eyJ", "Bearer sb_secret_x", "sk_live_123", "sb_secret", "SB_SECRET_x"]) {
+    assert.equal(controllaChiaveDiServizio(x).ok, false, JSON.stringify(x));
+  }
+});
+
+test("chiave: spazi o a capo ai lati (capita copiando) non rompono una chiave giusta", () => {
+  const r = controllaChiaveDiServizio("  sb_secret_abc123\n");
+  assert.equal(r.ok, true);
+  assert.equal(r.chiave, "sb_secret_abc123", "restituisce la chiave già pulita");
+});
+
+test("ambiente: il nome ufficiale ha la precedenza e il vecchio resta valido", () => {
+  assert.equal(chiaveDiServizioDaAmbiente({ SUPABASE_SECRET_KEY: "sb_secret_nuova" }).chiave, "sb_secret_nuova");
+  assert.equal(chiaveDiServizioDaAmbiente({ SUPABASE_SERVICE_ROLE_KEY: jwt("service_role") }).ok, true);
+  const entrambe = chiaveDiServizioDaAmbiente({ SUPABASE_SECRET_KEY: "sb_secret_nuova", SUPABASE_SERVICE_ROLE_KEY: jwt("service_role") });
+  assert.equal(entrambe.chiave, "sb_secret_nuova", "con tutte e due vince quella nuova");
+});
+
+test("ambiente: nessuna variabile, o variabile vuota, vale 'non configurata'", () => {
+  assert.equal(chiaveDiServizioDaAmbiente({}).ok, false);
+  assert.equal(chiaveDiServizioDaAmbiente({ SUPABASE_SECRET_KEY: "" }).ok, false);
+  // vuota la nuova ma presente la vecchia: si usa la vecchia
+  assert.equal(chiaveDiServizioDaAmbiente({ SUPABASE_SECRET_KEY: "  ", SUPABASE_SERVICE_ROLE_KEY: jwt("service_role") }).ok, true);
+});
+
+test("ambiente: la chiave PUBBLICA nella variabile della segreta non diventa mai la chiave di servizio", () => {
+  const r = chiaveDiServizioDaAmbiente({ SUPABASE_SECRET_KEY: "sb_publishable_xyz" });
+  assert.equal(r.ok, false);
+  // e non ricade silenziosamente su altro
+  const r2 = chiaveDiServizioDaAmbiente({ SUPABASE_SECRET_KEY: "sb_publishable_xyz", SUPABASE_SERVICE_ROLE_KEY: "" });
+  assert.equal(r2.ok, false);
+});
+
+test("la chiave di servizio non è mai in una variabile NEXT_PUBLIC_ (finirebbe nel browser)", () => {
+  // Legge il codice: nessun file deve leggere la chiave segreta da una variabile pubblica.
+  const cartella = path.join(radice, "src");
+  const trovati = [];
+  const visita = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+    const p = path.join(d, e.name);
+    if (e.isDirectory()) visita(p);
+    else if (/\.(ts|tsx)$/.test(e.name)) {
+      const t = fs.readFileSync(p, "utf8");
+      if (/NEXT_PUBLIC_[A-Z_]*(SECRET|SERVICE_ROLE)/.test(t)) trovati.push(path.relative(radice, p));
+    }
+  } };
+  visita(cartella);
+  assert.deepEqual(trovati, [], "una chiave segreta letta da NEXT_PUBLIC_: " + trovati.join(", "));
+});
