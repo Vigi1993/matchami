@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { Messaggio } from "@/lib/types";
 import { IconIndietro, IconInvia } from "@/components/icons";
+import { AvvisoMessaggio, AvvisoTruffe, ConfermaInvioRischioso } from "@/components/AvvisiChat";
+import { rilevaRischioPagamento, type Rischio } from "@/lib/truffe";
 
 export function ChatClient({
   candidaturaId,
@@ -23,6 +25,8 @@ export function ChatClient({
   const [messaggi, setMessaggi] = useState<Messaggio[]>(messaggiIniziali);
   const [testo, setTesto] = useState("");
   const [invio, setInvio] = useState(false);
+  // il messaggio che si sta per inviare e che parla di soldi: si chiede conferma
+  const [daConfermare, setDaConfermare] = useState<Rischio | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -55,9 +59,30 @@ export function ChatClient({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messaggi]);
 
-  async function invia() {
+  // Il rischio dei messaggi RICEVUTI. Si calcola una volta per messaggio, non a ogni
+  // battuta nel campo di testo. I propri messaggi non si segnalano: si è già avvisati prima di inviarli.
+  const rischi = useMemo(
+    () =>
+      new Map(
+        messaggi.map((m) => [m.id, m.mittente_id === userId ? null : rilevaRischioPagamento(m.testo)] as const)
+      ),
+    [messaggi, userId]
+  );
+
+  async function invia(conferma = false) {
     const testoTrim = testo.trim();
     if (!testoTrim) return;
+
+    // Un consiglio, non un divieto: se il messaggio parla di soldi si chiede una conferma,
+    // e «Invia comunque» lo manda così com'è.
+    if (!conferma) {
+      const rischio = rilevaRischioPagamento(testoTrim);
+      if (rischio.livello !== "nessuno") {
+        setDaConfermare(rischio);
+        return;
+      }
+    }
+    setDaConfermare(null);
     setInvio(true);
     setTesto("");
 
@@ -88,6 +113,8 @@ export function ChatClient({
         </div>
       </div>
 
+      <AvvisoTruffe />
+
       <div className="chat-scroll">
         {messaggi.length === 0 && (
           <p className="chat-empty">
@@ -96,17 +123,24 @@ export function ChatClient({
         )}
         {messaggi.map((m) => {
           const mio = m.mittente_id === userId;
+          const rischio = rischi.get(m.id);
           return (
-            <div
-              key={m.id}
-              className={`chat-msg ${mio ? "mine" : "theirs"}`}
-            >
-              {m.testo}
-            </div>
+            <Fragment key={m.id}>
+              <div className={`chat-msg ${mio ? "mine" : "theirs"}`}>{m.testo}</div>
+              {rischio && <AvvisoMessaggio rischio={rischio} />}
+            </Fragment>
           );
         })}
         <div ref={bottomRef} />
       </div>
+
+      {daConfermare && (
+        <ConfermaInvioRischioso
+          rischio={daConfermare}
+          onModifica={() => setDaConfermare(null)}
+          onInvia={() => invia(true)}
+        />
+      )}
 
       <form
         onSubmit={(e) => {
@@ -117,7 +151,11 @@ export function ChatClient({
       >
         <input
           value={testo}
-          onChange={(e) => setTesto(e.target.value)}
+          onChange={(e) => {
+            setTesto(e.target.value);
+            // il testo è cambiato: la conferma riguardava quello di prima
+            setDaConfermare(null);
+          }}
           placeholder="Scrivi un messaggio..."
         />
         <button type="submit" disabled={invio || !testo.trim()} aria-label="Invia">

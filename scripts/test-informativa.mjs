@@ -339,3 +339,16 @@ test("ritiro: il testo dice cosa vede il proprietario, e la migrazione lo fa dav
   const sql1 = fs.readFileSync(path.join(migrazioni, "0001_init.sql"), "utf8");
   assert.match(sql1, /unique \(listing_id, tenant_id\)/);
 });
+
+// ------------------------------------------------------------
+// Ciò che il testo dice dell'avviso nella chat è vero
+// ------------------------------------------------------------
+
+test("chat: il testo dichiara che l'app legge i messaggi per avvisare, e che non salva né comunica il risultato", () => {
+  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
+  assert.match(tutto, /Nella chat, l'app evidenzia i messaggi che parlano di pagamenti sospetti/);
+  assert.match(tutto, /non salviamo il risultato e non lo comunichiamo a nessuno/);
+  assert.match(tutto, /non impedisce mai di inviare un messaggio/);
+  // il testo NON deve dire che il controllo avviene solo sul dispositivo: la prima versione della pagina si costruisce sul server
+  assert.ok(!/sul tuo dispositivo|solo sul tuo telefono|resta sul tuo/i.test(tutto), "non è vero che il controllo avviene solo sul dispositivo");
+});

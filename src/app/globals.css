@@ -2684,3 +2684,80 @@ mark.segnaposto {
   font-size: 11px;
   color: var(--muted);
 }
+
+/* ============================================================
+   Chat: avvisi contro la truffa dell'affitto
+   ============================================================ */
+
+.chat-avviso {
+  flex-shrink: 0;
+  margin: 0 12px 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink);
+  background: rgba(201, 161, 90, 0.16);
+  border-radius: 12px;
+}
+.chat-avviso summary {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  cursor: pointer;
+  list-style: none;
+}
+.chat-avviso summary::-webkit-details-marker {
+  display: none;
+}
+.chat-avviso-icona {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+.chat-avviso-apri {
+  font-weight: 600;
+  text-decoration: underline;
+  white-space: nowrap;
+}
+.chat-avviso ul {
+  margin: 8px 0 4px 24px;
+  padding: 0;
+}
+.chat-avviso li {
+  margin-bottom: 3px;
+}
+.chat-avviso p {
+  margin: 6px 0 0 24px;
+  font-weight: 600;
+}
+.chat-rischio {
+  align-self: flex-start;
+  max-width: 85%;
+  margin: -2px 0 6px;
+  padding: 7px 11px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink);
+  background: rgba(201, 161, 90, 0.2);
+  border-radius: 10px;
+}
+.chat-rischio.alto {
+  background: rgba(201, 105, 78, 0.16);
+  border-left: 3px solid var(--clay);
+}
+.chat-conferma {
+  flex-shrink: 0;
+  margin: 0 12px 8px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  background: rgba(201, 105, 78, 0.12);
+  border-radius: 12px;
+}
+.chat-conferma p {
+  margin: 0 0 8px;
+}
