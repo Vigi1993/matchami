@@ -118,7 +118,7 @@ export function estensioneDa(tipo: string): string | null {
  */
 export function percorsoDocumento(input: {
   userId: string;
-  tipo: "identita" | "proprieta" | "contratto";
+  tipo: "identita" | "proprieta" | "contratto" | "inquilino-identita" | "inquilino-reddito";
   listingId: string | null;
   estensione: string;
   id: string;
@@ -127,11 +127,14 @@ export function percorsoDocumento(input: {
   // Il contratto si chiama "contratto-...": è ciò che la funzione del database
   // `crea_richiesta_rapporto` richiede, e impedisce di presentare come
   // contratto un altro file della propria cartella.
+  // I documenti dell'inquilino si chiamano "inquilino-identita-..." e
+  // "inquilino-reddito-...": è ciò che il database richiede per registrarli,
+  // e ciò che permette di toglierli prima dell'invio senza toccare i contratti.
   const base =
-    input.tipo === "identita"
-      ? "identita"
-      : input.tipo === "contratto"
-        ? "contratto"
+    input.tipo === "identita" || input.tipo === "contratto"
+      ? input.tipo
+      : input.tipo === "inquilino-identita" || input.tipo === "inquilino-reddito"
+        ? input.tipo
         : `proprieta-${pulito(input.listingId ?? "")}`;
   return `${pulito(input.userId)}/${base}-${pulito(input.id)}.${pulito(input.estensione)}`;
 }
@@ -176,6 +179,17 @@ const MESSAGGI: Record<string, string> = {
   RAPPORTO_NON_VERIFICATO:
     "Per lasciare un feedback l'affitto deve essere verificato: lo controlliamo noi.",
   RAPPORTO_GIA_RECENSITO: "Hai già lasciato il feedback per questo affitto.",
+  // verifica del reddito dell'inquilino
+  NON_INQUILINO: "Solo gli inquilini possono verificare il reddito.",
+  INQUILINO_GIA_VERIFICATO: "Il tuo reddito risulta già verificato.",
+  INQUILINO_GIA_IN_VERIFICA: "La tua richiesta è già in verifica.",
+  DOCUMENTI_INQUILINO_MANCANTI:
+    "Mancano dei documenti: servono un documento d'identità e una prova del reddito.",
+  DATI_PROFILO_MANCANTI:
+    "Prima completa il tuo profilo: indica il lavoro e il reddito mensile, così possiamo confrontarli con i documenti.",
+  INQUILINO_NON_IN_VERIFICA: "Questa persona non ha una verifica in attesa.",
+  INQUILINO_NOTA_OBBLIGATORIA: "Per respingere scrivi cosa non va: la persona la leggerà.",
+  INQUILINO_INESISTENTE: "Inquilino non trovato.",
   // decisioni sulle candidature
   CANDIDATURA_NON_TUA: "Questa candidatura non risulta tua.",
   CANDIDATURA_GIA_VALUTATA: "Questa candidatura è già stata valutata.",
@@ -186,6 +200,12 @@ const MESSAGGI: Record<string, string> = {
 /** Traduce gli errori del database in frasi comprensibili. Mai il testo tecnico. */
 export function messaggioErroreVerifica(errore: string | null | undefined): string {
   const e = errore ?? "";
-  const chiave = Object.keys(MESSAGGI).find((k) => e.includes(k));
+  // Più codici possono comparire nello stesso testo (uno contiene l'altro:
+  // INQUILINO_GIA_VERIFICATO contiene GIA_VERIFICATO): vince il più lungo, cioè
+  // il più specifico. Altrimenti all'inquilino toccherebbe la frase
+  // dell'immobile.
+  const chiave = Object.keys(MESSAGGI)
+    .filter((k) => e.includes(k))
+    .sort((a, b) => b.length - a.length)[0];
   return chiave ? MESSAGGI[chiave] : "Non è stato possibile completare l'operazione. Riprova.";
 }

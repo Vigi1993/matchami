@@ -17,6 +17,9 @@ export type TenantProfile = {
   presentazione: string | null;
   verificato: boolean;
   verifica_stato: "non_avviata" | "in_verifica" | "verificato";
+  /** perché la verifica non è riuscita, o è decaduta; lo scrive solo lo staff */
+  verifica_esito_note: string | null;
+  verifica_inviata_at: string | null;
   budget_max: number | null;
   locali_min: number | null;
   mq_min: number | null;

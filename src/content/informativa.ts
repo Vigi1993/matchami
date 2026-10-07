@@ -28,7 +28,7 @@ export const INFORMATIVA = {
    * controllo che fa il database (migrazione 0017): un test fallisce se
    * questa stringa non lo supera.
    */
-  versione: "2026-10-provvisoria-1",
+  versione: "2026-10-provvisoria-2",
   provvisoria: true,
   titolo: "Informativa sulla privacy",
   aggiornata: "ottobre 2026",
@@ -53,7 +53,7 @@ export const INFORMATIVA = {
         "Account: email, password (conservata come impronta, non in chiaro), nome, cognome e ruolo, inquilino o proprietario.",
         "Se sei inquilino: lavoro, reddito tuo e del tuo nucleo, garante, fideiussione, protesti (li dichiari tu e non vengono verificati), animali, composizione del nucleo, numero di figli, presentazione, foto del profilo e le tue preferenze di ricerca (budget, zone, locali, metri, caratteristiche).",
         "Se sei proprietario: tipo di proprietario, numero di immobili, obiettivo; gli annunci con titolo, descrizione, zona, prezzo, caratteristiche e foto; i criteri che chiedi ai candidati.",
-        "Per le verifiche: il documento d'identità e la prova di proprietà dell'immobile (proprietari), e i contratti di affitto caricati per dichiarare un affitto.",
+        "Per le verifiche: il documento d'identità e la prova di proprietà dell'immobile (proprietari); se sei inquilino e chiedi di verificare il reddito, un documento d'identità e una prova del reddito (una busta paga, la CU o la dichiarazione dei redditi); e i contratti di affitto caricati per dichiarare un affitto. Non chiediamo lo stato di famiglia.",
         "Mentre usi l'app: candidature, messaggi, contratti, recensioni, richieste di conferma di un affitto e inviti.",
         "Dati di un'altra persona: se inviti il tuo proprietario, scrivi il suo nome e, se vuoi, la sua email.",
       ],
@@ -68,6 +68,7 @@ export const INFORMATIVA = {
       titolo: "Punteggi calcolati automaticamente",
       paragrafi: [
         "La compatibilità (match) e l'affidabilità sono calcolate automaticamente da ciò che dichiari. Servono a ordinare annunci e candidati. La decisione di accettare o rifiutare una candidatura resta sempre del proprietario.",
+        "La verifica del reddito invece non è automatica: la decide una persona del team di MatchAmI, guardando i documenti che hai caricato. Se dopo la verifica cambi il lavoro o il reddito indicati, la verifica decade e va rifatta.",
       ],
     },
     {
@@ -77,28 +78,28 @@ export const INFORMATIVA = {
         "Il proprietario di un annuncio a cui ti candidi vede il tuo nome e cognome, il lavoro, il reddito, garante e fideiussione, i protesti che hai dichiarato, se il tuo reddito è verificato, la presentazione, la foto, il punteggio di affidabilità e la compatibilità. Non vede il numero di figli, la composizione del nucleo né se hai animali: sa solo se hai compilato quei campi, per contare quanto è completo il tuo profilo. Non vede le tue preferenze di ricerca.",
         "Se rifiuta la tua candidatura, del tuo profilo gli resta solo il tuo nome, oltre alla valutazione che aveva già fatto. Tu vedi il motivo del rifiuto, non la sua valutazione completa.",
         "I messaggi li leggono solo le due persone, dopo che la candidatura è stata accettata.",
-        "Le recensioni su un inquilino le leggono lui, chi le ha scritte e i proprietari a cui si è candidato.",
+        "Le recensioni su un inquilino le leggono la persona recensita, chi le ha scritte e i proprietari a cui ha inviato una candidatura.",
         "Gli annunci pubblicati e verificati li vedono tutti gli utenti connessi. L'indirizzo esatto degli immobili non lo raccogliamo.",
-        "Il documento d'identità, la prova di proprietà e i contratti li vedono solo chi li ha caricati e il team di MatchAmI che li controlla. L'altra parte di un affitto non vede il contratto.",
+        "Il documento d'identità, la prova del reddito, la prova di proprietà e i contratti li vedono solo chi li ha caricati e il team di MatchAmI che li controlla. Un proprietario non vede mai i documenti di un inquilino: vede solo se il reddito è verificato, sì o no. L'altra parte di un affitto non vede il contratto.",
         "Il team di MatchAmI vede nome e cognome di tutti, e gli annunci e gli affitti da verificare. Chi amministra il sistema ha un accesso tecnico a tutti i dati.",
       ],
     },
     {
       titolo: "File e foto",
       paragrafi: [
-        "La foto del profilo e le foto degli annunci si aprono con un indirizzo che non richiede l'accesso: chi conosce quel link può vederle. I documenti d'identità, di proprietà e i contratti non hanno mai un indirizzo pubblico: si aprono con link temporanei, e solo a chi ne ha diritto.",
+        "La foto del profilo e le foto degli annunci si aprono con un indirizzo che non richiede l'accesso: chi conosce quel link può vederle. I documenti d'identità, di reddito, di proprietà e i contratti non hanno mai un indirizzo pubblico: si aprono con link temporanei, e solo a chi ne ha diritto.",
       ],
     },
     {
       titolo: "Per quanto tempo conserviamo i dati",
       paragrafi: [
-        "Al momento non c'è una scadenza automatica: una candidatura, un messaggio o un invito restano finché non cancelli l'account. I tempi di conservazione saranno definiti nel testo definitivo.",
+        "Al momento non c'è una scadenza automatica: una candidatura, un messaggio, un invito o un documento restano finché non cancelli l'account. Un documento caricato per la verifica del reddito puoi toglierlo tu, ma solo finché non hai inviato la richiesta. I tempi di conservazione saranno definiti nel testo definitivo.",
       ],
     },
     {
       titolo: "Cancellare il tuo account",
       paragrafi: [
-        "Puoi cancellare l'account da Profilo, Account e accesso. Se sei inquilino spariscono tutti i tuoi dati, comprese le recensioni su di te. Se sei proprietario spariscono tutti i tuoi dati, tranne le recensioni che hai scritto su inquilini ancora iscritti, che restano senza il tuo nome.",
+        "Puoi cancellare l'account da Profilo, Account e accesso. Se sei inquilino spariscono tutti i tuoi dati, compresi i documenti e le recensioni su di te. Se sei proprietario spariscono tutti i tuoi dati, tranne le recensioni che hai scritto su inquilini ancora iscritti, che restano senza il tuo nome.",
         "Non c'è ancora un modo per scaricare i tuoi dati.",
       ],
     },

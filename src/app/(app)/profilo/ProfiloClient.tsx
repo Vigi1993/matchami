@@ -1,5 +1,6 @@
 "use client";
 
+import { rigaProfilo } from "@/lib/verifica-inquilino";
 import { useActionState, useState } from "react";
 import { Sheet } from "@/components/Sheet";
 import { LAVORO_VOCAB, ATTR_VOCAB, ZONE_MILANO } from "@/lib/constants";
@@ -33,6 +34,8 @@ import {
 type Props = {
   /** gli affitti dichiarati e confermati, costruiti dal server */
   affittiPanel: React.ReactNode;
+  /** il pannello per verificare il reddito con i documenti, costruito dal server */
+  verificaPanel: React.ReactNode;
   nome: string | null;
   cognome: string | null;
   email: string | null;
@@ -53,6 +56,7 @@ export function ProfiloClient({
   tenant,
   inviti,
   affittiPanel,
+  verificaPanel,
   zoneIniziali,
   interessiIniziali,
   mediaRecensioni,
@@ -66,12 +70,14 @@ export function ProfiloClient({
     | "ricerca"
     | "invito"
     | "affitti"
+    | "verifica"
     | "account"
     | "privacy"
     | "faq"
     | null
   >(null);
 
+  const rigaVerifica = rigaProfilo(tenant.verifica_stato, tenant.verifica_esito_note);
   const affidabilita = computeAffidabilita({
     verificato: tenant.verificato,
     protestato: tenant.protestato,
@@ -149,6 +155,16 @@ export function ProfiloClient({
           onClick={() => setSheetAperta("dati")}
         />
 
+        {/* Verifica del reddito */}
+        <Row
+          color={tenant.verifica_stato === "verificato" ? "var(--moss)" : "var(--gold)"}
+          icon={<IconScudo className={tenant.verifica_stato === "verificato" ? "fill-white stroke-none" : "fill-[var(--ink)] stroke-none"} />}
+          title={rigaVerifica.titolo}
+          subtitle={rigaVerifica.sottotitolo}
+          cta={rigaVerifica.cta}
+          onClick={() => setSheetAperta("verifica")}
+        />
+
         {/* La tua ricerca */}
         <Row
           color="var(--clay)"
@@ -215,6 +231,19 @@ export function ProfiloClient({
           Esci
         </button>
       </form>
+
+      {/* ---- Sheet: Verifica del reddito ---- */}
+      <Sheet
+        open={sheetAperta === "verifica"}
+        onClose={() => setSheetAperta(null)}
+        title="Verifica del reddito"
+      >
+        <p className="sheet-sub">
+          Carica un documento d&apos;identità e una prova del reddito. Se li confermiamo, i proprietari
+          vedono «Reddito verificato» e il tuo punteggio di affidabilità sale.
+        </p>
+        {verificaPanel}
+      </Sheet>
 
       {/* ---- Sheet: Affidabilità (sola lettura) ---- */}
       <Sheet

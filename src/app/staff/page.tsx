@@ -58,6 +58,16 @@ export default async function StaffPage() {
     (persone ?? []).map((p) => [p.id as string, [p.nome, p.cognome].filter(Boolean).join(" ") || "Senza nome"])
   );
 
+  // Gli inquilini che hanno inviato i documenti del reddito. Lo staff non
+  // legge i profili: la funzione del database gli dà solo nome e data.
+  const { data: inquiliniData } = await supabase.rpc("inquilini_da_verificare");
+  const inquilini = (inquiliniData ?? []) as {
+    tenant_id: string;
+    nome: string | null;
+    cognome: string | null;
+    inviata_at: string | null;
+  }[];
+
   return (
     <>
       <h1 className="screen-title">Immobili da verificare</h1>
@@ -104,6 +114,31 @@ export default async function StaffPage() {
                 <div className="mc-meta">
                   {nomiPersone.get(r.owner_id)} (proprietario) · {nomiPersone.get(r.tenant_id)} (inquilino)
                 </div>
+              </div>
+              <div className="mc-pct is-wait">Da controllare</div>
+            </Link>
+          );
+        })}
+      </div>
+    
+      <h1 className="screen-title" style={{ marginTop: 36 }}>
+        Redditi da verificare
+      </h1>
+      <p className="screen-sub">
+        {inquilini.length === 0
+          ? "Nessun inquilino in attesa."
+          : `${inquilini.length} in attesa, i più vecchi per primi.`}
+      </p>
+      <div className="staff-lista">
+        {inquilini.map((q) => {
+          const nome = [q.nome, q.cognome].filter(Boolean).join(" ") || "Senza nome";
+          return (
+            <Link key={q.tenant_id} href={`/staff/inquilini/${q.tenant_id}`} className="match-card">
+              <div className="mc-avatar">{nome.slice(0, 2).toUpperCase()}</div>
+              <div className="mc-body">
+                <div className="mc-zona">Inquilino</div>
+                <div className="mc-title">{nome}</div>
+                <div className="mc-meta">inviato {quandoFa(q.inviata_at)}</div>
               </div>
               <div className="mc-pct is-wait">Da controllare</div>
             </Link>

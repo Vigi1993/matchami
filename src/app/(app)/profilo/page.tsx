@@ -1,3 +1,5 @@
+import { VerificaRedditoPanel } from "@/components/VerificaRedditoPanel";
+import type { DocumentoInquilino } from "@/lib/verifica-inquilino";
 import { createClient } from "@/lib/supabase/server";
 import { RapportiPanel } from "@/components/RapportiPanel";
 import { caricaRapportiMiei } from "@/lib/rapporti-server";
@@ -42,6 +44,7 @@ export default async function ProfiloPage() {
     { data: interessiRows },
     { data: recensioni },
     { data: inviti },
+    { data: documentiRows },
   ] = await Promise.all([
     supabase.from("tenant_profiles").select("*").eq("profile_id", user!.id).single(),
     supabase.from("tenant_zone_interesse").select("zona").eq("tenant_id", user!.id),
@@ -55,6 +58,11 @@ export default async function ProfiloPage() {
       .select("id, token, nome_proprietario, email_proprietario, indirizzo, periodo, stato, created_at")
       .eq("tenant_id", user!.id)
       .order("created_at", { ascending: false }),
+    supabase
+      .from("documenti_inquilino")
+      .select("id, tipo, percorso, nome_file")
+      .eq("tenant_id", user!.id)
+      .order("created_at", { ascending: true }),
   ]);
 
   const rapporti = await caricaRapportiMiei(supabase, user!.id);
@@ -83,6 +91,17 @@ export default async function ProfiloPage() {
           immobili={[]}
           richieste={rapporti.richieste}
           rapporti={rapporti.rapporti}
+        />
+      }
+      verificaPanel={
+        <VerificaRedditoPanel
+          stato={(tenant as TenantProfile).verifica_stato}
+          nota={(tenant as TenantProfile).verifica_esito_note}
+          dati={{
+            professione: (tenant as TenantProfile).professione,
+            reddito_mensile: (tenant as TenantProfile).reddito_mensile,
+          }}
+          documenti={(documentiRows ?? []) as DocumentoInquilino[]}
         />
       }
       zoneIniziali={zoneIniziali}

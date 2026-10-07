@@ -72,3 +72,34 @@ export async function decidiRapporto(
   revalidatePath("/staff");
   redirect("/staff");
 }
+
+/**
+ * Verifica o respinge il reddito di un inquilino. Stessi controlli delle
+ * altre due: permessi qui, nel layout e nella funzione del database.
+ */
+export async function decidiInquilino(
+  _prev: EsitoState,
+  formData: FormData
+): Promise<EsitoState> {
+  const supabase = await richiediStaff();
+
+  const id = String(formData.get("id") || "");
+  const esito = String(formData.get("esito") || "");
+  const nota = String(formData.get("nota") || "").trim();
+
+  if (!èUuid(id)) return { error: "Inquilino non valido." };
+  if (esito !== "verifica" && esito !== "respingi") return { error: "Scelta non valida." };
+  if (esito === "respingi" && nota.length < 3) {
+    return { error: messaggioErroreVerifica("INQUILINO_NOTA_OBBLIGATORIA") };
+  }
+
+  const { error } = await supabase.rpc("esito_verifica_inquilino", {
+    p_tenant: id,
+    p_verificato: esito === "verifica",
+    p_note: esito === "respingi" ? nota : null,
+  });
+  if (error) return { error: messaggioErroreVerifica(error.message) };
+
+  revalidatePath("/staff");
+  redirect("/staff");
+}

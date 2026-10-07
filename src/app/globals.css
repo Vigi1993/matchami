@@ -2585,3 +2585,31 @@ mark.segnaposto {
   padding: 0 4px;
   border-radius: 4px;
 }
+
+/* ============================================================
+   Verifica del reddito dell'inquilino
+   ============================================================ */
+
+.elenco-documenti {
+  list-style: none;
+  margin: 0 0 8px 0;
+  padding: 0;
+}
+.elenco-documenti li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  font-size: 13px;
+  border-bottom: 1px solid rgba(16, 21, 26, 0.08);
+}
+.elenco-documenti li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.note-box.is-no {
+  background: rgba(201, 105, 78, 0.12);
+  color: var(--ink);
+}

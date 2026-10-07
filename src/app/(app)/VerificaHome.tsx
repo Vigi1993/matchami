@@ -1,5 +1,6 @@
 "use client";
 
+import { SelettoreFile } from "@/components/SelettoreFile";
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -248,34 +249,5 @@ export function VerificaHome({
         ti avvisiamo quando l&apos;esito è pronto: torna qui per vederlo.
       </div>
     </PageContainer>
-  );
-}
-
-function SelettoreFile({
-  etichetta,
-  aria,
-  occupato,
-  onFile,
-}: {
-  etichetta: string;
-  aria: string;
-  occupato: boolean;
-  onFile: (file: File | undefined) => void;
-}) {
-  return (
-    <label className="chip selettore-file" aria-busy={occupato}>
-      {occupato ? "Caricamento..." : etichetta}
-      <input
-        type="file"
-        accept="application/pdf,image/jpeg,image/png"
-        aria-label={aria}
-        disabled={occupato}
-        className="hidden"
-        onChange={(e) => {
-          onFile(e.target.files?.[0]);
-          e.target.value = ""; // permette di riscegliere lo stesso file
-        }}
-      />
-    </label>
   );
 }

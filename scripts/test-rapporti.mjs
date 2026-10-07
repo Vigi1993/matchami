@@ -212,6 +212,9 @@ test("i testi dei rapporti non presumono il genere di nessuno", () => {
     "src/lib/rapporti.ts", "src/lib/verifica.ts", "src/components/RapportiPanel.tsx",
     "src/components/CorniceScura.tsx", "src/components/FormFeedback.tsx", "src/app/staff/actions.ts",
     "src/app/invito/[token]/InvitoClient.tsx",
+    "src/components/VerificaRedditoPanel.tsx", "src/components/SelettoreFile.tsx",
+    "src/lib/verifica-inquilino.ts", "src/content/informativa.ts",
+    "src/app/staff/inquilini/[id]/page.tsx", "src/app/staff/inquilini/[id]/EsitoInquilinoForm.tsx",
   ].map((f) => path.join(radice, f));
   // tutte le pagine e i moduli delle cartelle nuove, compresi i sottolivelli
   const visita = (d) => { if (!fs.existsSync(d)) return; for (const e of fs.readdirSync(d, { withFileTypes: true })) {

@@ -216,3 +216,49 @@ test("file: i documenti d'identità, di proprietà e i contratti non sono mai de
   const dopo = testo.slice(testo.search(/documenti d'identità/i));
   assert.match(dopo, /non hanno mai un indirizzo pubblico/);
 });
+
+// ------------------------------------------------------------
+// Il testo nomina ogni tipo di documento che l'app raccoglie
+// ------------------------------------------------------------
+
+/** Come il testo chiama ogni tipo di documento. Un tipo nuovo senza voce qui fa fallire il test. */
+const NOME_NEL_TESTO = {
+  identita: /documento d'identità/i,
+  proprieta: /prova di proprietà/i,
+  reddito: /prova del reddito/i,
+};
+
+function tipiDocumentoDelDatabase() {
+  const trovati = new Set();
+  for (const f of fs.readdirSync(migrazioni).filter((x) => /^\d{4}_.*\.sql$/.test(x))) {
+    const sql = fs.readFileSync(path.join(migrazioni, f), "utf8");
+    // create table documenti_... ( ... tipo text ... check (tipo in ('a', 'b')) ... )
+    for (const t of sql.matchAll(/create\s+table\s+(?:if\s+not\s+exists\s+)?documenti_\w+\s*\(([\s\S]*?)\n\);/gi)) {
+      const m = t[1].match(/check\s*\(\s*tipo\s+in\s*\(([^)]*)\)/i);
+      if (m) for (const v of m[1].matchAll(/'([^']+)'/g)) trovati.add(v[1]);
+    }
+  }
+  return trovati;
+}
+
+test("documenti: il testo nomina ogni tipo di documento che il database accetta", () => {
+  const tipi = tipiDocumentoDelDatabase();
+  assert.ok(tipi.has("identita") && tipi.has("proprieta") && tipi.has("reddito"), `tipi trovati: ${[...tipi]}`);
+  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
+  for (const tipo of tipi) {
+    assert.ok(NOME_NEL_TESTO[tipo], `tipo di documento nuovo («${tipo}»): descrivilo nel testo e aggiungilo a NOME_NEL_TESTO`);
+    assert.match(tutto, NOME_NEL_TESTO[tipo], `il testo non nomina il tipo «${tipo}»`);
+  }
+});
+
+test("documenti: il testo dice che un proprietario non vede i documenti dell'inquilino", () => {
+  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
+  assert.match(tutto, /Un proprietario non vede mai i documenti di un inquilino/);
+  assert.match(tutto, /Non chiediamo lo stato di famiglia/);
+});
+
+test("documenti: il testo dice che la verifica del reddito non è automatica e che decade", () => {
+  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
+  assert.match(tutto, /non è automatica/);
+  assert.match(tutto, /la verifica decade e va rifatta/);
+});
