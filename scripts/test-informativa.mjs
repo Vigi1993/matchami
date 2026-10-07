@@ -316,3 +316,26 @@ test("notifiche: il testo le nomina e dice che non contengono nomi di persone", 
   assert.match(tutto, /notifiche sulle novità del tuo account/);
   assert.match(tutto, /mai nomi di persone/);
 });
+
+// ------------------------------------------------------------
+// Ciò che il testo dice del ritiro di una candidatura è vero
+// ------------------------------------------------------------
+
+test("ritiro: il testo dice cosa vede il proprietario, e la migrazione lo fa davvero", () => {
+  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
+  assert.match(tutto, /Se ritiri una candidatura mentre è ancora in attesa, il proprietario non la vede più/);
+  assert.match(tutto, /non legge né il tuo profilo né le recensioni su di te/);
+  assert.match(tutto, /non puoi candidarti di nuovo allo stesso annuncio/);
+
+  const sql20 = fs.readFileSync(path.join(migrazioni, "0020_ritira_candidatura.sql"), "utf8");
+  // il proprietario non legge più né la candidatura, né il profilo (vista), né le recensioni
+  const filtro = /status::text <> 'ritirata'/g;
+  assert.ok((sql20.match(filtro) ?? []).length >= 4, "i filtri sulla candidatura ritirata sono meno di quelli attesi");
+  assert.match(sql20, /create policy "candidature: owner reads received"[\s\S]*?status::text <> 'ritirata'/);
+  assert.match(sql20, /create or replace view public\.candidati_del_proprietario[\s\S]*?where c\.status::text <> 'ritirata'/);
+  assert.match(sql20, /create policy "recensioni: lettura limitata"[\s\S]*?c\.status::text <> 'ritirata'/);
+
+  // e non ci si può ricandidare: una sola candidatura per annuncio e per persona
+  const sql1 = fs.readFileSync(path.join(migrazioni, "0001_init.sql"), "utf8");
+  assert.match(sql1, /unique \(listing_id, tenant_id\)/);
+});

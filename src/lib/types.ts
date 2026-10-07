@@ -28,7 +28,7 @@ export type TenantProfile = {
 
 export type StatoContratto = "bozza" | "in_firma" | "firmato" | "concluso";
 
-export type StatoCandidatura = "in_attesa" | "accettata" | "rifiutata";
+export type StatoCandidatura = "in_attesa" | "accettata" | "rifiutata" | "ritirata";
 
 export type ListingProprietario = {
   id: string;

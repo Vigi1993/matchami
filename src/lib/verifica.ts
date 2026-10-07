@@ -192,6 +192,9 @@ const MESSAGGI: Record<string, string> = {
   INQUILINO_INESISTENTE: "Inquilino non trovato.",
   // decisioni sulle candidature
   CANDIDATURA_NON_TUA: "Questa candidatura non risulta tua.",
+  CANDIDATURA_RITIRATA: "La persona ha ritirato la candidatura: non c'è più nulla da valutare.",
+  CANDIDATURA_NON_RITIRABILE:
+    "Questa candidatura non si può più ritirare: il proprietario l'ha già valutata.",
   CANDIDATURA_GIA_VALUTATA: "Questa candidatura è già stata valutata.",
   MOTIVO_OBBLIGATORIO: "Scegli un motivo per il rifiuto.",
   STATO_NON_VALIDO: "Scelta non valida.",

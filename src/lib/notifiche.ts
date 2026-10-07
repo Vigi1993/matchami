@@ -14,6 +14,7 @@ export const TIPI_NOTIFICA = [
   "candidatura_ricevuta",
   "candidatura_accettata",
   "candidatura_rifiutata",
+  "candidatura_ritirata",
   "immobile_verificato",
   "immobile_respinto",
   "reddito_verificato",
@@ -68,6 +69,11 @@ export function descriviNotifica(
       return {
         titolo: "Candidatura non accettata",
         testo: `La tua candidatura per ${annuncio(dati, "un annuncio")} non è stata accettata. Nella scheda trovi il motivo.`,
+      };
+    case "candidatura_ritirata":
+      return {
+        titolo: "Candidatura ritirata",
+        testo: `Una persona ha ritirato la candidatura a ${annuncio(dati, "un tuo annuncio")}.`,
       };
     case "immobile_verificato":
       return {

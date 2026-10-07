@@ -12,16 +12,24 @@ import { caricaTs, radice } from "./carica-ts.mjs";
 
 const n = caricaTs(path.join(radice, "src", "lib", "notifiche.ts"));
 const sql = fs.readFileSync(path.join(radice, "supabase", "migrations", "0019_notifiche.sql"), "utf8");
+// Dopo la 0019 l'elenco dei tipi e il trigger delle candidature sono stati riscritti dalla 0020
+// (il ritiro di una candidatura): la verità è l'ultima definizione.
+const sql0020 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0020_ritira_candidatura.sql"), "utf8");
 
 /** I tipi che il vincolo sulla tabella ammette. */
 function tipiDelDatabase() {
-  const m = sql.match(/tipo text not null check \(tipo in \(([\s\S]*?)\)\),/);
-  assert.ok(m, "non trovo il vincolo sui tipi");
-  return [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
+  // l'ultima definizione del vincolo, in ordine di migrazione
+  const tutte = [...(sql + "\n" + sql0020).matchAll(/check \(tipo in \(([\s\S]*?)\)\)/g)];
+  assert.ok(tutte.length >= 2, "dovrei trovare il vincolo della 0019 e quello della 0020");
+  return [...tutte[tutte.length - 1][1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
 }
 
 /** Il corpo di tutte le funzioni dei trigger (tutto ciò che sta dopo la sezione 4). */
-const trigger = sql.slice(sql.indexOf("-- 4. I trigger"), sql.indexOf("-- 5. Pulizia"));
+const trigger =
+  sql.slice(sql.indexOf("-- 4. I trigger"), sql.indexOf("-- 5. Pulizia")) +
+  "\n" +
+  // la 0020 riscrive la funzione delle candidature: si guarda solo da lì in poi
+  sql0020.slice(sql0020.indexOf("-- 5. La notifica al proprietario"));
 
 // ------------------------------------------------------------
 // I tipi

@@ -2,46 +2,39 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Sheet } from "@/components/Sheet";
-import type { CandidaturaConAnnuncio, StatoCandidatura } from "@/lib/types";
+import type { CandidaturaConAnnuncio } from "@/lib/types";
+import {
+  NOTA_RITIRATA,
+  STATO_BADGE,
+  STATO_LABEL,
+  puoRitirare,
+  raggruppaCandidature,
+  riepilogoCandidature,
+} from "@/lib/candidature";
+import { RitiraCandidatura } from "@/components/RitiraCandidatura";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { messaggioMotivoRifiuto } from "@/lib/motivi-rifiuto";
 import { IconChat } from "@/components/icons";
-
-const STATO_LABEL: Record<StatoCandidatura, string> = {
-  in_attesa: "In attesa",
-  accettata: "Match",
-  rifiutata: "Non accettata",
-};
-
-const STATO_BADGE: Record<StatoCandidatura, string> = {
-  in_attesa: "is-wait",
-  accettata: "is-match",
-  rifiutata: "is-off",
-};
 
 export function CandidatureClient({
   candidature,
 }: {
   candidature: CandidaturaConAnnuncio[];
 }) {
+  const router = useRouter();
   const [selezionata, setSelezionata] = useState<CandidaturaConAnnuncio | null>(
     null
   );
 
-  const inAttesa = candidature.filter((c) => c.status === "in_attesa");
-  const accettate = candidature.filter((c) => c.status === "accettata");
-  const rifiutate = candidature.filter((c) => c.status === "rifiutata");
+  const { inAttesa, accettate, rifiutate, ritirate } = raggruppaCandidature(candidature);
 
   return (
     <PageContainer wide>
       <h1 className="screen-title">I tuoi match</h1>
       <p className="screen-sub">
-        {candidature.length === 0
-          ? "Gli annunci a cui ti candidi arrivano qui."
-          : `${candidature.length} candidatur${candidature.length === 1 ? "a inviata" : "e inviate"}${
-              accettate.length > 0 ? ` · ${accettate.length} match` : ""
-            }.`}
+        {riepilogoCandidature(candidature)}
       </p>
 
       {candidature.length === 0 ? (
@@ -71,6 +64,9 @@ export function CandidatureClient({
               items={rifiutate}
               onSelect={setSelezionata}
             />
+          )}
+          {ritirate.length > 0 && (
+            <Gruppo titolo="Ritirate" items={ritirate} onSelect={setSelezionata} />
           )}
         </>
       )}
@@ -126,9 +122,25 @@ export function CandidatureClient({
               </div>
             )}
             {selezionata.status === "in_attesa" && (
-              <div className="note-box mt-5">
-                Il proprietario non ha ancora valutato questa candidatura.
-              </div>
+              <>
+                <div className="note-box mt-5">
+                  Il proprietario non ha ancora valutato questa candidatura.
+                </div>
+                {puoRitirare(selezionata.status) && (
+                  <RitiraCandidatura
+                    key={selezionata.id}
+                    candidaturaId={selezionata.id}
+                    titolo={selezionata.listings?.titolo ?? null}
+                    onFatto={() => {
+                      setSelezionata(null);
+                      router.refresh();
+                    }}
+                  />
+                )}
+              </>
+            )}
+            {selezionata.status === "ritirata" && (
+              <div className="note-box mt-5">{NOTA_RITIRATA}</div>
             )}
             {selezionata.status === "rifiutata" && (
               <div className="note-box mt-5">
@@ -164,7 +176,7 @@ function Gruppo({
             key={c.id}
             onClick={() => onSelect(c)}
             className="match-card"
-            style={c.status === "rifiutata" ? { opacity: 0.55 } : undefined}
+            style={c.status === "rifiutata" || c.status === "ritirata" ? { opacity: 0.55 } : undefined}
           >
             <div className="mc-avatar">
               {(c.listings?.titolo ?? "IM").slice(0, 2).toUpperCase()}
