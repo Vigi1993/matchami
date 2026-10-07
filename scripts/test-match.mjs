@@ -566,8 +566,8 @@ const profiloDb = (o = {}) => ({
   garante: true,
   fideiussione: false,
   protestato: false,
-  animali: false,
-  nucleo: "coppia",
+  animali_compilato: true,
+  nucleo_compilato: true,
   presentazione: "Una presentazione abbastanza lunga.",
   verificato: false,
   ...o,
@@ -592,11 +592,11 @@ test("senza reddito del nucleo il criterio sul reddito risulta 'non indicato'", 
   assert.equal(r.incompleto, true);
 });
 
-test("completezza del profilo personale: otto campi, nessuna zona", () => {
+test("completezza del profilo personale: otto campi, nessuna zona, e animali e nucleo contano solo se compilati", () => {
   assert.equal(completezzaProfiloPersonale(profiloDb()), 100);
   assert.equal(completezzaProfiloPersonale(profiloDb({ reddito_nucleo: null })), 88);
   // sei su otto = 75: sotto la soglia del 'profilo completo'
-  assert.equal(completezzaProfiloPersonale(profiloDb({ reddito_nucleo: null, animali: null })), 75);
+  assert.equal(completezzaProfiloPersonale(profiloDb({ reddito_nucleo: null, animali_compilato: false })), 75);
   assert.equal(completezzaProfiloPersonale(profiloDb({ presentazione: "corta" })), 88);
 });
 

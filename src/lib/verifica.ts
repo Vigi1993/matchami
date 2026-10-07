@@ -176,6 +176,11 @@ const MESSAGGI: Record<string, string> = {
   RAPPORTO_NON_VERIFICATO:
     "Per lasciare un feedback l'affitto deve essere verificato: lo controlliamo noi.",
   RAPPORTO_GIA_RECENSITO: "Hai già lasciato il feedback per questo affitto.",
+  // decisioni sulle candidature
+  CANDIDATURA_NON_TUA: "Questa candidatura non risulta tua.",
+  CANDIDATURA_GIA_VALUTATA: "Questa candidatura è già stata valutata.",
+  MOTIVO_OBBLIGATORIO: "Scegli un motivo per il rifiuto.",
+  STATO_NON_VALIDO: "Scelta non valida.",
 };
 
 /** Traduce gli errori del database in frasi comprensibili. Mai il testo tecnico. */

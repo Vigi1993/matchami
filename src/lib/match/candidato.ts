@@ -7,10 +7,11 @@ import type {
 } from "./tipi";
 
 /**
- * I campi di `tenant_profiles` che il proprietario può leggere di chi si
- * è candidato. Le zone e le caratteristiche desiderate NON ci sono: sono
- * preferenze di ricerca, e la sicurezza del database le tiene leggibili
- * solo dall'inquilino.
+ * Ciò che il proprietario può leggere di chi si è candidato (la vista
+ * `candidati_del_proprietario`). NON ci sono: le zone e le caratteristiche
+ * desiderate, il numero di figli, né il valore di animali e composizione
+ * del nucleo. Di questi ultimi due il proprietario sa solo se sono compilati:
+ * servono a contare quanto è completo il profilo, e basta.
  */
 export type ProfiloCandidato = {
   professione: string | null;
@@ -19,8 +20,9 @@ export type ProfiloCandidato = {
   garante: boolean | null;
   fideiussione: boolean | null;
   protestato: boolean | null;
-  animali: boolean | null;
-  nucleo: string | null;
+  /** il valore non si mostra al proprietario: si sa solo se l'inquilino l'ha indicato */
+  animali_compilato: boolean;
+  nucleo_compilato: boolean;
   presentazione: string | null;
   verificato: boolean;
 };
@@ -38,9 +40,9 @@ export function completezzaProfiloPersonale(p: ProfiloCandidato): number {
     !!p.reddito_mensile,
     !!p.reddito_nucleo,
     p.garante !== null,
-    p.animali !== null,
+    p.animali_compilato,
     (p.presentazione ?? "").trim().length > 10,
-    p.nucleo !== null,
+    p.nucleo_compilato,
     p.fideiussione !== null,
   ];
   return Math.round((campi.filter(Boolean).length / campi.length) * 100);

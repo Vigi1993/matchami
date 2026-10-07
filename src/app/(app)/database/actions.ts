@@ -3,8 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { criteriDaRighe, valutaCandidato } from "@/lib/match";
-import type { ProfiloCandidato, RigaCriterioDb } from "@/lib/match";
+import type { RigaCriterioDb } from "@/lib/match";
 import { motivoRifiutoValido } from "@/lib/motivi-rifiuto";
+import { profiloDaVista } from "@/lib/candidati";
+import { messaggioErroreVerifica } from "@/lib/verifica";
 
 export async function valutaCandidatura(
   candidaturaId: string,
@@ -23,79 +25,70 @@ export async function valutaCandidatura(
     return { error: "Scegli un motivo per il rifiuto." };
   }
 
-  // La decisione registra una fotografia del match di quel momento (D7):
-  // da qui in poi l'inquilino può cambiare il profilo, ma il proprietario
-  // continua a vedere su cosa ha deciso.
+  // La valutazione si fotografa nel momento della decisione (D7): da qui in
+  // poi l'inquilino può cambiare il profilo, ma il proprietario continua a
+  // vedere su cosa ha deciso.
   //
-  // Il calcolo NON deve mai impedire la decisione: se qualcosa va storto,
-  // lo stato cambia lo stesso e semplicemente non c'è fotografia.
-  let fotografia: Record<string, unknown> | null = null;
+  // Il calcolo NON deve mai impedire la decisione: se qualcosa va storto la
+  // decisione passa lo stesso, senza fotografia.
+  let valutazione: unknown = null;
   try {
     const { data: c } = await supabase
       .from("candidature")
-      .select(
-        "tenant_id, listing_id, match_proprietario, listings!inner(owner_id, prezzo), tenant_profiles!inner(professione, reddito_mensile, reddito_nucleo, garante, fideiussione, protestato, animali, nucleo, verificato, presentazione)"
-      )
+      .select("tenant_id, listing_id, listings!inner(owner_id, prezzo)")
       .eq("id", candidaturaId)
       .single();
 
-    // una fotografia già scattata non si sovrascrive
-    if (c && !c.match_proprietario) {
-      const listing = c.listings as unknown as { owner_id: string; prezzo: number };
+    const listing = c?.listings as unknown as { owner_id: string; prezzo: number } | undefined;
 
-      if (listing.owner_id === user.id) {
-        const [{ data: righeCriteri }, { data: recensioni }] = await Promise.all([
-          supabase
-            .from("listing_criteri")
-            .select("chiave, peso, modo, soglia_pct")
-            .eq("listing_id", c.listing_id),
-          supabase.from("recensioni").select("voto").eq("tenant_id", c.tenant_id),
-        ]);
-        const voti = (recensioni ?? []).map((r) => r.voto as number);
+    if (c && listing && listing.owner_id === user.id) {
+      const [{ data: vista }, { data: righeCriteri }, { data: recensioni }] = await Promise.all([
+        supabase
+          .from("candidati_del_proprietario")
+          .select(
+            "professione, reddito_mensile, reddito_nucleo, garante, fideiussione, protestato, verificato, presentazione, animali_compilato, nucleo_compilato"
+          )
+          .eq("candidatura_id", candidaturaId)
+          .single(),
+        supabase
+          .from("listing_criteri")
+          .select("chiave, peso, modo, soglia_pct")
+          .eq("listing_id", c.listing_id),
+        supabase.from("recensioni").select("voto").eq("tenant_id", c.tenant_id),
+      ]);
+      const voti = (recensioni ?? []).map((r) => r.voto as number);
 
-        fotografia = valutaCandidato({
+      if (vista) {
+        valutazione = valutaCandidato({
           criteri: criteriDaRighe(righeCriteri as RigaCriterioDb[] | null),
           canone: listing.prezzo,
-          profilo: c.tenant_profiles as unknown as ProfiloCandidato,
-          mediaRecensioni:
-            voti.length > 0 ? voti.reduce((a, b) => a + b, 0) / voti.length : null,
+          profilo: profiloDaVista(vista),
+          mediaRecensioni: voti.length > 0 ? voti.reduce((a, b) => a + b, 0) / voti.length : null,
           numeroRecensioni: voti.length,
-        }) as unknown as Record<string, unknown>;
+        });
       }
     }
   } catch {
-    fotografia = null;
+    valutazione = null;
   }
 
-  // La decisione si prende una volta sola: si aggiorna solo se la
-  // candidatura è ancora in attesa. Il database lo impone anche da sé
-  // (migrazione 0009), qui serve a dare un messaggio chiaro.
-  const { data: aggiornate, error } = await supabase
-    .from("candidature")
-    .update({
-      status: nuovoStato,
-      updated_at: new Date().toISOString(),
-      motivo_rifiuto: nuovoStato === "rifiutata" ? motivo : null,
-      ...(fotografia
-        ? {
-            match_proprietario: fotografia,
-            match_proprietario_at: new Date().toISOString(),
-          }
-        : {}),
-    })
-    .eq("id", candidaturaId)
-    .eq("status", "in_attesa")
-    .select("id");
+  // La decisione passa da una funzione del database: controlla che la
+  // candidatura sia del proprietario, che sia ancora in attesa, e registra
+  // stato e valutazione insieme. Non c'è più un modo di modificare una
+  // candidatura direttamente.
+  const { error } = await supabase.rpc("decidi_candidatura", {
+    p_candidatura: candidaturaId,
+    p_stato: nuovoStato,
+    p_motivo: nuovoStato === "rifiutata" ? motivo : null,
+    p_valutazione: valutazione,
+  });
 
   if (error) {
-    return {
-      error: error.message.includes("DECISIONE_DEFINITIVA")
-        ? "Questa candidatura è già stata valutata."
-        : error.message,
-    };
-  }
-  if (!aggiornate || aggiornate.length === 0) {
-    return { error: "Questa candidatura è già stata valutata." };
+    // il trigger della migrazione 0009 usa un altro codice per lo stesso caso
+    const messaggio = error.message.includes("DECISIONE_DEFINITIVA")
+      ? "CANDIDATURA_GIA_VALUTATA"
+      : error.message;
+    return { error: messaggioErroreVerifica(messaggio) };
   }
 
   revalidatePath("/database");

@@ -36,12 +36,16 @@ export default async function ChatPage({
     redirect("/");
   }
 
-  const altroId = isTenant ? listing!.owner_id : candidatura.tenant_id;
-  const { data: altroProfilo } = await supabase
-    .from("profiles")
-    .select("nome, cognome")
-    .eq("id", altroId)
-    .single();
+  // Il nome dell'altra persona. L'inquilino legge il profilo del proprietario
+  // dopo il match; il proprietario legge quello dell'inquilino solo dalla
+  // vista `candidati_del_proprietario`, non più dalla tabella dei profili.
+  const { data: altroProfilo } = isTenant
+    ? await supabase.from("profiles").select("nome, cognome").eq("id", listing!.owner_id).single()
+    : await supabase
+        .from("candidati_del_proprietario")
+        .select("nome, cognome")
+        .eq("candidatura_id", id)
+        .single();
 
   const { data: messaggi } = await supabase
     .from("messaggi")

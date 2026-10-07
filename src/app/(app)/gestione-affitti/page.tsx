@@ -37,10 +37,13 @@ export default async function GestioneAffittiPage() {
   const tenantIds = [...new Set(senzaContratto.map((c) => c.tenant_id as string))];
   const { data: profiliSenza } =
     tenantIds.length > 0
-      ? await supabase.from("profiles").select("id, nome, cognome").in("id", tenantIds)
+      ? await supabase
+          .from("candidati_del_proprietario")
+          .select("tenant_id, nome, cognome")
+          .in("tenant_id", tenantIds)
       : { data: [] };
   const nomiSenzaContratto = new Map(
-    (profiliSenza ?? []).map((p) => [p.id as string, { nome: p.nome, cognome: p.cognome }])
+    (profiliSenza ?? []).map((p) => [p.tenant_id as string, { nome: p.nome, cognome: p.cognome }])
   );
 
   const candidatureSenzaContratto: CandidaturaSenzaContratto[] = senzaContratto.map(
@@ -62,10 +65,13 @@ export default async function GestioneAffittiPage() {
   ].filter(Boolean) as string[];
   const { data: profiliContratti } =
     tenantIdsContratti.length > 0
-      ? await supabase.from("profiles").select("id, nome, cognome").in("id", tenantIdsContratti)
+      ? await supabase
+          .from("candidati_del_proprietario")
+          .select("tenant_id, nome, cognome")
+          .in("tenant_id", tenantIdsContratti)
       : { data: [] };
   const nomiContratti = new Map(
-    (profiliContratti ?? []).map((p) => [p.id as string, { nome: p.nome, cognome: p.cognome }])
+    (profiliContratti ?? []).map((p) => [p.tenant_id as string, { nome: p.nome, cognome: p.cognome }])
   );
 
   const contrattiCompleti: ContrattoProprietario[] = (
