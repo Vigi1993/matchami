@@ -10,9 +10,6 @@ import { caricaTs, radice } from "./carica-ts.mjs";
 
 // candidati.ts importa "@/lib/match" e "@/lib/types": il caricatore non conosce l'alias,
 // quindi si legge il file sostituendo gli import con percorsi relativi.
-import { createRequire } from "node:module";
-const require_ = createRequire(import.meta.url);
-const ts = require_("typescript");
 const sorgente = fs.readFileSync(path.join(radice, "src", "lib", "candidati.ts"), "utf8")
   .replace('from "@/lib/match"', 'from "./match"').replace('from "@/lib/types"', 'from "./types"');
 const copia = path.join(radice, "src", "lib", "__candidati_test.ts");

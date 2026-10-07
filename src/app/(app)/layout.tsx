@@ -1,5 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation";
 import { Navigation } from "@/components/Navigation";
+import { INFORMATIVA } from "@/content/informativa";
+import { haAccettatoInformativa } from "@/lib/informativa";
 
 export default async function AppLayout({
   children,
@@ -10,6 +13,12 @@ export default async function AppLayout({
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  // Chi non ha accettato la versione in vigore dell'informativa non entra:
+  // quando il testo cambia, cambia la versione e tutti devono riaccettare.
+  if (!(await haAccettatoInformativa(supabase, user!.id, INFORMATIVA.versione))) {
+    redirect("/informativa/accetta");
+  }
 
   const { data: profile } = await supabase
     .from("profiles")

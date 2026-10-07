@@ -1,6 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState, useEffect, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
+import { INFORMATIVA } from "@/content/informativa";
 import { Sheet } from "@/components/Sheet";
 import { Chip } from "@/components/ui/Chip";
 import { Field } from "@/components/ui/Field";
@@ -28,6 +31,19 @@ export function PrivacySheet({
   const [marketing, setMarketing] = useState(consensoMarketingIniziale);
   const [terzi, setTerzi] = useState(consensoTerziIniziale);
 
+  // Quando hai accettato l'informativa in vigore. La sicurezza del database
+  // fa leggere a ognuno solo le proprie accettazioni.
+  const [accettataAl, setAccettataAl] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (!open) return;
+    createClient()
+      .from("accettazioni_informativa")
+      .select("accettata_at")
+      .eq("versione", INFORMATIVA.versione)
+      .maybeSingle()
+      .then(({ data }) => setAccettataAl((data?.accettata_at as string | undefined) ?? null));
+  }, [open]);
+
   useEffect(() => {
     if (state?.ok) {
       const t = setTimeout(onClose, 600);
@@ -37,11 +53,29 @@ export function PrivacySheet({
 
   return (
     <Sheet open={open} onClose={onClose} title="Privacy e consensi">
+      <div className="note-box" style={{ marginTop: 0, marginBottom: 16 }}>
+        <b>
+          Informativa sulla privacy
+          {INFORMATIVA.provvisoria ? " (provvisoria)" : ""}
+        </b>
+        <br />
+        Versione {INFORMATIVA.versione}.{" "}
+        {accettataAl === undefined
+          ? ""
+          : accettataAl
+            ? `Accettata il ${new Date(accettataAl).toLocaleDateString("it-IT", {
+                day: "numeric",
+                month: "long",
+                year: "numeric",
+              })}.`
+            : "Non ancora accettata."}{" "}
+        <Link href="/informativa" target="_blank" rel="noopener noreferrer" className="underline">
+          Leggila
+        </Link>
+      </div>
       <p className="sheet-sub">
-        Il trattamento dei dati necessario al funzionamento di MatchAmI
-        (creare il profilo, gestire candidature e contratti) è sempre
-        attivo: senza non potremmo farti usare l&apos;app. Qui puoi
-        decidere solo sui consensi facoltativi.
+        Alcuni dati servono per far funzionare l&apos;app: sono descritti
+        nell&apos;informativa. Qui puoi decidere solo sui consensi facoltativi.
       </p>
       <form action={formAction}>
         <input

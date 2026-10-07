@@ -3,6 +3,7 @@
 import { Suspense, useActionState, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { signup, login, richiediReset } from "./actions";
+import { INFORMATIVA } from "@/content/informativa";
 import { IconCasa, IconPalazzo } from "@/components/icons";
 
 type Ruolo = "inquilino" | "proprietario";
@@ -120,8 +121,18 @@ function LoginForm() {
 
             <label className="login-consent mt-1">
               <input type="checkbox" name="privacy" className="mt-0.5" />
-              Accetto il trattamento dei dati necessario al funzionamento di
-              MatchAmI (privacy policy).
+              Ho letto l&apos;
+              <a
+                href="/informativa"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline"
+              >
+                informativa sulla privacy
+                {INFORMATIVA.provvisoria ? " (provvisoria)" : ""}
+              </a>{" "}
+              e accetto il trattamento dei dati necessario al funzionamento di
+              MatchAmI.
             </label>
 
             {signupState?.error && (

@@ -5,6 +5,9 @@ import { RispostaForm } from "./RispostaForm";
 import { ruoloControparte } from "@/lib/rapporti";
 import type { RuoloRapporto } from "@/lib/rapporti";
 import { èTokenRapporto } from "@/lib/uuid";
+import { redirect } from "next/navigation";
+import { INFORMATIVA } from "@/content/informativa";
+import { haAccettatoInformativa } from "@/lib/informativa";
 
 type RichiestaPubblica = {
   nome_creatore: string;
@@ -105,6 +108,11 @@ export default async function RapportoPage({ params }: { params: Promise<{ token
         </Link>
       </CorniceScura>
     );
+  }
+
+  // Chi agisce da loggato deve aver accettato l'informativa in vigore.
+  if (!(await haAccettatoInformativa(supabase, user.id, INFORMATIVA.versione))) {
+    redirect(`/informativa/accetta?next=${encodeURIComponent(`/rapporto/${token}`)}`);
   }
 
   if (r.mia) {
