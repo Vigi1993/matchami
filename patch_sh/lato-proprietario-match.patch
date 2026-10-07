@@ -1,0 +1,2024 @@
+From 7ba805f2b824ef9dc23409b4b539e71d0dac58ec Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 5 Oct 2026 15:53:24 +0000
+Subject: [PATCH] =?UTF-8?q?feat(match):=20criteri=20del=20proprietario=20e?=
+ =?UTF-8?q?=20candidati=20ordinati=20per=20compatibilit=C3=A0?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RICHIEDE LA MIGRAZIONE 0008 PRIMA DEL PUSH.
+
+Database (0008):
+- tenant_profiles.reddito_nucleo: reddito di TUTTO il nucleo, chiesto
+  esplicitamente. reddito_mensile non viene reinterpretato.
+- listing_criteri: cosa chiede il proprietario per annuncio, con peso 1-10
+  e modo obbligatorio/preferenziale. Visibile solo al proprietario.
+- candidature.match_proprietario(_at): fotografia del match scattata alla
+  decisione del proprietario (D7).
+- policy di creazione delle candidature più stretta: prima un inquilino
+  poteva inserirne una già 'accettata' chiamando direttamente l'API.
+  Verificato su PostgreSQL prima e dopo.
+
+Proprietario:
+- modulo dell'annuncio: scelta dei criteri con importanza e obbligatorietà
+- Database inquilini raggruppato per annuncio; in attesa ordinati per
+  compatibilità, a parità per affidabilità, i bloccati in fondo
+- nel dettaglio: perché il numero, criteri soddisfatti e non, dati mancanti
+- la decisione fissa la fotografia del match; se il calcolo fallisce la
+  decisione passa lo stesso
+
+Inquilino:
+- campo 'reddito netto mensile di tutto il nucleo' (0 = non indicato)
+- la candidatura salva il match dell'inquilino in match_pct
+- la barra di completezza conta anche il reddito del nucleo
+
+Modulo: normalizzaCriteri (input non fidato, anche chiavi come
+'constructor'), valutaCandidato, completezzaProfiloPersonale (senza le
+zone, che il proprietario non può leggere), leggiFotografia,
+profiloRicercaDaRighe. 50 test.
+---
+ scripts/test-match.mjs                        | 170 ++++++++++
+ src/app/(app)/actions.ts                      |  44 +++
+ src/app/(app)/database/DatabaseClient.tsx     | 312 ++++++++++++++----
+ src/app/(app)/database/actions.ts             |  57 +++-
+ src/app/(app)/database/page.tsx               | 103 +++++-
+ src/app/(app)/immobili/ImmobiliClient.tsx     |   8 +
+ src/app/(app)/immobili/actions.ts             |  44 +++
+ src/app/(app)/immobili/page.tsx               |   5 +-
+ src/app/(app)/page.tsx                        |  19 +-
+ src/app/(app)/profilo/ProfiloClient.tsx       |  36 ++
+ src/app/(app)/profilo/actions.ts              |   8 +
+ src/app/globals.css                           | 104 ++++++
+ src/components/CriteriCandidati.tsx           | 156 +++++++++
+ src/lib/affidabilita.ts                       |   3 +
+ src/lib/match/candidato.ts                    | 133 ++++++++
+ src/lib/match/criteri.ts                      |  87 +++++
+ src/lib/match/index.ts                        |  19 +-
+ src/lib/match/mazzo.ts                        |  27 ++
+ src/lib/match/proprietario.ts                 |   2 +-
+ src/lib/types.ts                              |  17 +-
+ .../migrations/0008_criteri_proprietario.sql  | 108 ++++++
+ 21 files changed, 1363 insertions(+), 99 deletions(-)
+ create mode 100644 src/components/CriteriCandidati.tsx
+ create mode 100644 src/lib/match/candidato.ts
+ create mode 100644 src/lib/match/criteri.ts
+ create mode 100644 supabase/migrations/0008_criteri_proprietario.sql
+
+diff --git a/scripts/test-match.mjs b/scripts/test-match.mjs
+index e165ce6..db6da39 100644
+--- a/scripts/test-match.mjs
++++ b/scripts/test-match.mjs
+@@ -62,6 +62,14 @@ const {
+   preparaMazzo,
+   haCriteriDiRicerca,
+   statoMazzo,
++  normalizzaCriteri,
++  criteriDaRighe,
++  righeDaCriteri,
++  profiloRicercaDaRighe,
++  completezzaProfiloPersonale,
++  datiCandidatoDaProfilo,
++  valutaCandidato,
++  leggiFotografia,
+ } = m;
+ 
+ // ---- dati di prova
+@@ -517,3 +525,165 @@ test("il separatore cade dove preparaMazzo mette il primo annuncio fuori ricerca
+   assert.equal(statoMazzo(fasce, i, opz()).mostraSeparatore, true);
+   assert.equal(statoMazzo(fasce, i - 1, opz()).mostraSeparatore, false);
+ });
++
++// ============================================================
++// Criteri del proprietario: validazione di ciò che arriva dal modulo
++// ============================================================
++
++test("normalizzaCriteri: riporta tutto a valori validi e scarta il resto", () => {
++  const r = normalizzaCriteri(JSON.stringify([
++    { chiave: "garante", peso: 99, modo: "obbligatorio" },
++    { chiave: "redditoCanone", peso: 0, modo: "preferenziale", sogliaPct: 90 },
++    { chiave: "nessunProtesto", peso: "7", modo: "boh" },
++    { chiave: "criterioInventato", peso: 5, modo: "obbligatorio" },
++    { chiave: "garante", peso: 1, modo: "preferenziale" }, // doppione
++    "stringa", null, 42,
++  ]));
++  assert.deepEqual(r, [
++    { chiave: "garante", peso: 10, modo: "obbligatorio" },
++    { chiave: "redditoCanone", peso: 1, modo: "preferenziale", sogliaPct: 60 },
++    { chiave: "nessunProtesto", peso: 7, modo: "preferenziale" },
++  ]);
++});
++
++test("normalizzaCriteri: chiavi del prototipo di JavaScript non passano per criteri validi", () => {
++  const r = normalizzaCriteri([
++    { chiave: "constructor", peso: 5, modo: "obbligatorio" },
++    { chiave: "toString", peso: 5, modo: "obbligatorio" },
++    { chiave: "__proto__", peso: 5, modo: "obbligatorio" },
++    { chiave: "hasOwnProperty", peso: 5, modo: "obbligatorio" },
++  ]);
++  assert.deepEqual(r, []);
++});
++
++test("normalizzaCriteri: input rovinato non fa mai fallire", () => {
++  for (const x of [undefined, null, "", "{non json", "42", 42, {}, "[]", [[]], [{}]]) {
++    assert.deepEqual(normalizzaCriteri(x), []);
++  }
++});
++
++test("normalizzaCriteri: un modo sconosciuto diventa il più prudente, preferenziale", () => {
++  const r = normalizzaCriteri([{ chiave: "garante", peso: 5, modo: "OBBLIGATORIO" }]);
++  assert.equal(r[0].modo, "preferenziale");
++});
++
++test("normalizzaCriteri: peso mancante prende il valore proposto, la soglia solo dove serve", () => {
++  const r = normalizzaCriteri([{ chiave: "garante" }, { chiave: "redditoCanone" }]);
++  assert.equal(r[0].peso, 5);
++  assert.equal(r[0].sogliaPct, undefined, "garante non ha soglia");
++  assert.equal(r[1].sogliaPct, 33, "soglia predefinita");
++});
++
++test("criteri: andata e ritorno col database non perde nulla", () => {
++  const criteri = [
++    { chiave: "redditoCanone", peso: 8, modo: "obbligatorio", sogliaPct: 40 },
++    { chiave: "garante", peso: 3, modo: "preferenziale" },
++  ];
++  const righe = righeDaCriteri("L1", criteri);
++  assert.deepEqual(righe[0], { listing_id: "L1", chiave: "redditoCanone", peso: 8, modo: "obbligatorio", soglia_pct: 40 });
++  assert.equal(righe[1].soglia_pct, null, "solo il reddito ha una soglia");
++  assert.deepEqual(criteriDaRighe(righe), criteri);
++});
++
++test("criteriDaRighe: righe di criteri non più nel catalogo si ignorano", () => {
++  const r = criteriDaRighe([
++    { chiave: "garante", peso: 5, modo: "preferenziale", soglia_pct: null },
++    { chiave: "nessunAnimale", peso: 5, modo: "obbligatorio", soglia_pct: null },
++  ]);
++  assert.deepEqual(r.map((c) => c.chiave), ["garante"]);
++  assert.deepEqual(criteriDaRighe(null), []);
++});
++
++// ============================================================
++// Il candidato visto dal proprietario
++// ============================================================
++
++const profiloDb = (o = {}) => ({
++  professione: "Dipendente indeterminato",
++  reddito_mensile: 1800,
++  reddito_nucleo: 3200,
++  garante: true,
++  fideiussione: false,
++  protestato: false,
++  animali: false,
++  nucleo: "coppia",
++  presentazione: "Una presentazione abbastanza lunga.",
++  verificato: false,
++  ...o,
++});
++
++test("reddito del nucleo a zero vale 'non indicato', non 'nessun reddito'", () => {
++  assert.equal(datiCandidatoDaProfilo(profiloDb({ reddito_nucleo: 0 })).redditoMensileNucleo, null);
++  assert.equal(datiCandidatoDaProfilo(profiloDb({ reddito_nucleo: null })).redditoMensileNucleo, null);
++  assert.equal(datiCandidatoDaProfilo(profiloDb({ reddito_nucleo: 3200 })).redditoMensileNucleo, 3200);
++});
++
++test("senza reddito del nucleo il criterio sul reddito risulta 'non indicato'", () => {
++  const r = valutaCandidato({
++    criteri: [{ chiave: "redditoCanone", peso: 5, modo: "obbligatorio" }],
++    canone: 900,
++    profilo: profiloDb({ reddito_nucleo: 0 }),
++    mediaRecensioni: null,
++    numeroRecensioni: 0,
++  }).match;
++  assert.equal(r.criteri[0].stato, "non_indicato");
++  assert.equal(r.bloccato, true);
++  assert.equal(r.incompleto, true);
++});
++
++test("completezza del profilo personale: otto campi, nessuna zona", () => {
++  assert.equal(completezzaProfiloPersonale(profiloDb()), 100);
++  assert.equal(completezzaProfiloPersonale(profiloDb({ reddito_nucleo: null })), 88);
++  // sei su otto = 75: sotto la soglia del 'profilo completo'
++  assert.equal(completezzaProfiloPersonale(profiloDb({ reddito_nucleo: null, animali: null })), 75);
++  assert.equal(completezzaProfiloPersonale(profiloDb({ presentazione: "corta" })), 88);
++});
++
++test("valutaCandidato: affidabilità accanto al match, mai dentro", () => {
++  const criteri = [{ chiave: "garante", peso: 5, modo: "preferenziale" }];
++  const base = { criteri, canone: 1000, mediaRecensioni: null, numeroRecensioni: 0 };
++  const senza = valutaCandidato({ ...base, profilo: profiloDb({ verificato: false }) });
++  const con = valutaCandidato({ ...base, profilo: profiloDb({ verificato: true }) });
++
++  assert.ok(con.affidabilita > senza.affidabilita, "la verifica alza l'affidabilità");
++  assert.equal(con.match.punteggio, senza.match.punteggio, "ma non il match, che non la chiede");
++});
++
++test("il canone reale dell'annuncio decide il criterio sul reddito", () => {
++  const val = (canone) => valutaCandidato({
++    criteri: [{ chiave: "redditoCanone", peso: 5, modo: "preferenziale" }],
++    canone,
++    profilo: profiloDb({ reddito_nucleo: 3000 }),
++    mediaRecensioni: null,
++    numeroRecensioni: 0,
++  }).match.criteri[0].stato;
++  assert.equal(val(900), "ok");   // 30%
++  assert.equal(val(1500), "no");  // 50%
++});
++
++test("leggiFotografia: accetta quella salvata, rifiuta forme rovinate", () => {
++  const v = valutaCandidato({
++    criteri: [{ chiave: "garante", peso: 5, modo: "obbligatorio" }],
++    canone: 1000, profilo: profiloDb(), mediaRecensioni: null, numeroRecensioni: 0,
++  });
++  // come esce dal database: serializzata e riletta. JSON toglie le chiavi
++  // `undefined`, quindi il confronto è con la versione già serializzata.
++  const salvata = JSON.parse(JSON.stringify(v));
++  assert.deepEqual(leggiFotografia(salvata), salvata);
++
++  for (const x of [null, undefined, 5, "x", {}, { match: null, affidabilita: 5 },
++                   { match: { punteggio: "80" }, affidabilita: 5 },
++                   { match: { punteggio: 80, bloccato: false, incompleto: false, criteri: [], mancanti: [] } }]) {
++    assert.equal(leggiFotografia(x), null);
++  }
++});
++
++test("profiloRicercaDaRighe: 0 e vuoto valgono 'nessuna preferenza'", () => {
++  const p = profiloRicercaDaRighe(
++    { budget_max: 0, locali_min: null, mq_min: 60 },
++    [{ zona: "Isola, Milano" }],
++    [{ attributo_key: "balcone", peso: 8 }]
++  );
++  assert.deepEqual(p, { budgetMax: null, localiMin: null, mqMin: 60, zone: ["Isola, Milano"], interessi: { balcone: 8 } });
++  assert.equal(profiloRicercaDaRighe({ budget_max: null, locali_min: null, mq_min: null }, null, undefined).zone.length, 0);
++});
+diff --git a/src/app/(app)/actions.ts b/src/app/(app)/actions.ts
+index fe17c23..9451f08 100644
+--- a/src/app/(app)/actions.ts
++++ b/src/app/(app)/actions.ts
+@@ -2,6 +2,11 @@
+ 
+ import { revalidatePath } from "next/cache";
+ import { createClient } from "@/lib/supabase/server";
++import {
++  calcolaMatchInquilino,
++  haCriteriDiRicerca,
++  profiloRicercaDaRighe,
++} from "@/lib/match";
+ 
+ export async function candidati(listingId: string) {
+   const supabase = await createClient();
+@@ -10,10 +15,49 @@ export async function candidati(listingId: string) {
+   } = await supabase.auth.getUser();
+   if (!user) return { error: "Non autenticato." };
+ 
++  // Fotografia di quanto la casa andava bene all'inquilino nel momento in
++  // cui ha scelto: è il numero che rivede in "Candidature". La candidatura
++  // non deve MAI fallire per colpa di questo calcolo: se qualcosa non va,
++  // parte comunque, senza percentuale.
++  let matchPct: number | null = null;
++  try {
++    const [{ data: annuncio }, { data: tenant }, { data: zone }, { data: interessi }] =
++      await Promise.all([
++        supabase
++          .from("listings")
++          .select("prezzo, zona, locali, mq, attributi")
++          .eq("id", listingId)
++          .single(),
++        supabase
++          .from("tenant_profiles")
++          .select("budget_max, locali_min, mq_min")
++          .eq("profile_id", user.id)
++          .single(),
++        supabase.from("tenant_zone_interesse").select("zona").eq("tenant_id", user.id),
++        supabase
++          .from("tenant_interessi")
++          .select("attributo_key, peso")
++          .eq("tenant_id", user.id),
++      ]);
++
++    if (annuncio && tenant) {
++      const profilo = profiloRicercaDaRighe(tenant, zone, interessi);
++      // senza criteri impostati ogni casa fa 99: non è un'informazione
++      if (haCriteriDiRicerca(profilo)) {
++        matchPct = calcolaMatchInquilino(annuncio, profilo).punteggio;
++      }
++    }
++  } catch {
++    matchPct = null;
++  }
++
++  // Lo stato non si sceglie: lo impone anche la policy del database, che
++  // rifiuta una candidatura creata con uno stato diverso da "in_attesa".
+   const { error } = await supabase.from("candidature").insert({
+     listing_id: listingId,
+     tenant_id: user.id,
+     status: "in_attesa",
++    match_pct: matchPct,
+   });
+ 
+   if (error) return { error: error.message };
+diff --git a/src/app/(app)/database/DatabaseClient.tsx b/src/app/(app)/database/DatabaseClient.tsx
+index c31869a..6ea17f0 100644
+--- a/src/app/(app)/database/DatabaseClient.tsx
++++ b/src/app/(app)/database/DatabaseClient.tsx
+@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
+ import Link from "next/link";
+ import { Sheet } from "@/components/Sheet";
+ import type { CandidaturaRicevuta } from "@/lib/types";
++import { ordinaCandidati } from "@/lib/match";
+ import { valutaCandidatura } from "./actions";
+ import { PageContainer } from "@/components/ui/PageContainer";
+ import { IconPersone } from "@/components/icons";
+@@ -18,6 +19,21 @@ const LABEL: Record<string, string> = {
+   accettata: "Accettata",
+   rifiutata: "Rifiutata",
+ };
++const SIMBOLO = { ok: "✓", no: "–", non_indicato: "?" } as const;
++
++/** Colore del badge in base alla percentuale, con le stesse soglie delle etichette. */
++function classePercentuale(pct: number): string {
++  if (pct >= 70) return "is-match";
++  if (pct >= 50) return "is-wait";
++  return "is-off";
++}
++
++type Annuncio = {
++  id: string;
++  titolo: string;
++  zona: string;
++  candidature: CandidaturaRicevuta[];
++};
+ 
+ export function DatabaseClient({
+   candidature,
+@@ -28,6 +44,7 @@ export function DatabaseClient({
+     null
+   );
+   const [pending, startTransition] = useTransition();
++  const [errore, setErrore] = useState<string | null>(null);
+   const [aggiornate, setAggiornate] = useState<
+     Record<string, "accettata" | "rifiutata">
+   >({});
+@@ -37,17 +54,40 @@ export function DatabaseClient({
+   }
+ 
+   function valuta(c: CandidaturaRicevuta, nuovo: "accettata" | "rifiutata") {
++    setErrore(null);
+     startTransition(async () => {
+       const res = await valutaCandidatura(c.id, nuovo);
+-      if (!res?.error) {
+-        setAggiornate((prev) => ({ ...prev, [c.id]: nuovo }));
+-        setSelezionata(null);
++      if (res?.error) {
++        setErrore(res.error);
++        return;
+       }
++      setAggiornate((prev) => ({ ...prev, [c.id]: nuovo }));
++      setSelezionata(null);
+     });
+   }
+ 
+-  const inAttesa = candidature.filter((c) => stato(c) === "in_attesa");
+-  const valutate = candidature.filter((c) => stato(c) !== "in_attesa");
++  // ---- raggruppo per annuncio ----
++  const perAnnuncio = new Map<string, Annuncio>();
++  for (const c of candidature) {
++    const gruppo = perAnnuncio.get(c.listing_id) ?? {
++      id: c.listing_id,
++      titolo: c.listings?.titolo ?? "Annuncio",
++      zona: c.listings?.zona ?? "",
++      candidature: [],
++    };
++    gruppo.candidature.push(c);
++    perAnnuncio.set(c.listing_id, gruppo);
++  }
++
++  const daValutare = (a: Annuncio) =>
++    a.candidature.filter((c) => stato(c) === "in_attesa").length;
++
++  // prima gli annunci con più candidati in attesa
++  const annunci = [...perAnnuncio.values()].sort(
++    (a, b) => daValutare(b) - daValutare(a) || a.titolo.localeCompare(b.titolo)
++  );
++
++  const totaleInAttesa = candidature.filter((c) => stato(c) === "in_attesa").length;
+ 
+   return (
+     <PageContainer wide>
+@@ -55,7 +95,7 @@ export function DatabaseClient({
+       <p className="screen-sub">
+         {candidature.length === 0
+           ? "Le candidature ricevute sui tuoi annunci arrivano qui."
+-          : `${candidature.length} candidatur${candidature.length === 1 ? "a ricevuta" : "e ricevute"} · ${inAttesa.length} da valutare.`}
++          : `${candidature.length} candidatur${candidature.length === 1 ? "a ricevuta" : "e ricevute"} · ${totaleInAttesa} da valutare.`}
+       </p>
+ 
+       {candidature.length === 0 && (
+@@ -69,26 +109,21 @@ export function DatabaseClient({
+         </div>
+       )}
+ 
+-      {inAttesa.length > 0 && (
+-        <Gruppo
+-          titolo="Da valutare"
+-          items={inAttesa}
+-          onSelect={setSelezionata}
++      {annunci.map((a) => (
++        <SezioneAnnuncio
++          key={a.id}
++          annuncio={a}
+           stato={stato}
+-        />
+-      )}
+-      {valutate.length > 0 && (
+-        <Gruppo
+-          titolo="Valutate"
+-          items={valutate}
+           onSelect={setSelezionata}
+-          stato={stato}
+         />
+-      )}
++      ))}
+ 
+       <Sheet
+         open={selezionata !== null}
+-        onClose={() => setSelezionata(null)}
++        onClose={() => {
++          setSelezionata(null);
++          setErrore(null);
++        }}
+         title={
+           selezionata
+             ? `${selezionata.nome ?? "Inquilino"} ${selezionata.cognome ?? ""}`
+@@ -112,6 +147,10 @@ export function DatabaseClient({
+               Candidatura per <b>{selezionata.listings?.titolo}</b>
+             </p>
+ 
++            {selezionata.valutazione && (
++              <PercheMatchProprietario valutazione={selezionata.valutazione} />
++            )}
++
+             <DettaglioRow
+               label="Situazione lavorativa"
+               value={selezionata.tenant_profiles?.professione ?? "—"}
+@@ -124,14 +163,22 @@ export function DatabaseClient({
+                   : "—"
+               }
+             />
++            <DettaglioRow
++              label="Reddito del nucleo"
++              value={
++                selezionata.tenant_profiles?.reddito_nucleo
++                  ? `€${selezionata.tenant_profiles.reddito_nucleo.toLocaleString("it-IT")}/mese`
++                  : "Non indicato"
++              }
++            />
+             <DettaglioRow
+               label="Reddito verificato"
+               value={selezionata.tenant_profiles?.verificato ? "Sì" : "No"}
+             />
+-            {selezionata.match_pct !== null && (
++            {selezionata.valutazione && (
+               <DettaglioRow
+-                label="Compatibilità"
+-                value={`${selezionata.match_pct}%`}
++                label="Affidabilità"
++                value={`${selezionata.valutazione.affidabilita}/100`}
+               />
+             )}
+             {selezionata.tenant_profiles?.presentazione && (
+@@ -145,6 +192,12 @@ export function DatabaseClient({
+               </div>
+             )}
+ 
++            {errore && (
++              <p className="note-error" style={{ marginTop: 14 }}>
++                {errore}
++              </p>
++            )}
++
+             {stato(selezionata) === "in_attesa" ? (
+               <div className="flex gap-3 mt-6">
+                 <button
+@@ -191,57 +244,194 @@ export function DatabaseClient({
+   );
+ }
+ 
+-function Gruppo({
+-  titolo,
+-  items,
+-  onSelect,
++// ------------------------------------------------------------
++
++function SezioneAnnuncio({
++  annuncio,
+   stato,
++  onSelect,
+ }: {
+-  titolo: string;
+-  items: CandidaturaRicevuta[];
+-  onSelect: (c: CandidaturaRicevuta) => void;
++  annuncio: Annuncio;
+   stato: (c: CandidaturaRicevuta) => string;
++  onSelect: (c: CandidaturaRicevuta) => void;
+ }) {
++  const attesa = annuncio.candidature.filter((c) => stato(c) === "in_attesa");
++  const valutate = annuncio.candidature.filter((c) => stato(c) !== "in_attesa");
++
++  // In attesa: prima chi soddisfa i criteri obbligatori, poi per percentuale,
++  // a parità per affidabilità. Se manca la valutazione resta l'ordine di arrivo.
++  const ordinate = attesa.every((c) => c.valutazione)
++    ? ordinaCandidati(
++        attesa.map((c) => ({
++          c,
++          match: c.valutazione!.match,
++          affidabilita: c.valutazione!.affidabilita,
++        }))
++      ).map((v) => v.c)
++    : attesa;
++
+   return (
+     <>
+-      <div className="pref-label" style={{ marginTop: 20 }}>
++      <div className="pref-label" style={{ marginTop: 26 }}>
+         <span>
+-          {titolo} — {items.length}
++          {annuncio.titolo}
++          {annuncio.zona && ` · ${annuncio.zona.replace(", Milano", "")}`}
+         </span>
++        <b>
++          {attesa.length} da valutare
++        </b>
+       </div>
+-      <div className="card-grid">
+-        {items.map((c) => {
+-          const s = stato(c);
+-          const iniziali = `${c.nome?.[0] ?? ""}${c.cognome?.[0] ?? ""}`.toUpperCase();
+-          return (
+-            <button key={c.id} onClick={() => onSelect(c)} className="match-card">
+-              {c.tenant_profiles?.avatar_url ? (
+-                // eslint-disable-next-line @next/next/no-img-element
+-                <img src={c.tenant_profiles.avatar_url} alt="" />
+-              ) : (
+-                <div className="mc-avatar">{iniziali || "IN"}</div>
+-              )}
+-              <div className="mc-body">
+-                <div className="mc-zona">
+-                  {c.tenant_profiles?.professione ?? "Profilo inquilino"}
+-                </div>
+-                <div className="mc-title">
+-                  {c.nome} {c.cognome}
+-                </div>
+-                <div className="mc-meta">
+-                  {c.listings?.titolo}
+-                  {c.match_pct !== null && ` · ${c.match_pct}% compatibile`}
+-                </div>
+-              </div>
+-              <div className={`mc-pct ${BADGE[s]}`}>{LABEL[s]}</div>
+-            </button>
+-          );
+-        })}
+-      </div>
++
++      {ordinate.length > 0 && (
++        <div className="card-grid">
++          {ordinate.map((c) => (
++            <Scheda key={c.id} c={c} stato={stato(c)} onSelect={onSelect} />
++          ))}
++        </div>
++      )}
++
++      {valutate.length > 0 && (
++        <>
++          <div className="sotto-label">Già valutate — {valutate.length}</div>
++          <div className="card-grid">
++            {valutate.map((c) => (
++              <Scheda key={c.id} c={c} stato={stato(c)} onSelect={onSelect} />
++            ))}
++          </div>
++        </>
++      )}
+     </>
+   );
+ }
+ 
++function Scheda({
++  c,
++  stato,
++  onSelect,
++}: {
++  c: CandidaturaRicevuta;
++  stato: string;
++  onSelect: (c: CandidaturaRicevuta) => void;
++}) {
++  const iniziali = `${c.nome?.[0] ?? ""}${c.cognome?.[0] ?? ""}`.toUpperCase();
++  const v = c.valutazione;
++  const inAttesa = stato === "in_attesa";
++
++  let badge = (
++    <div className={`mc-pct ${BADGE[stato]}`}>{LABEL[stato]}</div>
++  );
++  if (inAttesa && v) {
++    if (v.match.bloccato) {
++      badge = (
++        <div className="mc-pct is-alert">
++          Bloccato<span>obbligatorio</span>
++        </div>
++      );
++    } else if (v.match.punteggio !== null) {
++      badge = (
++        <div className={`mc-pct ${classePercentuale(v.match.punteggio)}`}>
++          {v.match.punteggio}%<span>compatibile</span>
++        </div>
++      );
++    }
++  }
++
++  return (
++    <button onClick={() => onSelect(c)} className="match-card">
++      {c.tenant_profiles?.avatar_url ? (
++        // eslint-disable-next-line @next/next/no-img-element
++        <img src={c.tenant_profiles.avatar_url} alt="" />
++      ) : (
++        <div className="mc-avatar">{iniziali || "IN"}</div>
++      )}
++      <div className="mc-body">
++        <div className="mc-zona">
++          {c.tenant_profiles?.professione ?? "Profilo inquilino"}
++        </div>
++        <div className="mc-title">
++          {c.nome} {c.cognome}
++        </div>
++        <div className="mc-meta">
++          {v ? `Affidabilità ${v.affidabilita}` : ""}
++          {v?.match.incompleto && inAttesa && " · dati incompleti"}
++          {!inAttesa && v?.match.punteggio != null && ` · compatibilità ${v.match.punteggio}%`}
++        </div>
++      </div>
++      {badge}
++    </button>
++  );
++}
++
++// ------------------------------------------------------------
++
++/**
++ * "Perché vedi questo numero", dal lato del proprietario: i criteri che ha
++ * chiesto, quali il candidato soddisfa, e se qualcuno obbligatorio manca.
++ */
++export function PercheMatchProprietario({
++  valutazione,
++}: {
++  valutazione: NonNullable<CandidaturaRicevuta["valutazione"]>;
++}) {
++  const { match, congelata } = valutazione;
++
++  if (match.punteggio === null) {
++    return (
++      <div className="note-box" style={{ marginTop: 0, marginBottom: 18 }}>
++        Per questo annuncio non hai chiesto nessun criterio, quindi non c&apos;è
++        una percentuale. Puoi aggiungerli da Immobili.
++      </div>
++    );
++  }
++
++  return (
++    <div className="match-box">
++      <div className="match-box-top">
++        <div className="match-box-pct">{match.punteggio}%</div>
++        <div>
++          <div className="match-box-label">{match.etichetta}</div>
++          <div className="match-box-sub">
++            {congelata
++              ? "Fotografia al momento della tua decisione"
++              : "Sui criteri che hai chiesto, con i dati attuali"}
++          </div>
++        </div>
++      </div>
++
++      {match.bloccato && (
++        <div className="note-stop">
++          Non soddisfa un criterio obbligatorio: {match.mancanti.join(", ")}.
++        </div>
++      )}
++
++      <div className="perche-lista">
++        {match.criteri.map((c) => (
++          <div key={c.chiave} className={`perche-row ${c.stato}`}>
++            <span className="perche-simbolo">{SIMBOLO[c.stato]}</span>
++            <span className="perche-testo">
++              {c.etichetta}
++              {c.obbligatorio && <em className="tag-obbl">obbligatorio</em>}
++              {c.dettaglio && <small>{c.dettaglio}</small>}
++              {c.stato === "non_indicato" && <small>Non indicato dal candidato</small>}
++            </span>
++          </div>
++        ))}
++      </div>
++
++      {match.incompleto && !congelata && (
++        <p className="field-note" style={{ marginTop: 8 }}>
++          Il candidato non ha indicato alcuni dati: se li compila, la
++          percentuale può salire.
++        </p>
++      )}
++      <p className="field-note" style={{ marginTop: 8 }}>
++        È una compatibilità sui dati dichiarati dal candidato, non una
++        valutazione della persona né una previsione.
++      </p>
++    </div>
++  );
++}
++
+ function DettaglioRow({ label, value }: { label: string; value: string }) {
+   return (
+     <div className="feat-row">
+diff --git a/src/app/(app)/database/actions.ts b/src/app/(app)/database/actions.ts
+index 69c5a2a..81a5613 100644
+--- a/src/app/(app)/database/actions.ts
++++ b/src/app/(app)/database/actions.ts
+@@ -2,6 +2,8 @@
+ 
+ import { revalidatePath } from "next/cache";
+ import { createClient } from "@/lib/supabase/server";
++import { criteriDaRighe, valutaCandidato } from "@/lib/match";
++import type { ProfiloCandidato, RigaCriterioDb } from "@/lib/match";
+ 
+ export async function valutaCandidatura(
+   candidaturaId: string,
+@@ -13,9 +15,62 @@ export async function valutaCandidatura(
+   } = await supabase.auth.getUser();
+   if (!user) return { error: "Non autenticato." };
+ 
++  // La decisione registra una fotografia del match di quel momento (D7):
++  // da qui in poi l'inquilino può cambiare il profilo, ma il proprietario
++  // continua a vedere su cosa ha deciso.
++  //
++  // Il calcolo NON deve mai impedire la decisione: se qualcosa va storto,
++  // lo stato cambia lo stesso e semplicemente non c'è fotografia.
++  let fotografia: Record<string, unknown> | null = null;
++  try {
++    const { data: c } = await supabase
++      .from("candidature")
++      .select(
++        "tenant_id, listing_id, match_proprietario, listings!inner(owner_id, prezzo), tenant_profiles!inner(professione, reddito_mensile, reddito_nucleo, garante, fideiussione, protestato, animali, nucleo, verificato, presentazione)"
++      )
++      .eq("id", candidaturaId)
++      .single();
++
++    // una fotografia già scattata non si sovrascrive
++    if (c && !c.match_proprietario) {
++      const listing = c.listings as unknown as { owner_id: string; prezzo: number };
++
++      if (listing.owner_id === user.id) {
++        const [{ data: righeCriteri }, { data: recensioni }] = await Promise.all([
++          supabase
++            .from("listing_criteri")
++            .select("chiave, peso, modo, soglia_pct")
++            .eq("listing_id", c.listing_id),
++          supabase.from("recensioni").select("voto").eq("tenant_id", c.tenant_id),
++        ]);
++        const voti = (recensioni ?? []).map((r) => r.voto as number);
++
++        fotografia = valutaCandidato({
++          criteri: criteriDaRighe(righeCriteri as RigaCriterioDb[] | null),
++          canone: listing.prezzo,
++          profilo: c.tenant_profiles as unknown as ProfiloCandidato,
++          mediaRecensioni:
++            voti.length > 0 ? voti.reduce((a, b) => a + b, 0) / voti.length : null,
++          numeroRecensioni: voti.length,
++        }) as unknown as Record<string, unknown>;
++      }
++    }
++  } catch {
++    fotografia = null;
++  }
++
+   const { error } = await supabase
+     .from("candidature")
+-    .update({ status: nuovoStato, updated_at: new Date().toISOString() })
++    .update({
++      status: nuovoStato,
++      updated_at: new Date().toISOString(),
++      ...(fotografia
++        ? {
++            match_proprietario: fotografia,
++            match_proprietario_at: new Date().toISOString(),
++          }
++        : {}),
++    })
+     .eq("id", candidaturaId);
+ 
+   if (error) return { error: error.message };
+diff --git a/src/app/(app)/database/page.tsx b/src/app/(app)/database/page.tsx
+index 5cf5820..b48bebe 100644
+--- a/src/app/(app)/database/page.tsx
++++ b/src/app/(app)/database/page.tsx
+@@ -1,5 +1,11 @@
+ import { createClient } from "@/lib/supabase/server";
+ import { DatabaseClient } from "./DatabaseClient";
++import {
++  criteriDaRighe,
++  leggiFotografia,
++  valutaCandidato,
++} from "@/lib/match";
++import type { CriterioRichiesto, ProfiloCandidato, RigaCriterioDb } from "@/lib/match";
+ import type { CandidaturaRicevuta } from "@/lib/types";
+ 
+ export default async function DatabasePage() {
+@@ -8,36 +14,97 @@ export default async function DatabasePage() {
+     data: { user },
+   } = await supabase.auth.getUser();
+ 
+-  // Query 1: candidature ricevute sugli annunci di questo proprietario,
+-  // con i dati economici dell'inquilino (permesso dalla policy
+-  // "tenant_profiles: owner reads applicants").
++  // Candidature ricevute sugli annunci di questo proprietario, con i dati
++  // dell'inquilino che la sicurezza del database gli lascia leggere
++  // (policy "tenant_profiles: owner reads applicants"). Le zone e le
++  // caratteristiche desiderate NON sono tra questi: restano dell'inquilino.
+   const { data: candidature } = await supabase
+     .from("candidature")
+     .select(
+-      "id, status, match_pct, created_at, tenant_id, listings!inner(owner_id, titolo, zona), tenant_profiles!inner(professione, reddito_mensile, verificato, presentazione, avatar_url)"
++      "id, status, match_pct, created_at, tenant_id, listing_id, match_proprietario, listings!inner(owner_id, titolo, zona, prezzo), tenant_profiles!inner(professione, reddito_mensile, reddito_nucleo, garante, fideiussione, protestato, animali, nucleo, verificato, presentazione, avatar_url)"
+     )
+     .eq("listings.owner_id", user!.id)
+     .order("created_at", { ascending: false });
+ 
+-  // Query 2: nome/cognome degli inquilini (permesso dalla policy
+-  // "profiles: owner reads applicant profile", vedi migrazione 0003).
+-  const tenantIds = [...new Set((candidature ?? []).map((c) => c.tenant_id))];
+-  const { data: profili } =
+-    tenantIds.length > 0
+-      ? await supabase.from("profiles").select("id, nome, cognome").in("id", tenantIds)
+-      : { data: [] };
++  const righe = candidature ?? [];
++  const tenantIds = [...new Set(righe.map((c) => c.tenant_id as string))];
++  const listingIds = [...new Set(righe.map((c) => c.listing_id as string))];
++
++  // Nome e cognome (migrazione 0003), criteri richiesti per annuncio e
++  // recensioni di ciascun inquilino (per l'affidabilità).
++  const [{ data: profili }, { data: righeCriteri }, { data: recensioni }] =
++    await Promise.all([
++      tenantIds.length > 0
++        ? supabase.from("profiles").select("id, nome, cognome").in("id", tenantIds)
++        : { data: [] },
++      listingIds.length > 0
++        ? supabase
++            .from("listing_criteri")
++            .select("listing_id, chiave, peso, modo, soglia_pct")
++            .in("listing_id", listingIds)
++        : { data: [] },
++      tenantIds.length > 0
++        ? supabase.from("recensioni").select("tenant_id, voto").in("tenant_id", tenantIds)
++        : { data: [] },
++    ]);
+ 
+   const nomiPerTenant = new Map(
+     (profili ?? []).map((p) => [p.id as string, { nome: p.nome, cognome: p.cognome }])
+   );
+ 
+-  const candidatureComplete: CandidaturaRicevuta[] = (
+-    (candidature ?? []) as unknown as CandidaturaRicevuta[]
+-  ).map((c) => ({
+-    ...c,
+-    nome: nomiPerTenant.get(c.tenant_id)?.nome ?? null,
+-    cognome: nomiPerTenant.get(c.tenant_id)?.cognome ?? null,
+-  }));
++  const righePerListing = new Map<string, RigaCriterioDb[]>();
++  for (const r of righeCriteri ?? []) {
++    const id = r.listing_id as string;
++    righePerListing.set(id, [...(righePerListing.get(id) ?? []), r as RigaCriterioDb]);
++  }
++  const criteriPerListing = new Map<string, CriterioRichiesto[]>(
++    [...righePerListing].map(([id, rows]) => [id, criteriDaRighe(rows)])
++  );
++
++  const votiPerTenant = new Map<string, number[]>();
++  for (const r of recensioni ?? []) {
++    const id = r.tenant_id as string;
++    votiPerTenant.set(id, [...(votiPerTenant.get(id) ?? []), r.voto as number]);
++  }
++
++  const candidatureComplete: CandidaturaRicevuta[] = righe.map((c) => {
++    const listing = c.listings as unknown as { prezzo: number } | null;
++    const profilo = c.tenant_profiles as unknown as ProfiloCandidato;
++    const voti = votiPerTenant.get(c.tenant_id as string) ?? [];
++
++    // Finché la candidatura è in attesa il match si ricalcola sui dati
++    // attuali. Dopo la decisione si mostra la fotografia scattata in quel
++    // momento (se è leggibile; altrimenti si ricalcola).
++    const fotografia =
++      c.status !== "in_attesa" ? leggiFotografia(c.match_proprietario) : null;
++
++    const valutazione = fotografia
++      ? { ...fotografia, congelata: true }
++      : {
++          ...valutaCandidato({
++            criteri: criteriPerListing.get(c.listing_id as string) ?? [],
++            canone: listing?.prezzo ?? 0,
++            profilo,
++            mediaRecensioni:
++              voti.length > 0 ? voti.reduce((a, b) => a + b, 0) / voti.length : null,
++            numeroRecensioni: voti.length,
++          }),
++          congelata: false,
++        };
++
++    // `match_proprietario` grezzo non serve al client
++    const { match_proprietario: _grezzo, ...resto } = c as typeof c & {
++      match_proprietario: unknown;
++    };
++    void _grezzo;
++
++    return {
++      ...(resto as unknown as CandidaturaRicevuta),
++      nome: nomiPerTenant.get(c.tenant_id as string)?.nome ?? null,
++      cognome: nomiPerTenant.get(c.tenant_id as string)?.cognome ?? null,
++      valutazione,
++    };
++  });
+ 
+   return <DatabaseClient candidature={candidatureComplete} />;
+ }
+diff --git a/src/app/(app)/immobili/ImmobiliClient.tsx b/src/app/(app)/immobili/ImmobiliClient.tsx
+index 2d29323..cbe5284 100644
+--- a/src/app/(app)/immobili/ImmobiliClient.tsx
++++ b/src/app/(app)/immobili/ImmobiliClient.tsx
+@@ -10,6 +10,8 @@ import {
+ import { Sheet } from "@/components/Sheet";
+ import { ATTR_VOCAB, ZONE_MILANO } from "@/lib/constants";
+ import type { ImmobileDettaglio } from "@/lib/types";
++import type { CriterioRichiesto } from "@/lib/match";
++import { CriteriCandidati } from "@/components/CriteriCandidati";
+ import { PageContainer } from "@/components/ui/PageContainer";
+ import { Chip } from "@/components/ui/Chip";
+ import { Field } from "@/components/ui/Field";
+@@ -154,6 +156,7 @@ function ImmobileForm({
+   );
+   const [pubblicato, setPubblicato] = useState(immobile?.pubblicato ?? true);
+   const [foto, setFoto] = useState<string[]>(immobile?.foto ?? []);
++  const [criteri, setCriteri] = useState<CriterioRichiesto[]>(immobile?.criteri ?? []);
+   const inputFotoRef = useRef<HTMLInputElement>(null);
+   const [caricamentoFoto, setCaricamentoFoto] = useState(false);
+   const [erroreFoto, setErroreFoto] = useState<string | null>(null);
+@@ -257,6 +260,7 @@ function ImmobileForm({
+       <input type="hidden" name="attributi" value={JSON.stringify(attributi)} />
+       <input type="hidden" name="pubblicato" value={String(pubblicato)} />
+       <input type="hidden" name="foto" value={JSON.stringify(foto)} />
++      <input type="hidden" name="criteri" value={JSON.stringify(criteri)} />
+ 
+       <Field label="Titolo annuncio">
+         <input
+@@ -397,6 +401,10 @@ function ImmobileForm({
+         </div>
+       </Field>
+ 
++      <Field label="Cosa chiedi ai candidati">
++        <CriteriCandidati value={criteri} onChange={setCriteri} />
++      </Field>
++
+       <Field label="Visibilità">
+         <div className="flex gap-2">
+           <Chip label="Pubblicato" active={pubblicato} onClick={() => setPubblicato(true)} />
+diff --git a/src/app/(app)/immobili/actions.ts b/src/app/(app)/immobili/actions.ts
+index bcfe393..1156024 100644
+--- a/src/app/(app)/immobili/actions.ts
++++ b/src/app/(app)/immobili/actions.ts
+@@ -2,6 +2,8 @@
+ 
+ import { revalidatePath } from "next/cache";
+ import { createClient } from "@/lib/supabase/server";
++import { normalizzaCriteri, righeDaCriteri } from "@/lib/match";
++import type { CriterioRichiesto } from "@/lib/match";
+ 
+ export type SaveState = { error?: string; ok?: boolean } | null;
+ 
+@@ -14,6 +16,38 @@ function parseAttributi(raw: FormDataEntryValue | null): Record<string, boolean>
+   }
+ }
+ 
++type Supabase = Awaited<ReturnType<typeof createClient>>;
++
++/**
++ * Riscrive i criteri di un annuncio. Prima scrive quelli richiesti (upsert)
++ * e solo dopo toglie quelli non più richiesti: se la scrittura fallisce, i
++ * criteri precedenti restano dove sono invece di sparire.
++ * Restituisce il messaggio d'errore, o null.
++ */
++async function salvaCriteri(
++  supabase: Supabase,
++  listingId: string,
++  criteri: CriterioRichiesto[]
++): Promise<string | null> {
++  if (criteri.length > 0) {
++    const { error } = await supabase
++      .from("listing_criteri")
++      .upsert(righeDaCriteri(listingId, criteri), {
++        onConflict: "listing_id,chiave",
++      });
++    if (error) return error.message;
++  }
++
++  // Le chiavi arrivano da normalizzaCriteri, cioè dal catalogo: nessun
++  // carattere speciale, si possono mettere nel filtro senza escape.
++  let togli = supabase.from("listing_criteri").delete().eq("listing_id", listingId);
++  if (criteri.length > 0) {
++    togli = togli.not("chiave", "in", `(${criteri.map((c) => c.chiave).join(",")})`);
++  }
++  const { error: eDel } = await togli;
++  return eDel ? eDel.message : null;
++}
++
+ /** Le foto arrivano dal modulo come array JSON di URL, già ordinate. */
+ function parseFoto(valore: FormDataEntryValue | null): string[] {
+   try {
+@@ -47,6 +81,7 @@ export async function creaImmobile(
+   const attributi = parseAttributi(formData.get("attributi"));
+   const pubblicato = formData.get("pubblicato") === "true";
+   const foto = parseFoto(formData.get("foto"));
++  const criteri = normalizzaCriteri(formData.get("criteri"));
+ 
+   const { data: listing, error } = await supabase
+     .from("listings")
+@@ -73,6 +108,11 @@ export async function creaImmobile(
+     if (eFoto) return { error: eFoto.message };
+   }
+ 
++  if (listing) {
++    const eCriteri = await salvaCriteri(supabase, listing.id, criteri);
++    if (eCriteri) return { error: eCriteri };
++  }
++
+   revalidatePath("/immobili");
+   revalidatePath("/");
+   return { ok: true };
+@@ -104,6 +144,7 @@ export async function aggiornaImmobile(
+   const attributi = parseAttributi(formData.get("attributi"));
+   const pubblicato = formData.get("pubblicato") === "true";
+   const foto = parseFoto(formData.get("foto"));
++  const criteri = normalizzaCriteri(formData.get("criteri"));
+ 
+   const { error } = await supabase
+     .from("listings")
+@@ -138,6 +179,9 @@ export async function aggiornaImmobile(
+     if (eFoto) return { error: eFoto.message };
+   }
+ 
++  const eCriteri = await salvaCriteri(supabase, id, criteri);
++  if (eCriteri) return { error: eCriteri };
++
+   revalidatePath("/immobili");
+   revalidatePath("/");
+   return { ok: true };
+diff --git a/src/app/(app)/immobili/page.tsx b/src/app/(app)/immobili/page.tsx
+index a7e2a82..ff082c2 100644
+--- a/src/app/(app)/immobili/page.tsx
++++ b/src/app/(app)/immobili/page.tsx
+@@ -1,6 +1,8 @@
+ import { createClient } from "@/lib/supabase/server";
+ import { ImmobiliClient } from "./ImmobiliClient";
+ import type { ImmobileDettaglio } from "@/lib/types";
++import { criteriDaRighe } from "@/lib/match";
++import type { RigaCriterioDb } from "@/lib/match";
+ 
+ export default async function ImmobiliPage() {
+   const supabase = await createClient();
+@@ -12,7 +14,7 @@ export default async function ImmobiliPage() {
+     supabase
+       .from("listings")
+       .select(
+-        "id, titolo, descrizione, zona, prezzo, locali, mq, attributi, pubblicato, listing_photos(url, ordine)"
++        "id, titolo, descrizione, zona, prezzo, locali, mq, attributi, pubblicato, listing_photos(url, ordine), listing_criteri(chiave, peso, modo, soglia_pct)"
+       )
+       .eq("owner_id", user!.id)
+       .order("created_at", { ascending: false }),
+@@ -41,6 +43,7 @@ export default async function ImmobiliPage() {
+     foto: [...((l.listing_photos as { url: string; ordine: number }[]) ?? [])]
+       .sort((a, b) => (a.ordine ?? 0) - (b.ordine ?? 0))
+       .map((f) => f.url),
++    criteri: criteriDaRighe(l.listing_criteri as RigaCriterioDb[] | null),
+     nCandidature: nCandidaturePerListing.get(l.id) ?? 0,
+   }));
+ 
+diff --git a/src/app/(app)/page.tsx b/src/app/(app)/page.tsx
+index 7614516..d6704de 100644
+--- a/src/app/(app)/page.tsx
++++ b/src/app/(app)/page.tsx
+@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
+ import { HomeClient } from "./HomeClient";
+ import { OwnerHomeClient } from "./OwnerHomeClient";
+ import { computeAffidabilita } from "@/lib/affidabilita";
+-import { haCriteriDiRicerca, preparaMazzo } from "@/lib/match";
++import { haCriteriDiRicerca, preparaMazzo, profiloRicercaDaRighe } from "@/lib/match";
+ import type { ProfiloRicerca } from "@/lib/match";
+ import type { TenantProfile, ListingConMatch, ListingProprietario } from "@/lib/types";
+ 
+@@ -45,7 +45,6 @@ async function TenantHome({ userId }: { userId: string }) {
+     supabase.from("candidature").select("listing_id").eq("tenant_id", userId),
+   ]);
+ 
+-  const zone = (zoneRows ?? []).map((r) => r.zona as string);
+   const numeroRecensioni = recensioni?.length ?? 0;
+   const mediaRecensioni =
+     numeroRecensioni > 0
+@@ -93,17 +92,11 @@ async function TenantHome({ userId }: { userId: string }) {
+     ),
+   }));
+ 
+-  // Criteri di ricerca dell'inquilino. Un valore 0 o vuoto vale "nessuna
+-  // preferenza", come nel filtro che c'era prima.
+-  const profiloRicerca: ProfiloRicerca = {
+-    budgetMax: tenantProfile.budget_max || null,
+-    localiMin: tenantProfile.locali_min || null,
+-    mqMin: tenantProfile.mq_min || null,
+-    zone,
+-    interessi: Object.fromEntries(
+-      (interessiRows ?? []).map((r) => [r.attributo_key as string, r.peso as number])
+-    ),
+-  };
++  const profiloRicerca: ProfiloRicerca = profiloRicercaDaRighe(
++    tenantProfile,
++    zoneRows,
++    interessiRows
++  );
+ 
+   const { mazzo, esclusi } = preparaMazzo(listingsOrdinati, profiloRicerca);
+ 
+diff --git a/src/app/(app)/profilo/ProfiloClient.tsx b/src/app/(app)/profilo/ProfiloClient.tsx
+index 3179028..ff88d5b 100644
+--- a/src/app/(app)/profilo/ProfiloClient.tsx
++++ b/src/app/(app)/profilo/ProfiloClient.tsx
+@@ -82,6 +82,7 @@ export function ProfiloClient({
+     hasZone: zoneIniziali.length > 0,
+     professione: tenant.professione,
+     reddito_mensile: tenant.reddito_mensile,
++    reddito_nucleo: tenant.reddito_nucleo,
+     garante: tenant.garante,
+     animali: tenant.animali,
+     presentazione: tenant.presentazione,
+@@ -338,6 +339,7 @@ function DatiPersonaliSheet({
+ 
+   const [professione, setProfessione] = useState(tenant.professione ?? "");
+   const [reddito, setReddito] = useState(tenant.reddito_mensile ?? 0);
++  const [redditoNucleo, setRedditoNucleo] = useState(tenant.reddito_nucleo ?? 0);
+   const [garante, setGarante] = useState<boolean | null>(tenant.garante);
+   const [protestato, setProtestato] = useState<boolean | null>(
+     tenant.protestato
+@@ -365,6 +367,7 @@ function DatiPersonaliSheet({
+       <form action={formAction}>
+         <input type="hidden" name="professione" value={professione} />
+         <input type="hidden" name="reddito_mensile" value={reddito} />
++        <input type="hidden" name="reddito_nucleo" value={redditoNucleo} />
+         <input type="hidden" name="garante" value={String(garante)} />
+         <input type="hidden" name="protestato" value={String(protestato)} />
+         <input
+@@ -443,6 +446,39 @@ function DatiPersonaliSheet({
+           <Stepper value={redditiNucleo} onChange={setRedditiNucleo} min={1} max={6} />
+         </Field>
+ 
++        <Field
++          label={
++            redditoNucleo > 0
++              ? `Reddito netto mensile di tutto il nucleo · €${redditoNucleo.toLocaleString("it-IT")}`
++              : "Reddito netto mensile di tutto il nucleo · non indicato"
++          }
++        >
++          <input
++            type="range"
++            min={0}
++            max={15000}
++            step={50}
++            value={redditoNucleo}
++            onChange={(e) => setRedditoNucleo(Number(e.target.value))}
++            className="w-full"
++          />
++          <p className="field-note">
++            La somma dei redditi di tutte le persone che vivono nella casa. I
++            proprietari lo usano per capire quanto pesa l&apos;affitto sul
++            vostro bilancio.
++          </p>
++          {reddito > 0 && redditoNucleo === 0 && (
++            <button
++              type="button"
++              className="redo-link"
++              style={{ marginTop: 8 }}
++              onClick={() => setRedditoNucleo(reddito)}
++            >
++              Vivo da solo: uso €{reddito.toLocaleString("it-IT")}
++            </button>
++          )}
++        </Field>
++
+         <Field label="Animali domestici?">
+           <div className="chip-row">
+             <Chip label="Sì" active={animali === true} onClick={() => setAnimali(true)} />
+diff --git a/src/app/(app)/profilo/actions.ts b/src/app/(app)/profilo/actions.ts
+index 94cfcdb..5c3f099 100644
+--- a/src/app/(app)/profilo/actions.ts
++++ b/src/app/(app)/profilo/actions.ts
+@@ -24,6 +24,13 @@ export async function updateDatiPersonali(
+   const professione = String(formData.get("professione") || "") || null;
+   const redditoRaw = formData.get("reddito_mensile");
+   const reddito_mensile = redditoRaw ? Number(redditoRaw) : null;
++  // Lo slider parte da 0 e 0 vuol dire "non indicato": chi non lo tocca non
++  // ha dichiarato di non avere reddito.
++  const redditoNucleoRaw = Number(formData.get("reddito_nucleo") || 0);
++  const reddito_nucleo =
++    Number.isFinite(redditoNucleoRaw) && redditoNucleoRaw > 0
++      ? Math.round(redditoNucleoRaw)
++      : null;
+   const garante = parseBool(formData.get("garante"));
+   const protestato = parseBool(formData.get("protestato"));
+   const fideiussione = parseBool(formData.get("fideiussione"));
+@@ -40,6 +47,7 @@ export async function updateDatiPersonali(
+     .update({
+       professione,
+       reddito_mensile,
++      reddito_nucleo,
+       garante,
+       protestato,
+       fideiussione,
+diff --git a/src/app/globals.css b/src/app/globals.css
+index db32d70..f014e50 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -2215,3 +2215,107 @@ input[type="range"]::-moz-range-thumb {
+   font-size: 11.5px;
+   color: var(--muted);
+ }
++
++/* ============================================================
++   CRITERI DEL PROPRIETARIO (modulo dell'annuncio)
++   ============================================================ */
++
++.criteri-lista {
++  display: grid;
++  gap: 10px;
++}
++.criterio {
++  background: #fff;
++  border: 1.5px solid rgba(16, 21, 26, 0.1);
++  border-radius: 16px;
++  overflow: hidden;
++}
++.criterio.on {
++  border-color: var(--moss);
++}
++.criterio-testa {
++  -webkit-appearance: none;
++  appearance: none;
++  border: none;
++  background: none;
++  cursor: pointer;
++  width: 100%;
++  display: flex;
++  align-items: flex-start;
++  gap: 12px;
++  padding: 13px 14px;
++  text-align: left;
++  font-family: var(--font-sans);
++}
++.criterio-check {
++  flex: 0 0 22px;
++  width: 22px;
++  height: 22px;
++  border-radius: 7px;
++  border: 1.6px solid rgba(16, 21, 26, 0.25);
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  font-size: 13px;
++  font-weight: 700;
++  color: #fff;
++  margin-top: 1px;
++}
++.criterio.on .criterio-check {
++  background: var(--moss);
++  border-color: var(--moss);
++}
++.criterio-nome b {
++  display: block;
++  font-size: 13.5px;
++  color: var(--ink);
++}
++.criterio-nome small {
++  display: block;
++  font-size: 12px;
++  color: var(--muted);
++  line-height: 1.45;
++  margin-top: 2px;
++}
++.criterio-opzioni {
++  padding: 2px 14px 16px 48px;
++}
++
++@media (min-width: 768px) {
++  .criterio-opzioni {
++    padding-right: 20px;
++  }
++}
++
++/* Schermata Database: sottotitolo "già valutate", avviso di blocco, tag. */
++.sotto-label {
++  font-size: 10.5px;
++  font-weight: 700;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++  color: var(--muted);
++  margin: 18px 0 8px 0;
++}
++.note-stop {
++  background: rgba(201, 105, 78, 0.12);
++  border: 1px solid rgba(201, 105, 78, 0.35);
++  border-radius: 14px;
++  padding: 11px 14px;
++  margin-bottom: 12px;
++  font-size: 12.5px;
++  font-weight: 600;
++  color: #a85a42;
++}
++.tag-obbl {
++  font-style: normal;
++  font-size: 9px;
++  font-weight: 700;
++  letter-spacing: 0.05em;
++  text-transform: uppercase;
++  color: var(--gold-ink);
++  background: rgba(201, 161, 90, 0.2);
++  padding: 1px 7px;
++  border-radius: 999px;
++  margin-left: 8px;
++  vertical-align: 1px;
++}
+diff --git a/src/components/CriteriCandidati.tsx b/src/components/CriteriCandidati.tsx
+new file mode 100644
+index 0000000..4e99bcb
+--- /dev/null
++++ b/src/components/CriteriCandidati.tsx
+@@ -0,0 +1,156 @@
++"use client";
++
++import { Chip } from "@/components/ui/Chip";
++import { Stepper } from "@/components/ui/Stepper";
++import {
++  CATALOGO_CRITERI,
++  CHIAVI_CRITERI,
++  PESO_MAX,
++  PESO_MIN,
++  PESO_PREDEFINITO,
++  SOGLIA_REDDITO_CANONE,
++} from "@/lib/match";
++import type { ChiaveCriterio, CriterioRichiesto } from "@/lib/match";
++
++/**
++ * Cosa chiede il proprietario ai candidati di un annuncio.
++ *
++ * Ogni criterio si attiva e, una volta attivo, ha un peso da 1 a 10 e un
++ * modo: preferenziale (fa solo salire o scendere la percentuale) oppure
++ * obbligatorio (se manca, il candidato finisce in fondo, segnalato).
++ *
++ * Il componente non salva niente: restituisce la lista al modulo che lo
++ * contiene, che la invia insieme al resto dell'annuncio.
++ */
++export function CriteriCandidati({
++  value,
++  onChange,
++}: {
++  value: CriterioRichiesto[];
++  onChange: (criteri: CriterioRichiesto[]) => void;
++}) {
++  function trova(chiave: ChiaveCriterio) {
++    return value.find((c) => c.chiave === chiave);
++  }
++
++  function attiva(chiave: ChiaveCriterio) {
++    const nuovo: CriterioRichiesto = {
++      chiave,
++      peso: PESO_PREDEFINITO,
++      modo: "preferenziale",
++      ...(chiave === "redditoCanone"
++        ? { sogliaPct: SOGLIA_REDDITO_CANONE.predefinita }
++        : {}),
++    };
++    onChange([...value, nuovo]);
++  }
++
++  function disattiva(chiave: ChiaveCriterio) {
++    onChange(value.filter((c) => c.chiave !== chiave));
++  }
++
++  function cambia(chiave: ChiaveCriterio, modifiche: Partial<CriterioRichiesto>) {
++    onChange(value.map((c) => (c.chiave === chiave ? { ...c, ...modifiche } : c)));
++  }
++
++  return (
++    <div>
++      <p className="field-note" style={{ margin: "-4px 0 12px 0" }}>
++        Scegli cosa conta per te. Un criterio <b>preferenziale</b> fa salire o
++        scendere la percentuale di compatibilità; uno <b>obbligatorio</b>, se
++        manca, mette il candidato in fondo all&apos;elenco con un avviso. Gli
++        inquilini non vedono i tuoi criteri.
++      </p>
++
++      <div className="criteri-lista">
++        {CHIAVI_CRITERI.map((chiave) => {
++          const def = CATALOGO_CRITERI[chiave];
++          const attivo = trova(chiave);
++
++          return (
++            <div key={chiave} className={`criterio ${attivo ? "on" : ""}`}>
++              <button
++                type="button"
++                className="criterio-testa"
++                aria-pressed={!!attivo}
++                onClick={() => (attivo ? disattiva(chiave) : attiva(chiave))}
++              >
++                <span className="criterio-check">{attivo ? "✓" : ""}</span>
++                <span className="criterio-nome">
++                  <b>{def.nome}</b>
++                  <small>{def.descrizione}</small>
++                </span>
++              </button>
++
++              {attivo && (
++                <div className="criterio-opzioni">
++                  <div className="chip-row">
++                    <Chip
++                      label="Preferenziale"
++                      active={attivo.modo === "preferenziale"}
++                      onClick={() => cambia(chiave, { modo: "preferenziale" })}
++                    />
++                    <Chip
++                      label="Obbligatorio"
++                      active={attivo.modo === "obbligatorio"}
++                      onClick={() => cambia(chiave, { modo: "obbligatorio" })}
++                    />
++                  </div>
++
++                  <div className="pref-label" style={{ margin: "14px 0 4px 0" }}>
++                    <span>Importanza</span>
++                    <b>
++                      {attivo.peso}/{PESO_MAX}
++                    </b>
++                  </div>
++                  <input
++                    type="range"
++                    min={PESO_MIN}
++                    max={PESO_MAX}
++                    step={1}
++                    value={attivo.peso}
++                    onChange={(e) => cambia(chiave, { peso: Number(e.target.value) })}
++                    aria-label={`Importanza di ${def.nome}`}
++                  />
++                  {attivo.modo === "obbligatorio" && (
++                    <p className="field-note">
++                      L&apos;importanza conta comunque nella percentuale, anche
++                      se il criterio è obbligatorio.
++                    </p>
++                  )}
++
++                  {chiave === "redditoCanone" && (
++                    <div style={{ marginTop: 14 }}>
++                      <div className="pref-label" style={{ marginBottom: 8 }}>
++                        <span>Il canone non supera</span>
++                      </div>
++                      <Stepper
++                        value={attivo.sogliaPct ?? SOGLIA_REDDITO_CANONE.predefinita}
++                        onChange={(v) => cambia(chiave, { sogliaPct: v })}
++                        min={SOGLIA_REDDITO_CANONE.min}
++                        max={SOGLIA_REDDITO_CANONE.max}
++                        step={1}
++                        suffix="%"
++                      />
++                      <p className="field-note">
++                        del reddito mensile netto del nucleo, che il candidato
++                        indica nel suo profilo.
++                      </p>
++                    </div>
++                  )}
++                </div>
++              )}
++            </div>
++          );
++        })}
++      </div>
++
++      {value.length === 0 && (
++        <p className="field-note" style={{ marginTop: 10 }}>
++          Senza criteri i candidati non hanno una percentuale e li vedi in
++          ordine di arrivo.
++        </p>
++      )}
++    </div>
++  );
++}
+diff --git a/src/lib/affidabilita.ts b/src/lib/affidabilita.ts
+index 16fd555..b4b1c30 100644
+--- a/src/lib/affidabilita.ts
++++ b/src/lib/affidabilita.ts
+@@ -81,6 +81,8 @@ export type CompletenessInput = {
+   presentazione: string | null;
+   nucleo: string | null;
+   fideiussione: boolean | null;
++  /** facoltativo: i chiamanti precedenti non lo passano */
++  reddito_nucleo?: number | null;
+ };
+ 
+ export function computeProfileCompleteness(p: CompletenessInput): number {
+@@ -88,6 +90,7 @@ export function computeProfileCompleteness(p: CompletenessInput): number {
+     p.hasZone,
+     !!p.professione,
+     !!p.reddito_mensile,
++    !!p.reddito_nucleo,
+     p.garante !== null,
+     p.animali !== null,
+     (p.presentazione ?? "").trim().length > 10,
+diff --git a/src/lib/match/candidato.ts b/src/lib/match/candidato.ts
+new file mode 100644
+index 0000000..cf7c83b
+--- /dev/null
++++ b/src/lib/match/candidato.ts
+@@ -0,0 +1,133 @@
++import { computeAffidabilita } from "../affidabilita";
++import { calcolaMatchProprietario } from "./proprietario";
++import type {
++  CriterioRichiesto,
++  DatiCandidato,
++  RisultatoProprietario,
++} from "./tipi";
++
++/**
++ * I campi di `tenant_profiles` che il proprietario può leggere di chi si
++ * è candidato. Le zone e le caratteristiche desiderate NON ci sono: sono
++ * preferenze di ricerca, e la sicurezza del database le tiene leggibili
++ * solo dall'inquilino.
++ */
++export type ProfiloCandidato = {
++  professione: string | null;
++  reddito_mensile: number | null;
++  reddito_nucleo: number | null;
++  garante: boolean | null;
++  fideiussione: boolean | null;
++  protestato: boolean | null;
++  animali: boolean | null;
++  nucleo: string | null;
++  presentazione: string | null;
++  verificato: boolean;
++};
++
++/**
++ * Quanto è compilato il profilo PERSONALE, in percentuale.
++ *
++ * Non coincide con la barra che l'inquilino vede nel suo profilo: quella
++ * conta anche le zone di interesse, che il proprietario non può leggere.
++ * Qui si contano solo i dati che il proprietario ha davanti.
++ */
++export function completezzaProfiloPersonale(p: ProfiloCandidato): number {
++  const campi = [
++    !!p.professione,
++    !!p.reddito_mensile,
++    !!p.reddito_nucleo,
++    p.garante !== null,
++    p.animali !== null,
++    (p.presentazione ?? "").trim().length > 10,
++    p.nucleo !== null,
++    p.fideiussione !== null,
++  ];
++  return Math.round((campi.filter(Boolean).length / campi.length) * 100);
++}
++
++/**
++ * Dal profilo salvato ai dati che il calcolo del match legge.
++ *
++ * Un reddito del nucleo a 0 vale "non indicato": nel modulo dei dati lo
++ * slider parte da zero, e chi non lo tocca non ha dichiarato di non
++ * guadagnare nulla.
++ */
++export function datiCandidatoDaProfilo(p: ProfiloCandidato): DatiCandidato {
++  return {
++    redditoMensileNucleo:
++      p.reddito_nucleo !== null && p.reddito_nucleo > 0 ? p.reddito_nucleo : null,
++    garante: p.garante,
++    fideiussione: p.fideiussione,
++    verificato: p.verificato,
++    completezza: completezzaProfiloPersonale(p),
++    protestato: p.protestato,
++  };
++}
++
++export type ValutazioneCandidato = {
++  match: RisultatoProprietario;
++  /** punteggio di affidabilità della persona, valido per ogni casa */
++  affidabilita: number;
++};
++
++/**
++ * Tutto ciò che il proprietario vede di un candidato per un annuncio: il
++ * match sui suoi criteri e, accanto, l'affidabilità. Le due cose restano
++ * separate (D4): l'affidabilità non entra nella percentuale.
++ */
++export function valutaCandidato(input: {
++  criteri: CriterioRichiesto[];
++  /** il canone dell'annuncio */
++  canone: number;
++  profilo: ProfiloCandidato;
++  mediaRecensioni: number | null;
++  numeroRecensioni: number;
++}): ValutazioneCandidato {
++  const { profilo } = input;
++
++  const affidabilita = computeAffidabilita({
++    verificato: profilo.verificato,
++    protestato: profilo.protestato,
++    garante: profilo.garante,
++    fideiussione: profilo.fideiussione,
++    professione: profilo.professione,
++    reddito_mensile: profilo.reddito_mensile,
++    mediaRecensioni: input.mediaRecensioni,
++    numeroRecensioni: input.numeroRecensioni,
++  }).punteggio;
++
++  return {
++    match: calcolaMatchProprietario(
++      input.criteri,
++      datiCandidatoDaProfilo(profilo),
++      input.canone
++    ),
++    affidabilita,
++  };
++}
++
++/**
++ * Rilegge una fotografia salvata nel database. I dati escono da una
++ * colonna jsonb, quindi si controlla la forma invece di fidarsi: se è
++ * rovinata, il chiamante ricalcola.
++ */
++export function leggiFotografia(grezzo: unknown): ValutazioneCandidato | null {
++  if (typeof grezzo !== "object" || grezzo === null) return null;
++  const { match, affidabilita } = grezzo as Record<string, unknown>;
++  if (typeof affidabilita !== "number") return null;
++  if (typeof match !== "object" || match === null) return null;
++
++  const m = match as Record<string, unknown>;
++  const punteggioOk = m.punteggio === null || typeof m.punteggio === "number";
++  if (
++    !punteggioOk ||
++    typeof m.bloccato !== "boolean" ||
++    typeof m.incompleto !== "boolean" ||
++    !Array.isArray(m.criteri) ||
++    !Array.isArray(m.mancanti)
++  ) {
++    return null;
++  }
++  return { match: match as RisultatoProprietario, affidabilita };
++}
+diff --git a/src/lib/match/criteri.ts b/src/lib/match/criteri.ts
+new file mode 100644
+index 0000000..8071c27
+--- /dev/null
++++ b/src/lib/match/criteri.ts
+@@ -0,0 +1,87 @@
++import { PESO_PREDEFINITO } from "./config";
++import { pesoValido } from "./comuni";
++import { CATALOGO_CRITERI, sogliaValida } from "./proprietario";
++import type { ChiaveCriterio, CriterioRichiesto } from "./tipi";
++
++/** Una riga della tabella `listing_criteri`, come arriva dal database. */
++export type RigaCriterioDb = {
++  chiave: string;
++  peso: number;
++  modo: string;
++  soglia_pct: number | null;
++};
++
++function èChiaveDelCatalogo(chiave: unknown): chiave is ChiaveCriterio {
++  // hasOwnProperty e non `in`: con `in`, "constructor" o "toString"
++  // risulterebbero chiavi valide del catalogo.
++  return (
++    typeof chiave === "string" &&
++    Object.prototype.hasOwnProperty.call(CATALOGO_CRITERI, chiave)
++  );
++}
++
++/**
++ * Trasforma ciò che arriva da un modulo (JSON non fidato) in criteri
++ * validi. Si fida solo del catalogo: scarta chiavi sconosciute o
++ * ripetute, riporta pesi e soglie ai limiti, e un modo non riconosciuto
++ * diventa "preferenziale" (il più prudente: non blocca nessuno).
++ */
++export function normalizzaCriteri(grezzo: unknown): CriterioRichiesto[] {
++  let valore: unknown = grezzo;
++  if (typeof grezzo === "string") {
++    try {
++      valore = JSON.parse(grezzo);
++    } catch {
++      return [];
++    }
++  }
++  if (!Array.isArray(valore)) return [];
++
++  const viste = new Set<string>();
++  const criteri: CriterioRichiesto[] = [];
++
++  for (const r of valore) {
++    if (typeof r !== "object" || r === null) continue;
++    const { chiave, peso, modo, sogliaPct } = r as Record<string, unknown>;
++    if (!èChiaveDelCatalogo(chiave) || viste.has(chiave)) continue;
++    viste.add(chiave);
++
++    const criterio: CriterioRichiesto = {
++      chiave,
++      peso: peso === undefined ? PESO_PREDEFINITO : pesoValido(Number(peso)),
++      modo: modo === "obbligatorio" ? "obbligatorio" : "preferenziale",
++    };
++    if (chiave === "redditoCanone") {
++      criterio.sogliaPct = sogliaValida(
++        sogliaPct === undefined ? undefined : Number(sogliaPct)
++      );
++    }
++    criteri.push(criterio);
++  }
++  return criteri;
++}
++
++/** Dalle righe del database ai criteri usati dal calcolo. */
++export function criteriDaRighe(
++  righe: RigaCriterioDb[] | null | undefined
++): CriterioRichiesto[] {
++  return normalizzaCriteri(
++    (righe ?? []).map((r) => ({
++      chiave: r.chiave,
++      peso: r.peso,
++      modo: r.modo,
++      sogliaPct: r.soglia_pct ?? undefined,
++    }))
++  );
++}
++
++/** Dai criteri alle righe da scrivere nel database per un annuncio. */
++export function righeDaCriteri(listingId: string, criteri: CriterioRichiesto[]) {
++  return criteri.map((c) => ({
++    listing_id: listingId,
++    chiave: c.chiave,
++    peso: c.peso,
++    modo: c.modo,
++    soglia_pct: c.chiave === "redditoCanone" ? (c.sogliaPct ?? null) : null,
++  }));
++}
+diff --git a/src/lib/match/index.ts b/src/lib/match/index.ts
+index d3f4426..544fbeb 100644
+--- a/src/lib/match/index.ts
++++ b/src/lib/match/index.ts
+@@ -2,12 +2,27 @@ export * from "./config";
+ export * from "./tipi";
+ export { etichettaPer } from "./comuni";
+ export { calcolaMatchInquilino, ordinaAnnunci } from "./inquilino";
+-export { haCriteriDiRicerca, preparaMazzo, statoMazzo } from "./mazzo";
+-export type { Mazzo, StatoMazzo, VoceMazzo } from "./mazzo";
++export {
++  haCriteriDiRicerca,
++  preparaMazzo,
++  profiloRicercaDaRighe,
++  statoMazzo,
++} from "./mazzo";
++export type { Mazzo, RigaRicerca, StatoMazzo, VoceMazzo } from "./mazzo";
++export { criteriDaRighe, normalizzaCriteri, righeDaCriteri } from "./criteri";
++export type { RigaCriterioDb } from "./criteri";
++export {
++  completezzaProfiloPersonale,
++  datiCandidatoDaProfilo,
++  leggiFotografia,
++  valutaCandidato,
++} from "./candidato";
++export type { ProfiloCandidato, ValutazioneCandidato } from "./candidato";
+ export {
+   CATALOGO_CRITERI,
+   CHIAVI_CRITERI,
+   calcolaMatchProprietario,
++  sogliaValida,
+   confrontaCandidati,
+   ordinaCandidati,
+ } from "./proprietario";
+diff --git a/src/lib/match/mazzo.ts b/src/lib/match/mazzo.ts
+index caf0ff8..b94f91c 100644
+--- a/src/lib/match/mazzo.ts
++++ b/src/lib/match/mazzo.ts
+@@ -6,6 +6,33 @@ import type {
+   RisultatoInquilino,
+ } from "./tipi";
+ 
++/** Le colonne di ricerca di `tenant_profiles`, come arrivano dal database. */
++export type RigaRicerca = {
++  budget_max: number | null;
++  locali_min: number | null;
++  mq_min: number | null;
++};
++
++/**
++ * Dai dati salvati ai criteri di ricerca che il calcolo legge. Un valore
++ * 0 o vuoto vale "nessuna preferenza", come nel filtro che c'era prima.
++ */
++export function profiloRicercaDaRighe(
++  riga: RigaRicerca,
++  zone: { zona: string }[] | null | undefined,
++  interessi: { attributo_key: string; peso: number }[] | null | undefined
++): ProfiloRicerca {
++  return {
++    budgetMax: riga.budget_max || null,
++    localiMin: riga.locali_min || null,
++    mqMin: riga.mq_min || null,
++    zone: (zone ?? []).map((z) => z.zona),
++    interessi: Object.fromEntries(
++      (interessi ?? []).map((r) => [r.attributo_key, r.peso])
++    ),
++  };
++}
++
+ export type VoceMazzo<T> = T & { match: RisultatoInquilino };
+ 
+ export type Mazzo<T> = {
+diff --git a/src/lib/match/proprietario.ts b/src/lib/match/proprietario.ts
+index 37105fa..0477003 100644
+--- a/src/lib/match/proprietario.ts
++++ b/src/lib/match/proprietario.ts
+@@ -104,7 +104,7 @@ export const CATALOGO_CRITERI: Record<ChiaveCriterio, DefinizioneCriterio> = {
+ 
+ export const CHIAVI_CRITERI = Object.keys(CATALOGO_CRITERI) as ChiaveCriterio[];
+ 
+-function sogliaValida(sogliaPct: number | undefined): number {
++export function sogliaValida(sogliaPct: number | undefined): number {
+   const { predefinita, min, max } = SOGLIA_REDDITO_CANONE;
+   if (sogliaPct === undefined || !Number.isFinite(sogliaPct)) return predefinita;
+   return Math.max(min, Math.min(max, Math.round(sogliaPct)));
+diff --git a/src/lib/types.ts b/src/lib/types.ts
+index ac34934..01b1e93 100644
+--- a/src/lib/types.ts
++++ b/src/lib/types.ts
+@@ -5,6 +5,8 @@ export type TenantProfile = {
+   profile_id: string;
+   professione: string | null;
+   reddito_mensile: number | null;
++  /** reddito mensile di TUTTO il nucleo, chiesto esplicitamente */
++  reddito_nucleo: number | null;
+   garante: boolean | null;
+   fideiussione: boolean | null;
+   protestato: boolean | null;
+@@ -53,6 +55,8 @@ export type ImmobileDettaglio = {
+   pubblicato: boolean;
+   /** galleria dell'annuncio, già ordinata */
+   foto: string[];
++  /** cosa chiede il proprietario ai candidati, con peso e obbligatorietà */
++  criteri: import("@/lib/match").CriterioRichiesto[];
+   nCandidature: number;
+ };
+ 
+@@ -88,20 +92,29 @@ export type Messaggio = {
+ export type CandidaturaRicevuta = {
+   id: string;
+   status: StatoCandidatura;
++  /** compatibilità vista dall'INQUILINO al momento della candidatura: il
++   *  proprietario non la usa, vede la propria in `valutazione` */
+   match_pct: number | null;
+   created_at: string;
+   tenant_id: string;
+-  listings: { titolo: string; zona: string } | null;
++  listing_id: string;
++  listings: { titolo: string; zona: string; prezzo: number } | null;
+   tenant_profiles: {
+     professione: string | null;
+     reddito_mensile: number | null;
++    reddito_nucleo: number | null;
+     verificato: boolean;
+     presentazione: string | null;
+     avatar_url: string | null;
+   } | null;
+-  // aggiunto lato client dopo il fetch separato di profiles
++  // aggiunto lato server dopo il fetch separato di profiles
+   nome?: string | null;
+   cognome?: string | null;
++  /** il match visto dal proprietario sui criteri che ha chiesto, e
++   *  l'affidabilità accanto. `congelata`: fotografia scattata alla decisione. */
++  valutazione?: import("@/lib/match").ValutazioneCandidato & {
++    congelata: boolean;
++  };
+ };
+ 
+ export type CandidaturaConAnnuncio = {
+diff --git a/supabase/migrations/0008_criteri_proprietario.sql b/supabase/migrations/0008_criteri_proprietario.sql
+new file mode 100644
+index 0000000..5cf6128
+--- /dev/null
++++ b/supabase/migrations/0008_criteri_proprietario.sql
+@@ -0,0 +1,108 @@
++-- ============================================================
++-- MatchAmI — criteri del proprietario e match lato proprietario
++--
++-- Aggiunge:
++--   1. `tenant_profiles.reddito_nucleo`: il reddito mensile di TUTTO il
++--      nucleo, chiesto esplicitamente (decisione D6). Il campo
++--      `reddito_mensile` esistente resta com'è: nessun dato vecchio viene
++--      reinterpretato.
++--   2. `listing_criteri`: cosa chiede il proprietario per ogni annuncio,
++--      con peso 1-10 e modo obbligatorio/preferenziale.
++--   3. due colonne su `candidature` per la fotografia del match lato
++--      proprietario, scattata quando il proprietario decide (D7).
++--   4. una policy più stretta per la creazione delle candidature.
++--
++-- ORDINE: esegui questa migrazione PRIMA del push del codice.
++-- ============================================================
++
++-- ------------------------------------------------------------
++-- 1. Reddito del nucleo
++-- ------------------------------------------------------------
++
++alter table tenant_profiles
++  add column if not exists reddito_nucleo integer
++  check (reddito_nucleo is null or reddito_nucleo >= 0);
++
++-- ------------------------------------------------------------
++-- 2. Criteri richiesti dal proprietario, uno per riga
++--
++-- Visibili e modificabili SOLO dal proprietario dell'annuncio: gli
++-- inquilini non li leggono (nessuna policy per loro = nessun accesso).
++-- ------------------------------------------------------------
++
++create table if not exists listing_criteri (
++  listing_id uuid not null references listings(id) on delete cascade,
++  chiave text not null,
++  peso smallint not null check (peso between 1 and 10),
++  modo text not null check (modo in ('obbligatorio', 'preferenziale')),
++  -- solo per il criterio sul reddito: il canone non supera questa % del
++  -- reddito. I limiti precisi sono nell'app (config.ts); qui solo la
++  -- sanità di base.
++  soglia_pct smallint check (soglia_pct is null or soglia_pct between 1 and 100),
++  primary key (listing_id, chiave)
++);
++
++alter table listing_criteri enable row level security;
++
++create policy "listing_criteri: il proprietario gestisce i suoi" on listing_criteri
++  for all
++  using (
++    exists (
++      select 1 from listings l
++      where l.id = listing_criteri.listing_id and l.owner_id = auth.uid()
++    )
++  )
++  with check (
++    exists (
++      select 1 from listings l
++      where l.id = listing_criteri.listing_id and l.owner_id = auth.uid()
++    )
++  );
++
++-- ------------------------------------------------------------
++-- 3. Fotografia del match lato proprietario
++--
++-- Finché la candidatura è in attesa il match si ricalcola sui dati
++-- attuali dell'inquilino. Quando il proprietario accetta o rifiuta, il
++-- risultato si fissa qui: un inquilino non può più cambiare un reddito
++-- dopo essere stato accettato (D7).
++-- ------------------------------------------------------------
++
++alter table candidature
++  add column if not exists match_proprietario jsonb,
++  add column if not exists match_proprietario_at timestamptz;
++
++-- ------------------------------------------------------------
++-- 4. Chi crea una candidatura non può decidere il proprio esito
++--
++-- La policy precedente controllava solo che `tenant_id` fosse quello
++-- dell'utente: un inquilino che chiamava direttamente l'API poteva
++-- inserire una candidatura già `accettata`, saltando la decisione del
++-- proprietario, o con una fotografia del match scelta da lui.
++-- ------------------------------------------------------------
++
++drop policy if exists "candidature: tenant creates" on candidature;
++
++create policy "candidature: tenant creates" on candidature
++  for insert
++  with check (
++    auth.uid() = tenant_id
++    and status = 'in_attesa'
++    and match_proprietario is null
++    and match_proprietario_at is null
++  );
++
++-- ------------------------------------------------------------
++-- Verifica
++-- ------------------------------------------------------------
++
++select column_name, data_type from information_schema.columns
++where table_name = 'tenant_profiles' and column_name = 'reddito_nucleo';
++
++select table_name from information_schema.tables where table_name = 'listing_criteri';
++
++select column_name from information_schema.columns
++where table_name = 'candidature' and column_name like 'match_proprietario%';
++
++select polname from pg_policy
++where polrelid = 'candidature'::regclass and polname = 'candidature: tenant creates';
+-- 
+2.43.0
+

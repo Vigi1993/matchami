@@ -1,0 +1,51 @@
+From 7b9c1a9b4a8986cffe35784f17d7d88327003080 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 6 Oct 2026 16:11:23 +0000
+Subject: [PATCH] fix(staff): l'errore di is_staff() ora lascia traccia nel
+ registro
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Per chi non è staff il pannello risponde 404, di proposito. Ma anche un
+errore tecnico (per esempio la migrazione 0012 non eseguita, quindi la
+funzione is_staff non esiste) dava lo stesso 404 senza nessuna traccia, e
+'non sei staff' e 'qualcosa non va' non si distinguevano.
+
+Il comportamento non cambia: ogni errore resta un 'no' e il pannello resta
+chiuso. Ora, solo nel caso di errore, il motivo si scrive nel registro del
+server. Una risposta 'no' normale non scrive niente.
+
+Provato su un server Next contro un finto Supabase nei tre casi: non
+staff (404 senza riga di registro), funzione assente (404 con il motivo),
+staff (200).
+---
+ src/lib/staff.ts | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/src/lib/staff.ts b/src/lib/staff.ts
+index f5294dd..ca1e3b1 100644
+--- a/src/lib/staff.ts
++++ b/src/lib/staff.ts
+@@ -13,8 +13,16 @@ export async function eStaff(
+ ): Promise<boolean> {
+   try {
+     const { data, error } = await supabase.rpc("is_staff");
+-    return !error && data === true;
+-  } catch {
++    if (error) {
++      // Resta un "no": un errore non apre mai il pannello. Ma si scrive nel
++      // registro, perché altrimenti "non sei staff" e "la migrazione non è
++      // stata eseguita" sono la stessa pagina 404 e non si distinguono.
++      console.error("staff: is_staff() non è riuscita:", error.message);
++      return false;
++    }
++    return data === true;
++  } catch (e) {
++    console.error("staff: is_staff() ha lanciato un'eccezione:", e);
+     return false;
+   }
+ }
+-- 
+2.43.0
+

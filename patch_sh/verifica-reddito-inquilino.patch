@@ -1,0 +1,1776 @@
+From 7f2de0dbea7bac5c7c8dc9c3f16f0c15b4feb9b6 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 7 Oct 2026 12:54:33 +0000
+Subject: [PATCH] feat(verifica): verifica del reddito dell'inquilino con i
+ documenti
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RICHIEDE LA MIGRAZIONE 0018 PRIMA DEL PUSH.
+
+Fin qui 'reddito verificato' era un'etichetta che nessuno poteva far
+diventare vera: la colonna si cambiava solo a mano dal pannello SQL. Ora
+l'inquilino carica un documento d'identità e una prova del reddito, lo staff
+li confronta con quanto dichiarato e decide. Il proprietario vede solo
+l'esito, sì o no, mai i documenti.
+
+Database (0018):
+- documenti_inquilino: li legge solo la persona e lo staff; li registra la
+  persona nella propria cartella, con un nome che ne dice il tipo, fino a
+  12; li toglie solo finché non ha inviato la richiesta (un file caricato
+  per sbaglio non resta), e mai i contratti che stanno nella stessa cartella
+- nessun utente cambia stato, nota o data di verifica; se la persona cambia
+  lavoro o reddito dopo la verifica, questa decade e va rifatta
+- richiedi_verifica_inquilino: servono dati dichiarati e i due documenti
+- lo staff non legge il profilo intero: inquilini_da_verificare e
+  dati_per_verifica_inquilino restituiscono solo nome, lavoro e redditi
+  dichiarati; esito_verifica_inquilino decide (nota obbligatoria al rifiuto)
+- non si raccoglie lo stato di famiglia: dice la composizione del nucleo,
+  che l'app non usa
+
+App:
+- riga e pannello nel profilo dell'inquilino: caricamento, 'Togli' quando
+  consentito, invio, stato e nota del rifiuto. Se la registrazione di una
+  riga fallisce, il file appena caricato viene tolto; se la sicurezza
+  rifiuta in silenzio di togliere un file, la riga non si cancella
+- staff: sezione 'Redditi da verificare', pagina di dettaglio con link
+  firmati di 5 minuti, azione di decisione con controlli sui permessi
+- SelettoreFile condiviso con i documenti dei proprietari
+- codici di errore propri dell'inquilino; CORRETTO il modo di scegliere il
+  messaggio: vinceva il primo codice trovato come sottostringa, ora il più
+  specifico (altrimenti INQUILINO_GIA_VERIFICATO avrebbe mostrato la frase
+  dell'immobile)
+- informativa provvisoria aggiornata con i documenti raccolti, versione
+  2026-10-provvisoria-2: chi aveva accettato la precedente deve riaccettare.
+  Corretta una frase che presumeva il genere della persona
+- un test legge i tipi di documento accettati dal database e verifica che
+  l'informativa li nomini tutti
+
+189 test (25 nuovi sulla verifica, 3 sull'informativa). Verificato su
+PostgreSQL costruito da zero con circa 75 controlli; 21 prove di interazione
+sul pannello; pagine e azione dello staff contro un finto Supabase.
+---
+ package.json                                  |   2 +-
+ scripts/test-informativa.mjs                  |  46 +++
+ scripts/test-rapporti.mjs                     |   3 +
+ scripts/test-verifica-inquilino.mjs           | 229 +++++++++++++
+ src/app/(app)/VerificaHome.tsx                |  30 +-
+ src/app/(app)/profilo/ProfiloClient.tsx       |  29 ++
+ src/app/(app)/profilo/page.tsx                |  19 ++
+ src/app/globals.css                           |  28 ++
+ src/app/staff/actions.ts                      |  31 ++
+ .../inquilini/[id]/EsitoInquilinoForm.tsx     |  36 +++
+ src/app/staff/inquilini/[id]/page.tsx         | 128 ++++++++
+ src/app/staff/page.tsx                        |  35 ++
+ src/components/SelettoreFile.tsx              |  35 ++
+ src/components/VerificaRedditoPanel.tsx       | 246 ++++++++++++++
+ src/content/informativa.ts                    |  15 +-
+ src/lib/types.ts                              |   3 +
+ src/lib/verifica-inquilino.ts                 | 153 +++++++++
+ src/lib/verifica.ts                           |  32 +-
+ .../migrations/0018_verifica_inquilino.sql    | 300 ++++++++++++++++++
+ 19 files changed, 1357 insertions(+), 43 deletions(-)
+ create mode 100644 scripts/test-verifica-inquilino.mjs
+ create mode 100644 src/app/staff/inquilini/[id]/EsitoInquilinoForm.tsx
+ create mode 100644 src/app/staff/inquilini/[id]/page.tsx
+ create mode 100644 src/components/SelettoreFile.tsx
+ create mode 100644 src/components/VerificaRedditoPanel.tsx
+ create mode 100644 src/lib/verifica-inquilino.ts
+ create mode 100644 supabase/migrations/0018_verifica_inquilino.sql
+
+diff --git a/package.json b/package.json
+index d2ebcca..b8ddb01 100644
+--- a/package.json
++++ b/package.json
+@@ -7,7 +7,7 @@
+     "build": "next build",
+     "start": "next start",
+     "lint": "eslint",
+-    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-informativa.mjs b/scripts/test-informativa.mjs
+index d981712..09b566d 100644
+--- a/scripts/test-informativa.mjs
++++ b/scripts/test-informativa.mjs
+@@ -216,3 +216,49 @@ test("file: i documenti d'identità, di proprietà e i contratti non sono mai de
+   const dopo = testo.slice(testo.search(/documenti d'identità/i));
+   assert.match(dopo, /non hanno mai un indirizzo pubblico/);
+ });
++
++// ------------------------------------------------------------
++// Il testo nomina ogni tipo di documento che l'app raccoglie
++// ------------------------------------------------------------
++
++/** Come il testo chiama ogni tipo di documento. Un tipo nuovo senza voce qui fa fallire il test. */
++const NOME_NEL_TESTO = {
++  identita: /documento d'identità/i,
++  proprieta: /prova di proprietà/i,
++  reddito: /prova del reddito/i,
++};
++
++function tipiDocumentoDelDatabase() {
++  const trovati = new Set();
++  for (const f of fs.readdirSync(migrazioni).filter((x) => /^\d{4}_.*\.sql$/.test(x))) {
++    const sql = fs.readFileSync(path.join(migrazioni, f), "utf8");
++    // create table documenti_... ( ... tipo text ... check (tipo in ('a', 'b')) ... )
++    for (const t of sql.matchAll(/create\s+table\s+(?:if\s+not\s+exists\s+)?documenti_\w+\s*\(([\s\S]*?)\n\);/gi)) {
++      const m = t[1].match(/check\s*\(\s*tipo\s+in\s*\(([^)]*)\)/i);
++      if (m) for (const v of m[1].matchAll(/'([^']+)'/g)) trovati.add(v[1]);
++    }
++  }
++  return trovati;
++}
++
++test("documenti: il testo nomina ogni tipo di documento che il database accetta", () => {
++  const tipi = tipiDocumentoDelDatabase();
++  assert.ok(tipi.has("identita") && tipi.has("proprieta") && tipi.has("reddito"), `tipi trovati: ${[...tipi]}`);
++  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
++  for (const tipo of tipi) {
++    assert.ok(NOME_NEL_TESTO[tipo], `tipo di documento nuovo («${tipo}»): descrivilo nel testo e aggiungilo a NOME_NEL_TESTO`);
++    assert.match(tutto, NOME_NEL_TESTO[tipo], `il testo non nomina il tipo «${tipo}»`);
++  }
++});
++
++test("documenti: il testo dice che un proprietario non vede i documenti dell'inquilino", () => {
++  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
++  assert.match(tutto, /Un proprietario non vede mai i documenti di un inquilino/);
++  assert.match(tutto, /Non chiediamo lo stato di famiglia/);
++});
++
++test("documenti: il testo dice che la verifica del reddito non è automatica e che decade", () => {
++  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
++  assert.match(tutto, /non è automatica/);
++  assert.match(tutto, /la verifica decade e va rifatta/);
++});
+diff --git a/scripts/test-rapporti.mjs b/scripts/test-rapporti.mjs
+index 64518b8..905f578 100644
+--- a/scripts/test-rapporti.mjs
++++ b/scripts/test-rapporti.mjs
+@@ -212,6 +212,9 @@ test("i testi dei rapporti non presumono il genere di nessuno", () => {
+     "src/lib/rapporti.ts", "src/lib/verifica.ts", "src/components/RapportiPanel.tsx",
+     "src/components/CorniceScura.tsx", "src/components/FormFeedback.tsx", "src/app/staff/actions.ts",
+     "src/app/invito/[token]/InvitoClient.tsx",
++    "src/components/VerificaRedditoPanel.tsx", "src/components/SelettoreFile.tsx",
++    "src/lib/verifica-inquilino.ts", "src/content/informativa.ts",
++    "src/app/staff/inquilini/[id]/page.tsx", "src/app/staff/inquilini/[id]/EsitoInquilinoForm.tsx",
+   ].map((f) => path.join(radice, f));
+   // tutte le pagine e i moduli delle cartelle nuove, compresi i sottolivelli
+   const visita = (d) => { if (!fs.existsSync(d)) return; for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+diff --git a/scripts/test-verifica-inquilino.mjs b/scripts/test-verifica-inquilino.mjs
+new file mode 100644
+index 0000000..c586e82
+--- /dev/null
++++ b/scripts/test-verifica-inquilino.mjs
+@@ -0,0 +1,229 @@
++/**
++ * Test della verifica del reddito dell'inquilino (src/lib/verifica-inquilino.ts
++ * e le parti di src/lib/verifica.ts che usa). Si lancia con:   npm test
++ *
++ * Oltre alla logica, tengono allineati l'app e la migrazione 0018: il limite
++ * di documenti, i tipi ammessi, i nomi dei file e i codici di errore.
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const v = caricaTs(path.join(radice, "src", "lib", "verifica-inquilino.ts"));
++const base = caricaTs(path.join(radice, "src", "lib", "verifica.ts"));
++const sql = fs.readFileSync(path.join(radice, "supabase", "migrations", "0018_verifica_inquilino.sql"), "utf8");
++
++const UID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
++const dati = (o = {}) => ({ professione: "Dipendente", reddito_mensile: 1800, ...o });
++const docs = (...tipi) => tipi.map((tipo) => ({ tipo }));
++
++// ------------------------------------------------------------
++// Cosa dire alla persona
++// ------------------------------------------------------------
++
++test("stato: verificato dice cosa vedono i proprietari e che decade", () => {
++  const d = v.descriviStatoInquilino("verificato", null);
++  assert.equal(d.titolo, "Reddito verificato");
++  assert.equal(d.tono, "ok");
++  assert.match(d.testo, /la verifica decade e va rifatta/);
++});
++
++test("stato: in verifica spiega che i documenti non si tolgono ma si possono aggiungere", () => {
++  const d = v.descriviStatoInquilino("in_verifica", null);
++  assert.equal(d.tono, "attesa");
++  assert.match(d.testo, /non puoi toglierli/);
++  assert.match(d.testo, /aggiungerne altri/);
++});
++
++test("stato: non avviata, senza nota, invita a cominciare", () => {
++  const d = v.descriviStatoInquilino("non_avviata", null);
++  assert.equal(d.tono, "neutro");
++  assert.match(d.testo, /Carica un documento d'identità e una prova del reddito/);
++});
++
++test("stato: dopo un rifiuto mostra la nota dello staff e dice di correggere", () => {
++  const d = v.descriviStatoInquilino("non_avviata", "La busta paga è illeggibile");
++  assert.equal(d.tono, "no");
++  assert.equal(d.titolo, "Verifica non riuscita");
++  assert.match(d.testo, /La busta paga è illeggibile/);
++  assert.match(d.testo, /invia di nuovo/);
++});
++
++test("stato: una nota fatta di soli spazi non conta come nota", () => {
++  for (const nota of ["", "   ", "\n\t"]) {
++    assert.equal(v.descriviStatoInquilino("non_avviata", nota).tono, "neutro", JSON.stringify(nota));
++  }
++});
++
++test("stato: la nota di un reddito decaduto (scritta dal database) si legge come un rifiuto", () => {
++  const nota = "Hai modificato lavoro o reddito dopo la verifica: va rifatta.";
++  assert.ok(sql.includes(nota), "la frase che il database scrive deve essere quella che l'app si aspetta");
++  assert.equal(v.descriviStatoInquilino("non_avviata", nota).tono, "no");
++});
++
++test("riga del profilo: un testo per ogni stato", () => {
++  assert.equal(v.rigaProfilo("non_avviata", null).titolo, "Verifica il tuo reddito");
++  assert.equal(v.rigaProfilo("non_avviata", null).cta, "Inizia");
++  assert.equal(v.rigaProfilo("non_avviata", "x").titolo, "La verifica non è riuscita");
++  assert.equal(v.rigaProfilo("in_verifica", null).titolo, "Reddito in verifica");
++  assert.equal(v.rigaProfilo("verificato", null).titolo, "Reddito verificato");
++});
++
++// ------------------------------------------------------------
++// Cosa manca, cosa si può fare
++// ------------------------------------------------------------
++
++test("manca: con tutto, niente", () => {
++  assert.deepEqual(v.cosaMancaInquilino({ documenti: docs("identita", "reddito"), dati: dati() }), []);
++});
++
++test("manca: ogni elemento mancante è nominato", () => {
++  const m = v.cosaMancaInquilino({ documenti: [], dati: dati({ professione: null, reddito_mensile: null }) });
++  assert.equal(m.length, 4);
++  assert.ok(m.some((x) => /lavoro/.test(x)) && m.some((x) => /reddito mensile/.test(x)));
++  assert.ok(m.some((x) => /identità/.test(x)) && m.some((x) => /prova del reddito/.test(x)));
++});
++
++test("manca: servono entrambi i tipi di documento, non basta uno", () => {
++  assert.equal(v.cosaMancaInquilino({ documenti: docs("identita"), dati: dati() }).length, 1);
++  assert.equal(v.cosaMancaInquilino({ documenti: docs("reddito"), dati: dati() }).length, 1);
++  // più file dello stesso tipo non sostituiscono l'altro tipo
++  assert.equal(v.cosaMancaInquilino({ documenti: docs("reddito", "reddito", "reddito"), dati: dati() }).length, 1);
++});
++
++test("manca: professione vuota o di soli spazi, e reddito zero o negativo, contano come mancanti", () => {
++  for (const professione of [null, "", "   "]) {
++    assert.ok(v.cosaMancaInquilino({ documenti: docs("identita", "reddito"), dati: dati({ professione }) }).length >= 1, JSON.stringify(professione));
++  }
++  for (const reddito_mensile of [null, 0, -100]) {
++    assert.ok(v.cosaMancaInquilino({ documenti: docs("identita", "reddito"), dati: dati({ reddito_mensile }) }).length >= 1, String(reddito_mensile));
++  }
++});
++
++test("invio: possibile solo da «non avviata» e con tutto", () => {
++  const tutto = { documenti: docs("identita", "reddito"), dati: dati() };
++  assert.equal(v.puoInviareInquilino({ ...tutto, stato: "non_avviata" }), true);
++  assert.equal(v.puoInviareInquilino({ ...tutto, stato: "in_verifica" }), false);
++  assert.equal(v.puoInviareInquilino({ ...tutto, stato: "verificato" }), false);
++  assert.equal(v.puoInviareInquilino({ stato: "non_avviata", documenti: docs("identita"), dati: dati() }), false);
++});
++
++test("documenti: si tolgono solo prima dell'invio", () => {
++  assert.equal(v.puoTogliereDocumenti("non_avviata"), true);
++  assert.equal(v.puoTogliereDocumenti("in_verifica"), false);
++  assert.equal(v.puoTogliereDocumenti("verificato"), false);
++});
++
++test("documenti: il limite è quello del database", () => {
++  const m = sql.match(/select count\(\*\) from documenti_inquilino d where d\.tenant_id = auth\.uid\(\)\) < (\d+)/);
++  assert.ok(m, "non trovo il limite nella policy della migrazione");
++  assert.equal(v.LIMITE_DOCUMENTI, Number(m[1]));
++  assert.equal(v.puoAggiungereDocumento(v.LIMITE_DOCUMENTI - 1), true);
++  assert.equal(v.puoAggiungereDocumento(v.LIMITE_DOCUMENTI), false);
++  assert.equal(v.puoAggiungereDocumento(v.LIMITE_DOCUMENTI + 5), false);
++});
++
++test("documenti: i tipi dell'app sono quelli del database", () => {
++  const m = sql.match(/tipo text not null check \(tipo in \(([^)]*)\)\)/);
++  assert.ok(m, "non trovo il vincolo sul tipo");
++  const nelDb = [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]).sort();
++  assert.deepEqual([...v.TIPI_DOCUMENTO_INQUILINO].sort(), nelDb);
++  for (const t of v.TIPI_DOCUMENTO_INQUILINO) {
++    assert.ok(v.ETICHETTE_DOCUMENTO[t] && v.AIUTO_DOCUMENTO[t], `manca l'etichetta o l'aiuto per ${t}`);
++  }
++});
++
++// ------------------------------------------------------------
++// I nomi dei file: ciò che il database richiede
++// ------------------------------------------------------------
++
++const percorso = (tipo, o = {}) =>
++  base.percorsoDocumento({ userId: UID, tipo, listingId: null, estensione: "pdf", id: "11111111-2222-3333-4444-555555555555", ...o });
++
++/** La regola della policy di inserimento: percorso like uid || '/inquilino-' || tipo || '-%' */
++const comePolicy = (p, tipo) => new RegExp(`^${UID}/inquilino-${tipo}-.*$`).test(p);
++
++test("percorsi: i due tipi hanno il nome che la policy di inserimento richiede", () => {
++  assert.ok(sql.includes("percorso like auth.uid()::text || '/inquilino-' || tipo || '-%'"), "la policy è cambiata: aggiorna il test e il codice");
++  assert.ok(comePolicy(percorso("inquilino-identita"), "identita"), percorso("inquilino-identita"));
++  assert.ok(comePolicy(percorso("inquilino-reddito"), "reddito"), percorso("inquilino-reddito"));
++});
++
++test("percorsi: un tipo non passa per l'altro", () => {
++  assert.equal(comePolicy(percorso("inquilino-identita"), "reddito"), false);
++  assert.equal(comePolicy(percorso("inquilino-reddito"), "identita"), false);
++});
++
++test("percorsi: i file dei proprietari e i contratti non somigliano a quelli dell'inquilino", () => {
++  for (const tipo of ["identita", "proprieta", "contratto"]) {
++    const p = percorso(tipo, { listingId: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" });
++    assert.equal(comePolicy(p, "identita"), false, p);
++    assert.equal(comePolicy(p, "reddito"), false, p);
++    // e la regola con cui si tolgono i file (nome che comincia per «inquilino-») non li tocca
++    assert.equal(p.split("/").pop().startsWith("inquilino-"), false, p);
++  }
++});
++
++test("percorsi: tutti i file dell'inquilino si possono togliere, e nient'altro", () => {
++  assert.ok(sql.includes("storage.filename(name) like 'inquilino-%'"), "la regola di cancellazione è cambiata");
++  for (const tipo of ["inquilino-identita", "inquilino-reddito"]) {
++    assert.ok(percorso(tipo).split("/").pop().startsWith("inquilino-"), tipo);
++  }
++});
++
++test("percorsi: cominciano con l'id di chi carica e non si possono deviare", () => {
++  const p = percorso("inquilino-reddito", { userId: "../x/" + UID, id: "../../y" });
++  assert.ok(!p.includes(".."), p);
++  assert.equal((p.match(/\//g) ?? []).length, 1, "una sola cartella: " + p);
++});
++
++// ------------------------------------------------------------
++// I messaggi di errore
++// ------------------------------------------------------------
++
++const GENERICO = base.messaggioErroreVerifica("qualcosa di sconosciuto");
++
++test("errori: ogni codice che la migrazione può sollevare ha una frase sua", () => {
++  const codici = [...new Set([...sql.matchAll(/raise exception '([A-Z_]+)'/g)].map((m) => m[1]))];
++  assert.ok(codici.length >= 10, `trovati solo ${codici.length} codici`);
++  for (const c of codici) {
++    const frase = base.messaggioErroreVerifica(`ERROR: ${c} (P0001)`);
++    assert.notEqual(frase, GENERICO, `il codice ${c} non ha un messaggio: la persona vedrebbe «Riprova»`);
++    assert.ok(!frase.includes(c), `${c} compare nella frase`);
++  }
++});
++
++test("errori: le frasi dell'inquilino non parlano di «immobile»", () => {
++  for (const c of ["NON_INQUILINO", "INQUILINO_GIA_VERIFICATO", "INQUILINO_GIA_IN_VERIFICA", "DOCUMENTI_INQUILINO_MANCANTI",
++                   "DATI_PROFILO_MANCANTI", "INQUILINO_NON_IN_VERIFICA", "INQUILINO_NOTA_OBBLIGATORIA", "INQUILINO_INESISTENTE"]) {
++    assert.ok(!/immobile/i.test(base.messaggioErroreVerifica(c)), `${c}: ${base.messaggioErroreVerifica(c)}`);
++  }
++});
++
++test("errori: quando un codice ne contiene un altro vince il più specifico", () => {
++  // INQUILINO_GIA_VERIFICATO contiene GIA_VERIFICATO: all'inquilino non deve toccare la frase dell'immobile
++  assert.match(base.messaggioErroreVerifica("INQUILINO_GIA_VERIFICATO"), /reddito/);
++  assert.match(base.messaggioErroreVerifica("GIA_VERIFICATO"), /immobile/);
++  assert.match(base.messaggioErroreVerifica("INQUILINO_NON_IN_VERIFICA"), /persona/);
++  assert.match(base.messaggioErroreVerifica("NON_IN_VERIFICA"), /immobile/);
++  assert.match(base.messaggioErroreVerifica("INQUILINO_NOTA_OBBLIGATORIA"), /la persona la leggerà/);
++  assert.match(base.messaggioErroreVerifica("NOTA_OBBLIGATORIA"), /il proprietario la leggerà/);
++  // anche con il testo completo che manda il database
++  assert.match(base.messaggioErroreVerifica("ERROR: INQUILINO_GIA_IN_VERIFICA (P0001)"), /tua richiesta/);
++});
++
++test("errori: gli errori che non sono dell'inquilino continuano a funzionare", () => {
++  assert.match(base.messaggioErroreVerifica("IMMOBILE_NON_TUO"), /immobile/);
++  assert.match(base.messaggioErroreVerifica("DOCUMENTI_MANCANTI"), /prova di proprietà/);
++  assert.match(base.messaggioErroreVerifica("RAPPORTO_NON_VERIFICATO"), /affitto/);
++  assert.match(base.messaggioErroreVerifica("NON_STAFF"), /permessi/);
++  assert.equal(base.messaggioErroreVerifica(null), GENERICO);
++  assert.equal(base.messaggioErroreVerifica(undefined), GENERICO);
++});
++
++test("errori: il testo tecnico non arriva mai alla persona", () => {
++  const frase = base.messaggioErroreVerifica('ERROR: new row violates row-level security policy for table "documenti_inquilino"');
++  assert.equal(frase, GENERICO);
++});
+diff --git a/src/app/(app)/VerificaHome.tsx b/src/app/(app)/VerificaHome.tsx
+index 9f4867c..63ccf4a 100644
+--- a/src/app/(app)/VerificaHome.tsx
++++ b/src/app/(app)/VerificaHome.tsx
+@@ -1,5 +1,6 @@
+ "use client";
+ 
++import { SelettoreFile } from "@/components/SelettoreFile";
+ import { useState } from "react";
+ import Link from "next/link";
+ import { useRouter } from "next/navigation";
+@@ -250,32 +251,3 @@ export function VerificaHome({
+     </PageContainer>
+   );
+ }
+-
+-function SelettoreFile({
+-  etichetta,
+-  aria,
+-  occupato,
+-  onFile,
+-}: {
+-  etichetta: string;
+-  aria: string;
+-  occupato: boolean;
+-  onFile: (file: File | undefined) => void;
+-}) {
+-  return (
+-    <label className="chip selettore-file" aria-busy={occupato}>
+-      {occupato ? "Caricamento..." : etichetta}
+-      <input
+-        type="file"
+-        accept="application/pdf,image/jpeg,image/png"
+-        aria-label={aria}
+-        disabled={occupato}
+-        className="hidden"
+-        onChange={(e) => {
+-          onFile(e.target.files?.[0]);
+-          e.target.value = ""; // permette di riscegliere lo stesso file
+-        }}
+-      />
+-    </label>
+-  );
+-}
+diff --git a/src/app/(app)/profilo/ProfiloClient.tsx b/src/app/(app)/profilo/ProfiloClient.tsx
+index b2293ed..e6b5b7d 100644
+--- a/src/app/(app)/profilo/ProfiloClient.tsx
++++ b/src/app/(app)/profilo/ProfiloClient.tsx
+@@ -1,5 +1,6 @@
+ "use client";
+ 
++import { rigaProfilo } from "@/lib/verifica-inquilino";
+ import { useActionState, useState } from "react";
+ import { Sheet } from "@/components/Sheet";
+ import { LAVORO_VOCAB, ATTR_VOCAB, ZONE_MILANO } from "@/lib/constants";
+@@ -33,6 +34,8 @@ import {
+ type Props = {
+   /** gli affitti dichiarati e confermati, costruiti dal server */
+   affittiPanel: React.ReactNode;
++  /** il pannello per verificare il reddito con i documenti, costruito dal server */
++  verificaPanel: React.ReactNode;
+   nome: string | null;
+   cognome: string | null;
+   email: string | null;
+@@ -53,6 +56,7 @@ export function ProfiloClient({
+   tenant,
+   inviti,
+   affittiPanel,
++  verificaPanel,
+   zoneIniziali,
+   interessiIniziali,
+   mediaRecensioni,
+@@ -66,12 +70,14 @@ export function ProfiloClient({
+     | "ricerca"
+     | "invito"
+     | "affitti"
++    | "verifica"
+     | "account"
+     | "privacy"
+     | "faq"
+     | null
+   >(null);
+ 
++  const rigaVerifica = rigaProfilo(tenant.verifica_stato, tenant.verifica_esito_note);
+   const affidabilita = computeAffidabilita({
+     verificato: tenant.verificato,
+     protestato: tenant.protestato,
+@@ -149,6 +155,16 @@ export function ProfiloClient({
+           onClick={() => setSheetAperta("dati")}
+         />
+ 
++        {/* Verifica del reddito */}
++        <Row
++          color={tenant.verifica_stato === "verificato" ? "var(--moss)" : "var(--gold)"}
++          icon={<IconScudo className={tenant.verifica_stato === "verificato" ? "fill-white stroke-none" : "fill-[var(--ink)] stroke-none"} />}
++          title={rigaVerifica.titolo}
++          subtitle={rigaVerifica.sottotitolo}
++          cta={rigaVerifica.cta}
++          onClick={() => setSheetAperta("verifica")}
++        />
++
+         {/* La tua ricerca */}
+         <Row
+           color="var(--clay)"
+@@ -216,6 +232,19 @@ export function ProfiloClient({
+         </button>
+       </form>
+ 
++      {/* ---- Sheet: Verifica del reddito ---- */}
++      <Sheet
++        open={sheetAperta === "verifica"}
++        onClose={() => setSheetAperta(null)}
++        title="Verifica del reddito"
++      >
++        <p className="sheet-sub">
++          Carica un documento d&apos;identità e una prova del reddito. Se li confermiamo, i proprietari
++          vedono «Reddito verificato» e il tuo punteggio di affidabilità sale.
++        </p>
++        {verificaPanel}
++      </Sheet>
++
+       {/* ---- Sheet: Affidabilità (sola lettura) ---- */}
+       <Sheet
+         open={sheetAperta === "affidabilita"}
+diff --git a/src/app/(app)/profilo/page.tsx b/src/app/(app)/profilo/page.tsx
+index 38e29d5..26b2857 100644
+--- a/src/app/(app)/profilo/page.tsx
++++ b/src/app/(app)/profilo/page.tsx
+@@ -1,3 +1,5 @@
++import { VerificaRedditoPanel } from "@/components/VerificaRedditoPanel";
++import type { DocumentoInquilino } from "@/lib/verifica-inquilino";
+ import { createClient } from "@/lib/supabase/server";
+ import { RapportiPanel } from "@/components/RapportiPanel";
+ import { caricaRapportiMiei } from "@/lib/rapporti-server";
+@@ -42,6 +44,7 @@ export default async function ProfiloPage() {
+     { data: interessiRows },
+     { data: recensioni },
+     { data: inviti },
++    { data: documentiRows },
+   ] = await Promise.all([
+     supabase.from("tenant_profiles").select("*").eq("profile_id", user!.id).single(),
+     supabase.from("tenant_zone_interesse").select("zona").eq("tenant_id", user!.id),
+@@ -55,6 +58,11 @@ export default async function ProfiloPage() {
+       .select("id, token, nome_proprietario, email_proprietario, indirizzo, periodo, stato, created_at")
+       .eq("tenant_id", user!.id)
+       .order("created_at", { ascending: false }),
++    supabase
++      .from("documenti_inquilino")
++      .select("id, tipo, percorso, nome_file")
++      .eq("tenant_id", user!.id)
++      .order("created_at", { ascending: true }),
+   ]);
+ 
+   const rapporti = await caricaRapportiMiei(supabase, user!.id);
+@@ -85,6 +93,17 @@ export default async function ProfiloPage() {
+           rapporti={rapporti.rapporti}
+         />
+       }
++      verificaPanel={
++        <VerificaRedditoPanel
++          stato={(tenant as TenantProfile).verifica_stato}
++          nota={(tenant as TenantProfile).verifica_esito_note}
++          dati={{
++            professione: (tenant as TenantProfile).professione,
++            reddito_mensile: (tenant as TenantProfile).reddito_mensile,
++          }}
++          documenti={(documentiRows ?? []) as DocumentoInquilino[]}
++        />
++      }
+       zoneIniziali={zoneIniziali}
+       interessiIniziali={interessiIniziali}
+       mediaRecensioni={mediaRecensioni}
+diff --git a/src/app/globals.css b/src/app/globals.css
+index d185346..e4562c0 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -2585,3 +2585,31 @@ mark.segnaposto {
+   padding: 0 4px;
+   border-radius: 4px;
+ }
++
++/* ============================================================
++   Verifica del reddito dell'inquilino
++   ============================================================ */
++
++.elenco-documenti {
++  list-style: none;
++  margin: 0 0 8px 0;
++  padding: 0;
++}
++.elenco-documenti li {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 12px;
++  padding: 6px 0;
++  font-size: 13px;
++  border-bottom: 1px solid rgba(16, 21, 26, 0.08);
++}
++.elenco-documenti li span {
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++.note-box.is-no {
++  background: rgba(201, 105, 78, 0.12);
++  color: var(--ink);
++}
+diff --git a/src/app/staff/actions.ts b/src/app/staff/actions.ts
+index fc0cb42..77ec1c7 100644
+--- a/src/app/staff/actions.ts
++++ b/src/app/staff/actions.ts
+@@ -72,3 +72,34 @@ export async function decidiRapporto(
+   revalidatePath("/staff");
+   redirect("/staff");
+ }
++
++/**
++ * Verifica o respinge il reddito di un inquilino. Stessi controlli delle
++ * altre due: permessi qui, nel layout e nella funzione del database.
++ */
++export async function decidiInquilino(
++  _prev: EsitoState,
++  formData: FormData
++): Promise<EsitoState> {
++  const supabase = await richiediStaff();
++
++  const id = String(formData.get("id") || "");
++  const esito = String(formData.get("esito") || "");
++  const nota = String(formData.get("nota") || "").trim();
++
++  if (!èUuid(id)) return { error: "Inquilino non valido." };
++  if (esito !== "verifica" && esito !== "respingi") return { error: "Scelta non valida." };
++  if (esito === "respingi" && nota.length < 3) {
++    return { error: messaggioErroreVerifica("INQUILINO_NOTA_OBBLIGATORIA") };
++  }
++
++  const { error } = await supabase.rpc("esito_verifica_inquilino", {
++    p_tenant: id,
++    p_verificato: esito === "verifica",
++    p_note: esito === "respingi" ? nota : null,
++  });
++  if (error) return { error: messaggioErroreVerifica(error.message) };
++
++  revalidatePath("/staff");
++  redirect("/staff");
++}
+diff --git a/src/app/staff/inquilini/[id]/EsitoInquilinoForm.tsx b/src/app/staff/inquilini/[id]/EsitoInquilinoForm.tsx
+new file mode 100644
+index 0000000..6baf8f9
+--- /dev/null
++++ b/src/app/staff/inquilini/[id]/EsitoInquilinoForm.tsx
+@@ -0,0 +1,36 @@
++"use client";
++
++import { useActionState } from "react";
++import { decidiInquilino, type EsitoState } from "../../actions";
++
++export function EsitoInquilinoForm({ id }: { id: string }) {
++  const [state, formAction, pending] = useActionState<EsitoState, FormData>(decidiInquilino, null);
++
++  return (
++    <form action={formAction} className="staff-esito">
++      <input type="hidden" name="id" value={id} />
++
++      <div className="pref-label">
++        <span>Se respingi, scrivi cosa non va</span>
++      </div>
++      <textarea
++        name="nota"
++        className="ob-textarea"
++        placeholder="Es. La busta paga è illeggibile, caricane una più nitida"
++        rows={3}
++      />
++      <p className="field-note">La persona leggerà questa nota. Serve solo per respingere.</p>
++
++      {state?.error && <p className="note-error">{state.error}</p>}
++
++      <div className="flex gap-3" style={{ marginTop: 14 }}>
++        <button type="submit" name="esito" value="respingi" disabled={pending} className="btn-danger-outline">
++          Respingi
++        </button>
++        <button type="submit" name="esito" value="verifica" disabled={pending} className="opp-cta">
++          Verifica il reddito
++        </button>
++      </div>
++    </form>
++  );
++}
+diff --git a/src/app/staff/inquilini/[id]/page.tsx b/src/app/staff/inquilini/[id]/page.tsx
+new file mode 100644
+index 0000000..73fe953
+--- /dev/null
++++ b/src/app/staff/inquilini/[id]/page.tsx
+@@ -0,0 +1,128 @@
++import Link from "next/link";
++import { notFound } from "next/navigation";
++import { richiediStaff, èUuid } from "@/lib/staff";
++import {
++  ETICHETTE_DOCUMENTO,
++  TIPI_DOCUMENTO_INQUILINO,
++  type DocumentoInquilino,
++} from "@/lib/verifica-inquilino";
++import { EsitoInquilinoForm } from "./EsitoInquilinoForm";
++
++const euro = (n: number | null) =>
++  n === null || n === undefined ? "non indicato" : `${n.toLocaleString("it-IT")} € al mese`;
++
++export default async function StaffInquilinoPage({ params }: { params: Promise<{ id: string }> }) {
++  const supabase = await richiediStaff();
++  const { id } = await params;
++  // l'id arriva dall'indirizzo: si controlla prima di usarlo in una query
++  if (!èUuid(id)) notFound();
++
++  // Lo staff NON legge il profilo intero: la funzione gli restituisce solo
++  // ciò che serve a confrontare la dichiarazione con i documenti.
++  const { data } = await supabase.rpc("dati_per_verifica_inquilino", { p_tenant: id });
++  const dati = (data ?? [])[0] as
++    | {
++        nome: string | null;
++        cognome: string | null;
++        professione: string | null;
++        reddito_mensile: number | null;
++        reddito_nucleo: number | null;
++        verifica_stato: string;
++      }
++    | undefined;
++  if (!dati) notFound();
++
++  const nome = [dati.nome, dati.cognome].filter(Boolean).join(" ") || "Senza nome";
++
++  const { data: documentiData } = await supabase
++    .from("documenti_inquilino")
++    .select("id, tipo, percorso, nome_file")
++    .eq("tenant_id", id)
++    .order("created_at", { ascending: true });
++  const documenti = (documentiData ?? []) as DocumentoInquilino[];
++
++  // I documenti: indirizzi temporanei di 5 minuti, mai pubblici.
++  const firmati = await Promise.all(
++    documenti.map(async (d) => {
++      const { data: f } = await supabase.storage.from("documenti-verifica").createSignedUrl(d.percorso, 300);
++      return { ...d, url: f?.signedUrl ?? null };
++    })
++  );
++
++  const decidibile = dati.verifica_stato === "in_verifica";
++
++  return (
++    <>
++      <Link href="/staff" className="redo-link">
++        ← Torna all&apos;elenco
++      </Link>
++      <h1 className="screen-title" style={{ marginTop: 14 }}>
++        {nome}
++      </h1>
++      <p className="screen-sub">Verifica del reddito</p>
++
++      <div className="pref-label" style={{ marginTop: 6 }}>
++        <span>Ciò che ha dichiarato</span>
++      </div>
++      <div className="feat-row">
++        <span className="k">Nome</span>
++        <span className="v">{nome}</span>
++      </div>
++      <div className="feat-row">
++        <span className="k">Lavoro</span>
++        <span className="v">{dati.professione || "non indicato"}</span>
++      </div>
++      <div className="feat-row">
++        <span className="k">Reddito suo</span>
++        <span className="v">{euro(dati.reddito_mensile)}</span>
++      </div>
++      <div className="feat-row">
++        <span className="k">Reddito del nucleo</span>
++        <span className="v">{euro(dati.reddito_nucleo)}</span>
++      </div>
++
++      {TIPI_DOCUMENTO_INQUILINO.map((tipo) => {
++        const miei = firmati.filter((d) => d.tipo === tipo);
++        return (
++          <div key={tipo}>
++            <div className="pref-label" style={{ marginTop: 24 }}>
++              <span>{ETICHETTE_DOCUMENTO[tipo]}</span>
++            </div>
++            {miei.length === 0 ? (
++              <p className="note-error">Nessun file caricato.</p>
++            ) : (
++              <div className="staff-documenti">
++                {miei.map((d) =>
++                  d.url ? (
++                    <a key={d.id} href={d.url} target="_blank" rel="noopener noreferrer" className="staff-doc">
++                      {d.nome_file}
++                    </a>
++                  ) : (
++                    <p key={d.id} className="note-error">
++                      {d.nome_file}: non si apre. Ricarica la pagina.
++                    </p>
++                  )
++                )}
++              </div>
++            )}
++          </div>
++        );
++      })}
++
++      <p className="field-note" style={{ marginTop: 14 }}>
++        Controlla che il nome sul documento d&apos;identità sia «{nome}» e che la prova del reddito
++        sia coerente con quanto dichiarato qui sopra. I link durano 5 minuti.
++      </p>
++
++      <div style={{ marginTop: 26 }}>
++        {decidibile ? (
++          <EsitoInquilinoForm id={id} />
++        ) : (
++          <div className="note-box">
++            Questa persona non ha una verifica in attesa (stato: {dati.verifica_stato.replace("_", " ")}).
++          </div>
++        )}
++      </div>
++    </>
++  );
++}
+diff --git a/src/app/staff/page.tsx b/src/app/staff/page.tsx
+index 5e2e9a4..db5c063 100644
+--- a/src/app/staff/page.tsx
++++ b/src/app/staff/page.tsx
+@@ -58,6 +58,16 @@ export default async function StaffPage() {
+     (persone ?? []).map((p) => [p.id as string, [p.nome, p.cognome].filter(Boolean).join(" ") || "Senza nome"])
+   );
+ 
++  // Gli inquilini che hanno inviato i documenti del reddito. Lo staff non
++  // legge i profili: la funzione del database gli dà solo nome e data.
++  const { data: inquiliniData } = await supabase.rpc("inquilini_da_verificare");
++  const inquilini = (inquiliniData ?? []) as {
++    tenant_id: string;
++    nome: string | null;
++    cognome: string | null;
++    inviata_at: string | null;
++  }[];
++
+   return (
+     <>
+       <h1 className="screen-title">Immobili da verificare</h1>
+@@ -110,6 +120,31 @@ export default async function StaffPage() {
+           );
+         })}
+       </div>
++    
++      <h1 className="screen-title" style={{ marginTop: 36 }}>
++        Redditi da verificare
++      </h1>
++      <p className="screen-sub">
++        {inquilini.length === 0
++          ? "Nessun inquilino in attesa."
++          : `${inquilini.length} in attesa, i più vecchi per primi.`}
++      </p>
++      <div className="staff-lista">
++        {inquilini.map((q) => {
++          const nome = [q.nome, q.cognome].filter(Boolean).join(" ") || "Senza nome";
++          return (
++            <Link key={q.tenant_id} href={`/staff/inquilini/${q.tenant_id}`} className="match-card">
++              <div className="mc-avatar">{nome.slice(0, 2).toUpperCase()}</div>
++              <div className="mc-body">
++                <div className="mc-zona">Inquilino</div>
++                <div className="mc-title">{nome}</div>
++                <div className="mc-meta">inviato {quandoFa(q.inviata_at)}</div>
++              </div>
++              <div className="mc-pct is-wait">Da controllare</div>
++            </Link>
++          );
++        })}
++      </div>
+     </>
+   );
+ }
+diff --git a/src/components/SelettoreFile.tsx b/src/components/SelettoreFile.tsx
+new file mode 100644
+index 0000000..5780dc9
+--- /dev/null
++++ b/src/components/SelettoreFile.tsx
+@@ -0,0 +1,35 @@
++"use client";
++
++/**
++ * Il pulsante per scegliere un file da caricare (PDF, JPG o PNG). Serve ai
++ * documenti dei proprietari e a quelli degli inquilini: stesso aspetto, stessi
++ * tipi ammessi.
++ */
++export function SelettoreFile({
++  etichetta,
++  aria,
++  occupato,
++  onFile,
++}: {
++  etichetta: string;
++  aria: string;
++  occupato: boolean;
++  onFile: (file: File | undefined) => void;
++}) {
++  return (
++    <label className="chip selettore-file" aria-busy={occupato}>
++      {occupato ? "Caricamento..." : etichetta}
++      <input
++        type="file"
++        accept="application/pdf,image/jpeg,image/png"
++        aria-label={aria}
++        disabled={occupato}
++        className="hidden"
++        onChange={(e) => {
++          onFile(e.target.files?.[0]);
++          e.target.value = ""; // permette di riscegliere lo stesso file
++        }}
++      />
++    </label>
++  );
++}
+diff --git a/src/components/VerificaRedditoPanel.tsx b/src/components/VerificaRedditoPanel.tsx
+new file mode 100644
+index 0000000..5941b80
+--- /dev/null
++++ b/src/components/VerificaRedditoPanel.tsx
+@@ -0,0 +1,246 @@
++"use client";
++
++import { useState } from "react";
++import { useRouter } from "next/navigation";
++import { createClient } from "@/lib/supabase/client";
++import { SelettoreFile } from "@/components/SelettoreFile";
++import {
++  estensioneDa,
++  messaggioErroreVerifica,
++  percorsoDocumento,
++  validaFileDocumento,
++} from "@/lib/verifica";
++import {
++  AIUTO_DOCUMENTO,
++  ETICHETTE_DOCUMENTO,
++  LIMITE_DOCUMENTI,
++  TIPI_DOCUMENTO_INQUILINO,
++  cosaMancaInquilino,
++  descriviStatoInquilino,
++  puoAggiungereDocumento,
++  puoInviareInquilino,
++  puoTogliereDocumenti,
++  type DatiDichiarati,
++  type DocumentoInquilino,
++  type StatoVerificaInquilino,
++  type TipoDocumentoInquilino,
++} from "@/lib/verifica-inquilino";
++
++const BUCKET = "documenti-verifica";
++
++/**
++ * Il pannello con cui l'inquilino carica i documenti e li invia alla
++ * verifica del reddito.
++ *
++ * Le regole vere (chi può cambiare lo stato, quali documenti servono, che i
++ * documenti si tolgano solo prima dell'invio) stanno nel database. Qui si
++ * evita di far fare alla persona cose che il database rifiuterebbe.
++ */
++export function VerificaRedditoPanel({
++  stato,
++  nota,
++  dati,
++  documenti,
++}: {
++  stato: StatoVerificaInquilino;
++  nota: string | null;
++  dati: DatiDichiarati;
++  documenti: DocumentoInquilino[];
++}) {
++  const router = useRouter();
++  const [errore, setErrore] = useState<string | null>(null);
++  const [inCorso, setInCorso] = useState<string | null>(null);
++
++  const descrizione = descriviStatoInquilino(stato, nota);
++  const manca = cosaMancaInquilino({ documenti, dati });
++  const inviabile = puoInviareInquilino({ stato, documenti, dati });
++  const siTolgono = puoTogliereDocumenti(stato);
++
++  async function carica(tipo: TipoDocumentoInquilino, file: File | undefined) {
++    if (!file) return;
++    setErrore(null);
++
++    if (!puoAggiungereDocumento(documenti.length)) {
++      setErrore(`Hai già ${LIMITE_DOCUMENTI} documenti: toglierne uno, o scrivici.`);
++      return;
++    }
++    const problema = validaFileDocumento(file);
++    if (problema) {
++      setErrore(problema);
++      return;
++    }
++    const estensione = estensioneDa(file.type);
++    if (!estensione) {
++      setErrore("Il file deve essere un PDF, una foto JPG o una foto PNG.");
++      return;
++    }
++
++    setInCorso(`carica-${tipo}`);
++    try {
++      const supabase = createClient();
++      const {
++        data: { user },
++      } = await supabase.auth.getUser();
++      if (!user) {
++        setErrore(messaggioErroreVerifica("NON_AUTENTICATO"));
++        return;
++      }
++
++      const percorso = percorsoDocumento({
++        userId: user.id,
++        tipo: tipo === "identita" ? "inquilino-identita" : "inquilino-reddito",
++        listingId: null,
++        estensione,
++        id: crypto.randomUUID(),
++      });
++
++      const { error: eFile } = await supabase.storage
++        .from(BUCKET)
++        .upload(percorso, file, { contentType: file.type, upsert: false });
++      if (eFile) {
++        setErrore("Non sono riuscito a caricare il file. Riprova.");
++        return;
++      }
++
++      const { error: eRiga } = await supabase.from("documenti_inquilino").insert({
++        tenant_id: user.id,
++        tipo,
++        percorso,
++        nome_file: file.name.slice(0, 200),
++      });
++      if (eRiga) {
++        // un documento personale non deve restare nel bucket senza che nessuno lo veda
++        await supabase.storage.from(BUCKET).remove([percorso]);
++        setErrore("Non è stato possibile registrare il documento. Riprova.");
++        return;
++      }
++      router.refresh();
++    } finally {
++      setInCorso(null);
++    }
++  }
++
++  async function togli(doc: DocumentoInquilino) {
++    setErrore(null);
++    setInCorso(`togli-${doc.id}`);
++    try {
++      const supabase = createClient();
++      const { data: tolti, error: eFile } = await supabase.storage.from(BUCKET).remove([doc.percorso]);
++      // La sicurezza del database, se non permette di togliere il file, non
++      // dà errore: restituisce un elenco vuoto. Senza questo controllo si
++      // cancellerebbe la riga lasciando il file.
++      if (eFile || !tolti || tolti.length === 0) {
++        setErrore("Non è stato possibile togliere il documento: forse hai già inviato la richiesta.");
++        return;
++      }
++      const { error: eRiga } = await supabase.from("documenti_inquilino").delete().eq("id", doc.id);
++      if (eRiga) {
++        setErrore("Il file è stato tolto ma non il suo elenco. Ricarica la pagina.");
++        return;
++      }
++      router.refresh();
++    } finally {
++      setInCorso(null);
++    }
++  }
++
++  async function invia() {
++    setErrore(null);
++    setInCorso("invia");
++    try {
++      const { error } = await createClient().rpc("richiedi_verifica_inquilino");
++      if (error) {
++        setErrore(messaggioErroreVerifica(error.message));
++        return;
++      }
++      router.refresh();
++    } finally {
++      setInCorso(null);
++    }
++  }
++
++  return (
++    <div>
++      <div
++        className={`note-box ${descrizione.tono === "no" ? "is-no" : ""}`}
++        style={{ marginTop: 0, marginBottom: 16 }}
++        role="status"
++      >
++        <b>{descrizione.titolo}</b>
++        <br />
++        {descrizione.testo}
++      </div>
++
++      {TIPI_DOCUMENTO_INQUILINO.map((tipo) => {
++        const miei = documenti.filter((d) => d.tipo === tipo);
++        return (
++          <div key={tipo} className="passo-verifica" style={{ marginBottom: 12 }}>
++            <div className="pref-label" style={{ margin: "0 0 4px 0" }}>
++              <span>{ETICHETTE_DOCUMENTO[tipo]}</span>
++            </div>
++            <p className="field-note" style={{ margin: "0 0 8px 0" }}>
++              {AIUTO_DOCUMENTO[tipo]}
++            </p>
++
++            {miei.length > 0 && (
++              <ul className="elenco-documenti">
++                {miei.map((d) => (
++                  <li key={d.id}>
++                    <span>{d.nome_file}</span>
++                    {siTolgono && (
++                      <button
++                        type="button"
++                        className="redo-link"
++                        disabled={inCorso !== null}
++                        aria-label={`Togli ${d.nome_file}`}
++                        onClick={() => togli(d)}
++                      >
++                        {inCorso === `togli-${d.id}` ? "Tolgo..." : "Togli"}
++                      </button>
++                    )}
++                  </li>
++                ))}
++              </ul>
++            )}
++
++            <SelettoreFile
++              etichetta={miei.length > 0 ? "Aggiungi un altro file" : "Scegli un file"}
++              aria={`Carica: ${ETICHETTE_DOCUMENTO[tipo]}`}
++              occupato={inCorso === `carica-${tipo}`}
++              onFile={(f) => carica(tipo, f)}
++            />
++          </div>
++        );
++      })}
++
++      {stato === "non_avviata" && (
++        <>
++          {manca.length > 0 && <p className="field-note">Per inviare manca: {manca.join("; ")}.</p>}
++          <button
++            type="button"
++            className="opp-cta"
++            style={{ marginTop: 10 }}
++            disabled={!inviabile || inCorso !== null}
++            onClick={invia}
++          >
++            {inCorso === "invia" ? "Invio..." : "Invia per la verifica"}
++          </button>
++        </>
++      )}
++
++      {errore && (
++        <p className="note-error" style={{ marginTop: 10 }}>
++          {errore}
++        </p>
++      )}
++
++      <div className="note-box" style={{ marginTop: 20 }}>
++        <b>Chi vede i tuoi documenti.</b> Li vedi tu e il team di MatchAmI che li controlla. Il
++        proprietario non li vede mai: vede solo se il reddito è verificato, sì o no. Non hanno un
++        indirizzo pubblico e si cancellano insieme al tuo account. Finché non invii la richiesta
++        puoi togliere un documento caricato per sbaglio. Per ora non ti avvisiamo quando l&apos;esito
++        è pronto: torna qui per vederlo.
++      </div>
++    </div>
++  );
++}
+diff --git a/src/content/informativa.ts b/src/content/informativa.ts
+index fad1c55..00dee56 100644
+--- a/src/content/informativa.ts
++++ b/src/content/informativa.ts
+@@ -28,7 +28,7 @@ export const INFORMATIVA = {
+    * controllo che fa il database (migrazione 0017): un test fallisce se
+    * questa stringa non lo supera.
+    */
+-  versione: "2026-10-provvisoria-1",
++  versione: "2026-10-provvisoria-2",
+   provvisoria: true,
+   titolo: "Informativa sulla privacy",
+   aggiornata: "ottobre 2026",
+@@ -53,7 +53,7 @@ export const INFORMATIVA = {
+         "Account: email, password (conservata come impronta, non in chiaro), nome, cognome e ruolo, inquilino o proprietario.",
+         "Se sei inquilino: lavoro, reddito tuo e del tuo nucleo, garante, fideiussione, protesti (li dichiari tu e non vengono verificati), animali, composizione del nucleo, numero di figli, presentazione, foto del profilo e le tue preferenze di ricerca (budget, zone, locali, metri, caratteristiche).",
+         "Se sei proprietario: tipo di proprietario, numero di immobili, obiettivo; gli annunci con titolo, descrizione, zona, prezzo, caratteristiche e foto; i criteri che chiedi ai candidati.",
+-        "Per le verifiche: il documento d'identità e la prova di proprietà dell'immobile (proprietari), e i contratti di affitto caricati per dichiarare un affitto.",
++        "Per le verifiche: il documento d'identità e la prova di proprietà dell'immobile (proprietari); se sei inquilino e chiedi di verificare il reddito, un documento d'identità e una prova del reddito (una busta paga, la CU o la dichiarazione dei redditi); e i contratti di affitto caricati per dichiarare un affitto. Non chiediamo lo stato di famiglia.",
+         "Mentre usi l'app: candidature, messaggi, contratti, recensioni, richieste di conferma di un affitto e inviti.",
+         "Dati di un'altra persona: se inviti il tuo proprietario, scrivi il suo nome e, se vuoi, la sua email.",
+       ],
+@@ -68,6 +68,7 @@ export const INFORMATIVA = {
+       titolo: "Punteggi calcolati automaticamente",
+       paragrafi: [
+         "La compatibilità (match) e l'affidabilità sono calcolate automaticamente da ciò che dichiari. Servono a ordinare annunci e candidati. La decisione di accettare o rifiutare una candidatura resta sempre del proprietario.",
++        "La verifica del reddito invece non è automatica: la decide una persona del team di MatchAmI, guardando i documenti che hai caricato. Se dopo la verifica cambi il lavoro o il reddito indicati, la verifica decade e va rifatta.",
+       ],
+     },
+     {
+@@ -77,28 +78,28 @@ export const INFORMATIVA = {
+         "Il proprietario di un annuncio a cui ti candidi vede il tuo nome e cognome, il lavoro, il reddito, garante e fideiussione, i protesti che hai dichiarato, se il tuo reddito è verificato, la presentazione, la foto, il punteggio di affidabilità e la compatibilità. Non vede il numero di figli, la composizione del nucleo né se hai animali: sa solo se hai compilato quei campi, per contare quanto è completo il tuo profilo. Non vede le tue preferenze di ricerca.",
+         "Se rifiuta la tua candidatura, del tuo profilo gli resta solo il tuo nome, oltre alla valutazione che aveva già fatto. Tu vedi il motivo del rifiuto, non la sua valutazione completa.",
+         "I messaggi li leggono solo le due persone, dopo che la candidatura è stata accettata.",
+-        "Le recensioni su un inquilino le leggono lui, chi le ha scritte e i proprietari a cui si è candidato.",
++        "Le recensioni su un inquilino le leggono la persona recensita, chi le ha scritte e i proprietari a cui ha inviato una candidatura.",
+         "Gli annunci pubblicati e verificati li vedono tutti gli utenti connessi. L'indirizzo esatto degli immobili non lo raccogliamo.",
+-        "Il documento d'identità, la prova di proprietà e i contratti li vedono solo chi li ha caricati e il team di MatchAmI che li controlla. L'altra parte di un affitto non vede il contratto.",
++        "Il documento d'identità, la prova del reddito, la prova di proprietà e i contratti li vedono solo chi li ha caricati e il team di MatchAmI che li controlla. Un proprietario non vede mai i documenti di un inquilino: vede solo se il reddito è verificato, sì o no. L'altra parte di un affitto non vede il contratto.",
+         "Il team di MatchAmI vede nome e cognome di tutti, e gli annunci e gli affitti da verificare. Chi amministra il sistema ha un accesso tecnico a tutti i dati.",
+       ],
+     },
+     {
+       titolo: "File e foto",
+       paragrafi: [
+-        "La foto del profilo e le foto degli annunci si aprono con un indirizzo che non richiede l'accesso: chi conosce quel link può vederle. I documenti d'identità, di proprietà e i contratti non hanno mai un indirizzo pubblico: si aprono con link temporanei, e solo a chi ne ha diritto.",
++        "La foto del profilo e le foto degli annunci si aprono con un indirizzo che non richiede l'accesso: chi conosce quel link può vederle. I documenti d'identità, di reddito, di proprietà e i contratti non hanno mai un indirizzo pubblico: si aprono con link temporanei, e solo a chi ne ha diritto.",
+       ],
+     },
+     {
+       titolo: "Per quanto tempo conserviamo i dati",
+       paragrafi: [
+-        "Al momento non c'è una scadenza automatica: una candidatura, un messaggio o un invito restano finché non cancelli l'account. I tempi di conservazione saranno definiti nel testo definitivo.",
++        "Al momento non c'è una scadenza automatica: una candidatura, un messaggio, un invito o un documento restano finché non cancelli l'account. Un documento caricato per la verifica del reddito puoi toglierlo tu, ma solo finché non hai inviato la richiesta. I tempi di conservazione saranno definiti nel testo definitivo.",
+       ],
+     },
+     {
+       titolo: "Cancellare il tuo account",
+       paragrafi: [
+-        "Puoi cancellare l'account da Profilo, Account e accesso. Se sei inquilino spariscono tutti i tuoi dati, comprese le recensioni su di te. Se sei proprietario spariscono tutti i tuoi dati, tranne le recensioni che hai scritto su inquilini ancora iscritti, che restano senza il tuo nome.",
++        "Puoi cancellare l'account da Profilo, Account e accesso. Se sei inquilino spariscono tutti i tuoi dati, compresi i documenti e le recensioni su di te. Se sei proprietario spariscono tutti i tuoi dati, tranne le recensioni che hai scritto su inquilini ancora iscritti, che restano senza il tuo nome.",
+         "Non c'è ancora un modo per scaricare i tuoi dati.",
+       ],
+     },
+diff --git a/src/lib/types.ts b/src/lib/types.ts
+index c64be1b..73b807c 100644
+--- a/src/lib/types.ts
++++ b/src/lib/types.ts
+@@ -17,6 +17,9 @@ export type TenantProfile = {
+   presentazione: string | null;
+   verificato: boolean;
+   verifica_stato: "non_avviata" | "in_verifica" | "verificato";
++  /** perché la verifica non è riuscita, o è decaduta; lo scrive solo lo staff */
++  verifica_esito_note: string | null;
++  verifica_inviata_at: string | null;
+   budget_max: number | null;
+   locali_min: number | null;
+   mq_min: number | null;
+diff --git a/src/lib/verifica-inquilino.ts b/src/lib/verifica-inquilino.ts
+new file mode 100644
+index 0000000..25e9682
+--- /dev/null
++++ b/src/lib/verifica-inquilino.ts
+@@ -0,0 +1,153 @@
++/**
++ * La verifica del reddito dell'inquilino: cosa mostrare, cosa manca, cosa si
++ * può fare. Logica pura, senza database: si prova con `npm test`.
++ *
++ * Il percorso dei file e le regole sui tipi ammessi stanno in `verifica.ts`,
++ * condivise con i documenti dei proprietari.
++ */
++
++export type StatoVerificaInquilino = "non_avviata" | "in_verifica" | "verificato";
++export type TipoDocumentoInquilino = "identita" | "reddito";
++
++export const TIPI_DOCUMENTO_INQUILINO: readonly TipoDocumentoInquilino[] = ["identita", "reddito"];
++
++/** Quanti documenti al massimo: è anche il limite del database (migrazione 0018). */
++export const LIMITE_DOCUMENTI = 12;
++
++export const ETICHETTE_DOCUMENTO: Record<TipoDocumentoInquilino, string> = {
++  identita: "Documento d'identità",
++  reddito: "Prova del reddito",
++};
++
++export const AIUTO_DOCUMENTO: Record<TipoDocumentoInquilino, string> = {
++  identita: "Carta d'identità, patente o passaporto, fronte e retro. Serve a far coincidere il nome.",
++  reddito: "Una busta paga recente, la CU o la dichiarazione dei redditi.",
++};
++
++export type DocumentoInquilino = {
++  id: string;
++  tipo: TipoDocumentoInquilino;
++  percorso: string;
++  nome_file: string;
++};
++
++export type DatiDichiarati = {
++  professione: string | null;
++  reddito_mensile: number | null;
++};
++
++export type DescrizioneStato = {
++  titolo: string;
++  testo: string;
++  tono: "neutro" | "attesa" | "ok" | "no";
++};
++
++/** Cosa dire alla persona sullo stato della sua verifica. */
++export function descriviStatoInquilino(
++  stato: StatoVerificaInquilino,
++  nota: string | null
++): DescrizioneStato {
++  if (stato === "verificato") {
++    return {
++      titolo: "Reddito verificato",
++      testo:
++        "I proprietari vedono «Reddito verificato» accanto al tuo nome, e il tuo punteggio di affidabilità ne tiene conto. Se cambi il lavoro o il reddito, la verifica decade e va rifatta.",
++      tono: "ok",
++    };
++  }
++  if (stato === "in_verifica") {
++    return {
++      titolo: "In verifica",
++      testo:
++        "Stiamo controllando i documenti. Finché non rispondiamo non puoi toglierli, ma puoi aggiungerne altri.",
++      tono: "attesa",
++    };
++  }
++  if (nota && nota.trim()) {
++    return {
++      titolo: "Verifica non riuscita",
++      testo: `${nota.trim()} Correggi e invia di nuovo.`,
++      tono: "no",
++    };
++  }
++  return {
++    titolo: "Non ancora verificato",
++    testo:
++      "Carica un documento d'identità e una prova del reddito: se li confermiamo, i proprietari vedranno «Reddito verificato» e il tuo punteggio di affidabilità sale.",
++    tono: "neutro",
++  };
++}
++
++/** Cosa manca prima di poter inviare. Vuoto: si può inviare. */
++export function cosaMancaInquilino(input: {
++  documenti: Pick<DocumentoInquilino, "tipo">[];
++  dati: DatiDichiarati;
++}): string[] {
++  const manca: string[] = [];
++  if (!input.dati.professione || !input.dati.professione.trim()) {
++    manca.push("Indica il tuo lavoro nel profilo, in «I tuoi dati»");
++  }
++  if (!input.dati.reddito_mensile || input.dati.reddito_mensile <= 0) {
++    manca.push("Indica il tuo reddito mensile nel profilo, in «I tuoi dati»");
++  }
++  if (!input.documenti.some((d) => d.tipo === "identita")) {
++    manca.push("Carica un documento d'identità");
++  }
++  if (!input.documenti.some((d) => d.tipo === "reddito")) {
++    manca.push("Carica una prova del reddito");
++  }
++  return manca;
++}
++
++/** Si può inviare solo se non è già stato inviato o verificato, e non manca niente. */
++export function puoInviareInquilino(input: {
++  stato: StatoVerificaInquilino;
++  documenti: Pick<DocumentoInquilino, "tipo">[];
++  dati: DatiDichiarati;
++}): boolean {
++  return input.stato === "non_avviata" && cosaMancaInquilino(input).length === 0;
++}
++
++/** I documenti si tolgono solo finché non si è inviato niente (regola del database). */
++export function puoTogliereDocumenti(stato: StatoVerificaInquilino): boolean {
++  return stato === "non_avviata";
++}
++
++/** Si può aggiungere un documento se non si è al limite. */
++export function puoAggiungereDocumento(quanti: number): boolean {
++  return quanti < LIMITE_DOCUMENTI;
++}
++
++/** La riga che il profilo mostra per aprire il pannello. */
++export function rigaProfilo(
++  stato: StatoVerificaInquilino,
++  nota: string | null
++): { titolo: string; sottotitolo: string; cta: string } {
++  if (stato === "verificato") {
++    return {
++      titolo: "Reddito verificato",
++      sottotitolo: "I proprietari lo vedono accanto al tuo nome.",
++      cta: "Vedi i dettagli",
++    };
++  }
++  if (stato === "in_verifica") {
++    return {
++      titolo: "Reddito in verifica",
++      sottotitolo: "Stiamo controllando i documenti che hai inviato.",
++      cta: "Vedi lo stato",
++    };
++  }
++  if (nota && nota.trim()) {
++    return {
++      titolo: "La verifica non è riuscita",
++      sottotitolo: "Leggi cosa non andava e invia di nuovo.",
++      cta: "Vedi perché",
++    };
++  }
++  return {
++    titolo: "Verifica il tuo reddito",
++    sottotitolo:
++      "Carica un documento d'identità e una prova del reddito: i proprietari vedranno «Reddito verificato».",
++    cta: "Inizia",
++  };
++}
+diff --git a/src/lib/verifica.ts b/src/lib/verifica.ts
+index e1e240a..d06e70f 100644
+--- a/src/lib/verifica.ts
++++ b/src/lib/verifica.ts
+@@ -118,7 +118,7 @@ export function estensioneDa(tipo: string): string | null {
+  */
+ export function percorsoDocumento(input: {
+   userId: string;
+-  tipo: "identita" | "proprieta" | "contratto";
++  tipo: "identita" | "proprieta" | "contratto" | "inquilino-identita" | "inquilino-reddito";
+   listingId: string | null;
+   estensione: string;
+   id: string;
+@@ -127,11 +127,14 @@ export function percorsoDocumento(input: {
+   // Il contratto si chiama "contratto-...": è ciò che la funzione del database
+   // `crea_richiesta_rapporto` richiede, e impedisce di presentare come
+   // contratto un altro file della propria cartella.
++  // I documenti dell'inquilino si chiamano "inquilino-identita-..." e
++  // "inquilino-reddito-...": è ciò che il database richiede per registrarli,
++  // e ciò che permette di toglierli prima dell'invio senza toccare i contratti.
+   const base =
+-    input.tipo === "identita"
+-      ? "identita"
+-      : input.tipo === "contratto"
+-        ? "contratto"
++    input.tipo === "identita" || input.tipo === "contratto"
++      ? input.tipo
++      : input.tipo === "inquilino-identita" || input.tipo === "inquilino-reddito"
++        ? input.tipo
+         : `proprieta-${pulito(input.listingId ?? "")}`;
+   return `${pulito(input.userId)}/${base}-${pulito(input.id)}.${pulito(input.estensione)}`;
+ }
+@@ -176,6 +179,17 @@ const MESSAGGI: Record<string, string> = {
+   RAPPORTO_NON_VERIFICATO:
+     "Per lasciare un feedback l'affitto deve essere verificato: lo controlliamo noi.",
+   RAPPORTO_GIA_RECENSITO: "Hai già lasciato il feedback per questo affitto.",
++  // verifica del reddito dell'inquilino
++  NON_INQUILINO: "Solo gli inquilini possono verificare il reddito.",
++  INQUILINO_GIA_VERIFICATO: "Il tuo reddito risulta già verificato.",
++  INQUILINO_GIA_IN_VERIFICA: "La tua richiesta è già in verifica.",
++  DOCUMENTI_INQUILINO_MANCANTI:
++    "Mancano dei documenti: servono un documento d'identità e una prova del reddito.",
++  DATI_PROFILO_MANCANTI:
++    "Prima completa il tuo profilo: indica il lavoro e il reddito mensile, così possiamo confrontarli con i documenti.",
++  INQUILINO_NON_IN_VERIFICA: "Questa persona non ha una verifica in attesa.",
++  INQUILINO_NOTA_OBBLIGATORIA: "Per respingere scrivi cosa non va: la persona la leggerà.",
++  INQUILINO_INESISTENTE: "Inquilino non trovato.",
+   // decisioni sulle candidature
+   CANDIDATURA_NON_TUA: "Questa candidatura non risulta tua.",
+   CANDIDATURA_GIA_VALUTATA: "Questa candidatura è già stata valutata.",
+@@ -186,6 +200,12 @@ const MESSAGGI: Record<string, string> = {
+ /** Traduce gli errori del database in frasi comprensibili. Mai il testo tecnico. */
+ export function messaggioErroreVerifica(errore: string | null | undefined): string {
+   const e = errore ?? "";
+-  const chiave = Object.keys(MESSAGGI).find((k) => e.includes(k));
++  // Più codici possono comparire nello stesso testo (uno contiene l'altro:
++  // INQUILINO_GIA_VERIFICATO contiene GIA_VERIFICATO): vince il più lungo, cioè
++  // il più specifico. Altrimenti all'inquilino toccherebbe la frase
++  // dell'immobile.
++  const chiave = Object.keys(MESSAGGI)
++    .filter((k) => e.includes(k))
++    .sort((a, b) => b.length - a.length)[0];
+   return chiave ? MESSAGGI[chiave] : "Non è stato possibile completare l'operazione. Riprova.";
+ }
+diff --git a/supabase/migrations/0018_verifica_inquilino.sql b/supabase/migrations/0018_verifica_inquilino.sql
+new file mode 100644
+index 0000000..cc80e5e
+--- /dev/null
++++ b/supabase/migrations/0018_verifica_inquilino.sql
+@@ -0,0 +1,300 @@
++-- ============================================================
++-- MatchAmI — verifica del reddito dell'inquilino, con i documenti
++--
++-- Fin qui «reddito verificato» era un'etichetta che nessuno poteva far
++-- diventare vera: la colonna esisteva, ma si cambiava solo a mano dal
++-- pannello SQL. Ora l'inquilino carica i documenti, lo staff li controlla e
++-- decide, e il proprietario vede soltanto l'esito: verificato sì o no.
++--
++-- Cosa si raccoglie, e cosa NO:
++--   - un documento d'identità, per far coincidere il nome;
++--   - una prova del reddito (busta paga, CU, dichiarazione).
++--   Non si raccoglie lo stato di famiglia: dice la composizione del nucleo,
++--   che l'app non usa e non mostra ai proprietari per scelta.
++--
++-- I file stanno nel bucket PRIVATO `documenti-verifica` (già esistente),
++-- nella cartella della persona. Li vedono solo lei e lo staff. Il
++-- proprietario non li vede mai.
++--
++-- ORDINE: esegui questa migrazione PRIMA del push del codice.
++-- ============================================================
++
++-- ------------------------------------------------------------
++-- 1. Cosa si ricorda di una verifica
++-- ------------------------------------------------------------
++
++alter table tenant_profiles
++  add column if not exists verifica_esito_note text,
++  add column if not exists verifica_inviata_at timestamptz;
++
++-- ------------------------------------------------------------
++-- 2. Chi può cambiare lo stato di verifica
++--
++-- Nessun utente: né verificato, né stato, né nota, né data. In più: se la
++-- persona cambia i dati su cui è stata verificata (lavoro, reddito suo o del
++-- nucleo), la verifica DECADE e va rifatta. Altrimenti «verificato»
++-- resterebbe attaccato a un reddito diverso da quello controllato.
++--
++-- Garante, fideiussione e protesti non decadono: non si verificano con
++-- questi documenti.
++-- ------------------------------------------------------------
++
++create or replace function public.proteggi_verifica_inquilino()
++returns trigger
++language plpgsql
++as $$
++begin
++  -- chi lavora dal pannello SQL, o le funzioni sotto, non è limitato
++  if current_user not in ('authenticated', 'anon') then
++    return new;
++  end if;
++
++  if tg_op = 'INSERT' then
++    new.verificato := false;
++    new.verifica_stato := 'non_avviata';
++    new.verifica_esito_note := null;
++    new.verifica_inviata_at := null;
++    return new;
++  end if;
++
++  if new.verificato is distinct from old.verificato
++     or new.verifica_stato is distinct from old.verifica_stato
++     or new.verifica_esito_note is distinct from old.verifica_esito_note
++     or new.verifica_inviata_at is distinct from old.verifica_inviata_at then
++    raise exception 'VERIFICA_RISERVATA: lo stato di verifica lo imposta solo chi gestisce MatchAmI'
++      using errcode = 'P0001';
++  end if;
++
++  if old.verificato
++     and (new.professione is distinct from old.professione
++          or new.reddito_mensile is distinct from old.reddito_mensile
++          or new.reddito_nucleo is distinct from old.reddito_nucleo) then
++    new.verificato := false;
++    new.verifica_stato := 'non_avviata';
++    new.verifica_esito_note := 'Hai modificato lavoro o reddito dopo la verifica: va rifatta.';
++    new.verifica_inviata_at := null;
++  end if;
++
++  return new;
++end;
++$$;
++
++-- ------------------------------------------------------------
++-- 3. I documenti dell'inquilino
++-- ------------------------------------------------------------
++
++create table if not exists documenti_inquilino (
++  id uuid primary key default gen_random_uuid(),
++  tenant_id uuid not null references tenant_profiles(profile_id) on delete cascade,
++  tipo text not null check (tipo in ('identita', 'reddito')),
++  percorso text not null unique,
++  nome_file text not null check (length(nome_file) between 1 and 200),
++  created_at timestamptz not null default now()
++);
++
++create index if not exists documenti_inquilino_tenant_idx on documenti_inquilino (tenant_id);
++
++alter table documenti_inquilino enable row level security;
++
++-- Li legge la persona e lo staff. Mai un proprietario.
++drop policy if exists "documenti inquilino: li legge la persona o lo staff" on documenti_inquilino;
++create policy "documenti inquilino: li legge la persona o lo staff" on documenti_inquilino
++  for select using (tenant_id = auth.uid() or is_staff());
++
++-- Li registra la persona, nella propria cartella e con un nome che ne dice
++-- il tipo. Al massimo 12: lo staff deve poterli sfogliare.
++drop policy if exists "documenti inquilino: li registra la persona" on documenti_inquilino;
++create policy "documenti inquilino: li registra la persona" on documenti_inquilino
++  for insert with check (
++    tenant_id = auth.uid()
++    and percorso like auth.uid()::text || '/inquilino-' || tipo || '-%'
++    and (select count(*) from documenti_inquilino d where d.tenant_id = auth.uid()) < 12
++  );
++
++-- Si può togliere un documento SOLO finché non si è inviato niente alla
++-- verifica: un file caricato per sbaglio non resta lì. Dopo l'invio i
++-- documenti non si toccano più (sono ciò che lo staff sta guardando).
++drop policy if exists "documenti inquilino: li toglie la persona prima dell'invio" on documenti_inquilino;
++create policy "documenti inquilino: li toglie la persona prima dell'invio" on documenti_inquilino
++  for delete using (
++    tenant_id = auth.uid()
++    and exists (
++      select 1 from tenant_profiles t
++      where t.profile_id = auth.uid() and t.verifica_stato = 'non_avviata'
++    )
++  );
++
++-- Lo stesso per il file vero. Solo i file `inquilino-...`: nella stessa
++-- cartella ci sono anche i contratti degli affitti dichiarati, e quelli
++-- non devono sparire da sotto gli occhi dello staff.
++drop policy if exists "documenti-verifica: l'inquilino toglie i propri prima dell'invio" on storage.objects;
++create policy "documenti-verifica: l'inquilino toglie i propri prima dell'invio" on storage.objects
++  for delete to authenticated using (
++    bucket_id = 'documenti-verifica'
++    and (storage.foldername(name))[1] = auth.uid()::text
++    and storage.filename(name) like 'inquilino-%'
++    and exists (
++      select 1 from tenant_profiles t
++      where t.profile_id = auth.uid() and t.verifica_stato = 'non_avviata'
++    )
++  );
++
++-- ------------------------------------------------------------
++-- 4. Inviare per la verifica
++-- ------------------------------------------------------------
++
++create or replace function public.richiedi_verifica_inquilino()
++returns void
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_t tenant_profiles;
++begin
++  if auth.uid() is null then
++    raise exception 'NON_AUTENTICATO';
++  end if;
++
++  select * into v_t from tenant_profiles where profile_id = auth.uid();
++  if not found then
++    raise exception 'NON_INQUILINO';
++  end if;
++
++  if v_t.verifica_stato = 'verificato' then
++    raise exception 'INQUILINO_GIA_VERIFICATO';
++  end if;
++  if v_t.verifica_stato = 'in_verifica' then
++    raise exception 'INQUILINO_GIA_IN_VERIFICA';
++  end if;
++
++  -- lo staff confronta ciò che hai dichiarato con i documenti: senza una
++  -- dichiarazione non c'è niente da confrontare
++  if coalesce(trim(v_t.professione), '') = '' or coalesce(v_t.reddito_mensile, 0) <= 0 then
++    raise exception 'DATI_PROFILO_MANCANTI';
++  end if;
++
++  if not exists (select 1 from documenti_inquilino where tenant_id = auth.uid() and tipo = 'identita')
++     or not exists (select 1 from documenti_inquilino where tenant_id = auth.uid() and tipo = 'reddito') then
++    raise exception 'DOCUMENTI_INQUILINO_MANCANTI';
++  end if;
++
++  update tenant_profiles
++     set verifica_stato = 'in_verifica',
++         verifica_inviata_at = now(),
++         verifica_esito_note = null
++   where profile_id = auth.uid();
++end;
++$$;
++
++grant execute on function public.richiedi_verifica_inquilino() to authenticated;
++
++-- ------------------------------------------------------------
++-- 5. Lo staff: cosa vede, e la decisione
++--
++-- Lo staff NON legge il profilo intero: riceve solo ciò che serve a
++-- confrontare la dichiarazione con i documenti (stesso principio della
++-- vista dei candidati per i proprietari).
++-- ------------------------------------------------------------
++
++create or replace function public.inquilini_da_verificare()
++returns table (tenant_id uuid, nome text, cognome text, inviata_at timestamptz)
++language plpgsql
++security definer
++set search_path = public
++as $$
++begin
++  if not is_staff() then
++    raise exception 'NON_STAFF';
++  end if;
++
++  return query
++    select t.profile_id, p.nome, p.cognome, t.verifica_inviata_at
++      from tenant_profiles t
++      join profiles p on p.id = t.profile_id
++     where t.verifica_stato = 'in_verifica'
++     order by t.verifica_inviata_at nulls last;
++end;
++$$;
++
++create or replace function public.dati_per_verifica_inquilino(p_tenant uuid)
++returns table (
++  nome text, cognome text, professione text,
++  reddito_mensile integer, reddito_nucleo integer,
++  verifica_stato text, inviata_at timestamptz
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++begin
++  if not is_staff() then
++    raise exception 'NON_STAFF';
++  end if;
++
++  return query
++    select p.nome, p.cognome, t.professione, t.reddito_mensile, t.reddito_nucleo,
++           t.verifica_stato::text, t.verifica_inviata_at
++      from tenant_profiles t
++      join profiles p on p.id = t.profile_id
++     where t.profile_id = p_tenant;
++end;
++$$;
++
++create or replace function public.esito_verifica_inquilino(
++  p_tenant uuid,
++  p_verificato boolean,
++  p_note text
++)
++returns void
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_stato stato_verifica;
++begin
++  if not is_staff() then
++    raise exception 'NON_STAFF';
++  end if;
++
++  select verifica_stato into v_stato from tenant_profiles where profile_id = p_tenant;
++  if not found then
++    raise exception 'INQUILINO_INESISTENTE';
++  end if;
++  if v_stato <> 'in_verifica' then
++    raise exception 'INQUILINO_NON_IN_VERIFICA';
++  end if;
++
++  if p_verificato then
++    update tenant_profiles
++       set verificato = true, verifica_stato = 'verificato', verifica_esito_note = null
++     where profile_id = p_tenant;
++  else
++    if p_note is null or length(trim(p_note)) < 3 then
++      raise exception 'INQUILINO_NOTA_OBBLIGATORIA';
++    end if;
++    update tenant_profiles
++       set verificato = false, verifica_stato = 'non_avviata',
++           verifica_esito_note = left(trim(p_note), 500)
++     where profile_id = p_tenant;
++  end if;
++end;
++$$;
++
++grant execute on function public.inquilini_da_verificare() to authenticated;
++grant execute on function public.dati_per_verifica_inquilino(uuid) to authenticated;
++grant execute on function public.esito_verifica_inquilino(uuid, boolean, text) to authenticated;
++
++-- ------------------------------------------------------------
++-- Verifica
++-- ------------------------------------------------------------
++
++select table_name from information_schema.tables where table_name = 'documenti_inquilino';
++
++select routine_name from information_schema.routines
++where routine_name in ('richiedi_verifica_inquilino', 'inquilini_da_verificare',
++                       'dati_per_verifica_inquilino', 'esito_verifica_inquilino')
++order by 1;   -- 4 righe
++
++select policyname from pg_policies where tablename = 'documenti_inquilino' order by 1;   -- 3 righe
+-- 
+2.43.0
+

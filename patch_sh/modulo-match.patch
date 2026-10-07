@@ -1,0 +1,1188 @@
+From 7a8a0fa222f36f0d4dde963d1cd4cd2696f31a99 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 5 Oct 2026 15:27:50 +0000
+Subject: [PATCH] feat(match): modulo di calcolo del match con test
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Porta nell'app il calcolo del prototipo, corretto, e applica le decisioni
+D1-D8 concordate. Per ora NON è collegato all'interfaccia: nessun
+comportamento dell'app cambia.
+
+Lato inquilino (calcolaMatchInquilino, ordinaAnnunci):
+- cinque componenti pesati come nel prototipo
+- curva del budget continua: prima una casa appena sopra il budget
+  valeva più di una esattamente a budget
+- tolleranza del 10%: oltre non compare, entro compare in fondo
+- fasce in_ricerca / oltre_ricerca / escluso per ordinare il mazzo
+- un dato mancante nell'annuncio non penalizza l'inquilino
+- niente minimo a 28, massimo 99
+
+Lato proprietario (calcolaMatchProprietario, ordinaCandidati):
+- ogni criterio ha un peso 1-10 ed è obbligatorio o preferenziale
+- un obbligatorio non soddisfatto blocca, la percentuale resta visibile
+- 'non indicato' distinto da 'no'
+- reddito confrontato con il canone reale, soglia scelta dal proprietario
+- cinque criteri al lancio, nessuno sulla composizione familiare
+- a parità di percentuale si ordina per affidabilità (D4)
+
+Pesi e soglie in un solo file (config.ts). 22 test, lanciabili con
+'npm test' senza dipendenze nuove.
+---
+ package.json                  |   3 +-
+ scripts/test-match.mjs        | 352 ++++++++++++++++++++++++++++++++++
+ src/lib/match/comuni.ts       |  30 +++
+ src/lib/match/config.ts       | 110 +++++++++++
+ src/lib/match/index.ts        |  12 ++
+ src/lib/match/inquilino.ts    | 239 +++++++++++++++++++++++
+ src/lib/match/proprietario.ts | 220 +++++++++++++++++++++
+ src/lib/match/tipi.ts         | 117 +++++++++++
+ 8 files changed, 1082 insertions(+), 1 deletion(-)
+ create mode 100644 scripts/test-match.mjs
+ create mode 100644 src/lib/match/comuni.ts
+ create mode 100644 src/lib/match/config.ts
+ create mode 100644 src/lib/match/index.ts
+ create mode 100644 src/lib/match/inquilino.ts
+ create mode 100644 src/lib/match/proprietario.ts
+ create mode 100644 src/lib/match/tipi.ts
+
+diff --git a/package.json b/package.json
+index 167f826..d167aa2 100644
+--- a/package.json
++++ b/package.json
+@@ -6,7 +6,8 @@
+     "dev": "next dev",
+     "build": "next build",
+     "start": "next start",
+-    "lint": "eslint"
++    "lint": "eslint",
++    "test": "node --test scripts/test-match.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-match.mjs b/scripts/test-match.mjs
+new file mode 100644
+index 0000000..7269cec
+--- /dev/null
++++ b/scripts/test-match.mjs
+@@ -0,0 +1,352 @@
++/**
++ * Test del modulo di calcolo del match (src/lib/match).
++ *
++ * Si lancia con:   npm test
++ *
++ * Non serve nessuna dipendenza in più: usa il test runner incluso in
++ * Node e il compilatore TypeScript già presente nel progetto, che qui
++ * serve solo a leggere i file .ts del modulo senza prima compilare l'app.
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import { createRequire } from "node:module";
++import fs from "node:fs";
++import path from "node:path";
++import { fileURLToPath } from "node:url";
++
++const require = createRequire(import.meta.url);
++const ts = require("typescript");
++const radice = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
++
++// ---- piccolo caricatore: traduce i .ts al volo e risolve gli import relativi
++const cache = new Map();
++function carica(file) {
++  const assoluto = path.resolve(file);
++  if (cache.has(assoluto)) return cache.get(assoluto).exports;
++
++  const sorgente = fs.readFileSync(assoluto, "utf8");
++  const { outputText } = ts.transpileModule(sorgente, {
++    compilerOptions: {
++      module: ts.ModuleKind.CommonJS,
++      target: ts.ScriptTarget.ES2020,
++    },
++  });
++
++  const modulo = { exports: {} };
++  cache.set(assoluto, modulo);
++
++  const richiedi = (spec) => {
++    if (!spec.startsWith(".")) return require(spec);
++    let p = path.resolve(path.dirname(assoluto), spec);
++    if (fs.existsSync(p + ".ts")) p += ".ts";
++    else if (fs.existsSync(path.join(p, "index.ts"))) p = path.join(p, "index.ts");
++    return carica(p);
++  };
++
++  new Function("require", "module", "exports", outputText)(
++    richiedi,
++    modulo,
++    modulo.exports
++  );
++  return modulo.exports;
++}
++
++const m = carica(path.join(radice, "src", "lib", "match", "index.ts"));
++const {
++  calcolaMatchInquilino,
++  ordinaAnnunci,
++  calcolaMatchProprietario,
++  ordinaCandidati,
++  etichettaPer,
++  CHIAVI_CRITERI,
++} = m;
++
++// ---- dati di prova
++const profilo = (o = {}) => ({
++  budgetMax: 1500,
++  localiMin: 2,
++  mqMin: 50,
++  zone: ["Isola, Milano"],
++  interessi: {},
++  ...o,
++});
++const casa = (o = {}) => ({
++  prezzo: 1500,
++  zona: "Isola, Milano",
++  locali: 2,
++  mq: 50,
++  attributi: {},
++  ...o,
++});
++const candidato = (o = {}) => ({
++  redditoMensileNucleo: 3000,
++  garante: true,
++  fideiussione: null,
++  verificato: true,
++  completezza: 90,
++  protestato: false,
++  ...o,
++});
++const req = (chiave, peso, modo = "preferenziale", extra = {}) => ({
++  chiave,
++  peso,
++  modo,
++  ...extra,
++});
++
++// ============================================================
++// Lato inquilino
++// ============================================================
++
++test("difetto 1: il budget non premia lo sforamento", () => {
++  const prezzi = [1200, 1400, 1500, 1515, 1575, 1650];
++  const punteggi = prezzi.map((prezzo) =>
++    calcolaMatchInquilino(casa({ prezzo }), profilo()).punteggio
++  );
++  for (let i = 1; i < punteggi.length; i++) {
++    assert.ok(
++      punteggi[i] <= punteggi[i - 1],
++      `a ${prezzi[i]} il punteggio (${punteggi[i]}) supera quello a ${prezzi[i - 1]} (${punteggi[i - 1]})`
++    );
++  }
++  // il caso preciso del prototipo: a budget 89, appena sopra 99
++  const aBudget = calcolaMatchInquilino(casa({ prezzo: 1500 }), profilo());
++  const appenaSopra = calcolaMatchInquilino(casa({ prezzo: 1515 }), profilo());
++  assert.ok(aBudget.punteggio > appenaSopra.punteggio);
++});
++
++test("D1: fasce del budget con tolleranza del 10%", () => {
++  const f = (prezzo) => calcolaMatchInquilino(casa({ prezzo }), profilo()).fascia;
++  assert.equal(f(1200), "in_ricerca");
++  assert.equal(f(1500), "in_ricerca");
++  assert.equal(f(1501), "oltre_ricerca");
++  assert.equal(f(1650), "oltre_ricerca"); // esattamente +10%
++  assert.equal(f(1651), "escluso");
++  assert.equal(f(2200), "escluso");
++});
++
++test("lo sforamento entro tolleranza genera un avviso leggibile", () => {
++  const r = calcolaMatchInquilino(casa({ prezzo: 1590 }), profilo());
++  assert.equal(r.fascia, "oltre_ricerca");
++  assert.deepEqual(r.avvisi, ["Oltre il tuo budget del 6%"]);
++});
++
++test("senza budget impostato non c'è limite e nessuna fascia penalizzante", () => {
++  const r = calcolaMatchInquilino(casa({ prezzo: 9000 }), profilo({ budgetMax: null }));
++  assert.equal(r.fascia, "in_ricerca");
++  assert.ok(!r.criteri.some((c) => c.chiave === "budget"));
++});
++
++test("zone vuote = nessuna preferenza, non un malus per tutti", () => {
++  const senzaZone = calcolaMatchInquilino(casa({ zona: "Bicocca, Milano" }), profilo({ zone: [] }));
++  const inZona = calcolaMatchInquilino(casa(), profilo());
++  assert.equal(senzaZone.fascia, "in_ricerca");
++  assert.equal(senzaZone.punteggio, inZona.punteggio);
++});
++
++test("una zona non scelta porta l'annuncio oltre la ricerca e abbassa il punteggio", () => {
++  const fuori = calcolaMatchInquilino(casa({ zona: "Bicocca, Milano" }), profilo());
++  const dentro = calcolaMatchInquilino(casa(), profilo());
++  assert.equal(fuori.fascia, "oltre_ricerca");
++  assert.ok(fuori.punteggio < dentro.punteggio);
++});
++
++test("P4: un dato mancante nell'annuncio non punisce l'inquilino", () => {
++  const mancante = calcolaMatchInquilino(casa({ locali: null, mq: null }), profilo());
++  const sottoMinimo = calcolaMatchInquilino(casa({ locali: 1, mq: 40 }), profilo());
++  const completo = calcolaMatchInquilino(casa(), profilo());
++
++  assert.equal(mancante.fascia, "in_ricerca", "non deve cambiare fascia");
++  assert.equal(mancante.avvisi.length, 2);
++  assert.ok(mancante.punteggio < completo.punteggio);
++  assert.ok(mancante.punteggio > sottoMinimo.punteggio, "meglio di una casa troppo piccola");
++  assert.equal(mancante.criteri.find((c) => c.chiave === "locali").stato, "non_indicato");
++});
++
++test("le caratteristiche contano in proporzione al peso scelto", () => {
++  const p = profilo({ interessi: { balcone: 8, ascensore: 2 } });
++  const soloBalcone = calcolaMatchInquilino(casa({ attributi: { balcone: true } }), p);
++  const soloAscensore = calcolaMatchInquilino(casa({ attributi: { ascensore: true } }), p);
++  assert.equal(soloBalcone.punteggio, 87);
++  assert.equal(soloAscensore.punteggio, 75);
++  assert.equal(soloBalcone.criteri.find((c) => c.chiave === "balcone").stato, "ok");
++  assert.equal(soloBalcone.criteri.find((c) => c.chiave === "ascensore").stato, "no");
++});
++
++test("D8: nessun punteggio arriva a 100 e il minimo di 28 non esiste più", () => {
++  const perfetta = calcolaMatchInquilino(
++    casa({ prezzo: 1000, attributi: { balcone: true, ascensore: true } }),
++    profilo({ interessi: { balcone: 8, ascensore: 2 } })
++  );
++  assert.equal(perfetta.punteggio, 99);
++
++  const pessima = calcolaMatchInquilino(
++    casa({ prezzo: 1650, zona: "Bicocca, Milano", locali: 1, mq: 10 }),
++    profilo()
++  );
++  assert.ok(pessima.punteggio < 28, `atteso sotto 28, trovato ${pessima.punteggio}`);
++});
++
++test("D8: soglie delle etichette", () => {
++  assert.equal(etichettaPer(99), "Ottima compatibilità");
++  assert.equal(etichettaPer(88), "Ottima compatibilità");
++  assert.equal(etichettaPer(87), "Buona compatibilità");
++  assert.equal(etichettaPer(70), "Buona compatibilità");
++  assert.equal(etichettaPer(69), "Compatibilità parziale");
++  assert.equal(etichettaPer(50), "Compatibilità parziale");
++  assert.equal(etichettaPer(49), "Compatibilità bassa");
++});
++
++test("D2: il mazzo mette prima gli annunci in ricerca, toglie gli esclusi, ordina per punteggio", () => {
++  const voci = [
++    { id: "a", match: { fascia: "oltre_ricerca", punteggio: 90 } },
++    { id: "b", match: { fascia: "in_ricerca", punteggio: 60 } },
++    { id: "c", match: { fascia: "escluso", punteggio: 95 } },
++    { id: "d", match: { fascia: "in_ricerca", punteggio: 80 } },
++    { id: "e", match: { fascia: "in_ricerca", punteggio: 80 } },
++  ];
++  assert.deepEqual(ordinaAnnunci(voci).map((v) => v.id), ["d", "e", "b", "a"]);
++});
++
++// ============================================================
++// Lato proprietario
++// ============================================================
++
++test("difetto 2: il reddito si confronta con il canone, non con una soglia fissa", () => {
++  const richiesti = [req("redditoCanone", 5)];
++  const c = candidato({ redditoMensileNucleo: 2500 });
++
++  const stato = (canone) =>
++    calcolaMatchProprietario(richiesti, c, canone).criteri[0].stato;
++
++  assert.equal(stato(800), "ok"); // 32%
++  assert.equal(stato(1500), "no"); // 60%
++  assert.equal(stato(2200), "no"); // 88%
++});
++
++test("la soglia del reddito è scelta dal proprietario ed è limitata", () => {
++  const c = candidato({ redditoMensileNucleo: 2500 });
++  const r = (soglia) =>
++    calcolaMatchProprietario([req("redditoCanone", 5, "preferenziale", { sogliaPct: soglia })], c, 1500)
++      .criteri[0].stato;
++
++  assert.equal(r(60), "ok"); // 1500/2500 = 60%
++  assert.equal(r(50), "no");
++  // fuori scala: 90 viene riportato al massimo consentito (60)
++  const alto = calcolaMatchProprietario(
++    [req("redditoCanone", 5, "preferenziale", { sogliaPct: 90 })],
++    candidato({ redditoMensileNucleo: 1000 }),
++    700
++  );
++  assert.equal(alto.criteri[0].stato, "no"); // 70% > 60%
++});
++
++test("difetto 3: 'non indicato' si distingue da 'no' anche se pesa uguale", () => {
++  const richiesti = [req("nessunProtesto", 5), req("garante", 5)];
++  const r = (protestato) =>
++    calcolaMatchProprietario(richiesti, candidato({ protestato }), 1000);
++
++  const no = r(true);
++  const nonIndicato = r(null);
++
++  assert.equal(no.punteggio, nonIndicato.punteggio);
++  assert.equal(no.criteri[0].stato, "no");
++  assert.equal(nonIndicato.criteri[0].stato, "non_indicato");
++  assert.equal(no.incompleto, false);
++  assert.equal(nonIndicato.incompleto, true);
++  assert.equal(r(false).punteggio, 99);
++});
++
++test("tutti i criteri richiesti pesano, ciascuno col suo peso", () => {
++  // garante (peso 8) soddisfatto, profilo completo (peso 2) no: 80%
++  const r = calcolaMatchProprietario(
++    [req("garante", 8), req("profiloCompleto", 2)],
++    candidato({ completezza: 40 }),
++    1000
++  );
++  assert.equal(r.punteggio, 80);
++});
++
++test("un criterio obbligatorio non soddisfatto blocca ma la percentuale resta visibile", () => {
++  const r = calcolaMatchProprietario(
++    [req("garante", 8, "obbligatorio"), req("profiloCompleto", 2)],
++    candidato({ garante: false, fideiussione: false }),
++    1000
++  );
++  assert.equal(r.bloccato, true);
++  assert.deepEqual(r.mancanti, ["Garante o fideiussione disponibile"]);
++  assert.equal(r.punteggio, 20);
++  assert.equal(r.criteri[0].obbligatorio, true);
++});
++
++test("un obbligatorio non indicato blocca, ma si legge come 'non indicato'", () => {
++  const r = calcolaMatchProprietario(
++    [req("nessunProtesto", 5, "obbligatorio")],
++    candidato({ protestato: null }),
++    1000
++  );
++  assert.equal(r.bloccato, true);
++  assert.equal(r.criteri[0].stato, "non_indicato");
++});
++
++test("un criterio preferenziale non soddisfatto non blocca", () => {
++  const r = calcolaMatchProprietario(
++    [req("garante", 5, "preferenziale")],
++    candidato({ garante: false, fideiussione: false }),
++    1000
++  );
++  assert.equal(r.bloccato, false);
++  assert.equal(r.punteggio, 0);
++});
++
++test("senza criteri la percentuale è null; chiavi sconosciute e ripetute si ignorano", () => {
++  assert.equal(calcolaMatchProprietario([], candidato(), 1000).punteggio, null);
++  assert.equal(
++    calcolaMatchProprietario([req("inesistente", 5)], candidato(), 1000).punteggio,
++    null
++  );
++  const doppio = calcolaMatchProprietario(
++    [req("garante", 5), req("garante", 1, "obbligatorio")],
++    candidato(),
++    1000
++  );
++  assert.equal(doppio.criteri.length, 1);
++  assert.equal(doppio.bloccato, false, "vale la prima occorrenza");
++});
++
++test("i pesi fuori scala vengono riportati a 1-10", () => {
++  // garante peso 99 -> 10 (soddisfatto), protesto peso 0 -> 1 (non soddisfatto): 10/11
++  const r = calcolaMatchProprietario(
++    [req("garante", 99), req("nessunProtesto", 0)],
++    candidato({ protestato: true }),
++    1000
++  );
++  assert.equal(r.punteggio, 91);
++});
++
++test("difetto 4: nessun criterio disponibile riguarda la composizione familiare", () => {
++  assert.equal(CHIAVI_CRITERI.length, 5);
++  for (const k of CHIAVI_CRITERI) {
++    assert.ok(!/nucle|figli|famigli|anim|coppia|single/i.test(k), `criterio sospetto: ${k}`);
++  }
++});
++
++test("D4: i candidati si ordinano per blocco, percentuale e, a parità, affidabilità", () => {
++  const v = (id, punteggio, bloccato, affidabilita) => ({
++    id,
++    affidabilita,
++    match: { punteggio, bloccato },
++  });
++  const ordinati = ordinaCandidati([
++    v("bloccato-alto", 90, true, 99),
++    v("sessanta-affidabile-50", 60, false, 50),
++    v("sessanta-affidabile-80", 60, false, 80),
++    v("settanta", 70, false, 10),
++  ]);
++  assert.deepEqual(ordinati.map((x) => x.id), [
++    "settanta",
++    "sessanta-affidabile-80",
++    "sessanta-affidabile-50",
++    "bloccato-alto",
++  ]);
++});
+diff --git a/src/lib/match/comuni.ts b/src/lib/match/comuni.ts
+new file mode 100644
+index 0000000..b6ddaa5
+--- /dev/null
++++ b/src/lib/match/comuni.ts
+@@ -0,0 +1,30 @@
++import {
++  ETICHETTA_MINIMA,
++  PESO_MAX,
++  PESO_MIN,
++  PUNTEGGIO_MAX,
++  SOGLIE_ETICHETTE,
++} from "./config";
++import type { EtichettaMatch } from "./tipi";
++
++/** Porta un punteggio nell'intervallo 0-99, arrotondato. */
++export function limita(punteggio: number): number {
++  return Math.max(0, Math.min(PUNTEGGIO_MAX, Math.round(punteggio)));
++}
++
++export function etichettaPer(punteggio: number): EtichettaMatch {
++  for (const s of SOGLIE_ETICHETTE) {
++    if (punteggio >= s.da) return s.etichetta;
++  }
++  return ETICHETTA_MINIMA;
++}
++
++/** Un peso arriva dal database o da un modulo: lo riporto a 1-10. */
++export function pesoValido(peso: number): number {
++  if (!Number.isFinite(peso)) return PESO_MIN;
++  return Math.max(PESO_MIN, Math.min(PESO_MAX, Math.round(peso)));
++}
++
++export function euro(n: number): string {
++  return `€${n.toLocaleString("it-IT")}`;
++}
+diff --git a/src/lib/match/config.ts b/src/lib/match/config.ts
+new file mode 100644
+index 0000000..c052bc7
+--- /dev/null
++++ b/src/lib/match/config.ts
+@@ -0,0 +1,110 @@
++/**
++ * Pesi e soglie del calcolo del match.
++ *
++ * È l'UNICO posto da modificare per tarare il calcolo: la logica nei
++ * file accanto legge da qui e non contiene numeri propri.
++ *
++ * Origine: i valori derivano dal prototipo HTML e dalle decisioni D1-D8
++ * del documento "Come si calcola il match". Dove un valore è un
++ * segnaposto in attesa di una scelta vostra, c'è scritto.
++ */
++
++// ------------------------------------------------------------
++// Lato inquilino: quanto una casa gli va bene
++// ------------------------------------------------------------
++
++/** Peso di ogni componente, su 100. Con interessi indicati. */
++export const PESI_INQUILINO = {
++  budget: 32,
++  zona: 20,
++  locali: 16,
++  mq: 12,
++  caratteristiche: 20,
++} as const;
++
++/** Stessi pesi quando l'inquilino non ha indicato caratteristiche. */
++export const PESI_INQUILINO_SENZA_CARATTERISTICHE = {
++  budget: 40,
++  zona: 25,
++  locali: 20,
++  mq: 15,
++  caratteristiche: 0,
++} as const;
++
++/**
++ * Curva del budget (D1).
++ *
++ * A budget si ottiene `puntiAlBudget` dei punti. Sotto budget i punti
++ * salgono di un punto per ogni punto di risparmio, fino al pieno (con
++ * 0,72 il pieno arriva al 28% sotto il budget). Sopra budget si scende
++ * in linea retta fino a zero a `sforoAZero`.
++ * È continua: una casa appena sopra il budget non può valere più di
++ * una esattamente a budget, come accadeva nel prototipo.
++ */
++export const CURVA_BUDGET = {
++  puntiAlBudget: 0.72,
++  sforoAZero: 0.25,
++} as const;
++
++/**
++ * Oltre questo sforamento (10% sul budget) l'annuncio non compare.
++ * Entro, compare in fondo e marcato come "oltre il tuo budget" (D1, D2).
++ */
++export const TOLLERANZA_BUDGET = 0.1;
++
++/** Frazione dei punti di un componente quando il minimo NON è raggiunto. */
++export const PENALITA = {
++  zonaFuori: 0.24,
++  localiSotto: 0.2,
++  /** per i m²: punti = peso * rapporto - peso * questo valore */
++  mqSottoDetrazione: 0.2,
++} as const;
++
++/**
++ * Punti quando il dato dell'ANNUNCIO manca (P4): l'inquilino non può
++ * compilare l'annuncio, quindi non viene punito per una dimenticanza
++ * del proprietario. Metà dei punti, e un avviso.
++ */
++export const PUNTI_DATO_MANCANTE = 0.5;
++
++// ------------------------------------------------------------
++// Lato proprietario: quanto il candidato risponde ai suoi criteri
++// ------------------------------------------------------------
++
++export const PESO_MIN = 1;
++export const PESO_MAX = 10;
++/** Peso proposto nel modulo quando il proprietario aggiunge un criterio. */
++export const PESO_PREDEFINITO = 5;
++
++/**
++ * Soglia di partenza del criterio "reddito rispetto al canone": il
++ * canone non supera questa percentuale del reddito mensile del nucleo.
++ *
++ * SEGNAPOSTO (D6): è un valore di partenza suggerito, la scelta
++ * definitiva è dei soci. Il proprietario può cambiarlo per annuncio
++ * entro questi limiti.
++ */
++export const SOGLIA_REDDITO_CANONE = {
++  predefinita: 33,
++  min: 15,
++  max: 60,
++} as const;
++
++/** Un profilo vale "completo" da questa percentuale di campi compilati. */
++export const SOGLIA_PROFILO_COMPLETO = 80;
++
++// ------------------------------------------------------------
++// Comuni
++// ------------------------------------------------------------
++
++/** Nessun punteggio arriva a 100: sono dati dichiarati (D8). */
++export const PUNTEGGIO_MAX = 99;
++
++/** Soglie delle etichette (D8). Sotto l'ultima: "Bassa". */
++export const SOGLIE_ETICHETTE = [
++  { da: 88, etichetta: "Ottima compatibilità" },
++  { da: 70, etichetta: "Buona compatibilità" },
++  { da: 50, etichetta: "Compatibilità parziale" },
++] as const;
++
++export const ETICHETTA_MINIMA = "Compatibilità bassa";
+diff --git a/src/lib/match/index.ts b/src/lib/match/index.ts
+new file mode 100644
+index 0000000..874b688
+--- /dev/null
++++ b/src/lib/match/index.ts
+@@ -0,0 +1,12 @@
++export * from "./config";
++export * from "./tipi";
++export { etichettaPer } from "./comuni";
++export { calcolaMatchInquilino, ordinaAnnunci } from "./inquilino";
++export {
++  CATALOGO_CRITERI,
++  CHIAVI_CRITERI,
++  calcolaMatchProprietario,
++  confrontaCandidati,
++  ordinaCandidati,
++} from "./proprietario";
++export type { VoceCandidato } from "./proprietario";
+diff --git a/src/lib/match/inquilino.ts b/src/lib/match/inquilino.ts
+new file mode 100644
+index 0000000..039cc42
+--- /dev/null
++++ b/src/lib/match/inquilino.ts
+@@ -0,0 +1,239 @@
++import { ATTR_VOCAB } from "../constants";
++import {
++  CURVA_BUDGET,
++  PENALITA,
++  PESI_INQUILINO,
++  PESI_INQUILINO_SENZA_CARATTERISTICHE,
++  PUNTI_DATO_MANCANTE,
++  TOLLERANZA_BUDGET,
++} from "./config";
++import { etichettaPer, euro, limita } from "./comuni";
++import type {
++  AnnuncioPerMatch,
++  Fascia,
++  ProfiloRicerca,
++  RisultatoInquilino,
++  VoceCriterio,
++} from "./tipi";
++
++// Margine per i confronti sui numeri in virgola mobile (es. 1650 contro
++// 1500 * 1,10, che in floating point vale 1650,0000000000002).
++const EPS = 1e-9;
++
++/**
++ * Quanto una casa va bene a un inquilino.
++ *
++ * Funzione pura: non legge né scrive nel database. Cinque componenti
++ * pesati (budget, zona, locali, metratura, caratteristiche), una
++ * fascia che decide DOVE compare l'annuncio nel mazzo, e una
++ * spiegazione voce per voce.
++ *
++ * Regole sui dati mancanti:
++ *  - criterio non impostato dall'inquilino (budget, zone, minimi
++ *    vuoti): nessuna preferenza, punti pieni;
++ *  - dato mancante nell'ANNUNCIO (locali, metratura): punti neutri e un
++ *    avviso, senza cambiare fascia. L'inquilino non può compilare
++ *    l'annuncio e non va punito;
++ *  - caratteristica non spuntata nell'annuncio: considerata assente.
++ *    Non si distingue "assente" da "non compilata" perché il database
++ *    non conserva la differenza.
++ */
++export function calcolaMatchInquilino(
++  annuncio: AnnuncioPerMatch,
++  profilo: ProfiloRicerca
++): RisultatoInquilino {
++  const interessi = profilo.interessi ?? {};
++  const chiaviInteressi = Object.keys(interessi);
++  const haCaratteristiche = chiaviInteressi.length > 0;
++  const W = haCaratteristiche
++    ? PESI_INQUILINO
++    : PESI_INQUILINO_SENZA_CARATTERISTICHE;
++
++  let punti = 0;
++  let fuoriRicerca = false;
++  let escluso = false;
++  const criteri: VoceCriterio[] = [];
++  const avvisi: string[] = [];
++
++  // ---------------- Budget ----------------
++  if (profilo.budgetMax === null) {
++    punti += W.budget;
++  } else {
++    const B = profilo.budgetMax;
++    const p = annuncio.prezzo;
++
++    if (p <= B) {
++      const margine = (B - p) / B;
++      punti += W.budget * Math.min(1, CURVA_BUDGET.puntiAlBudget + margine);
++    } else {
++      const sforo = (p - B) / B;
++      punti +=
++        W.budget *
++        CURVA_BUDGET.puntiAlBudget *
++        Math.max(0, 1 - sforo / CURVA_BUDGET.sforoAZero);
++
++      const pct = Math.max(1, Math.round(sforo * 100));
++      if (sforo <= TOLLERANZA_BUDGET + EPS) {
++        fuoriRicerca = true;
++        avvisi.push(`Oltre il tuo budget del ${pct}%`);
++      } else {
++        escluso = true;
++      }
++    }
++
++    criteri.push({
++      chiave: "budget",
++      etichetta: `Budget ${euro(B)}`,
++      stato: p <= B ? "ok" : "no",
++      dettaglio: `${euro(p)} al mese`,
++    });
++  }
++
++  // ---------------- Zona ----------------
++  if (profilo.zone.length === 0) {
++    punti += W.zona;
++  } else if (profilo.zone.includes(annuncio.zona)) {
++    punti += W.zona;
++    criteri.push({ chiave: "zona", etichetta: "Zona preferita", stato: "ok" });
++  } else {
++    punti += W.zona * PENALITA.zonaFuori;
++    fuoriRicerca = true;
++    criteri.push({
++      chiave: "zona",
++      etichetta: "Zona preferita",
++      stato: "no",
++      dettaglio: annuncio.zona,
++    });
++  }
++
++  // ---------------- Locali ----------------
++  if (profilo.localiMin === null) {
++    punti += W.locali;
++  } else if (annuncio.locali === null) {
++    punti += W.locali * PUNTI_DATO_MANCANTE;
++    avvisi.push("Numero di locali non indicato dal proprietario");
++    criteri.push({
++      chiave: "locali",
++      etichetta: `${profilo.localiMin}+ locali`,
++      stato: "non_indicato",
++    });
++  } else if (annuncio.locali >= profilo.localiMin) {
++    punti += W.locali;
++    criteri.push({
++      chiave: "locali",
++      etichetta: `${profilo.localiMin}+ locali`,
++      stato: "ok",
++    });
++  } else {
++    punti += W.locali * PENALITA.localiSotto;
++    fuoriRicerca = true;
++    criteri.push({
++      chiave: "locali",
++      etichetta: `${profilo.localiMin}+ locali`,
++      stato: "no",
++      dettaglio: `${annuncio.locali} locali`,
++    });
++  }
++
++  // ---------------- Metratura ----------------
++  if (profilo.mqMin === null) {
++    punti += W.mq;
++  } else if (annuncio.mq === null) {
++    punti += W.mq * PUNTI_DATO_MANCANTE;
++    avvisi.push("Metratura non indicata dal proprietario");
++    criteri.push({
++      chiave: "mq",
++      etichetta: `${profilo.mqMin}+ m²`,
++      stato: "non_indicato",
++    });
++  } else if (annuncio.mq >= profilo.mqMin) {
++    punti += W.mq;
++    criteri.push({
++      chiave: "mq",
++      etichetta: `${profilo.mqMin}+ m²`,
++      stato: "ok",
++    });
++  } else {
++    const rapporto = annuncio.mq / profilo.mqMin;
++    punti += Math.max(
++      0,
++      W.mq * rapporto - W.mq * PENALITA.mqSottoDetrazione
++    );
++    fuoriRicerca = true;
++    criteri.push({
++      chiave: "mq",
++      etichetta: `${profilo.mqMin}+ m²`,
++      stato: "no",
++      dettaglio: `${annuncio.mq} m²`,
++    });
++  }
++
++  // ---------------- Caratteristiche ----------------
++  if (haCaratteristiche) {
++    const attributi = annuncio.attributi ?? {};
++    const totale = chiaviInteressi.reduce((s, k) => s + interessi[k], 0);
++    let ottenuto = 0;
++
++    // prima nell'ordine del vocabolario, poi eventuali chiavi sconosciute
++    const ordinate = [
++      ...ATTR_VOCAB.map((a) => a.key as string).filter((k) =>
++        chiaviInteressi.includes(k)
++      ),
++      ...chiaviInteressi.filter(
++        (k) => !ATTR_VOCAB.some((a) => (a.key as string) === k)
++      ),
++    ];
++
++    for (const k of ordinate) {
++      const presente = !!attributi[k];
++      if (presente) ottenuto += interessi[k];
++      criteri.push({
++        chiave: k,
++        etichetta: ATTR_VOCAB.find((a) => a.key === k)?.label ?? k,
++        stato: presente ? "ok" : "no",
++      });
++    }
++    if (totale > 0) punti += W.caratteristiche * (ottenuto / totale);
++  }
++
++  const punteggio = limita(punti);
++  const fascia: Fascia = escluso
++    ? "escluso"
++    : fuoriRicerca
++      ? "oltre_ricerca"
++      : "in_ricerca";
++
++  return {
++    punteggio,
++    etichetta: etichettaPer(punteggio),
++    fascia,
++    criteri,
++    avvisi,
++  };
++}
++
++/**
++ * Prepara il mazzo: toglie gli esclusi e ordina per fascia (prima gli
++ * annunci in ricerca, poi gli altri), e dentro ogni fascia per
++ * percentuale decrescente. A parità l'ordine di arrivo resta invariato.
++ */
++export function ordinaAnnunci<T extends { match: RisultatoInquilino }>(
++  voci: T[]
++): T[] {
++  const ordineFascia: Record<Fascia, number> = {
++    in_ricerca: 0,
++    oltre_ricerca: 1,
++    escluso: 2,
++  };
++
++  return voci
++    .map((v, i) => ({ v, i }))
++    .filter(({ v }) => v.match.fascia !== "escluso")
++    .sort(
++      (a, b) =>
++        ordineFascia[a.v.match.fascia] - ordineFascia[b.v.match.fascia] ||
++        b.v.match.punteggio - a.v.match.punteggio ||
++        a.i - b.i
++    )
++    .map(({ v }) => v);
++}
+diff --git a/src/lib/match/proprietario.ts b/src/lib/match/proprietario.ts
+new file mode 100644
+index 0000000..37105fa
+--- /dev/null
++++ b/src/lib/match/proprietario.ts
+@@ -0,0 +1,220 @@
++import {
++  SOGLIA_PROFILO_COMPLETO,
++  SOGLIA_REDDITO_CANONE,
++} from "./config";
++import { etichettaPer, limita, pesoValido } from "./comuni";
++import type {
++  ChiaveCriterio,
++  CriterioRichiesto,
++  DatiCandidato,
++  RisultatoProprietario,
++  StatoCriterio,
++  VoceCriterio,
++} from "./tipi";
++
++const EPS = 1e-9;
++
++type Contesto = {
++  canone: number;
++  sogliaPct: number;
++};
++
++type Esito = { stato: StatoCriterio; dettaglio?: string };
++
++type DefinizioneCriterio = {
++  /** testo per l'interfaccia, anche nel modulo del proprietario */
++  nome: string;
++  descrizione: string;
++  etichetta: (ctx: Contesto) => string;
++  valuta: (c: DatiCandidato, ctx: Contesto) => Esito;
++};
++
++/**
++ * Il catalogo dei criteri che un proprietario può chiedere (D5).
++ *
++ * Aggiungerne uno significa aggiungere una voce qui e il suo tipo in
++ * `ChiaveCriterio`. NON ci sono criteri sulla composizione familiare
++ * (figli, numero di persone nel nucleo): è una scelta deliberata, vedi
++ * il difetto 4 del documento. Anche "nessun animale" resta fuori finché
++ * non lo valuta un legale.
++ */
++export const CATALOGO_CRITERI: Record<ChiaveCriterio, DefinizioneCriterio> = {
++  redditoCanone: {
++    nome: "Reddito rispetto al canone",
++    descrizione:
++      "Il canone non supera una certa percentuale del reddito mensile del nucleo.",
++    etichetta: ({ sogliaPct }) => `Canone entro il ${sogliaPct}% del reddito`,
++    valuta: (c, { canone, sogliaPct }) => {
++      if (c.redditoMensileNucleo === null) return { stato: "non_indicato" };
++      if (c.redditoMensileNucleo <= 0) {
++        return { stato: "no", dettaglio: "Reddito non positivo" };
++      }
++      const peso = (canone / c.redditoMensileNucleo) * 100;
++      return {
++        stato: peso <= sogliaPct + EPS ? "ok" : "no",
++        dettaglio: `Il canone pesa il ${Math.round(peso)}% sul reddito`,
++      };
++    },
++  },
++
++  garante: {
++    nome: "Garante o fideiussione",
++    descrizione: "Il candidato ha un garante oppure una fideiussione.",
++    etichetta: () => "Garante o fideiussione disponibile",
++    valuta: (c) => {
++      if (c.garante === true || c.fideiussione === true) return { stato: "ok" };
++      if (c.garante === false && c.fideiussione === false) {
++        return { stato: "no" };
++      }
++      return { stato: "non_indicato" };
++    },
++  },
++
++  profiloVerificato: {
++    nome: "Profilo verificato",
++    descrizione: "Il reddito è stato verificato con documenti.",
++    etichetta: () => "Profilo verificato con documenti",
++    // `verificato` non è mai "non indicato": o è stato verificato o no.
++    valuta: (c) =>
++      c.verificato
++        ? { stato: "ok" }
++        : { stato: "no", dettaglio: "Verifica non ancora effettuata" },
++  },
++
++  profiloCompleto: {
++    nome: "Profilo completo",
++    descrizione: "Il candidato ha compilato quasi tutti i campi del profilo.",
++    etichetta: () => "Presentazione e profilo completi",
++    valuta: (c) => ({
++      stato: c.completezza >= SOGLIA_PROFILO_COMPLETO ? "ok" : "no",
++      dettaglio: `${Math.round(c.completezza)}% dei campi compilati`,
++    }),
++  },
++
++  nessunProtesto: {
++    nome: "Nessun protesto",
++    descrizione: "Il candidato dichiara di non avere protesti.",
++    etichetta: () => "Nessun protesto dichiarato",
++    valuta: (c) => {
++      if (c.protestato === null) return { stato: "non_indicato" };
++      return { stato: c.protestato ? "no" : "ok" };
++    },
++  },
++};
++
++export const CHIAVI_CRITERI = Object.keys(CATALOGO_CRITERI) as ChiaveCriterio[];
++
++function sogliaValida(sogliaPct: number | undefined): number {
++  const { predefinita, min, max } = SOGLIA_REDDITO_CANONE;
++  if (sogliaPct === undefined || !Number.isFinite(sogliaPct)) return predefinita;
++  return Math.max(min, Math.min(max, Math.round(sogliaPct)));
++}
++
++/**
++ * Quanto un candidato risponde ai criteri che il proprietario ha chiesto
++ * per un annuncio.
++ *
++ * La percentuale è la quota di peso dei criteri soddisfatti sul peso
++ * totale, TUTTI i criteri richiesti contano, ciascuno col suo peso.
++ * In più, un criterio può essere obbligatorio: se manca, il candidato
++ * risulta `bloccato`, ma la percentuale resta calcolata e visibile.
++ *
++ * Un dato non indicato dal candidato conta come criterio non
++ * soddisfatto, ma si presenta come "non indicato" e non come "no": chi
++ * compila il profilo sa che può salire.
++ *
++ * Senza nessun criterio richiesto la percentuale è `null`: non c'è nulla
++ * da confrontare.
++ */
++export function calcolaMatchProprietario(
++  richiesti: CriterioRichiesto[],
++  candidato: DatiCandidato,
++  canone: number
++): RisultatoProprietario {
++  const viste = new Set<ChiaveCriterio>();
++  const criteri: VoceCriterio[] = [];
++  const mancanti: string[] = [];
++  let totale = 0;
++  let ottenuto = 0;
++  let incompleto = false;
++
++  for (const r of richiesti) {
++    const def = CATALOGO_CRITERI[r.chiave];
++    // una riga con una chiave che non esiste più nel catalogo, o ripetuta,
++    // si ignora invece di far fallire l'intero calcolo
++    if (!def || viste.has(r.chiave)) continue;
++    viste.add(r.chiave);
++
++    const ctx: Contesto = { canone, sogliaPct: sogliaValida(r.sogliaPct) };
++    const peso = pesoValido(r.peso);
++    const esito = def.valuta(candidato, ctx);
++    const etichetta = def.etichetta(ctx);
++    const obbligatorio = r.modo === "obbligatorio";
++
++    totale += peso;
++    if (esito.stato === "ok") ottenuto += peso;
++    if (esito.stato === "non_indicato") incompleto = true;
++    if (obbligatorio && esito.stato !== "ok") mancanti.push(etichetta);
++
++    criteri.push({
++      chiave: r.chiave,
++      etichetta,
++      stato: esito.stato,
++      dettaglio: esito.dettaglio,
++      obbligatorio,
++    });
++  }
++
++  if (totale === 0) {
++    return {
++      punteggio: null,
++      etichetta: null,
++      bloccato: false,
++      mancanti: [],
++      criteri: [],
++      incompleto: false,
++    };
++  }
++
++  const punteggio = limita((ottenuto / totale) * 100);
++
++  return {
++    punteggio,
++    etichetta: etichettaPer(punteggio),
++    bloccato: mancanti.length > 0,
++    mancanti,
++    criteri,
++    incompleto,
++  };
++}
++
++export type VoceCandidato = {
++  match: RisultatoProprietario;
++  /** punteggio di affidabilità, solo per gli spareggi (D4) */
++  affidabilita: number | null;
++};
++
++/**
++ * Ordine dei candidati di un annuncio: prima chi soddisfa tutti i
++ * criteri obbligatori, poi per percentuale decrescente, e a parità per
++ * affidabilità decrescente.
++ *
++ * L'affidabilità qui NON entra nella percentuale: è una proprietà della
++ * persona, uguale per ogni casa, e si usa solo per decidere tra pari.
++ */
++export function confrontaCandidati(
++  a: VoceCandidato,
++  b: VoceCandidato
++): number {
++  if (a.match.bloccato !== b.match.bloccato) return a.match.bloccato ? 1 : -1;
++
++  const pa = a.match.punteggio ?? -1;
++  const pb = b.match.punteggio ?? -1;
++  if (pa !== pb) return pb - pa;
++
++  return (b.affidabilita ?? -1) - (a.affidabilita ?? -1);
++}
++
++export function ordinaCandidati<T extends VoceCandidato>(voci: T[]): T[] {
++  return [...voci].sort(confrontaCandidati);
++}
+diff --git a/src/lib/match/tipi.ts b/src/lib/match/tipi.ts
+new file mode 100644
+index 0000000..b2b8604
+--- /dev/null
++++ b/src/lib/match/tipi.ts
+@@ -0,0 +1,117 @@
++/** Tipi condivisi dai due lati del calcolo. Nessuna dipendenza dal database. */
++
++export type StatoCriterio = "ok" | "no" | "non_indicato";
++
++/** Una riga della spiegazione: "perché vedi questo numero" (P6). */
++export type VoceCriterio = {
++  chiave: string;
++  etichetta: string;
++  stato: StatoCriterio;
++  /** testo breve, es. "€1.420 contro un budget di €1.500" */
++  dettaglio?: string;
++  /** lato proprietario: il criterio era obbligatorio */
++  obbligatorio?: boolean;
++};
++
++export type EtichettaMatch =
++  | "Ottima compatibilità"
++  | "Buona compatibilità"
++  | "Compatibilità parziale"
++  | "Compatibilità bassa";
++
++// ------------------------------------------------------------
++// Inquilino → casa
++// ------------------------------------------------------------
++
++/** I criteri di ricerca dell'inquilino. `null` = nessuna preferenza. */
++export type ProfiloRicerca = {
++  budgetMax: number | null;
++  localiMin: number | null;
++  mqMin: number | null;
++  /** vuoto = nessuna preferenza di zona */
++  zone: string[];
++  /** chiave caratteristica → peso da 1 a 10 */
++  interessi: Record<string, number>;
++};
++
++export type AnnuncioPerMatch = {
++  prezzo: number;
++  zona: string;
++  locali: number | null;
++  mq: number | null;
++  attributi: Record<string, boolean> | null;
++};
++
++/**
++ * - `in_ricerca`: rispetta tutti i criteri.
++ * - `oltre_ricerca`: sfora il budget entro la tolleranza, o non rispetta
++ *   zona, locali o metratura. Compare dopo gli altri, marcato.
++ * - `escluso`: sfora il budget oltre la tolleranza. Non compare.
++ */
++export type Fascia = "in_ricerca" | "oltre_ricerca" | "escluso";
++
++export type RisultatoInquilino = {
++  /** 0-99 */
++  punteggio: number;
++  etichetta: EtichettaMatch;
++  fascia: Fascia;
++  criteri: VoceCriterio[];
++  /** frasi per l'interfaccia, es. "Oltre il tuo budget del 6%" */
++  avvisi: string[];
++};
++
++// ------------------------------------------------------------
++// Candidato → criteri del proprietario
++// ------------------------------------------------------------
++
++/**
++ * I criteri che un proprietario può chiedere. Sono cinque al lancio (D5):
++ * nessuno riguarda la composizione familiare, e quello sugli animali
++ * resta fuori finché non lo valuta un legale.
++ */
++export type ChiaveCriterio =
++  | "redditoCanone"
++  | "garante"
++  | "profiloVerificato"
++  | "profiloCompleto"
++  | "nessunProtesto";
++
++/**
++ * Un criterio richiesto dal proprietario per un annuncio.
++ * - `preferenziale`: fa salire o scendere la percentuale.
++ * - `obbligatorio`: oltre a pesare, se manca il candidato risulta
++ *   "bloccato".
++ */
++export type CriterioRichiesto = {
++  chiave: ChiaveCriterio;
++  /** da 1 a 10 */
++  peso: number;
++  modo: "obbligatorio" | "preferenziale";
++  /** solo per `redditoCanone`: il canone non supera questa % del reddito */
++  sogliaPct?: number;
++};
++
++/** Cosa si sa del candidato. `null` = non indicato. */
++export type DatiCandidato = {
++  /** reddito mensile del NUCLEO, non della sola persona (D6) */
++  redditoMensileNucleo: number | null;
++  garante: boolean | null;
++  fideiussione: boolean | null;
++  verificato: boolean;
++  /** percentuale di completezza del profilo, 0-100 */
++  completezza: number;
++  protestato: boolean | null;
++};
++
++export type RisultatoProprietario = {
++  /** 0-99, oppure `null` se il proprietario non ha chiesto nessun criterio */
++  punteggio: number | null;
++  etichetta: EtichettaMatch | null;
++  /** manca almeno un criterio obbligatorio */
++  bloccato: boolean;
++  /** etichette dei criteri obbligatori non soddisfatti */
++  mancanti: string[];
++  criteri: VoceCriterio[];
++  /** almeno un dato non è stato indicato dal candidato */
++  incompleto: boolean;
++};
+-- 
+2.43.0
+

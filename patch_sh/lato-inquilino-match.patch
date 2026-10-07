@@ -1,0 +1,1096 @@
+From 44d27d927f4bbab0247edc9b8328f07fc4bf8890 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 5 Oct 2026 15:38:10 +0000
+Subject: [PATCH] =?UTF-8?q?feat(match):=20mazzo=20ordinato=20per=20compati?=
+ =?UTF-8?q?bilit=C3=A0,=20separatore=20e=20spiegazione?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Collega il calcolo del match alla Home dell'inquilino. Nessuna migrazione.
+
+Mazzo:
+- la query non filtra più per budget, locali, metratura e zone: lo fa
+  calcolaMatchInquilino, che separa gli annunci in ricerca da quelli
+  'oltre la ricerca' e toglie solo chi supera la tolleranza sul budget
+- ordine: prima gli annunci in ricerca per percentuale decrescente, poi
+  gli altri
+- legge anche le caratteristiche pesate (tenant_interessi), che prima la
+  pagina non caricava
+
+Deck:
+- percentuale e giudizio sulla card, con i motivi per gli annunci fuori
+  ricerca ('Oltre il tuo budget del 6%', 'Fuori dalle tue zone')
+- schermata di passaggio tra le due fasce, anche a inizio mazzo se
+  nessuna casa è in ricerca
+- riquadro in alto con i conteggi corretti
+- messaggi quando il mazzo è corto, che dicono quante case sono oltre la
+  tolleranza e come vederle
+- senza criteri di ricerca nessuna percentuale: sarebbe 99 per tutte
+- il mazzo si congela alla prima visualizzazione: dopo una candidatura la
+  pagina viene rigenerata senza l'annuncio scelto e l'indice saltava
+  una casa
+
+Scheda: sezione 'perché questo match' con i criteri soddisfatti e non,
+i dati mancanti e l'avvertenza che non è una previsione.
+
+Modulo: motivi separati dagli avvisi, sforoBudgetPct, preparaMazzo,
+haCriteriDiRicerca, statoMazzo. 36 test.
+---
+ scripts/test-match.mjs           | 171 ++++++++++++++++++++++++++++++-
+ src/app/(app)/HomeClient.tsx     | 167 +++++++++++++++++++++++++-----
+ src/app/(app)/SchedaImmobile.tsx |  65 +++++++++++-
+ src/app/(app)/page.tsx           |  60 +++++++----
+ src/app/globals.css              | 140 +++++++++++++++++++++++++
+ src/lib/match/index.ts           |   2 +
+ src/lib/match/inquilino.ts       |  10 +-
+ src/lib/match/mazzo.ts           |  98 ++++++++++++++++++
+ src/lib/match/tipi.ts            |   9 +-
+ src/lib/types.ts                 |   5 +
+ 10 files changed, 676 insertions(+), 51 deletions(-)
+ create mode 100644 src/lib/match/mazzo.ts
+
+diff --git a/scripts/test-match.mjs b/scripts/test-match.mjs
+index 7269cec..e165ce6 100644
+--- a/scripts/test-match.mjs
++++ b/scripts/test-match.mjs
+@@ -59,6 +59,9 @@ const {
+   ordinaCandidati,
+   etichettaPer,
+   CHIAVI_CRITERI,
++  preparaMazzo,
++  haCriteriDiRicerca,
++  statoMazzo,
+ } = m;
+ 
+ // ---- dati di prova
+@@ -125,10 +128,30 @@ test("D1: fasce del budget con tolleranza del 10%", () => {
+   assert.equal(f(2200), "escluso");
+ });
+ 
+-test("lo sforamento entro tolleranza genera un avviso leggibile", () => {
++test("lo sforamento entro tolleranza ha un motivo leggibile, non un avviso", () => {
+   const r = calcolaMatchInquilino(casa({ prezzo: 1590 }), profilo());
+   assert.equal(r.fascia, "oltre_ricerca");
+-  assert.deepEqual(r.avvisi, ["Oltre il tuo budget del 6%"]);
++  assert.deepEqual(r.motivi, ["Oltre il tuo budget del 6%"]);
++  assert.deepEqual(r.avvisi, [], "gli avvisi sono solo per i dati mancanti");
++});
++
++test("ogni motivo di fuori-ricerca è spiegato, e in ricerca non ne ha", () => {
++  const motivi = (a) => calcolaMatchInquilino(a, profilo()).motivi;
++  assert.deepEqual(motivi(casa()), []);
++  assert.deepEqual(motivi(casa({ zona: "Bicocca, Milano" })), ["Fuori dalle tue zone"]);
++  assert.deepEqual(motivi(casa({ locali: 1 })), ["Meno locali del tuo minimo"]);
++  assert.deepEqual(motivi(casa({ mq: 40 })), ["Sotto la tua metratura minima"]);
++  // più motivi insieme
++  assert.equal(motivi(casa({ prezzo: 1560, locali: 1, zona: "Bicocca, Milano" })).length, 3);
++});
++
++test("lo sforamento del budget è esposto come numero, per chi deve contarlo", () => {
++  const sforo = (prezzo) => calcolaMatchInquilino(casa({ prezzo }), profilo()).sforoBudgetPct;
++  assert.equal(sforo(1400), null);
++  assert.equal(sforo(1500), null);
++  assert.equal(sforo(1590), 6);
++  assert.equal(sforo(1650), 10);
++  assert.equal(sforo(2000), 33, "anche gli esclusi lo riportano");
+ });
+ 
+ test("senza budget impostato non c'è limite e nessuna fascia penalizzante", () => {
+@@ -350,3 +373,147 @@ test("D4: i candidati si ordinano per blocco, percentuale e, a parità, affidabi
+     "bloccato-alto",
+   ]);
+ });
++
++// ============================================================
++// Il mazzo dell'inquilino (quello che la pagina Home passa al deck)
++// ============================================================
++
++// annunci con campi in più rispetto al calcolo, come arrivano dal database
++const riga = (id, o = {}) => ({ id, titolo: `Casa ${id}`, ...casa(o) });
++
++test("preparaMazzo: ordina per fascia, toglie gli esclusi e li conta", () => {
++  const { mazzo, inRicerca, esclusi } = preparaMazzo(
++    [
++      riga("fuoriZona", { zona: "Bicocca, Milano" }), // oltre_ricerca
++      riga("perfetta", { prezzo: 1200 }), // in_ricerca, punteggio alto
++      riga("troppoCara", { prezzo: 2000 }), // escluso
++      riga("ok", { prezzo: 1500 }), // in_ricerca
++    ],
++    profilo()
++  );
++
++  assert.deepEqual(mazzo.map((v) => v.id), ["perfetta", "ok", "fuoriZona"]);
++  assert.equal(inRicerca, 2);
++  assert.equal(esclusi, 1);
++});
++
++test("preparaMazzo conserva i campi dell'annuncio e aggiunge il match", () => {
++  const { mazzo } = preparaMazzo([riga("x")], profilo());
++  assert.equal(mazzo[0].id, "x");
++  assert.equal(mazzo[0].titolo, "Casa x");
++  assert.equal(typeof mazzo[0].match.punteggio, "number");
++});
++
++test("preparaMazzo: i primi `inRicerca` annunci sono davvero quelli in ricerca", () => {
++  // il deck si fida di questo per decidere dove mettere il separatore
++  const { mazzo, inRicerca } = preparaMazzo(
++    [
++      riga("a", { zona: "Bicocca, Milano", prezzo: 1000 }),
++      riga("b", { prezzo: 1500 }),
++      riga("c", { prezzo: 1580 }),
++      riga("d", { prezzo: 1100 }),
++    ],
++    profilo()
++  );
++  mazzo.forEach((v, i) => {
++    assert.equal(
++      v.match.fascia === "in_ricerca",
++      i < inRicerca,
++      `posizione ${i} (${v.id}) è ${v.match.fascia}`
++    );
++  });
++});
++
++test("preparaMazzo: mazzo vuoto e tutti esclusi", () => {
++  assert.deepEqual(preparaMazzo([], profilo()), { mazzo: [], inRicerca: 0, esclusi: 0 });
++  const r = preparaMazzo([riga("a", { prezzo: 9000 }), riga("b", { prezzo: 8000 })], profilo());
++  assert.equal(r.mazzo.length, 0);
++  assert.equal(r.esclusi, 2);
++});
++
++test("senza criteri di ricerca nessuna percentuale è significativa e l'ordine resta quello d'arrivo", () => {
++  const vuoto = { budgetMax: null, localiMin: null, mqMin: null, zone: [], interessi: {} };
++  assert.equal(haCriteriDiRicerca(vuoto), false);
++
++  const { mazzo, inRicerca } = preparaMazzo(
++    [riga("1", { prezzo: 3000 }), riga("2", { zona: "Bicocca, Milano" }), riga("3")],
++    vuoto
++  );
++  assert.deepEqual(mazzo.map((v) => v.id), ["1", "2", "3"]);
++  assert.equal(inRicerca, 3);
++  assert.equal(new Set(mazzo.map((v) => v.match.punteggio)).size, 1, "tutti lo stesso punteggio");
++});
++
++test("haCriteriDiRicerca: basta un criterio qualsiasi", () => {
++  const base = { budgetMax: null, localiMin: null, mqMin: null, zone: [], interessi: {} };
++  assert.equal(haCriteriDiRicerca({ ...base, budgetMax: 1500 }), true);
++  assert.equal(haCriteriDiRicerca({ ...base, localiMin: 2 }), true);
++  assert.equal(haCriteriDiRicerca({ ...base, mqMin: 50 }), true);
++  assert.equal(haCriteriDiRicerca({ ...base, zone: ["Isola, Milano"] }), true);
++  assert.equal(haCriteriDiRicerca({ ...base, interessi: { balcone: 5 } }), true);
++});
++
++// ============================================================
++// Il separatore tra "in linea" e "oltre la ricerca"
++// ============================================================
++
++const IN = "in_ricerca";
++const OLTRE = "oltre_ricerca";
++const opz = (o = {}) => ({ mostraMatch: true, separatoreVisto: false, ...o });
++
++test("il separatore compare esattamente al primo annuncio della seconda fascia", () => {
++  const fasce = [IN, IN, OLTRE, OLTRE];
++  const compare = (i, o) => statoMazzo(fasce, i, opz(o)).mostraSeparatore;
++
++  assert.equal(compare(0), false);
++  assert.equal(compare(1), false);
++  assert.equal(compare(2), true, "dopo i due in ricerca");
++  assert.equal(compare(3), false);
++  assert.equal(compare(4), false, "mazzo finito");
++});
++
++test("il separatore sparisce dopo che l'inquilino lo ha superato", () => {
++  const fasce = [IN, OLTRE];
++  assert.equal(statoMazzo(fasce, 1, opz()).mostraSeparatore, true);
++  assert.equal(statoMazzo(fasce, 1, opz({ separatoreVisto: true })).mostraSeparatore, false);
++});
++
++test("se nessun annuncio è in ricerca il separatore apre il mazzo", () => {
++  const s = statoMazzo([OLTRE, OLTRE], 0, opz());
++  assert.equal(s.mostraSeparatore, true);
++  assert.equal(s.inRicerca, 0);
++  assert.equal(s.oltre, 2);
++});
++
++test("senza fascia 'oltre' o senza criteri non c'è mai separatore", () => {
++  for (let i = 0; i <= 3; i++) {
++    assert.equal(statoMazzo([IN, IN, IN], i, opz()).mostraSeparatore, false);
++    assert.equal(statoMazzo([IN, OLTRE], i, opz({ mostraMatch: false })).mostraSeparatore, false);
++  }
++});
++
++test("sequenza completa di swipe: il separatore compare una volta sola", () => {
++  const fasce = [IN, IN, OLTRE, OLTRE, OLTRE];
++  let visto = false;
++  const comparse = [];
++  for (let indice = 0; indice < fasce.length; indice++) {
++    if (statoMazzo(fasce, indice, opz({ separatoreVisto: visto })).mostraSeparatore) {
++      comparse.push(indice);
++      visto = true; // l'inquilino preme "Vedi le altre case"
++    }
++  }
++  assert.deepEqual(comparse, [2]);
++  assert.equal(statoMazzo(fasce, 5, opz({ separatoreVisto: visto })).finito, true);
++});
++
++test("il separatore cade dove preparaMazzo mette il primo annuncio fuori ricerca", () => {
++  const { mazzo } = preparaMazzo(
++    [riga("a", { zona: "Bicocca, Milano" }), riga("b", { prezzo: 1200 }), riga("c", { prezzo: 1590 }), riga("d")],
++    profilo()
++  );
++  const fasce = mazzo.map((v) => v.match.fascia);
++  const i = fasce.findIndex((f) => f === "oltre_ricerca");
++  assert.ok(i > 0);
++  assert.equal(statoMazzo(fasce, i, opz()).mostraSeparatore, true);
++  assert.equal(statoMazzo(fasce, i - 1, opz()).mostraSeparatore, false);
++});
+diff --git a/src/app/(app)/HomeClient.tsx b/src/app/(app)/HomeClient.tsx
+index 7fca3ff..e367c85 100644
+--- a/src/app/(app)/HomeClient.tsx
++++ b/src/app/(app)/HomeClient.tsx
+@@ -1,8 +1,10 @@
+ "use client";
+ 
+ import { useRef, useState, useTransition } from "react";
++import Link from "next/link";
+ import type { AffidabilitaResult } from "@/lib/affidabilita";
+-import type { ListingConFoto } from "@/lib/types";
++import type { ListingConMatch } from "@/lib/types";
++import { TOLLERANZA_BUDGET, statoMazzo } from "@/lib/match";
+ import { candidati } from "./actions";
+ import {
+   IconChevronSu,
+@@ -19,11 +21,24 @@ const SOGLIA_TOCCO = 8; // sotto questo spostamento è un tocco, non un trascina
+ export function HomeClient({
+   affidabilita,
+   listings,
++  esclusi,
++  mostraMatch,
+ }: {
+   affidabilita: AffidabilitaResult;
+-  listings: ListingConFoto[];
++  /** il mazzo già ordinato: prima gli annunci in ricerca, poi gli altri */
++  listings: ListingConMatch[];
++  /** annunci tolti perché oltre la tolleranza sul budget */
++  esclusi: number;
++  /** false se l'inquilino non ha impostato nessun criterio di ricerca */
++  mostraMatch: boolean;
+ }) {
++  // Il mazzo si congela alla prima visualizzazione. Dopo una candidatura
++  // la pagina viene rigenerata dal server senza l'annuncio appena scelto:
++  // se il deck seguisse quella lista, il suo indice salterebbe una casa e
++  // il punto del separatore si sposterebbe a metà sessione.
++  const [mazzo] = useState(listings);
+   const [index, setIndex] = useState(0);
++  const [separatoreVisto, setSeparatoreVisto] = useState(false);
+   const [candidatureInviate, setCandidatureInviate] = useState<Set<string>>(
+     new Set()
+   );
+@@ -40,15 +55,24 @@ export function HomeClient({
+   // non scattare, e senza questo il tocco finirebbe nella zona foto.
+   const daPulsante = useRef(false);
+ 
+-  const attuale = listings[index];
+-  const finito = index >= listings.length;
++  const attuale = mazzo[index];
++
++  // Gli annunci in ricerca sono i primi del mazzo; poi comincia la fascia
++  // "oltre la tua ricerca", che si apre con una schermata di passaggio.
++  const { inRicerca, oltre, finito, mostraSeparatore } = statoMazzo(
++    mazzo.map((l) => l.match.fascia),
++    index,
++    { mostraMatch, separatoreVisto }
++  );
++  const oltreBudget = mazzo.filter((l) => l.match.sforoBudgetPct !== null).length;
++  const tolleranzaPct = Math.round(TOLLERANZA_BUDGET * 100);
+ 
+   function scarta() {
+     setIndex((i) => i + 1);
+     setFotoIdx(0);
+   }
+ 
+-  function candidati_(listing: ListingConFoto) {
++  function candidati_(listing: ListingConMatch) {
+     startTransition(async () => {
+       const res = await candidati(listing.id);
+       if (!res?.error) {
+@@ -62,7 +86,7 @@ export function HomeClient({
+   // Azionata sia dal rilascio del trascinamento sia dai pulsanti: fa
+   // "volare via" la card nella direzione scelta, poi passa alla prossima.
+   function swipe(direzione: "left" | "right") {
+-    if (!attuale || pending) return;
++    if (!attuale || pending || mostraSeparatore) return;
+     setSchedaAperta(false);
+     setExiting(direzione);
+     setTimeout(() => {
+@@ -152,9 +176,9 @@ export function HomeClient({
+         <div className="brand">
+           Match<b>AmI</b>
+         </div>
+-        {listings.length > 0 && !finito && (
++        {mazzo.length > 0 && !finito && (
+           <div className="counter">
+-            {index + 1} / {listings.length}
++            {index + 1} / {mazzo.length}
+           </div>
+         )}
+       </div>
+@@ -171,49 +195,92 @@ export function HomeClient({
+             </div>
+           </div>
+           <div className="hi-count">
+-            <b>{listings.length}</b>
+-            casa{listings.length === 1 ? "" : "e"} in linea
+-            <br />
+-            con la tua ricerca
++            {mostraMatch ? (
++              <>
++                <b>{inRicerca}</b>
++                {inRicerca === 1 ? "casa in linea" : "case in linea"}
++                <br />
++                {oltre > 0 ? `+ ${oltre} oltre la ricerca` : "con la tua ricerca"}
++              </>
++            ) : (
++              <>
++                <b>{mazzo.length}</b>
++                {mazzo.length === 1 ? "casa disponibile" : "case disponibili"}
++                <br />
++                <Link href="/profilo" className="hi-link">
++                  Imposta la ricerca
++                </Link>
++              </>
++            )}
+           </div>
+         </div>
+       </div>
+ 
+       <div className="deck">
+         {/* ---- Nessun annuncio ---- */}
+-        {listings.length === 0 && (
++        {mazzo.length === 0 && (
+           <div className="empty-state">
+             <div className="ring">
+-              <IconCasa
+-                className="icon-ring"
+-              />
++              <IconCasa className="icon-ring" />
+             </div>
+-            <h2>Nessun annuncio in linea con la tua ricerca</h2>
++            <h2>
++              {esclusi > 0
++                ? "Nessuna casa nel tuo budget"
++                : "Nessun annuncio per la tua ricerca"}
++            </h2>
+             <p>
+-              Appena ci saranno immobili pubblicati che rientrano nei tuoi
+-              criteri, li vedrai qui. Nel frattempo puoi aggiornare i criteri
+-              in Profilo → La tua ricerca.
++              {esclusi > 0
++                ? `Ci sono ${esclusi} ${esclusi === 1 ? "casa" : "case"} oltre il ${tolleranzaPct}% del tuo budget, che non ti mostriamo. Se vuoi vederle, aggiorna il budget in Profilo → La tua ricerca.`
++                : "Appena ci saranno immobili pubblicati che rientrano nei tuoi criteri, li vedrai qui. Nel frattempo puoi aggiornare i criteri in Profilo → La tua ricerca."}
+             </p>
+           </div>
+         )}
+ 
+         {/* ---- Deck esaurito ---- */}
+-        {listings.length > 0 && finito && (
++        {mazzo.length > 0 && finito && (
+           <div className="empty-state">
+             <div className="ring">
+-              <IconCuore
+-                className="icon-ring"
+-              />
++              <IconCuore className="icon-ring" />
+             </div>
+             <h2>Hai visto tutti gli annunci disponibili</h2>
+             <p>
+               Torna più tardi: ne arrivano di nuovi appena vengono pubblicati.
++              {esclusi > 0 &&
++                ` Altre ${esclusi} ${esclusi === 1 ? "casa è" : "case sono"} oltre il ${tolleranzaPct}% del tuo budget e non te ${esclusi === 1 ? "la" : "le"} mostriamo: se vuoi vederle, aggiorna il budget in Profilo.`}
+             </p>
+           </div>
+         )}
+ 
++        {/* ---- Passaggio tra "in linea" e "oltre la ricerca" ---- */}
++        {mostraSeparatore && (
++          <div className="empty-state">
++            <div className="ring">
++              <IconChevronSu className="icon-ring" />
++            </div>
++            <h2>
++              {inRicerca > 0
++                ? "Hai visto le case in linea con la tua ricerca"
++                : "Nessuna casa rispetta tutti i tuoi criteri"}
++            </h2>
++            <p>
++              {descriviOltre(oltre, oltreBudget, tolleranzaPct, inRicerca > 0)} Puoi
++              guardarle comunque: le trovi segnate come &quot;oltre la tua ricerca&quot;.
++            </p>
++            <button
++              type="button"
++              className="opp-cta"
++              onClick={() => setSeparatoreVisto(true)}
++            >
++              Vedi le altre case
++            </button>
++            <Link href="/profilo" className="link-quiet">
++              Modifica la tua ricerca
++            </Link>
++          </div>
++        )}
++
+         {/* ---- Card corrente (trascinabile) ---- */}
+-        {attuale && !finito && (
++        {attuale && !finito && !mostraSeparatore && (
+           <div
+             onPointerDown={onPointerDown}
+             onPointerMove={onPointerMove}
+@@ -267,6 +334,21 @@ export function HomeClient({
+             </div>
+ 
+             <div className="card-info">
++              {mostraMatch && (
++                <div className="match-row">
++                  <span
++                    className={`match-pill ${
++                      attuale.match.fascia === "oltre_ricerca" ? "oltre" : ""
++                    }`}
++                  >
++                    <b>{attuale.match.punteggio}%</b>
++                    {attuale.match.etichetta}
++                  </span>
++                  {attuale.match.fascia === "oltre_ricerca" && (
++                    <span className="match-tag">Oltre la tua ricerca</span>
++                  )}
++                </div>
++              )}
+               <div className="zona">{attuale.zona}</div>
+               <h1>{attuale.titolo}</h1>
+               <div className="meta-row">
+@@ -278,6 +360,12 @@ export function HomeClient({
+                 {attuale.mq && <span>{attuale.mq} m²</span>}
+               </div>
+ 
++              {mostraMatch && attuale.match.motivi.length > 0 && (
++                <div className="match-motivi">
++                  {attuale.match.motivi.join(" · ")}
++                </div>
++              )}
++
+               <button
+                 type="button"
+                 className="card-dettagli"
+@@ -302,7 +390,7 @@ export function HomeClient({
+       </div>
+ 
+       {/* ---- Pulsanti scarta / candidati ---- */}
+-      {attuale && !finito && (
++      {attuale && !finito && !mostraSeparatore && (
+         <div className="actions">
+           <button
+             className="btn-pass"
+@@ -325,6 +413,7 @@ export function HomeClient({
+ 
+       <SchedaImmobile
+         listing={schedaAperta ? attuale : null}
++        mostraMatch={mostraMatch}
+         onClose={() => setSchedaAperta(false)}
+         onPassa={() => swipe("left")}
+         onCandidati={() => swipe("right")}
+@@ -339,3 +428,29 @@ export function HomeClient({
+     </div>
+   );
+ }
++
++/** Frase che spiega perché le case che restano si discostano dalla ricerca. */
++function descriviOltre(
++  oltre: number,
++  oltreBudget: number,
++  tolleranzaPct: number,
++  haAltre: boolean
++): string {
++  const altre = oltre - oltreBudget;
++  const quante =
++    oltre === 1
++      ? haAltre
++        ? "Ce n'è un'altra"
++        : "Ce n'è una"
++      : haAltre
++        ? `Ce ne sono altre ${oltre}`
++        : `Ce ne sono ${oltre}`;
++
++  if (oltreBudget > 0 && altre > 0) {
++    return `${quante} che si discostano un po': ${oltreBudget} sopra il budget (al massimo del ${tolleranzaPct}%), ${altre} che ${altre === 1 ? "non rispetta" : "non rispettano"} zona, locali o metratura.`;
++  }
++  if (oltreBudget > 0) {
++    return `${quante}, sopra il tuo budget di non più del ${tolleranzaPct}%.`;
++  }
++  return `${quante} che ${oltre === 1 ? "non rispetta" : "non rispettano"} zona, locali o metratura.`;
++}
+diff --git a/src/app/(app)/SchedaImmobile.tsx b/src/app/(app)/SchedaImmobile.tsx
+index 8bae188..405afa0 100644
+--- a/src/app/(app)/SchedaImmobile.tsx
++++ b/src/app/(app)/SchedaImmobile.tsx
+@@ -2,7 +2,7 @@
+ 
+ import { Sheet } from "@/components/Sheet";
+ import { ATTR_VOCAB } from "@/lib/constants";
+-import type { ListingConFoto } from "@/lib/types";
++import type { ListingConMatch } from "@/lib/types";
+ 
+ /**
+  * Tutto quello che si sa di un immobile, aperto dal mazzo prima di
+@@ -11,12 +11,15 @@ import type { ListingConFoto } from "@/lib/types";
+  */
+ export function SchedaImmobile({
+   listing,
++  mostraMatch,
+   onClose,
+   onPassa,
+   onCandidati,
+   inCorso,
+ }: {
+-  listing: ListingConFoto | null;
++  listing: ListingConMatch | null;
++  /** false se l'inquilino non ha impostato criteri: la percentuale non dice nulla */
++  mostraMatch: boolean;
+   onClose: () => void;
+   onPassa: () => void;
+   onCandidati: () => void;
+@@ -51,6 +54,8 @@ export function SchedaImmobile({
+         </div>
+       )}
+ 
++      {mostraMatch && <PercheMatch match={listing.match} />}
++
+       <Riga etichetta="Canone" valore={`€${listing.prezzo.toLocaleString("it-IT")} / mese`} />
+       <Riga etichetta="Zona" valore={listing.zona} />
+       <Riga
+@@ -136,3 +141,59 @@ function Riga({ etichetta, valore }: { etichetta: string; valore: string }) {
+     </div>
+   );
+ }
++
++const SIMBOLO = { ok: "✓", no: "–", non_indicato: "?" } as const;
++
++/**
++ * "Perché vedi questo numero": la percentuale, i criteri soddisfatti e
++ * non, e cosa manca. Senza questa spiegazione la percentuale è solo un
++ * numero da fidarsi; con questa l'inquilino può contraddirla.
++ */
++function PercheMatch({ match }: { match: ListingConMatch["match"] }) {
++  const oltre = match.fascia === "oltre_ricerca";
++
++  return (
++    <div className="match-box">
++      <div className="match-box-top">
++        <div className="match-box-pct">{match.punteggio}%</div>
++        <div>
++          <div className="match-box-label">{match.etichetta}</div>
++          <div className="match-box-sub">
++            Per te, in base ai criteri che hai impostato
++          </div>
++        </div>
++      </div>
++
++      {oltre && (
++        <div className="note-wait" style={{ marginBottom: 12 }}>
++          Oltre la tua ricerca: {match.motivi.join(", ").toLowerCase()}.
++        </div>
++      )}
++
++      {match.criteri.length > 0 && (
++        <div className="perche-lista">
++          {match.criteri.map((c) => (
++            <div key={c.chiave} className={`perche-row ${c.stato}`}>
++              <span className="perche-simbolo">{SIMBOLO[c.stato]}</span>
++              <span className="perche-testo">
++                {c.etichetta}
++                {c.dettaglio && <small>{c.dettaglio}</small>}
++              </span>
++            </div>
++          ))}
++        </div>
++      )}
++
++      {match.avvisi.length > 0 && (
++        <p className="field-note" style={{ marginTop: 8 }}>
++          {match.avvisi.join(". ")}. Il punteggio è meno preciso.
++        </p>
++      )}
++
++      <p className="field-note" style={{ marginTop: 8 }}>
++        È una compatibilità calcolata sui tuoi criteri, non una previsione di
++        essere accettato dal proprietario.
++      </p>
++    </div>
++  );
++}
+diff --git a/src/app/(app)/page.tsx b/src/app/(app)/page.tsx
+index a1f5609..7614516 100644
+--- a/src/app/(app)/page.tsx
++++ b/src/app/(app)/page.tsx
+@@ -2,7 +2,9 @@ import { createClient } from "@/lib/supabase/server";
+ import { HomeClient } from "./HomeClient";
+ import { OwnerHomeClient } from "./OwnerHomeClient";
+ import { computeAffidabilita } from "@/lib/affidabilita";
+-import type { TenantProfile, ListingConFoto, ListingProprietario } from "@/lib/types";
++import { haCriteriDiRicerca, preparaMazzo } from "@/lib/match";
++import type { ProfiloRicerca } from "@/lib/match";
++import type { TenantProfile, ListingConMatch, ListingProprietario } from "@/lib/types";
+ 
+ export default async function Home() {
+   const supabase = await createClient();
+@@ -26,13 +28,22 @@ export default async function Home() {
+ async function TenantHome({ userId }: { userId: string }) {
+   const supabase = await createClient();
+ 
+-  const [{ data: tenant }, { data: zoneRows }, { data: recensioni }, { data: giaCandidato }] =
+-    await Promise.all([
+-      supabase.from("tenant_profiles").select("*").eq("profile_id", userId).single(),
+-      supabase.from("tenant_zone_interesse").select("zona").eq("tenant_id", userId),
+-      supabase.from("recensioni").select("voto").eq("tenant_id", userId),
+-      supabase.from("candidature").select("listing_id").eq("tenant_id", userId),
+-    ]);
++  const [
++    { data: tenant },
++    { data: zoneRows },
++    { data: interessiRows },
++    { data: recensioni },
++    { data: giaCandidato },
++  ] = await Promise.all([
++    supabase.from("tenant_profiles").select("*").eq("profile_id", userId).single(),
++    supabase.from("tenant_zone_interesse").select("zona").eq("tenant_id", userId),
++    supabase
++      .from("tenant_interessi")
++      .select("attributo_key, peso")
++      .eq("tenant_id", userId),
++    supabase.from("recensioni").select("voto").eq("tenant_id", userId),
++    supabase.from("candidature").select("listing_id").eq("tenant_id", userId),
++  ]);
+ 
+   const zone = (zoneRows ?? []).map((r) => r.zona as string);
+   const numeroRecensioni = recensioni?.length ?? 0;
+@@ -54,11 +65,11 @@ async function TenantHome({ userId }: { userId: string }) {
+     numeroRecensioni,
+   });
+ 
+-  // ---- Costruisco la query "case in linea con la tua ricerca" ----
+-  // Stessa logica del prototipo (listingsAfterFilters): budget, locali,
+-  // metratura minima e zone preferite. Se non ci sono ancora annunci nel
+-  // database, questa query restituisce semplicemente 0 risultati — è il
+-  // comportamento corretto, non un errore.
++  // ---- Tutti gli annunci pubblicati che l'inquilino non ha già scelto ----
++  // Budget, locali, metratura e zone NON filtrano più la query: li valuta
++  // calcolaMatchInquilino, che decide se un annuncio è in ricerca, oltre la
++  // ricerca (compare in fondo, marcato) o escluso (oltre la tolleranza sul
++  // budget). Se non ci sono annunci, la query restituisce 0 risultati.
+   let query = supabase
+     .from("listings")
+     .select(
+@@ -66,11 +77,6 @@ async function TenantHome({ userId }: { userId: string }) {
+     )
+     .eq("pubblicato", true);
+ 
+-  if (tenantProfile.budget_max) query = query.lte("prezzo", tenantProfile.budget_max);
+-  if (tenantProfile.locali_min) query = query.gte("locali", tenantProfile.locali_min);
+-  if (tenantProfile.mq_min) query = query.gte("mq", tenantProfile.mq_min);
+-  if (zone.length > 0) query = query.in("zona", zone);
+-
+   const listingIdsEsclusi = (giaCandidato ?? []).map((c) => c.listing_id as string);
+   if (listingIdsEsclusi.length > 0) {
+     query = query.not("id", "in", `(${listingIdsEsclusi.join(",")})`);
+@@ -87,10 +93,26 @@ async function TenantHome({ userId }: { userId: string }) {
+     ),
+   }));
+ 
++  // Criteri di ricerca dell'inquilino. Un valore 0 o vuoto vale "nessuna
++  // preferenza", come nel filtro che c'era prima.
++  const profiloRicerca: ProfiloRicerca = {
++    budgetMax: tenantProfile.budget_max || null,
++    localiMin: tenantProfile.locali_min || null,
++    mqMin: tenantProfile.mq_min || null,
++    zone,
++    interessi: Object.fromEntries(
++      (interessiRows ?? []).map((r) => [r.attributo_key as string, r.peso as number])
++    ),
++  };
++
++  const { mazzo, esclusi } = preparaMazzo(listingsOrdinati, profiloRicerca);
++
+   return (
+     <HomeClient
+       affidabilita={affidabilita}
+-      listings={listingsOrdinati as unknown as ListingConFoto[]}
++      listings={mazzo as unknown as ListingConMatch[]}
++      esclusi={esclusi}
++      mostraMatch={haCriteriDiRicerca(profiloRicerca)}
+     />
+   );
+ }
+diff --git a/src/app/globals.css b/src/app/globals.css
+index 2761d79..db32d70 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -2075,3 +2075,143 @@ input[type="range"]::-moz-range-thumb {
+   padding: 2px 6px;
+   border-radius: 999px;
+ }
++
++/* ============================================================
++   MATCH: percentuale sulla card, separatore, spiegazione nella scheda
++   ============================================================ */
++
++/* Riga sopra la zona, sulla card. */
++.match-row {
++  display: flex;
++  align-items: center;
++  flex-wrap: wrap;
++  gap: 8px;
++  margin-bottom: 10px;
++}
++.match-pill {
++  display: inline-flex;
++  align-items: baseline;
++  gap: 7px;
++  padding: 5px 12px;
++  border-radius: 999px;
++  background: rgba(16, 21, 26, 0.6);
++  backdrop-filter: blur(8px);
++  border: 1px solid rgba(92, 140, 116, 0.65);
++  color: rgba(247, 244, 236, 0.86);
++  font-size: 11.5px;
++  font-weight: 600;
++}
++.match-pill b {
++  font-family: var(--font-display);
++  font-size: 16px;
++  font-weight: 700;
++  color: #8fe3b8;
++}
++.match-pill.oltre {
++  border-color: rgba(201, 161, 90, 0.7);
++}
++.match-pill.oltre b {
++  color: var(--gold);
++}
++.match-tag {
++  padding: 4px 10px;
++  border-radius: 999px;
++  background: rgba(201, 161, 90, 0.2);
++  border: 1px solid rgba(201, 161, 90, 0.5);
++  color: var(--gold);
++  font-size: 10.5px;
++  font-weight: 700;
++  letter-spacing: 0.04em;
++  text-transform: uppercase;
++}
++.match-motivi {
++  margin-top: 6px;
++  font-size: 12px;
++  font-weight: 600;
++  color: var(--gold);
++}
++
++/* Link discreti nel riquadro in alto e nelle schermate di passaggio. */
++.home-intro .hi-link,
++.empty-state .link-quiet {
++  color: var(--gold);
++  font-weight: 700;
++  text-decoration: underline;
++  text-underline-offset: 3px;
++}
++.empty-state .link-quiet {
++  display: block;
++  margin-top: 16px;
++  font-size: 12.5px;
++}
++.empty-state .opp-cta {
++  width: auto;
++  min-width: 220px;
++  padding-left: 28px;
++  padding-right: 28px;
++}
++
++/* Spiegazione nella scheda. */
++.match-box {
++  background: var(--paper-dim);
++  border-radius: 18px;
++  padding: 16px 16px 14px 16px;
++  margin-bottom: 18px;
++}
++.match-box-top {
++  display: flex;
++  align-items: center;
++  gap: 14px;
++  margin-bottom: 12px;
++}
++.match-box-pct {
++  font-family: var(--font-display);
++  font-size: 34px;
++  font-weight: 700;
++  color: var(--moss);
++  line-height: 1;
++}
++.match-box-label {
++  font-weight: 700;
++  font-size: 13.5px;
++  color: var(--ink);
++}
++.match-box-sub {
++  font-size: 11.5px;
++  color: var(--muted);
++  margin-top: 1px;
++}
++.perche-lista {
++  display: grid;
++  gap: 2px;
++}
++.perche-row {
++  display: flex;
++  gap: 10px;
++  align-items: baseline;
++  padding: 5px 0;
++  font-size: 13px;
++  color: var(--body-text);
++}
++.perche-simbolo {
++  flex: 0 0 16px;
++  text-align: center;
++  font-weight: 700;
++}
++.perche-row.ok .perche-simbolo {
++  color: var(--moss);
++}
++.perche-row.no {
++  color: var(--muted);
++}
++.perche-row.no .perche-simbolo {
++  color: var(--clay);
++}
++.perche-row.non_indicato .perche-simbolo {
++  color: var(--gold-ink);
++}
++.perche-testo small {
++  display: block;
++  font-size: 11.5px;
++  color: var(--muted);
++}
+diff --git a/src/lib/match/index.ts b/src/lib/match/index.ts
+index 874b688..d3f4426 100644
+--- a/src/lib/match/index.ts
++++ b/src/lib/match/index.ts
+@@ -2,6 +2,8 @@ export * from "./config";
+ export * from "./tipi";
+ export { etichettaPer } from "./comuni";
+ export { calcolaMatchInquilino, ordinaAnnunci } from "./inquilino";
++export { haCriteriDiRicerca, preparaMazzo, statoMazzo } from "./mazzo";
++export type { Mazzo, StatoMazzo, VoceMazzo } from "./mazzo";
+ export {
+   CATALOGO_CRITERI,
+   CHIAVI_CRITERI,
+diff --git a/src/lib/match/inquilino.ts b/src/lib/match/inquilino.ts
+index 039cc42..a59285e 100644
+--- a/src/lib/match/inquilino.ts
++++ b/src/lib/match/inquilino.ts
+@@ -52,7 +52,9 @@ export function calcolaMatchInquilino(
+   let punti = 0;
+   let fuoriRicerca = false;
+   let escluso = false;
++  let sforoBudgetPct: number | null = null;
+   const criteri: VoceCriterio[] = [];
++  const motivi: string[] = [];
+   const avvisi: string[] = [];
+ 
+   // ---------------- Budget ----------------
+@@ -73,9 +75,10 @@ export function calcolaMatchInquilino(
+         Math.max(0, 1 - sforo / CURVA_BUDGET.sforoAZero);
+ 
+       const pct = Math.max(1, Math.round(sforo * 100));
++      sforoBudgetPct = pct;
+       if (sforo <= TOLLERANZA_BUDGET + EPS) {
+         fuoriRicerca = true;
+-        avvisi.push(`Oltre il tuo budget del ${pct}%`);
++        motivi.push(`Oltre il tuo budget del ${pct}%`);
+       } else {
+         escluso = true;
+       }
+@@ -98,6 +101,7 @@ export function calcolaMatchInquilino(
+   } else {
+     punti += W.zona * PENALITA.zonaFuori;
+     fuoriRicerca = true;
++    motivi.push("Fuori dalle tue zone");
+     criteri.push({
+       chiave: "zona",
+       etichetta: "Zona preferita",
+@@ -127,6 +131,7 @@ export function calcolaMatchInquilino(
+   } else {
+     punti += W.locali * PENALITA.localiSotto;
+     fuoriRicerca = true;
++    motivi.push("Meno locali del tuo minimo");
+     criteri.push({
+       chiave: "locali",
+       etichetta: `${profilo.localiMin}+ locali`,
+@@ -160,6 +165,7 @@ export function calcolaMatchInquilino(
+       W.mq * rapporto - W.mq * PENALITA.mqSottoDetrazione
+     );
+     fuoriRicerca = true;
++    motivi.push("Sotto la tua metratura minima");
+     criteri.push({
+       chiave: "mq",
+       etichetta: `${profilo.mqMin}+ m²`,
+@@ -207,7 +213,9 @@ export function calcolaMatchInquilino(
+     punteggio,
+     etichetta: etichettaPer(punteggio),
+     fascia,
++    sforoBudgetPct,
+     criteri,
++    motivi,
+     avvisi,
+   };
+ }
+diff --git a/src/lib/match/mazzo.ts b/src/lib/match/mazzo.ts
+new file mode 100644
+index 0000000..caf0ff8
+--- /dev/null
++++ b/src/lib/match/mazzo.ts
+@@ -0,0 +1,98 @@
++import { calcolaMatchInquilino, ordinaAnnunci } from "./inquilino";
++import type {
++  AnnuncioPerMatch,
++  Fascia,
++  ProfiloRicerca,
++  RisultatoInquilino,
++} from "./tipi";
++
++export type VoceMazzo<T> = T & { match: RisultatoInquilino };
++
++export type Mazzo<T> = {
++  /** annunci da mostrare, già in ordine: prima in ricerca, poi gli altri */
++  mazzo: VoceMazzo<T>[];
++  /** quanti annunci del mazzo (i primi) sono in ricerca */
++  inRicerca: number;
++  /** annunci tolti perché oltre la tolleranza sul budget */
++  esclusi: number;
++};
++
++/**
++ * L'inquilino ha impostato almeno un criterio di ricerca?
++ *
++ * Senza criteri ogni annuncio prende lo stesso punteggio pieno e la
++ * percentuale non dice nulla: l'interfaccia non deve mostrarla.
++ */
++export function haCriteriDiRicerca(profilo: ProfiloRicerca): boolean {
++  return (
++    profilo.budgetMax !== null ||
++    profilo.localiMin !== null ||
++    profilo.mqMin !== null ||
++    profilo.zone.length > 0 ||
++    Object.keys(profilo.interessi).length > 0
++  );
++}
++
++/**
++ * Dagli annunci pubblicati al mazzo dell'inquilino: calcola il match di
++ * ciascuno, toglie quelli oltre la tolleranza sul budget e ordina.
++ * Gli annunci conservano tutti i loro campi, con `match` in più.
++ */
++export function preparaMazzo<T extends AnnuncioPerMatch>(
++  annunci: T[],
++  profilo: ProfiloRicerca
++): Mazzo<T> {
++  const voci: VoceMazzo<T>[] = annunci.map((a) => ({
++    ...a,
++    match: calcolaMatchInquilino(a, profilo),
++  }));
++
++  const mazzo = ordinaAnnunci(voci);
++
++  return {
++    mazzo,
++    inRicerca: mazzo.filter((v) => v.match.fascia === "in_ricerca").length,
++    esclusi: voci.length - mazzo.length,
++  };
++}
++
++export type StatoMazzo = {
++  /** annunci in ricerca: sono i primi del mazzo */
++  inRicerca: number;
++  /** annunci della fascia "oltre la ricerca": vengono dopo */
++  oltre: number;
++  finito: boolean;
++  /** va mostrata la schermata di passaggio tra le due fasce */
++  mostraSeparatore: boolean;
++};
++
++/**
++ * Dove si trova il deck: serve a decidere cosa mostrare, in particolare
++ * quando comparire la schermata di passaggio tra "in linea con la tua
++ * ricerca" e "oltre la tua ricerca".
++ *
++ * Il separatore compare quando l'indice arriva al primo annuncio della
++ * seconda fascia, anche all'inizio se nessun annuncio è in ricerca, e
++ * solo finché l'inquilino non l'ha superato.
++ */
++export function statoMazzo(
++  fasce: Fascia[],
++  indice: number,
++  opzioni: { mostraMatch: boolean; separatoreVisto: boolean }
++): StatoMazzo {
++  const inRicerca = fasce.filter((f) => f === "in_ricerca").length;
++  const oltre = fasce.length - inRicerca;
++  const finito = indice >= fasce.length;
++
++  return {
++    inRicerca,
++    oltre,
++    finito,
++    mostraSeparatore:
++      opzioni.mostraMatch &&
++      !finito &&
++      !opzioni.separatoreVisto &&
++      oltre > 0 &&
++      indice === inRicerca,
++  };
++}
+diff --git a/src/lib/match/tipi.ts b/src/lib/match/tipi.ts
+index b2b8604..1999fd4 100644
+--- a/src/lib/match/tipi.ts
++++ b/src/lib/match/tipi.ts
+@@ -55,8 +55,15 @@ export type RisultatoInquilino = {
+   punteggio: number;
+   etichetta: EtichettaMatch;
+   fascia: Fascia;
++  /** di quanto il canone supera il budget, in % arrotondata; `null` se non lo supera */
++  sforoBudgetPct: number | null;
+   criteri: VoceCriterio[];
+-  /** frasi per l'interfaccia, es. "Oltre il tuo budget del 6%" */
++  /**
++   * Perché l'annuncio è `oltre_ricerca`, in frasi per l'interfaccia
++   * (es. "Oltre il tuo budget del 6%"). Vuoto se è `in_ricerca`.
++   */
++  motivi: string[];
++  /** Dati che mancano nell'annuncio e rendono il punteggio meno preciso. */
+   avvisi: string[];
+ };
+ 
+diff --git a/src/lib/types.ts b/src/lib/types.ts
+index defc93a..ac34934 100644
+--- a/src/lib/types.ts
++++ b/src/lib/types.ts
+@@ -131,6 +131,11 @@ export type ListingConFoto = {
+   listing_photos: { url: string; ordine: number }[];
+ };
+ 
++/** Un annuncio del mazzo, con il calcolo di quanto va bene a questo inquilino. */
++export type ListingConMatch = ListingConFoto & {
++  match: import("@/lib/match").RisultatoInquilino;
++};
++
+ export type ContrattoConAnnuncio = {
+   id: string;
+   stato: StatoContratto;
+-- 
+2.43.0
+

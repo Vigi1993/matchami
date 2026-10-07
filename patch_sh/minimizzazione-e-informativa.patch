@@ -1,0 +1,2133 @@
+From 691c44f42028ab33bc302932bec31064150157be Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 7 Oct 2026 07:51:38 +0000
+Subject: [PATCH 1/2] =?UTF-8?q?fix(privacy):=20il=20proprietario=20vede=20?=
+ =?UTF-8?q?dei=20candidati=20solo=20ci=C3=B2=20che=20serve?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RICHIEDE LA MIGRAZIONE 0016, E CODICE E MIGRAZIONE VANNO ONLINE INSIEME:
+il codice precedente non trova più le colonne cambiate, e il nuovo non
+funziona senza la migrazione.
+
+Corregge tre esposizioni trovate nell'inventario dei dati personali
+(verificate con utenti diversi su un database vero):
+
+- un proprietario leggeva TUTTE le colonne del profilo di chi si
+  candidava, anche quelle che l'app non mostra e non usa come criterio
+  (figli, composizione del nucleo, animali, consensi marketing). Ora legge
+  la vista candidati_del_proprietario, con le sole colonne che servono;
+  di animali e nucleo sa solo se sono compilati
+- continuava a leggere quel profilo dopo un rifiuto, senza limite: ora,
+  dopo un rifiuto, della persona resta solo il nome
+- un inquilino leggeva, dalla propria candidatura decisa, la valutazione
+  che il proprietario aveva fatto di lui (con i criteri scelti dal
+  proprietario). Ora la valutazione sta in valutazioni_candidati, che
+  legge solo il proprietario. Quelle già salvate passano nella tabella
+  nuova, intatte
+
+In più, togliendo il permesso di modificare direttamente le candidature,
+si chiude un passaggio trovato provando: un proprietario poteva
+riassegnare una candidatura a un altro inquilino mai candidato, aprendo
+di fatto una chat con lui. Le decisioni passano da decidi_candidatura,
+che controlla il proprietario, la scadenza e registra stato e valutazione
+insieme (prima erano due passaggi separati).
+
+Codice: l'assemblaggio di ciò che il proprietario vede di un candidato
+esce dalla pagina in una funzione pura (lib/candidati.ts), per la prima
+volta con test. Database, azione di decisione, Gestione affitti e chat
+leggono dalla vista; nessuno interroga più tenant_profiles o profiles.
+
+Trovato costruendo il banco di prova: le migrazioni dalla 0001 alla 0015
+si applicano pulite, in ordine, su un database nuovo (mai verificato
+prima). La 0016 è rilanciabile e conserva i dati.
+
+144 test. Verificato su PostgreSQL pulito con circa 45 controlli; su un
+server Next contro un finto Supabase per le tre pagine e l'azione di
+decisione in tutti i casi.
+---
+ package.json                                  |   2 +-
+ scripts/test-candidati.mjs                    | 134 +++++++++++
+ scripts/test-match.mjs                        |   8 +-
+ src/app/(app)/database/actions.ts             | 103 ++++----
+ src/app/(app)/database/page.tsx               |  94 +++-----
+ src/app/(app)/gestione-affitti/page.tsx       |  14 +-
+ src/app/chat/[id]/page.tsx                    |  16 +-
+ src/lib/candidati.ts                          | 115 +++++++++
+ src/lib/match/candidato.ts                    |  18 +-
+ src/lib/verifica.ts                           |   5 +
+ .../0016_minimizzazione_candidati.sql         | 219 ++++++++++++++++++
+ 11 files changed, 587 insertions(+), 141 deletions(-)
+ create mode 100644 scripts/test-candidati.mjs
+ create mode 100644 src/lib/candidati.ts
+ create mode 100644 supabase/migrations/0016_minimizzazione_candidati.sql
+
+diff --git a/package.json b/package.json
+index b104c26..66f1fea 100644
+--- a/package.json
++++ b/package.json
+@@ -7,7 +7,7 @@
+     "build": "next build",
+     "start": "next start",
+     "lint": "eslint",
+-    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs"
++    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-candidati.mjs b/scripts/test-candidati.mjs
+new file mode 100644
+index 0000000..545596f
+--- /dev/null
++++ b/scripts/test-candidati.mjs
+@@ -0,0 +1,134 @@
++/**
++ * Test dell'assemblaggio di ciò che il proprietario vede dei candidati
++ * (src/lib/candidati.ts). Si lancia con:   npm test
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++// candidati.ts importa "@/lib/match" e "@/lib/types": il caricatore non conosce l'alias,
++// quindi si legge il file sostituendo gli import con percorsi relativi.
++import { createRequire } from "node:module";
++const require_ = createRequire(import.meta.url);
++const ts = require_("typescript");
++const sorgente = fs.readFileSync(path.join(radice, "src", "lib", "candidati.ts"), "utf8")
++  .replace('from "@/lib/match"', 'from "./match"').replace('from "@/lib/types"', 'from "./types"');
++const copia = path.join(radice, "src", "lib", "__candidati_test.ts");
++fs.writeFileSync(copia, sorgente);
++const c = caricaTs(copia);
++fs.unlinkSync(copia);
++const { assemblaCandidature, profiloDaVista, COLONNE_VISTA_CANDIDATI } = c;
++const { valutaCandidato } = caricaTs(path.join(radice, "src", "lib", "match", "index.ts"));
++
++const riga = (id, o = {}) => ({ id, status: "in_attesa", match_pct: null, created_at: "2026-10-01", tenant_id: "t" + id, listing_id: "L1",
++  listings: { titolo: "Casa", zona: "Isola", prezzo: 1500 }, ...o });
++const vista = (id, o = {}) => ({ candidatura_id: id, nome: "Tina", cognome: "Rossi", professione: "Dipendente", reddito_mensile: 1800, reddito_nucleo: 4800,
++  garante: true, fideiussione: false, protestato: false, verificato: false, presentazione: "Una presentazione lunga.", avatar_url: "http://a/x.jpg",
++  animali_compilato: true, nucleo_compilato: true, ...o });
++const criteri = new Map([["L1", [{ chiave: "redditoCanone", peso: 8, modo: "obbligatorio", sogliaPct: 33 }, { chiave: "garante", peso: 5, modo: "preferenziale" }]]]);
++const base = { criteriPerListing: criteri, votiPerTenant: new Map(), valutazioni: [] };
++const assembla = (candidature, v, extra = {}) => assemblaCandidature({ ...base, candidature, vista: v, ...extra });
++
++test("profiloDaVista: animali e nucleo arrivano solo come 'compilato', mai come valore", () => {
++  const p = profiloDaVista(vista("1"));
++  assert.equal(p.animali_compilato, true);
++  assert.equal(p.nucleo_compilato, true);
++  assert.ok(!("animali" in p) && !("nucleo" in p) && !("figli" in p), "il profilo contiene un campo che il proprietario non deve vedere");
++});
++
++test("profiloDaVista: una riga vuota, nulla o parziale non fa mai crollare", () => {
++  for (const x of [null, undefined, {}, { nome: "x" }]) {
++    const p = profiloDaVista(x);
++    assert.equal(p.animali_compilato, false); assert.equal(p.verificato, false); assert.equal(p.reddito_nucleo, null);
++  }
++});
++
++test("profiloDaVista: 'compilato' vale solo se è davvero true (null e stringhe no)", () => {
++  assert.equal(profiloDaVista({ animali_compilato: null }).animali_compilato, false);
++  assert.equal(profiloDaVista({ animali_compilato: "true" }).animali_compilato, false);
++  assert.equal(profiloDaVista({ verificato: null }).verificato, false);
++});
++
++test("la richiesta alla vista non nomina colonne che il proprietario non deve leggere", () => {
++  // nomi di colonna interi: "nucleo" è vietato, "reddito_nucleo" e "nucleo_compilato" no
++  const colonne = COLONNE_VISTA_CANDIDATI.split(",").map((x) => x.trim());
++  for (const vietata of ["figli", "animali", "nucleo", "consenso_marketing", "consenso_terzi", "privacy_accettata", "redditi_nucleo", "verifica_stato", "onboarding_completato"]) {
++    assert.ok(!colonne.includes(vietata), `chiede "${vietata}"`);
++  }
++  for (const serve of ["candidatura_id", "nome", "cognome", "reddito_nucleo", "animali_compilato", "nucleo_compilato"]) {
++    assert.ok(colonne.includes(serve), `manca "${serve}"`);
++  }
++  assert.equal(new Set(colonne).size, colonne.length, "una colonna è nominata due volte");
++});
++
++test("in attesa: il match si ricalcola sui dati attuali, non congelato", () => {
++  const [r] = assembla([riga("1")], [vista("1")]);
++  assert.equal(r.valutazione.congelata, false);
++  assert.equal(r.valutazione.match.punteggio, 99, "reddito 4800 su canone 1500 (31%) e garante: tutto soddisfatto");
++});
++
++test("decisa con una valutazione registrata: si mostra quella, anche se i dati sono cambiati", () => {
++  const registrata = JSON.parse(JSON.stringify(valutaCandidato({ criteri: criteri.get("L1"), canone: 1500, profilo: profiloDaVista(vista("1", { reddito_nucleo: 2000 })), mediaRecensioni: null, numeroRecensioni: 0 })));
++  const [r] = assembla([riga("1", { status: "accettata" })], [vista("1", { reddito_nucleo: 9999 })], { valutazioni: [{ candidatura_id: "1", valutazione: registrata }] });
++  assert.equal(r.valutazione.congelata, true);
++  assert.equal(r.valutazione.match.bloccato, true, "la valutazione registrata aveva il reddito troppo basso");
++});
++
++test("RIFIUTATA: la vista dà solo il nome, e la valutazione registrata si legge comunque", () => {
++  const vuota = vista("1", { professione: null, reddito_mensile: null, reddito_nucleo: null, garante: null, fideiussione: null, protestato: null, verificato: null, presentazione: null, avatar_url: null, animali_compilato: null, nucleo_compilato: null });
++  const registrata = JSON.parse(JSON.stringify(valutaCandidato({ criteri: criteri.get("L1"), canone: 1500, profilo: profiloDaVista(vista("1")), mediaRecensioni: null, numeroRecensioni: 0 })));
++  const [r] = assembla([riga("1", { status: "rifiutata" })], [vuota], { valutazioni: [{ candidatura_id: "1", valutazione: registrata }] });
++  assert.equal(r.nome, "Tina"); assert.equal(r.cognome, "Rossi");
++  assert.equal(r.valutazione.congelata, true);
++  assert.equal(r.tenant_profiles.reddito_nucleo, null); assert.equal(r.tenant_profiles.avatar_url, null);
++  assert.equal(r.tenant_profiles.verificato, false);
++});
++
++test("RIFIUTATA senza valutazione registrata (decisa prima): non crolla, si ricalcola sui dati vuoti", () => {
++  const vuota = vista("1", { professione: null, reddito_nucleo: null, garante: null, protestato: null, verificato: null });
++  const [r] = assembla([riga("1", { status: "rifiutata" })], [vuota]);
++  assert.equal(r.valutazione.congelata, false);
++  assert.equal(typeof r.valutazione.match.punteggio, "number");
++});
++
++test("valutazione registrata rovinata: si ricalcola invece di mostrare spazzatura", () => {
++  for (const x of [null, "x", {}, { match: null }, { affidabilita: 5 }]) {
++    const [r] = assembla([riga("1", { status: "accettata" })], [vista("1")], { valutazioni: [{ candidatura_id: "1", valutazione: x }] });
++    assert.equal(r.valutazione.congelata, false, JSON.stringify(x));
++  }
++});
++
++test("manca la riga della vista (non dovrebbe): niente crollo, nome vuoto", () => {
++  const [r] = assembla([riga("1")], []);
++  assert.equal(r.nome, null); assert.equal(r.tenant_profiles.reddito_nucleo, null);
++  assert.equal(typeof r.valutazione.match.punteggio, "number");
++});
++
++test("la valutazione di una candidatura non finisce mai su un'altra", () => {
++  const a = JSON.parse(JSON.stringify(valutaCandidato({ criteri: criteri.get("L1"), canone: 1500, profilo: profiloDaVista(vista("1", { reddito_nucleo: 1000 })), mediaRecensioni: null, numeroRecensioni: 0 })));
++  const risultati = assembla([riga("1", { status: "accettata" }), riga("2", { status: "accettata" })], [vista("1"), vista("2")], { valutazioni: [{ candidatura_id: "1", valutazione: a }] });
++  assert.equal(risultati[0].valutazione.congelata, true);
++  assert.equal(risultati[1].valutazione.congelata, false, "la seconda non ha valutazione registrata");
++  assert.equal(risultati[0].valutazione.match.bloccato, true); assert.equal(risultati[1].valutazione.match.bloccato, false);
++});
++
++test("l'ordine delle candidature e i loro dati restano quelli di arrivo", () => {
++  const out = assembla([riga("3"), riga("1"), riga("2")], [vista("1", { nome: "Uno" }), vista("2", { nome: "Due" }), vista("3", { nome: "Tre" })]);
++  assert.deepEqual(out.map((x) => [x.id, x.nome]), [["3", "Tre"], ["1", "Uno"], ["2", "Due"]]);
++});
++
++test("l'affidabilità usa le recensioni dell'inquilino giusto", () => {
++  const voti = new Map([["t1", [5, 5, 5]], ["t2", [1]]]);
++  const out = assembla([riga("1"), riga("2")], [vista("1"), vista("2")], { votiPerTenant: voti });
++  assert.ok(out[0].valutazione.affidabilita > out[1].valutazione.affidabilita, `${out[0].valutazione.affidabilita} contro ${out[1].valutazione.affidabilita}`);
++});
++
++test("l'output non contiene nessun campo che il proprietario non deve vedere", () => {
++  const [r] = assembla([riga("1")], [vista("1")]);
++  const testo = JSON.stringify(r);
++  for (const vietato of ["figli", "\"animali\"", "\"nucleo\"", "consenso", "privacy_accettata", "redditi_nucleo", "match_proprietario"]) {
++    assert.ok(!testo.includes(vietato), `compare "${vietato}"`);
++  }
++});
+diff --git a/scripts/test-match.mjs b/scripts/test-match.mjs
+index b0aa861..2dbd6a3 100644
+--- a/scripts/test-match.mjs
++++ b/scripts/test-match.mjs
+@@ -566,8 +566,8 @@ const profiloDb = (o = {}) => ({
+   garante: true,
+   fideiussione: false,
+   protestato: false,
+-  animali: false,
+-  nucleo: "coppia",
++  animali_compilato: true,
++  nucleo_compilato: true,
+   presentazione: "Una presentazione abbastanza lunga.",
+   verificato: false,
+   ...o,
+@@ -592,11 +592,11 @@ test("senza reddito del nucleo il criterio sul reddito risulta 'non indicato'",
+   assert.equal(r.incompleto, true);
+ });
+ 
+-test("completezza del profilo personale: otto campi, nessuna zona", () => {
++test("completezza del profilo personale: otto campi, nessuna zona, e animali e nucleo contano solo se compilati", () => {
+   assert.equal(completezzaProfiloPersonale(profiloDb()), 100);
+   assert.equal(completezzaProfiloPersonale(profiloDb({ reddito_nucleo: null })), 88);
+   // sei su otto = 75: sotto la soglia del 'profilo completo'
+-  assert.equal(completezzaProfiloPersonale(profiloDb({ reddito_nucleo: null, animali: null })), 75);
++  assert.equal(completezzaProfiloPersonale(profiloDb({ reddito_nucleo: null, animali_compilato: false })), 75);
+   assert.equal(completezzaProfiloPersonale(profiloDb({ presentazione: "corta" })), 88);
+ });
+ 
+diff --git a/src/app/(app)/database/actions.ts b/src/app/(app)/database/actions.ts
+index 0ccf675..75cd7ca 100644
+--- a/src/app/(app)/database/actions.ts
++++ b/src/app/(app)/database/actions.ts
+@@ -3,8 +3,10 @@
+ import { revalidatePath } from "next/cache";
+ import { createClient } from "@/lib/supabase/server";
+ import { criteriDaRighe, valutaCandidato } from "@/lib/match";
+-import type { ProfiloCandidato, RigaCriterioDb } from "@/lib/match";
++import type { RigaCriterioDb } from "@/lib/match";
+ import { motivoRifiutoValido } from "@/lib/motivi-rifiuto";
++import { profiloDaVista } from "@/lib/candidati";
++import { messaggioErroreVerifica } from "@/lib/verifica";
+ 
+ export async function valutaCandidatura(
+   candidaturaId: string,
+@@ -23,79 +25,70 @@ export async function valutaCandidatura(
+     return { error: "Scegli un motivo per il rifiuto." };
+   }
+ 
+-  // La decisione registra una fotografia del match di quel momento (D7):
+-  // da qui in poi l'inquilino può cambiare il profilo, ma il proprietario
+-  // continua a vedere su cosa ha deciso.
++  // La valutazione si fotografa nel momento della decisione (D7): da qui in
++  // poi l'inquilino può cambiare il profilo, ma il proprietario continua a
++  // vedere su cosa ha deciso.
+   //
+-  // Il calcolo NON deve mai impedire la decisione: se qualcosa va storto,
+-  // lo stato cambia lo stesso e semplicemente non c'è fotografia.
+-  let fotografia: Record<string, unknown> | null = null;
++  // Il calcolo NON deve mai impedire la decisione: se qualcosa va storto la
++  // decisione passa lo stesso, senza fotografia.
++  let valutazione: unknown = null;
+   try {
+     const { data: c } = await supabase
+       .from("candidature")
+-      .select(
+-        "tenant_id, listing_id, match_proprietario, listings!inner(owner_id, prezzo), tenant_profiles!inner(professione, reddito_mensile, reddito_nucleo, garante, fideiussione, protestato, animali, nucleo, verificato, presentazione)"
+-      )
++      .select("tenant_id, listing_id, listings!inner(owner_id, prezzo)")
+       .eq("id", candidaturaId)
+       .single();
+ 
+-    // una fotografia già scattata non si sovrascrive
+-    if (c && !c.match_proprietario) {
+-      const listing = c.listings as unknown as { owner_id: string; prezzo: number };
++    const listing = c?.listings as unknown as { owner_id: string; prezzo: number } | undefined;
+ 
+-      if (listing.owner_id === user.id) {
+-        const [{ data: righeCriteri }, { data: recensioni }] = await Promise.all([
+-          supabase
+-            .from("listing_criteri")
+-            .select("chiave, peso, modo, soglia_pct")
+-            .eq("listing_id", c.listing_id),
+-          supabase.from("recensioni").select("voto").eq("tenant_id", c.tenant_id),
+-        ]);
+-        const voti = (recensioni ?? []).map((r) => r.voto as number);
++    if (c && listing && listing.owner_id === user.id) {
++      const [{ data: vista }, { data: righeCriteri }, { data: recensioni }] = await Promise.all([
++        supabase
++          .from("candidati_del_proprietario")
++          .select(
++            "professione, reddito_mensile, reddito_nucleo, garante, fideiussione, protestato, verificato, presentazione, animali_compilato, nucleo_compilato"
++          )
++          .eq("candidatura_id", candidaturaId)
++          .single(),
++        supabase
++          .from("listing_criteri")
++          .select("chiave, peso, modo, soglia_pct")
++          .eq("listing_id", c.listing_id),
++        supabase.from("recensioni").select("voto").eq("tenant_id", c.tenant_id),
++      ]);
++      const voti = (recensioni ?? []).map((r) => r.voto as number);
+ 
+-        fotografia = valutaCandidato({
++      if (vista) {
++        valutazione = valutaCandidato({
+           criteri: criteriDaRighe(righeCriteri as RigaCriterioDb[] | null),
+           canone: listing.prezzo,
+-          profilo: c.tenant_profiles as unknown as ProfiloCandidato,
+-          mediaRecensioni:
+-            voti.length > 0 ? voti.reduce((a, b) => a + b, 0) / voti.length : null,
++          profilo: profiloDaVista(vista),
++          mediaRecensioni: voti.length > 0 ? voti.reduce((a, b) => a + b, 0) / voti.length : null,
+           numeroRecensioni: voti.length,
+-        }) as unknown as Record<string, unknown>;
++        });
+       }
+     }
+   } catch {
+-    fotografia = null;
++    valutazione = null;
+   }
+ 
+-  // La decisione si prende una volta sola: si aggiorna solo se la
+-  // candidatura è ancora in attesa. Il database lo impone anche da sé
+-  // (migrazione 0009), qui serve a dare un messaggio chiaro.
+-  const { data: aggiornate, error } = await supabase
+-    .from("candidature")
+-    .update({
+-      status: nuovoStato,
+-      updated_at: new Date().toISOString(),
+-      motivo_rifiuto: nuovoStato === "rifiutata" ? motivo : null,
+-      ...(fotografia
+-        ? {
+-            match_proprietario: fotografia,
+-            match_proprietario_at: new Date().toISOString(),
+-          }
+-        : {}),
+-    })
+-    .eq("id", candidaturaId)
+-    .eq("status", "in_attesa")
+-    .select("id");
++  // La decisione passa da una funzione del database: controlla che la
++  // candidatura sia del proprietario, che sia ancora in attesa, e registra
++  // stato e valutazione insieme. Non c'è più un modo di modificare una
++  // candidatura direttamente.
++  const { error } = await supabase.rpc("decidi_candidatura", {
++    p_candidatura: candidaturaId,
++    p_stato: nuovoStato,
++    p_motivo: nuovoStato === "rifiutata" ? motivo : null,
++    p_valutazione: valutazione,
++  });
+ 
+   if (error) {
+-    return {
+-      error: error.message.includes("DECISIONE_DEFINITIVA")
+-        ? "Questa candidatura è già stata valutata."
+-        : error.message,
+-    };
+-  }
+-  if (!aggiornate || aggiornate.length === 0) {
+-    return { error: "Questa candidatura è già stata valutata." };
++    // il trigger della migrazione 0009 usa un altro codice per lo stesso caso
++    const messaggio = error.message.includes("DECISIONE_DEFINITIVA")
++      ? "CANDIDATURA_GIA_VALUTATA"
++      : error.message;
++    return { error: messaggioErroreVerifica(messaggio) };
+   }
+ 
+   revalidatePath("/database");
+diff --git a/src/app/(app)/database/page.tsx b/src/app/(app)/database/page.tsx
+index b48bebe..76e20d1 100644
+--- a/src/app/(app)/database/page.tsx
++++ b/src/app/(app)/database/page.tsx
+@@ -1,12 +1,12 @@
+ import { createClient } from "@/lib/supabase/server";
+ import { DatabaseClient } from "./DatabaseClient";
++import { criteriDaRighe } from "@/lib/match";
++import type { CriterioRichiesto, RigaCriterioDb } from "@/lib/match";
+ import {
+-  criteriDaRighe,
+-  leggiFotografia,
+-  valutaCandidato,
+-} from "@/lib/match";
+-import type { CriterioRichiesto, ProfiloCandidato, RigaCriterioDb } from "@/lib/match";
+-import type { CandidaturaRicevuta } from "@/lib/types";
++  assemblaCandidature,
++  COLONNE_VISTA_CANDIDATI,
++} from "@/lib/candidati";
++import type { RigaCandidatura, RigaVistaCandidato } from "@/lib/candidati";
+ 
+ export default async function DatabasePage() {
+   const supabase = await createClient();
+@@ -14,28 +14,29 @@ export default async function DatabasePage() {
+     data: { user },
+   } = await supabase.auth.getUser();
+ 
+-  // Candidature ricevute sugli annunci di questo proprietario, con i dati
+-  // dell'inquilino che la sicurezza del database gli lascia leggere
+-  // (policy "tenant_profiles: owner reads applicants"). Le zone e le
+-  // caratteristiche desiderate NON sono tra questi: restano dell'inquilino.
++  // Le candidature ricevute sui miei annunci. I dati degli inquilini NON si
++  // leggono più dalle loro tabelle: il database lascia al proprietario solo
++  // la vista `candidati_del_proprietario`, con le colonne che servono (e dopo
++  // un rifiuto, solo il nome).
+   const { data: candidature } = await supabase
+     .from("candidature")
+     .select(
+-      "id, status, match_pct, created_at, tenant_id, listing_id, match_proprietario, listings!inner(owner_id, titolo, zona, prezzo), tenant_profiles!inner(professione, reddito_mensile, reddito_nucleo, garante, fideiussione, protestato, animali, nucleo, verificato, presentazione, avatar_url)"
++      "id, status, match_pct, created_at, tenant_id, listing_id, listings!inner(owner_id, titolo, zona, prezzo)"
+     )
+     .eq("listings.owner_id", user!.id)
+     .order("created_at", { ascending: false });
+ 
+-  const righe = candidature ?? [];
+-  const tenantIds = [...new Set(righe.map((c) => c.tenant_id as string))];
+-  const listingIds = [...new Set(righe.map((c) => c.listing_id as string))];
++  const righe = (candidature ?? []) as unknown as RigaCandidatura[];
++  const tenantIds = [...new Set(righe.map((c) => c.tenant_id))];
++  const listingIds = [...new Set(righe.map((c) => c.listing_id))];
+ 
+-  // Nome e cognome (migrazione 0003), criteri richiesti per annuncio e
+-  // recensioni di ciascun inquilino (per l'affidabilità).
+-  const [{ data: profili }, { data: righeCriteri }, { data: recensioni }] =
++  const [{ data: vista }, { data: valutazioni }, { data: righeCriteri }, { data: recensioni }] =
+     await Promise.all([
+-      tenantIds.length > 0
+-        ? supabase.from("profiles").select("id, nome, cognome").in("id", tenantIds)
++      righe.length > 0
++        ? supabase.from("candidati_del_proprietario").select(COLONNE_VISTA_CANDIDATI)
++        : { data: [] },
++      righe.length > 0
++        ? supabase.from("valutazioni_candidati").select("candidatura_id, valutazione")
+         : { data: [] },
+       listingIds.length > 0
+         ? supabase
+@@ -48,10 +49,6 @@ export default async function DatabasePage() {
+         : { data: [] },
+     ]);
+ 
+-  const nomiPerTenant = new Map(
+-    (profili ?? []).map((p) => [p.id as string, { nome: p.nome, cognome: p.cognome }])
+-  );
+-
+   const righePerListing = new Map<string, RigaCriterioDb[]>();
+   for (const r of righeCriteri ?? []) {
+     const id = r.listing_id as string;
+@@ -67,44 +64,15 @@ export default async function DatabasePage() {
+     votiPerTenant.set(id, [...(votiPerTenant.get(id) ?? []), r.voto as number]);
+   }
+ 
+-  const candidatureComplete: CandidaturaRicevuta[] = righe.map((c) => {
+-    const listing = c.listings as unknown as { prezzo: number } | null;
+-    const profilo = c.tenant_profiles as unknown as ProfiloCandidato;
+-    const voti = votiPerTenant.get(c.tenant_id as string) ?? [];
+-
+-    // Finché la candidatura è in attesa il match si ricalcola sui dati
+-    // attuali. Dopo la decisione si mostra la fotografia scattata in quel
+-    // momento (se è leggibile; altrimenti si ricalcola).
+-    const fotografia =
+-      c.status !== "in_attesa" ? leggiFotografia(c.match_proprietario) : null;
+-
+-    const valutazione = fotografia
+-      ? { ...fotografia, congelata: true }
+-      : {
+-          ...valutaCandidato({
+-            criteri: criteriPerListing.get(c.listing_id as string) ?? [],
+-            canone: listing?.prezzo ?? 0,
+-            profilo,
+-            mediaRecensioni:
+-              voti.length > 0 ? voti.reduce((a, b) => a + b, 0) / voti.length : null,
+-            numeroRecensioni: voti.length,
+-          }),
+-          congelata: false,
+-        };
+-
+-    // `match_proprietario` grezzo non serve al client
+-    const { match_proprietario: _grezzo, ...resto } = c as typeof c & {
+-      match_proprietario: unknown;
+-    };
+-    void _grezzo;
+-
+-    return {
+-      ...(resto as unknown as CandidaturaRicevuta),
+-      nome: nomiPerTenant.get(c.tenant_id as string)?.nome ?? null,
+-      cognome: nomiPerTenant.get(c.tenant_id as string)?.cognome ?? null,
+-      valutazione,
+-    };
+-  });
+-
+-  return <DatabaseClient candidature={candidatureComplete} />;
++  return (
++    <DatabaseClient
++      candidature={assemblaCandidature({
++        candidature: righe,
++        vista: (vista ?? []) as unknown as RigaVistaCandidato[],
++        valutazioni: (valutazioni ?? []) as { candidatura_id: string; valutazione: unknown }[],
++        criteriPerListing,
++        votiPerTenant,
++      })}
++    />
++  );
+ }
+diff --git a/src/app/(app)/gestione-affitti/page.tsx b/src/app/(app)/gestione-affitti/page.tsx
+index 96b66be..4e254ac 100644
+--- a/src/app/(app)/gestione-affitti/page.tsx
++++ b/src/app/(app)/gestione-affitti/page.tsx
+@@ -37,10 +37,13 @@ export default async function GestioneAffittiPage() {
+   const tenantIds = [...new Set(senzaContratto.map((c) => c.tenant_id as string))];
+   const { data: profiliSenza } =
+     tenantIds.length > 0
+-      ? await supabase.from("profiles").select("id, nome, cognome").in("id", tenantIds)
++      ? await supabase
++          .from("candidati_del_proprietario")
++          .select("tenant_id, nome, cognome")
++          .in("tenant_id", tenantIds)
+       : { data: [] };
+   const nomiSenzaContratto = new Map(
+-    (profiliSenza ?? []).map((p) => [p.id as string, { nome: p.nome, cognome: p.cognome }])
++    (profiliSenza ?? []).map((p) => [p.tenant_id as string, { nome: p.nome, cognome: p.cognome }])
+   );
+ 
+   const candidatureSenzaContratto: CandidaturaSenzaContratto[] = senzaContratto.map(
+@@ -62,10 +65,13 @@ export default async function GestioneAffittiPage() {
+   ].filter(Boolean) as string[];
+   const { data: profiliContratti } =
+     tenantIdsContratti.length > 0
+-      ? await supabase.from("profiles").select("id, nome, cognome").in("id", tenantIdsContratti)
++      ? await supabase
++          .from("candidati_del_proprietario")
++          .select("tenant_id, nome, cognome")
++          .in("tenant_id", tenantIdsContratti)
+       : { data: [] };
+   const nomiContratti = new Map(
+-    (profiliContratti ?? []).map((p) => [p.id as string, { nome: p.nome, cognome: p.cognome }])
++    (profiliContratti ?? []).map((p) => [p.tenant_id as string, { nome: p.nome, cognome: p.cognome }])
+   );
+ 
+   const contrattiCompleti: ContrattoProprietario[] = (
+diff --git a/src/app/chat/[id]/page.tsx b/src/app/chat/[id]/page.tsx
+index ae7da04..115a192 100644
+--- a/src/app/chat/[id]/page.tsx
++++ b/src/app/chat/[id]/page.tsx
+@@ -36,12 +36,16 @@ export default async function ChatPage({
+     redirect("/");
+   }
+ 
+-  const altroId = isTenant ? listing!.owner_id : candidatura.tenant_id;
+-  const { data: altroProfilo } = await supabase
+-    .from("profiles")
+-    .select("nome, cognome")
+-    .eq("id", altroId)
+-    .single();
++  // Il nome dell'altra persona. L'inquilino legge il profilo del proprietario
++  // dopo il match; il proprietario legge quello dell'inquilino solo dalla
++  // vista `candidati_del_proprietario`, non più dalla tabella dei profili.
++  const { data: altroProfilo } = isTenant
++    ? await supabase.from("profiles").select("nome, cognome").eq("id", listing!.owner_id).single()
++    : await supabase
++        .from("candidati_del_proprietario")
++        .select("nome, cognome")
++        .eq("candidatura_id", id)
++        .single();
+ 
+   const { data: messaggi } = await supabase
+     .from("messaggi")
+diff --git a/src/lib/candidati.ts b/src/lib/candidati.ts
+new file mode 100644
+index 0000000..3f0ae9d
+--- /dev/null
++++ b/src/lib/candidati.ts
+@@ -0,0 +1,115 @@
++import { leggiFotografia, valutaCandidato } from "@/lib/match";
++import type { CriterioRichiesto, ProfiloCandidato } from "@/lib/match";
++import type { CandidaturaRicevuta } from "@/lib/types";
++
++/** Una riga della tabella `candidature`, come la legge il proprietario. */
++export type RigaCandidatura = {
++  id: string;
++  status: CandidaturaRicevuta["status"];
++  match_pct: number | null;
++  created_at: string;
++  tenant_id: string;
++  listing_id: string;
++  listings: { titolo: string; zona: string; prezzo: number } | null;
++};
++
++/**
++ * Una riga della vista `candidati_del_proprietario`. Dopo un rifiuto tutto
++ * tranne nome e cognome arriva vuoto: la vista lo decide, non questo codice.
++ */
++export type RigaVistaCandidato = {
++  candidatura_id: string;
++  nome: string | null;
++  cognome: string | null;
++  professione: string | null;
++  reddito_mensile: number | null;
++  reddito_nucleo: number | null;
++  garante: boolean | null;
++  fideiussione: boolean | null;
++  protestato: boolean | null;
++  verificato: boolean | null;
++  presentazione: string | null;
++  avatar_url: string | null;
++  animali_compilato: boolean | null;
++  nucleo_compilato: boolean | null;
++};
++
++/** Le colonne da chiedere alla vista, in un posto solo. */
++export const COLONNE_VISTA_CANDIDATI =
++  "candidatura_id, nome, cognome, professione, reddito_mensile, reddito_nucleo, garante, fideiussione, protestato, verificato, presentazione, avatar_url, animali_compilato, nucleo_compilato";
++
++/** Dalla riga della vista al profilo che legge il calcolo del match. */
++export function profiloDaVista(v: Partial<RigaVistaCandidato> | null | undefined): ProfiloCandidato {
++  return {
++    professione: v?.professione ?? null,
++    reddito_mensile: v?.reddito_mensile ?? null,
++    reddito_nucleo: v?.reddito_nucleo ?? null,
++    garante: v?.garante ?? null,
++    fideiussione: v?.fideiussione ?? null,
++    protestato: v?.protestato ?? null,
++    animali_compilato: v?.animali_compilato === true,
++    nucleo_compilato: v?.nucleo_compilato === true,
++    presentazione: v?.presentazione ?? null,
++    verificato: v?.verificato === true,
++  };
++}
++
++/**
++ * Mette insieme ciò che il proprietario vede di ogni candidatura: i dati
++ * della vista e il match sui criteri che ha chiesto.
++ *
++ * Finché la candidatura è in attesa il match si ricalcola sui dati attuali.
++ * Dopo la decisione si mostra la valutazione registrata in quel momento; se
++ * manca o è illeggibile (candidature decise prima che esistesse) si ricalcola.
++ */
++export function assemblaCandidature(input: {
++  candidature: RigaCandidatura[];
++  vista: RigaVistaCandidato[];
++  valutazioni: { candidatura_id: string; valutazione: unknown }[];
++  criteriPerListing: Map<string, CriterioRichiesto[]>;
++  votiPerTenant: Map<string, number[]>;
++}): CandidaturaRicevuta[] {
++  const vistaPer = new Map(input.vista.map((v) => [v.candidatura_id, v]));
++  const valutazionePer = new Map(input.valutazioni.map((v) => [v.candidatura_id, v.valutazione]));
++
++  return input.candidature.map((c) => {
++    const v = vistaPer.get(c.id);
++    const voti = input.votiPerTenant.get(c.tenant_id) ?? [];
++
++    const registrata = c.status !== "in_attesa" ? leggiFotografia(valutazionePer.get(c.id)) : null;
++
++    const valutazione = registrata
++      ? { ...registrata, congelata: true }
++      : {
++          ...valutaCandidato({
++            criteri: input.criteriPerListing.get(c.listing_id) ?? [],
++            canone: c.listings?.prezzo ?? 0,
++            profilo: profiloDaVista(v),
++            mediaRecensioni: voti.length > 0 ? voti.reduce((a, b) => a + b, 0) / voti.length : null,
++            numeroRecensioni: voti.length,
++          }),
++          congelata: false,
++        };
++
++    return {
++      id: c.id,
++      status: c.status,
++      match_pct: c.match_pct,
++      created_at: c.created_at,
++      tenant_id: c.tenant_id,
++      listing_id: c.listing_id,
++      listings: c.listings,
++      tenant_profiles: {
++        professione: v?.professione ?? null,
++        reddito_mensile: v?.reddito_mensile ?? null,
++        reddito_nucleo: v?.reddito_nucleo ?? null,
++        verificato: v?.verificato === true,
++        presentazione: v?.presentazione ?? null,
++        avatar_url: v?.avatar_url ?? null,
++      },
++      nome: v?.nome ?? null,
++      cognome: v?.cognome ?? null,
++      valutazione,
++    };
++  });
++}
+diff --git a/src/lib/match/candidato.ts b/src/lib/match/candidato.ts
+index cf7c83b..c8580d5 100644
+--- a/src/lib/match/candidato.ts
++++ b/src/lib/match/candidato.ts
+@@ -7,10 +7,11 @@ import type {
+ } from "./tipi";
+ 
+ /**
+- * I campi di `tenant_profiles` che il proprietario può leggere di chi si
+- * è candidato. Le zone e le caratteristiche desiderate NON ci sono: sono
+- * preferenze di ricerca, e la sicurezza del database le tiene leggibili
+- * solo dall'inquilino.
++ * Ciò che il proprietario può leggere di chi si è candidato (la vista
++ * `candidati_del_proprietario`). NON ci sono: le zone e le caratteristiche
++ * desiderate, il numero di figli, né il valore di animali e composizione
++ * del nucleo. Di questi ultimi due il proprietario sa solo se sono compilati:
++ * servono a contare quanto è completo il profilo, e basta.
+  */
+ export type ProfiloCandidato = {
+   professione: string | null;
+@@ -19,8 +20,9 @@ export type ProfiloCandidato = {
+   garante: boolean | null;
+   fideiussione: boolean | null;
+   protestato: boolean | null;
+-  animali: boolean | null;
+-  nucleo: string | null;
++  /** il valore non si mostra al proprietario: si sa solo se l'inquilino l'ha indicato */
++  animali_compilato: boolean;
++  nucleo_compilato: boolean;
+   presentazione: string | null;
+   verificato: boolean;
+ };
+@@ -38,9 +40,9 @@ export function completezzaProfiloPersonale(p: ProfiloCandidato): number {
+     !!p.reddito_mensile,
+     !!p.reddito_nucleo,
+     p.garante !== null,
+-    p.animali !== null,
++    p.animali_compilato,
+     (p.presentazione ?? "").trim().length > 10,
+-    p.nucleo !== null,
++    p.nucleo_compilato,
+     p.fideiussione !== null,
+   ];
+   return Math.round((campi.filter(Boolean).length / campi.length) * 100);
+diff --git a/src/lib/verifica.ts b/src/lib/verifica.ts
+index 85f9692..e1e240a 100644
+--- a/src/lib/verifica.ts
++++ b/src/lib/verifica.ts
+@@ -176,6 +176,11 @@ const MESSAGGI: Record<string, string> = {
+   RAPPORTO_NON_VERIFICATO:
+     "Per lasciare un feedback l'affitto deve essere verificato: lo controlliamo noi.",
+   RAPPORTO_GIA_RECENSITO: "Hai già lasciato il feedback per questo affitto.",
++  // decisioni sulle candidature
++  CANDIDATURA_NON_TUA: "Questa candidatura non risulta tua.",
++  CANDIDATURA_GIA_VALUTATA: "Questa candidatura è già stata valutata.",
++  MOTIVO_OBBLIGATORIO: "Scegli un motivo per il rifiuto.",
++  STATO_NON_VALIDO: "Scelta non valida.",
+ };
+ 
+ /** Traduce gli errori del database in frasi comprensibili. Mai il testo tecnico. */
+diff --git a/supabase/migrations/0016_minimizzazione_candidati.sql b/supabase/migrations/0016_minimizzazione_candidati.sql
+new file mode 100644
+index 0000000..0255ebf
+--- /dev/null
++++ b/supabase/migrations/0016_minimizzazione_candidati.sql
+@@ -0,0 +1,219 @@
++-- ============================================================
++-- MatchAmI — il proprietario vede dei candidati solo ciò che serve
++--
++-- Correzione di tre esposizioni trovate nell'inventario dei dati personali
++-- (verificate con utenti diversi su un database vero):
++--
++--   1. Un proprietario leggeva TUTTE le colonne del profilo di chi si
++--      candidava, anche quelle che l'app non mostra e non usa come criterio:
++--      numero di figli, composizione del nucleo, animali, e i consensi
++--      marketing della persona. Ora legge solo una VISTA con le colonne che
++--      servono davvero.
++--   2. Continuava a leggere quel profilo anche dopo aver rifiutato il
++--      candidato, senza limite di tempo. Ora, dopo un rifiuto, della persona
++--      resta solo il nome, per il suo elenco.
++--   3. Un inquilino leggeva, dalla propria candidatura decisa, la valutazione
++--      che il proprietario aveva fatto di lui: punteggio, criteri non
++--      soddisfatti, con il testo dei criteri. Ora la valutazione sta in una
++--      tabella che legge solo il proprietario.
++--
++-- In più, togliendo il permesso di modificare direttamente le candidature, si
++-- chiude un altro passaggio trovato provando: un proprietario poteva
++-- riassegnare una candidatura a un altro inquilino che non si era mai
++-- candidato, aprendo di fatto una chat con lui. Ora le decisioni passano da
++-- una funzione.
++--
++-- ATTENZIONE, ORDINE: questa migrazione e il codice vanno messi online
++-- INSIEME. Il codice precedente non trova più le colonne e le tabelle che
++-- questa migrazione cambia, e il codice nuovo non funziona senza di essa.
++-- Esegui la migrazione e subito dopo fai il push.
++-- ============================================================
++
++-- ------------------------------------------------------------
++-- 1. La vista: cosa vede il proprietario di chi si candida
++--
++-- La vista gira con i permessi di chi l'ha creata (non con quelli di chi la
++-- interroga), quindi il filtro per proprietario è DENTRO la vista, su
++-- auth.uid(). `security_barrier` impedisce che una funzione scritta da chi
++-- interroga veda le righe prima del filtro.
++--
++-- Dopo un rifiuto restano solo nome e cognome (per l'elenco "già valutate").
++-- ------------------------------------------------------------
++
++create or replace view public.candidati_del_proprietario
++with (security_barrier = true) as
++select
++  c.id as candidatura_id,
++  c.listing_id,
++  c.tenant_id,
++  c.status as stato,
++  p.nome,
++  p.cognome,
++  case when c.status <> 'rifiutata' then t.professione end as professione,
++  case when c.status <> 'rifiutata' then t.reddito_mensile end as reddito_mensile,
++  case when c.status <> 'rifiutata' then t.reddito_nucleo end as reddito_nucleo,
++  case when c.status <> 'rifiutata' then t.garante end as garante,
++  case when c.status <> 'rifiutata' then t.fideiussione end as fideiussione,
++  case when c.status <> 'rifiutata' then t.protestato end as protestato,
++  case when c.status <> 'rifiutata' then t.verificato end as verificato,
++  case when c.status <> 'rifiutata' then t.presentazione end as presentazione,
++  case when c.status <> 'rifiutata' then t.avatar_url end as avatar_url,
++  -- Animali e composizione del nucleo NON si mostrano al proprietario: servono
++  -- solo a sapere se il profilo è compilato. Quindi solo un sì/no.
++  case when c.status <> 'rifiutata' then (t.animali is not null) end as animali_compilato,
++  case when c.status <> 'rifiutata' then (t.nucleo is not null) end as nucleo_compilato
++from candidature c
++join listings l on l.id = c.listing_id and l.owner_id = auth.uid()
++join profiles p on p.id = c.tenant_id
++left join tenant_profiles t on t.profile_id = c.tenant_id;
++
++revoke all on public.candidati_del_proprietario from public, anon;
++grant select on public.candidati_del_proprietario to authenticated;
++
++-- Il proprietario non legge più le righe grezze.
++drop policy if exists "tenant_profiles: owner reads applicants" on tenant_profiles;
++drop policy if exists "profiles: owner reads applicant profile" on profiles;
++
++-- ------------------------------------------------------------
++-- 2. La valutazione del proprietario resta del proprietario
++-- ------------------------------------------------------------
++
++create table if not exists valutazioni_candidati (
++  candidatura_id uuid primary key references candidature(id) on delete cascade,
++  valutazione jsonb not null,
++  created_at timestamptz not null default now(),
++  check (pg_column_size(valutazione) < 20000)
++);
++
++alter table valutazioni_candidati enable row level security;
++
++-- Solo il proprietario dell'annuncio. Nessuna policy di scrittura: la
++-- valutazione si registra con `decidi_candidatura`.
++drop policy if exists "valutazioni: le legge il proprietario" on valutazioni_candidati;
++create policy "valutazioni: le legge il proprietario" on valutazioni_candidati
++  for select using (
++    exists (
++      select 1 from candidature c
++      join listings l on l.id = c.listing_id
++      where c.id = valutazioni_candidati.candidatura_id and l.owner_id = auth.uid()
++    )
++  );
++
++-- Le valutazioni già fotografate passano nella tabella nuova.
++do $$
++begin
++  if exists (select 1 from information_schema.columns
++              where table_schema = 'public' and table_name = 'candidature'
++                and column_name = 'match_proprietario') then
++    insert into valutazioni_candidati (candidatura_id, valutazione, created_at)
++    select id, match_proprietario, coalesce(match_proprietario_at, now())
++      from candidature
++     where match_proprietario is not null
++    on conflict do nothing;
++  end if;
++end;
++$$;
++
++-- La policy di inserimento delle candidature citava le colonne che stiamo
++-- per togliere: si riscrive senza, con le stesse regole di prima.
++drop policy if exists "candidature: tenant creates" on candidature;
++
++alter table candidature
++  drop column if exists match_proprietario,
++  drop column if exists match_proprietario_at;
++
++create policy "candidature: tenant creates" on candidature
++  for insert
++  with check (
++    auth.uid() = tenant_id
++    and status = 'in_attesa'
++    and exists (
++      select 1 from listings l
++      where l.id = candidature.listing_id
++        and l.pubblicato = true
++        and l.verifica_stato = 'verificato'
++    )
++  );
++
++-- ------------------------------------------------------------
++-- 3. Le decisioni passano da una funzione
++--
++-- Toglie il permesso di modificare direttamente una candidatura: con quello
++-- un proprietario poteva anche cambiarne l'inquilino. La funzione decide
++-- (una volta sola) e registra la valutazione nello stesso momento.
++-- ------------------------------------------------------------
++
++drop policy if exists "candidature: owner updates status" on candidature;
++
++create or replace function public.decidi_candidatura(
++  p_candidatura uuid,
++  p_stato text,
++  p_motivo text,
++  p_valutazione jsonb
++)
++returns void
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_owner uuid;
++begin
++  if auth.uid() is null then
++    raise exception 'NON_AUTENTICATO';
++  end if;
++
++  if p_stato not in ('accettata', 'rifiutata') then
++    raise exception 'STATO_NON_VALIDO';
++  end if;
++
++  if p_stato = 'rifiutata' and p_motivo is null then
++    raise exception 'MOTIVO_OBBLIGATORIO';
++  end if;
++
++  -- Un id inesistente e una candidatura altrui rispondono allo stesso modo.
++  select l.owner_id into v_owner
++    from candidature c join listings l on l.id = c.listing_id
++   where c.id = p_candidatura;
++  if v_owner is distinct from auth.uid() then
++    raise exception 'CANDIDATURA_NON_TUA';
++  end if;
++
++  update candidature
++     set status = p_stato::stato_candidatura,
++         motivo_rifiuto = case when p_stato = 'rifiutata' then p_motivo else null end,
++         updated_at = now()
++   where id = p_candidatura and status = 'in_attesa';
++  if not found then
++    raise exception 'CANDIDATURA_GIA_VALUTATA';
++  end if;
++
++  if p_valutazione is not null then
++    insert into valutazioni_candidati (candidatura_id, valutazione)
++    values (p_candidatura, p_valutazione)
++    on conflict do nothing;
++  end if;
++end;
++$$;
++
++grant execute on function public.decidi_candidatura(uuid, text, text, jsonb) to authenticated;
++
++-- ------------------------------------------------------------
++-- Verifica
++-- ------------------------------------------------------------
++
++select table_name from information_schema.tables
++where table_name in ('candidati_del_proprietario', 'valutazioni_candidati') order by table_name;
++
++-- deve risultare 0: nessuna policy del proprietario sulle righe grezze dei profili
++select count(*) as policy_del_proprietario_rimaste from pg_policy
++where polrelid in ('tenant_profiles'::regclass, 'profiles'::regclass)
++  and polname in ('tenant_profiles: owner reads applicants', 'profiles: owner reads applicant profile');
++
++-- deve risultare 0: le colonne con la valutazione non sono più nelle candidature
++select count(*) as colonne_valutazione_ancora_nelle_candidature
++from information_schema.columns
++where table_name = 'candidature' and column_name like 'match_proprietario%';
++
++-- deve elencare solo "owner reads received", "tenant creates", "tenant reads own"
++select policyname from pg_policies where tablename = 'candidature' order by 1;
+-- 
+2.43.0
+
+
+From fa849282fd0369bb991357700bd35bbdaaed006a Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 7 Oct 2026 12:19:56 +0000
+Subject: [PATCH 2/2] feat(privacy): informativa provvisoria con versione,
+ accettazione registrata e blocco
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RICHIEDE LA MIGRAZIONE 0017 PRIMA DEL PUSH. Se il codice è online e la
+migrazione manca, nessuno riesce a superare la schermata di accettazione.
+
+Prima di questa modifica l'app non aveva nessuna informativa: la casella
+alla registrazione rimandava a una 'privacy policy' che non esisteva, e il
+consenso era un sì/no senza versione né data.
+
+- /informativa: pagina pubblica con un documento PROVVISORIO, dichiarato
+  tale, non legale, da usare con dati di prova. Descrive solo fatti
+  verificati (quali dati, chi li vede, cosa succede alla cancellazione) e
+  lascia come [da indicare] titolare, contatto e regione dei dati
+- accettazioni_informativa (0017): ogni accettazione registra versione e
+  data; la data la mette il database, chi accetta non la sceglie; la
+  versione ha una forma controllata anche dal database
+- chi non ha accettato la versione in vigore viene fermato nell'area
+  dell'app, nella chat, e sulle pagine d'invito e di rapporto da loggato.
+  Se la lettura del registro fallisce si ferma comunque (fallire chiusi)
+- la versione NON arriva dal browser: si prende dal file di contenuto sul
+  server, così non si può accettare una versione diversa da quella
+  mostrata. Le destinazioni ostili dopo l'accettazione tornano a '/'
+- la casella alla registrazione rimanda al testo, dichiarandolo
+  provvisorio; la schermata Privacy mostra versione e data di accettazione
+  e non afferma più una base giuridica, che spetta a un legale
+- sostituire il testo con quello del legale: riscrivere
+  src/content/informativa.ts, mettere provvisoria: false, cambiare la
+  versione. Tutti riaccettano
+
+Test (17 nuovi, 161 in tutto): la regola della versione è identica nel
+database e nell'app; un testo provvisorio non può affermare cose legali;
+un testo definitivo non può portarsi dietro segnaposto o l'avviso
+provvisorio; ciò che il testo dice dei file corrisponde ai bucket
+davvero pubblici e privati. Le regole sanno fermare un testo sbagliato.
+
+Verificato su PostgreSQL costruito da zero (tutte le migrazioni dalla
+0001 alla 0017), su un server Next contro un finto Supabase, e con prove
+di interazione sulla schermata Privacy.
+---
+ package.json                                  |   2 +-
+ scripts/test-candidati.mjs                    |   3 -
+ scripts/test-informativa.mjs                  | 218 ++++++++++++++++++
+ src/app/(app)/layout.tsx                      |   9 +
+ src/app/chat/[id]/page.tsx                    |   7 +
+ src/app/globals.css                           |  61 +++++
+ src/app/informativa/accetta/AccettaForm.tsx   |  51 ++++
+ src/app/informativa/accetta/actions.ts        |  40 ++++
+ src/app/informativa/accetta/page.tsx          |  50 ++++
+ src/app/informativa/page.tsx                  |  23 ++
+ src/app/invito/[token]/page.tsx               |   8 +
+ src/app/login/page.tsx                        |  15 +-
+ src/app/rapporto/[token]/page.tsx             |   8 +
+ src/components/PrivacySheet.tsx               |  42 +++-
+ src/components/TestoInformativa.tsx           |  42 ++++
+ src/content/informativa.ts                    | 134 +++++++++++
+ src/lib/informativa.ts                        |  55 +++++
+ src/lib/supabase/middleware.ts                |   2 +-
+ .../0017_accettazioni_informativa.sql         |  81 +++++++
+ 19 files changed, 840 insertions(+), 11 deletions(-)
+ create mode 100644 scripts/test-informativa.mjs
+ create mode 100644 src/app/informativa/accetta/AccettaForm.tsx
+ create mode 100644 src/app/informativa/accetta/actions.ts
+ create mode 100644 src/app/informativa/accetta/page.tsx
+ create mode 100644 src/app/informativa/page.tsx
+ create mode 100644 src/components/TestoInformativa.tsx
+ create mode 100644 src/content/informativa.ts
+ create mode 100644 src/lib/informativa.ts
+ create mode 100644 supabase/migrations/0017_accettazioni_informativa.sql
+
+diff --git a/package.json b/package.json
+index 66f1fea..d2ebcca 100644
+--- a/package.json
++++ b/package.json
+@@ -7,7 +7,7 @@
+     "build": "next build",
+     "start": "next start",
+     "lint": "eslint",
+-    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-candidati.mjs b/scripts/test-candidati.mjs
+index 545596f..b85f351 100644
+--- a/scripts/test-candidati.mjs
++++ b/scripts/test-candidati.mjs
+@@ -10,9 +10,6 @@ import { caricaTs, radice } from "./carica-ts.mjs";
+ 
+ // candidati.ts importa "@/lib/match" e "@/lib/types": il caricatore non conosce l'alias,
+ // quindi si legge il file sostituendo gli import con percorsi relativi.
+-import { createRequire } from "node:module";
+-const require_ = createRequire(import.meta.url);
+-const ts = require_("typescript");
+ const sorgente = fs.readFileSync(path.join(radice, "src", "lib", "candidati.ts"), "utf8")
+   .replace('from "@/lib/match"', 'from "./match"').replace('from "@/lib/types"', 'from "./types"');
+ const copia = path.join(radice, "src", "lib", "__candidati_test.ts");
+diff --git a/scripts/test-informativa.mjs b/scripts/test-informativa.mjs
+new file mode 100644
+index 0000000..d981712
+--- /dev/null
++++ b/scripts/test-informativa.mjs
+@@ -0,0 +1,218 @@
++/**
++ * Test dell'informativa sulla privacy (src/content/informativa.ts e
++ * src/lib/informativa.ts). Si lancia con:   npm test
++ *
++ * Servono a una cosa sola: far sì che il documento provvisorio non diventi
++ * per sbaglio qualcosa che non è. Controllano che
++ *   - la versione abbia la forma che il database accetta;
++ *   - il testo provvisorio non affermi niente di legale, e si dichiari tale;
++ *   - un testo definitivo non porti con sé segnaposto o avvisi provvisori;
++ *   - ciò che il testo dice dei file corrisponda a come sono davvero
++ *     configurati i bucket.
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const { INFORMATIVA, SEGNAPOSTO } = caricaTs(path.join(radice, "src", "content", "informativa.ts"));
++const { versioneValida, REGOLA_VERSIONE } = caricaTs(path.join(radice, "src", "lib", "informativa.ts"));
++const migrazioni = path.join(radice, "supabase", "migrations");
++
++// ------------------------------------------------------------
++// Le regole, scritte una volta: si applicano al testo vero e a testi finti
++// ------------------------------------------------------------
++
++/** Frasi che farebbero sembrare legale un testo che non lo è. */
++const AFFERMAZIONI_LEGALI = [
++  /\bGDPR\b/i, /regolamento\s*\(?ue\)?/i, /\bconform[ei]\b|\bconformit/i, /in regola con/i,
++  /base giuridica/i, /legittimo interesse/i, /\bai sensi\b/i, /\ba norma di legge\b/i,
++  /d\.?\s?lgs/i, /garante per la protezione/i, /\bart\.\s?\d/i,
++  /garantiam/i, /totalmente sicur/i, /massima sicurezza/i,
++];
++
++/** Ogni stringa di testo di un'informativa, per cercarci dentro. */
++function tutteLeStringhe(c) {
++  const fuori = [c.titolo ?? "", c.avviso ?? ""];
++  const dentro = c.sezioni.flatMap((s) => [s.titolo, ...(s.paragrafi ?? []), ...(s.elenco ?? [])]);
++  return [...fuori, ...dentro];
++}
++
++/** Restituisce l'elenco dei problemi di un contenuto: vuoto se va bene. */
++function problemi(c) {
++  const p = [];
++  if (!versioneValida(c.versione)) p.push(`versione non valida: ${c.versione}`);
++
++  const titoli = c.sezioni.map((s) => s.titolo);
++  if (new Set(titoli).size !== titoli.length) p.push("due sezioni con lo stesso titolo");
++  for (const s of c.sezioni) {
++    if (!s.titolo?.trim()) p.push("sezione senza titolo");
++    if (!(s.paragrafi?.length || s.elenco?.length)) p.push(`sezione vuota: ${s.titolo}`);
++  }
++  // l'avviso può essere vuoto (in un testo definitivo non c'è): si controllano titolo e sezioni
++  const voci = [c.titolo ?? "", ...c.sezioni.flatMap((s) => [s.titolo, ...(s.paragrafi ?? []), ...(s.elenco ?? [])])];
++  for (const t of voci) if (!t.trim()) p.push("una voce di testo è vuota");
++
++  if (c.provvisoria) {
++    if (!c.avviso?.trim()) p.push("provvisoria ma senza avviso");
++    if (!/provvisori/i.test(c.avviso ?? "")) p.push("l'avviso non dice che è provvisorio");
++    if (!/dati di prova/i.test(c.avviso ?? "")) p.push("l'avviso non dice di usare dati di prova");
++    for (const t of tutteLeStringhe(c)) {
++      for (const re of AFFERMAZIONI_LEGALI) if (re.test(t)) p.push(`affermazione legale in un testo provvisorio (${re}): "${t.slice(0, 60)}…"`);
++    }
++  } else {
++    // un testo definitivo non può portarsi dietro i resti del provvisorio
++    for (const t of tutteLeStringhe(c)) if (t.includes(SEGNAPOSTO)) p.push(`segnaposto rimasto in un testo definitivo: "${t.slice(0, 60)}…"`);
++    if (/documento provvisorio|dati di prova/i.test(c.avviso ?? "")) p.push("avviso provvisorio in un testo definitivo");
++  }
++  return p;
++}
++
++const contenuto = (o = {}) => ({
++  versione: "2026-10-prova-1", provvisoria: true, titolo: "T", aggiornata: "x",
++  avviso: "Documento provvisorio per il prototipo. Usa solo dati di prova.",
++  sezioni: [{ titolo: "A", paragrafi: ["Un testo."] }, { titolo: "B", elenco: ["Una voce."] }],
++  ...o,
++});
++
++// ------------------------------------------------------------
++// La versione
++// ------------------------------------------------------------
++
++test("versione: la regola dell'app è identica a quella del database", () => {
++  const sql = fs.readFileSync(path.join(migrazioni, "0017_accettazioni_informativa.sql"), "utf8");
++  const nelDb = [...sql.matchAll(/~\s*'(\^[^']+\$)'/g)].map((m) => m[1]);
++  assert.ok(nelDb.length >= 2, "la regola dovrebbe comparire nel vincolo e nella funzione");
++  for (const regola of nelDb) assert.equal(REGOLA_VERSIONE.source, regola, "le due regole divergono");
++  assert.match(sql, /length\(versione\) <= 60/);
++});
++
++test("versione: quella in vigore la passa", () => {
++  assert.equal(versioneValida(INFORMATIVA.versione), true, INFORMATIVA.versione);
++});
++
++test("versione: forme valide e non valide", () => {
++  for (const ok of ["2026-10-provvisoria-1", "2027-01-legale-1", "2027-03-legale-v2", "2026-10-a"]) assert.equal(versioneValida(ok), true, ok);
++  const no = ["", "abc", "2026-10", "2026-10-", "2026-10-Provvisoria", "2026-1-x", "26-10-x", "2026-10-prov visoria",
++    "2026-10-x;drop", "2026-10-x\n", " 2026-10-x", "2026-10-x'--", "2026-10-" + "a".repeat(60), "x2026-10-a"];
++  for (const v of no) assert.equal(versioneValida(v), false, JSON.stringify(v));
++});
++
++// ------------------------------------------------------------
++// Il contenuto vero
++// ------------------------------------------------------------
++
++test("contenuto: il testo in vigore non ha problemi", () => {
++  assert.deepEqual(problemi(INFORMATIVA), []);
++});
++
++test("contenuto: il documento provvisorio si dichiara tale e non ha niente di legale", () => {
++  assert.equal(INFORMATIVA.provvisoria, true, "se non è più provvisorio, il test sul testo definitivo vale al suo posto");
++  assert.match(INFORMATIVA.avviso, /provvisori/i);
++  assert.match(INFORMATIVA.avviso, /dati di prova/i);
++  assert.match(INFORMATIVA.avviso, /legale/i);
++});
++
++test("contenuto: i punti non noti sono segnati, non inventati", () => {
++  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
++  assert.ok(tutto.includes(SEGNAPOSTO), "il titolare, il contatto e la regione devono restare da compilare");
++  // quanti: titolare, contatto privacy, regione, contatto per i diritti
++  assert.ok(tutto.split(SEGNAPOSTO).length - 1 >= 3, "dovrebbero essere almeno tre");
++});
++
++test("contenuto: i segnaposto sono scritti in un solo modo (si trovano con una ricerca)", () => {
++  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
++  // qualunque cosa tra parentesi quadre deve essere il segnaposto
++  for (const m of tutto.matchAll(/\[[^\]]*\]/g)) assert.equal(m[0], SEGNAPOSTO, `segnaposto scritto diversamente: ${m[0]}`);
++});
++
++// ------------------------------------------------------------
++// Le regole sanno riconoscere un testo sbagliato (altrimenti non valgono)
++// ------------------------------------------------------------
++
++test("regole: un contenuto sano non dà problemi", () => {
++  assert.deepEqual(problemi(contenuto()), []);
++});
++
++test("regole: un testo provvisorio che si spaccia per legale viene fermato", () => {
++  for (const frase of ["Il trattamento è conforme al GDPR.", "La base giuridica è il consenso.", "Ai sensi del Regolamento (UE) 2016/679.",
++                       "Trattiamo i dati per legittimo interesse.", "Garantiamo la massima sicurezza.", "Come da art. 13."]) {
++    const p = problemi(contenuto({ sezioni: [{ titolo: "A", paragrafi: [frase] }] }));
++    assert.ok(p.some((x) => x.includes("affermazione legale")), `non ha fermato: ${frase}`);
++  }
++});
++
++test("regole: 'garante' come persona che garantisce l'affitto non è un'affermazione legale", () => {
++  assert.deepEqual(problemi(contenuto({ sezioni: [{ titolo: "A", elenco: ["lavoro, reddito, garante e fideiussione"] }] })), []);
++});
++
++test("regole: un provvisorio senza avviso, o che non dice di usare dati di prova, viene fermato", () => {
++  assert.ok(problemi(contenuto({ avviso: "" })).length > 0);
++  assert.ok(problemi(contenuto({ avviso: "Testo di prova per il prototipo." })).some((x) => x.includes("provvisorio")));
++  assert.ok(problemi(contenuto({ avviso: "Documento provvisorio per il prototipo." })).some((x) => x.includes("dati di prova")));
++});
++
++test("regole: un testo DEFINITIVO con un segnaposto rimasto viene fermato", () => {
++  const p = problemi(contenuto({ provvisoria: false, avviso: "", sezioni: [{ titolo: "A", paragrafi: ["Il titolare è [da indicare]."] }] }));
++  assert.ok(p.some((x) => x.includes("segnaposto rimasto")), p.join("; "));
++});
++
++test("regole: un testo definitivo con l'avviso provvisorio ancora dentro viene fermato", () => {
++  const p = problemi(contenuto({ provvisoria: false }));
++  assert.ok(p.some((x) => x.includes("avviso provvisorio")), p.join("; "));
++});
++
++test("regole: un testo definitivo pulito, che usa parole legali, è accettato", () => {
++  // quando arriva il testo del legale, "GDPR" e "base giuridica" sono legittimi
++  const p = problemi(contenuto({ provvisoria: false, avviso: "", versione: "2027-01-legale-1",
++    sezioni: [{ titolo: "Base giuridica", paragrafi: ["Il trattamento è conforme al GDPR."] }] }));
++  assert.deepEqual(p, []);
++});
++
++test("regole: versione sbagliata, sezioni doppie o vuote vengono fermate", () => {
++  assert.ok(problemi(contenuto({ versione: "boh" })).some((x) => x.includes("versione")));
++  assert.ok(problemi(contenuto({ sezioni: [{ titolo: "A", paragrafi: ["x"] }, { titolo: "A", paragrafi: ["y"] }] })).some((x) => x.includes("stesso titolo")));
++  assert.ok(problemi(contenuto({ sezioni: [{ titolo: "A" }] })).some((x) => x.includes("vuota")));
++  assert.ok(problemi(contenuto({ sezioni: [{ titolo: "A", paragrafi: ["  "] }] })).some((x) => x.includes("vuota")));
++});
++
++// ------------------------------------------------------------
++// Ciò che il testo dice dei file corrisponde allo schema
++// ------------------------------------------------------------
++
++function bucketDelleMigrazioni() {
++  const trovati = new Map();
++  for (const f of fs.readdirSync(migrazioni).filter((x) => /^\d{4}_.*\.sql$/.test(x))) {
++    const sql = fs.readFileSync(path.join(migrazioni, f), "utf8");
++    for (const m of sql.matchAll(/insert\s+into\s+storage\.buckets[^;]*?values\s*\(\s*'([^']+)'\s*,\s*'[^']+'\s*,\s*(true|false)/gis)) {
++      trovati.set(m[1], m[2].toLowerCase() === "true");
++    }
++  }
++  return trovati;
++}
++
++test("file: i bucket pubblici e privati sono quelli che il testo descrive", () => {
++  const bucket = bucketDelleMigrazioni();
++  assert.ok(bucket.size >= 3, `dovrei vedere i tre bucket noti, ne vedo ${bucket.size}`);
++  const pubblici = [...bucket].filter(([, p]) => p).map(([id]) => id).sort();
++  const privati = [...bucket].filter(([, p]) => !p).map(([id]) => id).sort();
++  // Se questa uguaglianza cambia, il testo («foto del profilo e degli annunci con
++  // indirizzo pubblico, documenti privati») va riscritto: non va lasciato com'è.
++  assert.deepEqual(pubblici, ["avatar-inquilini", "immobili-foto"], "i bucket pubblici sono cambiati: aggiorna la sezione 'File e foto'");
++  assert.deepEqual(privati, ["documenti-verifica"], "i bucket privati sono cambiati: aggiorna la sezione 'File e foto'");
++
++  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
++  assert.match(tutto, /non richiede l'accesso/, "il testo non dice che le foto hanno un indirizzo pubblico");
++  assert.match(tutto, /link temporanei/, "il testo non dice che i documenti si aprono con link temporanei");
++  assert.match(tutto, /foto del profilo/i);
++  assert.match(tutto, /foto degli annunci/i);
++});
++
++test("file: i documenti d'identità, di proprietà e i contratti non sono mai descritti come pubblici", () => {
++  const sezione = INFORMATIVA.sezioni.find((s) => /file e foto/i.test(s.titolo));
++  assert.ok(sezione, "manca la sezione sui file");
++  const testo = (sezione.paragrafi ?? []).join(" ");
++  const dopo = testo.slice(testo.search(/documenti d'identità/i));
++  assert.match(dopo, /non hanno mai un indirizzo pubblico/);
++});
+diff --git a/src/app/(app)/layout.tsx b/src/app/(app)/layout.tsx
+index bd7b15e..d990009 100644
+--- a/src/app/(app)/layout.tsx
++++ b/src/app/(app)/layout.tsx
+@@ -1,5 +1,8 @@
+ import { createClient } from "@/lib/supabase/server";
++import { redirect } from "next/navigation";
+ import { Navigation } from "@/components/Navigation";
++import { INFORMATIVA } from "@/content/informativa";
++import { haAccettatoInformativa } from "@/lib/informativa";
+ 
+ export default async function AppLayout({
+   children,
+@@ -11,6 +14,12 @@ export default async function AppLayout({
+     data: { user },
+   } = await supabase.auth.getUser();
+ 
++  // Chi non ha accettato la versione in vigore dell'informativa non entra:
++  // quando il testo cambia, cambia la versione e tutti devono riaccettare.
++  if (!(await haAccettatoInformativa(supabase, user!.id, INFORMATIVA.versione))) {
++    redirect("/informativa/accetta");
++  }
++
+   const { data: profile } = await supabase
+     .from("profiles")
+     .select("ruolo, nome")
+diff --git a/src/app/chat/[id]/page.tsx b/src/app/chat/[id]/page.tsx
+index 115a192..1e99a93 100644
+--- a/src/app/chat/[id]/page.tsx
++++ b/src/app/chat/[id]/page.tsx
+@@ -1,5 +1,7 @@
+ import { redirect } from "next/navigation";
+ import { createClient } from "@/lib/supabase/server";
++import { INFORMATIVA } from "@/content/informativa";
++import { haAccettatoInformativa } from "@/lib/informativa";
+ import { ChatClient } from "./ChatClient";
+ import type { Messaggio } from "@/lib/types";
+ 
+@@ -14,6 +16,11 @@ export default async function ChatPage({
+     data: { user },
+   } = await supabase.auth.getUser();
+ 
++  // La chat sta fuori dal gruppo (app), quindi il blocco va ripetuto qui.
++  if (!(await haAccettatoInformativa(supabase, user!.id, INFORMATIVA.versione))) {
++    redirect(`/informativa/accetta?next=${encodeURIComponent(`/chat/${id}`)}`);
++  }
++
+   const { data: candidatura } = await supabase
+     .from("candidature")
+     .select("id, tenant_id, status, listings(owner_id, titolo)")
+diff --git a/src/app/globals.css b/src/app/globals.css
+index 28a6d8c..d185346 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -2524,3 +2524,64 @@ input[type="range"]::-moz-range-thumb {
+   cursor: pointer;
+   display: inline-block;
+ }
++
++/* ============================================================
++   INFORMATIVA
++   ============================================================ */
++.informativa-pagina {
++  min-height: 100vh;
++  background: var(--paper);
++}
++.informativa-colonna {
++  max-width: 720px;
++  margin: 0 auto;
++  padding: 32px 22px 80px 22px;
++}
++.informativa-avviso {
++  background: rgba(201, 105, 78, 0.12);
++  border: 1px solid rgba(201, 105, 78, 0.4);
++  border-left: 5px solid var(--clay);
++  border-radius: 12px;
++  padding: 12px 16px;
++  margin-bottom: 22px;
++  font-size: 13.5px;
++  line-height: 1.55;
++  color: #8a4733;
++}
++.informativa-testo h1 {
++  font-family: var(--font-display);
++  font-size: 30px;
++  color: var(--ink);
++  margin: 0 0 4px 0;
++}
++.informativa-meta {
++  font-size: 12px;
++  color: var(--muted);
++  margin: 0 0 26px 0;
++}
++.informativa-testo h2 {
++  font-family: var(--font-display);
++  font-size: 18px;
++  color: var(--ink);
++  margin: 26px 0 8px 0;
++}
++.informativa-testo p,
++.informativa-testo li {
++  font-size: 14px;
++  line-height: 1.65;
++  color: var(--body-text);
++}
++.informativa-testo ul {
++  margin: 6px 0 0 20px;
++  padding: 0;
++}
++.informativa-testo li {
++  margin-bottom: 7px;
++}
++mark.segnaposto {
++  background: rgba(201, 161, 90, 0.35);
++  color: var(--ink);
++  font-weight: 600;
++  padding: 0 4px;
++  border-radius: 4px;
++}
+diff --git a/src/app/informativa/accetta/AccettaForm.tsx b/src/app/informativa/accetta/AccettaForm.tsx
+new file mode 100644
+index 0000000..eecbcc5
+--- /dev/null
++++ b/src/app/informativa/accetta/AccettaForm.tsx
+@@ -0,0 +1,51 @@
++"use client";
++
++import Link from "next/link";
++import { useActionState } from "react";
++import { accettaInformativa, type AccettaState } from "./actions";
++import { logout } from "@/app/login/actions";
++import { INFORMATIVA } from "@/content/informativa";
++
++export function AccettaForm({ destinazione }: { destinazione: string }) {
++  const [state, formAction, pending] = useActionState<AccettaState, FormData>(
++    accettaInformativa,
++    null
++  );
++
++  return (
++    <>
++      <form action={formAction} className="flex flex-col gap-3">
++        <input type="hidden" name="next" value={destinazione} />
++
++        <label className="login-consent mt-1">
++          <input type="checkbox" name="letto" className="mt-0.5" />
++          Ho letto l&apos;informativa e accetto il trattamento dei dati che
++          descrive.
++        </label>
++
++        {state?.error && <p className="login-error">{state.error}</p>}
++
++        <button type="submit" disabled={pending} className="login-cta mt-2">
++          {pending ? "Un momento..." : "Continua"}
++        </button>
++      </form>
++
++      <form action={logout}>
++        <button
++          type="submit"
++          className="login-fine"
++          style={{ background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
++        >
++          Non accetto: esci
++        </button>
++      </form>
++
++      <p className="login-fine" style={{ marginTop: 4 }}>
++        <Link href="/informativa" target="_blank" rel="noopener noreferrer" className="underline">
++          Leggi l&apos;informativa
++        </Link>{" "}
++        (versione {INFORMATIVA.versione})
++      </p>
++    </>
++  );
++}
+diff --git a/src/app/informativa/accetta/actions.ts b/src/app/informativa/accetta/actions.ts
+new file mode 100644
+index 0000000..fa0d20b
+--- /dev/null
++++ b/src/app/informativa/accetta/actions.ts
+@@ -0,0 +1,40 @@
++"use server";
++
++import { redirect } from "next/navigation";
++import { createClient } from "@/lib/supabase/server";
++import { INFORMATIVA } from "@/content/informativa";
++import { percorsoInterno } from "@/lib/percorso";
++
++export type AccettaState = { error?: string } | null;
++
++/**
++ * Registra l'accettazione della versione in vigore.
++ *
++ * La versione NON arriva dal modulo: si prende dal file di contenuto, sul
++ * server, così nessuno può accettare una versione diversa da quella che gli
++ * è stata mostrata. La data la mette il database.
++ */
++export async function accettaInformativa(
++  _prev: AccettaState,
++  formData: FormData
++): Promise<AccettaState> {
++  if (formData.get("letto") !== "on") {
++    return { error: "Per continuare spunta la casella." };
++  }
++
++  const supabase = await createClient();
++  const {
++    data: { user },
++  } = await supabase.auth.getUser();
++  if (!user) return { error: "Devi accedere per continuare." };
++
++  const { error } = await supabase.rpc("accetta_informativa", {
++    p_versione: INFORMATIVA.versione,
++  });
++  if (error) {
++    console.error("accettaInformativa:", error.message);
++    return { error: "Non è stato possibile registrare l'accettazione. Riprova." };
++  }
++
++  redirect(percorsoInterno(String(formData.get("next") || ""), "/"));
++}
+diff --git a/src/app/informativa/accetta/page.tsx b/src/app/informativa/accetta/page.tsx
+new file mode 100644
+index 0000000..0c17c94
+--- /dev/null
++++ b/src/app/informativa/accetta/page.tsx
+@@ -0,0 +1,50 @@
++import { redirect } from "next/navigation";
++import { createClient } from "@/lib/supabase/server";
++import { CorniceScura } from "@/components/CorniceScura";
++import { INFORMATIVA } from "@/content/informativa";
++import { haAccettatoInformativa } from "@/lib/informativa";
++import { percorsoInterno } from "@/lib/percorso";
++import { AccettaForm } from "./AccettaForm";
++
++/**
++ * La schermata che ferma chi non ha accettato la versione in vigore
++ * dell'informativa. Sta sotto /informativa, che è un percorso pubblico (il
++ * testo si legge senza account): per questo controlla da sé chi sei.
++ */
++export default async function AccettaPage({
++  searchParams,
++}: {
++  searchParams: Promise<{ next?: string }>;
++}) {
++  const { next } = await searchParams;
++  const destinazione = percorsoInterno(next, "/");
++
++  const supabase = await createClient();
++  const {
++    data: { user },
++  } = await supabase.auth.getUser();
++  if (!user) {
++    redirect(`/login?next=${encodeURIComponent("/informativa/accetta" + (next ? `?next=${encodeURIComponent(destinazione)}` : ""))}`);
++  }
++
++  // già accettata: non c'è niente da fare qui
++  if (await haAccettatoInformativa(supabase, user.id, INFORMATIVA.versione)) {
++    redirect(destinazione);
++  }
++
++  return (
++    <CorniceScura titolo="Prima di continuare">
++      <p>
++        Per usare MatchAmI devi leggere e accettare l&apos;informativa sulla
++        privacy.
++      </p>
++      {INFORMATIVA.provvisoria && (
++        <p>
++          <b>È un documento provvisorio per il prototipo</b>, non
++          un&apos;informativa legale: usa solo dati di prova.
++        </p>
++      )}
++      <AccettaForm destinazione={destinazione} />
++    </CorniceScura>
++  );
++}
+diff --git a/src/app/informativa/page.tsx b/src/app/informativa/page.tsx
+new file mode 100644
+index 0000000..f5f932b
+--- /dev/null
++++ b/src/app/informativa/page.tsx
+@@ -0,0 +1,23 @@
++import Link from "next/link";
++import { TestoInformativa } from "@/components/TestoInformativa";
++
++export const metadata = { title: "Informativa sulla privacy · MatchAmI" };
++
++/** Pubblica: si legge anche senza account, per esempio prima di registrarsi. */
++export default function InformativaPage() {
++  return (
++    <main className="informativa-pagina">
++      <div className="informativa-colonna">
++        <div className="login-brand" style={{ color: "var(--ink)", marginBottom: 18 }}>
++          Match<b>AmI</b>
++        </div>
++        <TestoInformativa />
++        <p style={{ marginTop: 28 }}>
++          <Link href="/" className="redo-link">
++            ← Torna a MatchAmI
++          </Link>
++        </p>
++      </div>
++    </main>
++  );
++}
+diff --git a/src/app/invito/[token]/page.tsx b/src/app/invito/[token]/page.tsx
+index f152aec..53e6287 100644
+--- a/src/app/invito/[token]/page.tsx
++++ b/src/app/invito/[token]/page.tsx
+@@ -1,6 +1,9 @@
+ import Link from "next/link";
+ import { createClient } from "@/lib/supabase/server";
+ import { InvitoClient } from "./InvitoClient";
++import { redirect } from "next/navigation";
++import { INFORMATIVA } from "@/content/informativa";
++import { haAccettatoInformativa } from "@/lib/informativa";
+ import { descriviRequisiti } from "@/lib/invito";
+ import type { RequisitiFeedback } from "@/lib/invito";
+ 
+@@ -64,6 +67,11 @@ export default async function InvitoPage({
+     data: { user },
+   } = await supabase.auth.getUser();
+ 
++  // Chi agisce da loggato deve aver accettato l'informativa in vigore.
++  if (user && !(await haAccettatoInformativa(supabase, user.id, INFORMATIVA.versione))) {
++    redirect(`/informativa/accetta?next=${encodeURIComponent(`/invito/${token}`)}`);
++  }
++
+   let ruolo: string | null = null;
+   if (user) {
+     const { data: profile } = await supabase
+diff --git a/src/app/login/page.tsx b/src/app/login/page.tsx
+index 2e32bc9..d074571 100644
+--- a/src/app/login/page.tsx
++++ b/src/app/login/page.tsx
+@@ -3,6 +3,7 @@
+ import { Suspense, useActionState, useState } from "react";
+ import { useSearchParams } from "next/navigation";
+ import { signup, login, richiediReset } from "./actions";
++import { INFORMATIVA } from "@/content/informativa";
+ import { IconCasa, IconPalazzo } from "@/components/icons";
+ 
+ type Ruolo = "inquilino" | "proprietario";
+@@ -120,8 +121,18 @@ function LoginForm() {
+ 
+             <label className="login-consent mt-1">
+               <input type="checkbox" name="privacy" className="mt-0.5" />
+-              Accetto il trattamento dei dati necessario al funzionamento di
+-              MatchAmI (privacy policy).
++              Ho letto l&apos;
++              <a
++                href="/informativa"
++                target="_blank"
++                rel="noopener noreferrer"
++                className="underline"
++              >
++                informativa sulla privacy
++                {INFORMATIVA.provvisoria ? " (provvisoria)" : ""}
++              </a>{" "}
++              e accetto il trattamento dei dati necessario al funzionamento di
++              MatchAmI.
+             </label>
+ 
+             {signupState?.error && (
+diff --git a/src/app/rapporto/[token]/page.tsx b/src/app/rapporto/[token]/page.tsx
+index df7ce60..4eed26a 100644
+--- a/src/app/rapporto/[token]/page.tsx
++++ b/src/app/rapporto/[token]/page.tsx
+@@ -5,6 +5,9 @@ import { RispostaForm } from "./RispostaForm";
+ import { ruoloControparte } from "@/lib/rapporti";
+ import type { RuoloRapporto } from "@/lib/rapporti";
+ import { èTokenRapporto } from "@/lib/uuid";
++import { redirect } from "next/navigation";
++import { INFORMATIVA } from "@/content/informativa";
++import { haAccettatoInformativa } from "@/lib/informativa";
+ 
+ type RichiestaPubblica = {
+   nome_creatore: string;
+@@ -107,6 +110,11 @@ export default async function RapportoPage({ params }: { params: Promise<{ token
+     );
+   }
+ 
++  // Chi agisce da loggato deve aver accettato l'informativa in vigore.
++  if (!(await haAccettatoInformativa(supabase, user.id, INFORMATIVA.versione))) {
++    redirect(`/informativa/accetta?next=${encodeURIComponent(`/rapporto/${token}`)}`);
++  }
++
+   if (r.mia) {
+     return (
+       <CorniceScura titolo="È la tua richiesta">
+diff --git a/src/components/PrivacySheet.tsx b/src/components/PrivacySheet.tsx
+index cd640ec..12972fc 100644
+--- a/src/components/PrivacySheet.tsx
++++ b/src/components/PrivacySheet.tsx
+@@ -1,6 +1,9 @@
+ "use client";
+ 
++import Link from "next/link";
+ import { useActionState, useEffect, useState } from "react";
++import { createClient } from "@/lib/supabase/client";
++import { INFORMATIVA } from "@/content/informativa";
+ import { Sheet } from "@/components/Sheet";
+ import { Chip } from "@/components/ui/Chip";
+ import { Field } from "@/components/ui/Field";
+@@ -28,6 +31,19 @@ export function PrivacySheet({
+   const [marketing, setMarketing] = useState(consensoMarketingIniziale);
+   const [terzi, setTerzi] = useState(consensoTerziIniziale);
+ 
++  // Quando hai accettato l'informativa in vigore. La sicurezza del database
++  // fa leggere a ognuno solo le proprie accettazioni.
++  const [accettataAl, setAccettataAl] = useState<string | null | undefined>(undefined);
++  useEffect(() => {
++    if (!open) return;
++    createClient()
++      .from("accettazioni_informativa")
++      .select("accettata_at")
++      .eq("versione", INFORMATIVA.versione)
++      .maybeSingle()
++      .then(({ data }) => setAccettataAl((data?.accettata_at as string | undefined) ?? null));
++  }, [open]);
++
+   useEffect(() => {
+     if (state?.ok) {
+       const t = setTimeout(onClose, 600);
+@@ -37,11 +53,29 @@ export function PrivacySheet({
+ 
+   return (
+     <Sheet open={open} onClose={onClose} title="Privacy e consensi">
++      <div className="note-box" style={{ marginTop: 0, marginBottom: 16 }}>
++        <b>
++          Informativa sulla privacy
++          {INFORMATIVA.provvisoria ? " (provvisoria)" : ""}
++        </b>
++        <br />
++        Versione {INFORMATIVA.versione}.{" "}
++        {accettataAl === undefined
++          ? ""
++          : accettataAl
++            ? `Accettata il ${new Date(accettataAl).toLocaleDateString("it-IT", {
++                day: "numeric",
++                month: "long",
++                year: "numeric",
++              })}.`
++            : "Non ancora accettata."}{" "}
++        <Link href="/informativa" target="_blank" rel="noopener noreferrer" className="underline">
++          Leggila
++        </Link>
++      </div>
+       <p className="sheet-sub">
+-        Il trattamento dei dati necessario al funzionamento di MatchAmI
+-        (creare il profilo, gestire candidature e contratti) è sempre
+-        attivo: senza non potremmo farti usare l&apos;app. Qui puoi
+-        decidere solo sui consensi facoltativi.
++        Alcuni dati servono per far funzionare l&apos;app: sono descritti
++        nell&apos;informativa. Qui puoi decidere solo sui consensi facoltativi.
+       </p>
+       <form action={formAction}>
+         <input
+diff --git a/src/components/TestoInformativa.tsx b/src/components/TestoInformativa.tsx
+new file mode 100644
+index 0000000..6125272
+--- /dev/null
++++ b/src/components/TestoInformativa.tsx
+@@ -0,0 +1,42 @@
++import { INFORMATIVA, SEGNAPOSTO } from "@/content/informativa";
++
++/** Evidenzia i punti ancora da compilare, così non si possono scambiare per testo vero. */
++function conSegnaposti(testo: string) {
++  return testo.split(SEGNAPOSTO).flatMap((pezzo, i, tutti) =>
++    i < tutti.length - 1
++      ? [pezzo, <mark key={i} className="segnaposto">{SEGNAPOSTO}</mark>]
++      : [pezzo]
++  );
++}
++
++/** Il testo dell'informativa, dal file di contenuto. Serve a pagina e schermata di accettazione. */
++export function TestoInformativa() {
++  return (
++    <div className="informativa-testo">
++      {INFORMATIVA.provvisoria && (
++        <div className="informativa-avviso" role="note">
++          <b>Documento provvisorio.</b> {INFORMATIVA.avviso}
++        </div>
++      )}
++      <h1>{INFORMATIVA.titolo}</h1>
++      <p className="informativa-meta">
++        Versione {INFORMATIVA.versione} · aggiornata a {INFORMATIVA.aggiornata}
++      </p>
++
++      {INFORMATIVA.sezioni.map((s) => (
++        <section key={s.titolo}>
++          <h2>{s.titolo}</h2>
++          {"paragrafi" in s &&
++            s.paragrafi?.map((p, i) => <p key={i}>{conSegnaposti(p)}</p>)}
++          {"elenco" in s && s.elenco && (
++            <ul>
++              {s.elenco.map((voce, i) => (
++                <li key={i}>{conSegnaposti(voce)}</li>
++              ))}
++            </ul>
++          )}
++        </section>
++      ))}
++    </div>
++  );
++}
+diff --git a/src/content/informativa.ts b/src/content/informativa.ts
+new file mode 100644
+index 0000000..fad1c55
+--- /dev/null
++++ b/src/content/informativa.ts
+@@ -0,0 +1,134 @@
++/**
++ * L'INFORMATIVA SULLA PRIVACY.
++ *
++ * QUESTO È IL SOLO FILE DA SOSTITUIRE quando il legale consegna il testo
++ * definitivo. Per sostituirlo basta:
++ *   1. riscrivere `sezioni` con il testo del legale;
++ *   2. mettere `provvisoria: false`;
++ *   3. cambiare `versione` (per esempio "2027-01-legale-1").
++ * Cambiando la versione, chiunque non abbia accettato la nuova viene
++ * fermato alla prossima visita e deve accettarla. Non si tocca altro.
++ *
++ * Finché `provvisoria` è true, il documento si presenta ovunque come
++ * provvisorio. Il testo qui sotto NON è un parere legale: è stato scritto
++ * da chi ha costruito l'app, a partire da cosa l'app fa davvero (vedi
++ * l'inventario dei dati personali), e descrive solo fatti verificati.
++ * I punti da compilare sono segnati con [da indicare].
++ */
++
++export type SezioneInformativa = {
++  titolo: string;
++  paragrafi?: string[];
++  elenco?: string[];
++};
++
++export const INFORMATIVA = {
++  /**
++   * Formato: aaaa-mm-<parola>[-<parola>...], in minuscolo. È lo stesso
++   * controllo che fa il database (migrazione 0017): un test fallisce se
++   * questa stringa non lo supera.
++   */
++  versione: "2026-10-provvisoria-1",
++  provvisoria: true,
++  titolo: "Informativa sulla privacy",
++  aggiornata: "ottobre 2026",
++  avviso:
++    "Documento provvisorio per il prototipo. Non è un'informativa legale: verrà sostituito dal testo redatto da un legale prima di qualunque uso con persone reali. Fino ad allora usa solo dati di prova.",
++  sezioni: [
++    {
++      titolo: "Cos'è questo documento",
++      paragrafi: [
++        "MatchAmI è un prototipo. Questo testo spiega, in modo semplice, quali dati raccoglie e cosa ne fa. È un documento provvisorio: scritto da chi ha costruito l'app, non da un legale.",
++      ],
++    },
++    {
++      titolo: "Chi è il titolare",
++      paragrafi: [
++        "Il titolare del trattamento è [da indicare]. Per le richieste sulla privacy: [da indicare].",
++      ],
++    },
++    {
++      titolo: "Quali dati raccogliamo",
++      elenco: [
++        "Account: email, password (conservata come impronta, non in chiaro), nome, cognome e ruolo, inquilino o proprietario.",
++        "Se sei inquilino: lavoro, reddito tuo e del tuo nucleo, garante, fideiussione, protesti (li dichiari tu e non vengono verificati), animali, composizione del nucleo, numero di figli, presentazione, foto del profilo e le tue preferenze di ricerca (budget, zone, locali, metri, caratteristiche).",
++        "Se sei proprietario: tipo di proprietario, numero di immobili, obiettivo; gli annunci con titolo, descrizione, zona, prezzo, caratteristiche e foto; i criteri che chiedi ai candidati.",
++        "Per le verifiche: il documento d'identità e la prova di proprietà dell'immobile (proprietari), e i contratti di affitto caricati per dichiarare un affitto.",
++        "Mentre usi l'app: candidature, messaggi, contratti, recensioni, richieste di conferma di un affitto e inviti.",
++        "Dati di un'altra persona: se inviti il tuo proprietario, scrivi il suo nome e, se vuoi, la sua email.",
++      ],
++    },
++    {
++      titolo: "A cosa servono",
++      paragrafi: [
++        "Servono a far funzionare l'app: creare il tuo account, mostrarti gli annunci e i candidati, calcolare la compatibilità, far scambiare messaggi dopo un'accettazione, e controllare identità e affitti prima di segnare qualcosa come «verificato».",
++      ],
++    },
++    {
++      titolo: "Punteggi calcolati automaticamente",
++      paragrafi: [
++        "La compatibilità (match) e l'affidabilità sono calcolate automaticamente da ciò che dichiari. Servono a ordinare annunci e candidati. La decisione di accettare o rifiutare una candidatura resta sempre del proprietario.",
++      ],
++    },
++    {
++      titolo: "Chi vede cosa",
++      elenco: [
++        "Tu vedi tutti i tuoi dati.",
++        "Il proprietario di un annuncio a cui ti candidi vede il tuo nome e cognome, il lavoro, il reddito, garante e fideiussione, i protesti che hai dichiarato, se il tuo reddito è verificato, la presentazione, la foto, il punteggio di affidabilità e la compatibilità. Non vede il numero di figli, la composizione del nucleo né se hai animali: sa solo se hai compilato quei campi, per contare quanto è completo il tuo profilo. Non vede le tue preferenze di ricerca.",
++        "Se rifiuta la tua candidatura, del tuo profilo gli resta solo il tuo nome, oltre alla valutazione che aveva già fatto. Tu vedi il motivo del rifiuto, non la sua valutazione completa.",
++        "I messaggi li leggono solo le due persone, dopo che la candidatura è stata accettata.",
++        "Le recensioni su un inquilino le leggono lui, chi le ha scritte e i proprietari a cui si è candidato.",
++        "Gli annunci pubblicati e verificati li vedono tutti gli utenti connessi. L'indirizzo esatto degli immobili non lo raccogliamo.",
++        "Il documento d'identità, la prova di proprietà e i contratti li vedono solo chi li ha caricati e il team di MatchAmI che li controlla. L'altra parte di un affitto non vede il contratto.",
++        "Il team di MatchAmI vede nome e cognome di tutti, e gli annunci e gli affitti da verificare. Chi amministra il sistema ha un accesso tecnico a tutti i dati.",
++      ],
++    },
++    {
++      titolo: "File e foto",
++      paragrafi: [
++        "La foto del profilo e le foto degli annunci si aprono con un indirizzo che non richiede l'accesso: chi conosce quel link può vederle. I documenti d'identità, di proprietà e i contratti non hanno mai un indirizzo pubblico: si aprono con link temporanei, e solo a chi ne ha diritto.",
++      ],
++    },
++    {
++      titolo: "Per quanto tempo conserviamo i dati",
++      paragrafi: [
++        "Al momento non c'è una scadenza automatica: una candidatura, un messaggio o un invito restano finché non cancelli l'account. I tempi di conservazione saranno definiti nel testo definitivo.",
++      ],
++    },
++    {
++      titolo: "Cancellare il tuo account",
++      paragrafi: [
++        "Puoi cancellare l'account da Profilo, Account e accesso. Se sei inquilino spariscono tutti i tuoi dati, comprese le recensioni su di te. Se sei proprietario spariscono tutti i tuoi dati, tranne le recensioni che hai scritto su inquilini ancora iscritti, che restano senza il tuo nome.",
++        "Non c'è ancora un modo per scaricare i tuoi dati.",
++      ],
++    },
++    {
++      titolo: "Fornitori e cookie",
++      paragrafi: [
++        "Usiamo Supabase (database, accessi, file e le email di accesso) e Vercel (per ospitare l'app, che può conservare registri tecnici delle richieste). La regione dei dati è [da indicare].",
++        "Nell'app non ci sono strumenti di analisi né pubblicità. Usiamo solo cookie tecnici, necessari a mantenerti connesso.",
++      ],
++    },
++    {
++      titolo: "Consensi facoltativi",
++      paragrafi: [
++        "Puoi attivare o disattivare il consenso a marketing e partner da Profilo, Privacy e consensi. Oggi non inviamo comunicazioni di marketing né condividiamo dati con partner.",
++      ],
++    },
++    {
++      titolo: "I tuoi diritti",
++      paragrafi: [
++        "Per sapere quali dati abbiamo su di te, correggerli o fare altre richieste, scrivi a [da indicare]. Il testo definitivo descriverà i tuoi diritti in dettaglio.",
++      ],
++    },
++    {
++      titolo: "Se questo testo cambia",
++      paragrafi: [
++        "Quando questo documento viene sostituito o modificato, ti chiederemo di leggerlo e accettarlo di nuovo prima di continuare.",
++      ],
++    },
++  ] satisfies SezioneInformativa[],
++} as const;
++
++/** Il segnaposto da compilare. Un solo modo di scriverlo, così si trova con una ricerca. */
++export const SEGNAPOSTO = "[da indicare]";
+diff --git a/src/lib/informativa.ts b/src/lib/informativa.ts
+new file mode 100644
+index 0000000..a9c097f
+--- /dev/null
++++ b/src/lib/informativa.ts
+@@ -0,0 +1,55 @@
++import type { createClient } from "@/lib/supabase/server";
++
++/**
++ * La forma di una versione dell'informativa: aaaa-mm-<parola>[-<parola>...],
++ * in minuscolo. È la stessa regola della migrazione 0017: un test controlla
++ * che le due coincidano.
++ */
++export const REGOLA_VERSIONE = /^[0-9]{4}-[0-9]{2}(-[a-z0-9]+)+$/;
++
++export function versioneValida(versione: string): boolean {
++  return versione.length <= 60 && REGOLA_VERSIONE.test(versione);
++}
++
++type Supabase = Awaited<ReturnType<typeof createClient>>;
++
++/**
++ * Questa persona ha accettato la versione in vigore?
++ *
++ * Se la domanda al database non riesce si risponde NO: la schermata di
++ * accettazione compare invece di lasciar passare. Meglio fermare qualcuno
++ * per un errore che lasciar usare l'app a chi non ha accettato.
++ */
++export async function haAccettatoInformativa(
++  supabase: Supabase,
++  userId: string,
++  versione: string
++): Promise<boolean> {
++  const { data, error } = await supabase
++    .from("accettazioni_informativa")
++    .select("versione")
++    .eq("user_id", userId)
++    .eq("versione", versione)
++    .maybeSingle();
++
++  if (error) {
++    console.error("haAccettatoInformativa: la lettura non è riuscita:", error.message);
++    return false;
++  }
++  return data !== null;
++}
++
++/** Quando ha accettato la versione in vigore, se l'ha fatto. */
++export async function dataAccettazione(
++  supabase: Supabase,
++  userId: string,
++  versione: string
++): Promise<string | null> {
++  const { data } = await supabase
++    .from("accettazioni_informativa")
++    .select("accettata_at")
++    .eq("user_id", userId)
++    .eq("versione", versione)
++    .maybeSingle();
++  return (data?.accettata_at as string | undefined) ?? null;
++}
+diff --git a/src/lib/supabase/middleware.ts b/src/lib/supabase/middleware.ts
+index bb46379..d490c23 100644
+--- a/src/lib/supabase/middleware.ts
++++ b/src/lib/supabase/middleware.ts
+@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
+ 
+ // "/invito" è pubblico: il proprietario che riceve il link non ha
+ // ancora un account quando lo apre.
+-const PUBLIC_PATHS = ["/login", "/auth", "/invito", "/rapporto"];
++const PUBLIC_PATHS = ["/login", "/auth", "/invito", "/rapporto", "/informativa"];
+ 
+ /**
+  * Rinfresca il token di sessione Supabase ad ogni richiesta e protegge
+diff --git a/supabase/migrations/0017_accettazioni_informativa.sql b/supabase/migrations/0017_accettazioni_informativa.sql
+new file mode 100644
+index 0000000..3294c40
+--- /dev/null
++++ b/supabase/migrations/0017_accettazioni_informativa.sql
+@@ -0,0 +1,81 @@
++-- ============================================================
++-- MatchAmI — registro delle accettazioni dell'informativa
++--
++-- Fin qui il consenso era una casella sì/no (`profiles.privacy_accettata`):
++-- nessuna versione, nessuna data, nessun testo a cui riferirsi. Ora ogni
++-- accettazione registra QUALE versione dell'informativa e QUANDO.
++--
++-- Quando il testo cambia (per esempio quando il documento provvisorio viene
++-- sostituito da quello di un legale) cambia la versione nel codice, e chi
++-- non ha accettato quella versione deve accettarla prima di continuare.
++-- Non serve toccare il database.
++--
++-- La data la mette il database, non il browser: chi accetta non può
++-- sceglierla.
++--
++-- ORDINE: esegui questa migrazione PRIMA del push del codice. Se il codice
++-- è già online e la migrazione manca, nessuno riesce a superare la schermata
++-- di accettazione.
++-- ============================================================
++
++create table if not exists accettazioni_informativa (
++  user_id uuid not null references profiles(id) on delete cascade,
++  versione text not null
++    check (versione ~ '^[0-9]{4}-[0-9]{2}(-[a-z0-9]+)+$' and length(versione) <= 60),
++  accettata_at timestamptz not null default now(),
++  primary key (user_id, versione)
++);
++
++alter table accettazioni_informativa enable row level security;
++
++-- Ognuno legge le proprie. Nessuna policy di scrittura: si accetta con la
++-- funzione qui sotto, che mette la data.
++drop policy if exists "accettazioni: le legge chi le ha date" on accettazioni_informativa;
++create policy "accettazioni: le legge chi le ha date" on accettazioni_informativa
++  for select using (user_id = auth.uid());
++
++create or replace function public.accetta_informativa(p_versione text)
++returns timestamptz
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_data timestamptz;
++begin
++  if auth.uid() is null then
++    raise exception 'NON_AUTENTICATO';
++  end if;
++
++  if p_versione is null
++     or p_versione !~ '^[0-9]{4}-[0-9]{2}(-[a-z0-9]+)+$'
++     or length(p_versione) > 60 then
++    raise exception 'VERSIONE_NON_VALIDA';
++  end if;
++
++  -- Accettare due volte la stessa versione non cambia la data della prima.
++  insert into accettazioni_informativa (user_id, versione)
++  values (auth.uid(), p_versione)
++  on conflict (user_id, versione) do nothing;
++
++  select accettata_at into v_data
++    from accettazioni_informativa
++   where user_id = auth.uid() and versione = p_versione;
++
++  return v_data;
++end;
++$$;
++
++grant execute on function public.accetta_informativa(text) to authenticated;
++
++-- ------------------------------------------------------------
++-- Verifica
++-- ------------------------------------------------------------
++
++select table_name from information_schema.tables where table_name = 'accettazioni_informativa';
++
++select routine_name from information_schema.routines where routine_name = 'accetta_informativa';
++
++-- deve risultare 0: nessuna policy di scrittura sul registro
++select count(*) as policy_di_scrittura_rimaste from pg_policy
++where polrelid = 'accettazioni_informativa'::regclass and polcmd in ('a', 'w', 'd');
+-- 
+2.43.0
+

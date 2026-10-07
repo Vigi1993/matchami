@@ -1,0 +1,1596 @@
+From 1cf1386b4b2de6e9dc6fe206d44b443c998eb181 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 6 Oct 2026 15:00:50 +0000
+Subject: [PATCH 1/2] feat(account): cancellazione dell'account con recensioni
+ conservate
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RICHIEDE LA MIGRAZIONE 0010 PRIMA DEL PUSH, E UNA VARIABILE D'AMBIENTE.
+
+Regole:
+- inquilino: si cancella tutto, comprese le recensioni scritte su di lui
+- proprietario: si cancella tutto (annunci, candidature, chat, contratti)
+  TRANNE le recensioni su inquilini ancora iscritti, che restano senza
+  il nome dell'autore
+
+Database (0010), difetti trovati provando su PostgreSQL:
+- recensioni.autore_id era NOT NULL senza cascata: un proprietario con
+  anche una sola recensione non si poteva cancellare
+- messaggi.mittente_id senza cascata: chiunque avesse scritto anche un
+  solo messaggio, inquilino o proprietario, non si poteva cancellare
+- i dati personali del proprietario negli inviti (nome, email scritti
+  dall'inquilino) vengono resi anonimi alla cancellazione
+
+App:
+- 'Elimina l'account' in Account e accesso, in due tempi: spiegazione di
+  cosa sparisce (diversa per ruolo), poi password + parola ELIMINA
+- l'azione verifica la password con la stessa funzione usata per
+  cambiare email e password (ora in un modulo condiviso)
+- ordine: password, poi file nello Storage, poi utente. Se lo Storage
+  fallisce l'account resta intatto. Eccezioni della libreria gestite.
+- agisce solo sull'utente autenticato, mai su un id del client; la
+  chiave di servizio non si usa prima di aver verificato la password
+- test che legge le migrazioni e fallisce se un bucket di file
+  personali non è nella lista da svuotare
+
+Richiede SUPABASE_SERVICE_ROLE_KEY (solo lato server, mai NEXT_PUBLIC_).
+Senza, la cancellazione risponde che non è attiva invece di fallire.
+
+75 test. Verificato: cascate su PostgreSQL; azione su server Next contro
+un finto Supabase (ordine delle chiamate, uso della chiave, casi
+sbagliati); interfaccia con 7 prove di interazione.
+---
+ scripts/test-sicurezza.mjs                    | 101 +++++++++++++++++
+ src/app/(app)/profilo/OwnerProfiloClient.tsx  |   1 +
+ src/app/(app)/profilo/ProfiloClient.tsx       |   1 +
+ src/app/(app)/profilo/account-actions.ts      |  25 +----
+ src/app/(app)/profilo/elimina-actions.ts      |  86 +++++++++++++++
+ src/app/login/page.tsx                        |   8 ++
+ src/components/AccountSheet.tsx               | 102 +++++++++++++++++-
+ src/lib/account.ts                            |  73 +++++++++++++
+ src/lib/supabase/admin.ts                     |  30 ++++++
+ src/lib/supabase/password.ts                  |  28 +++++
+ .../migrations/0010_cancellazione_account.sql |  98 +++++++++++++++++
+ 11 files changed, 528 insertions(+), 25 deletions(-)
+ create mode 100644 src/app/(app)/profilo/elimina-actions.ts
+ create mode 100644 src/lib/account.ts
+ create mode 100644 src/lib/supabase/admin.ts
+ create mode 100644 src/lib/supabase/password.ts
+ create mode 100644 supabase/migrations/0010_cancellazione_account.sql
+
+diff --git a/scripts/test-sicurezza.mjs b/scripts/test-sicurezza.mjs
+index 9877872..6ae14b4 100644
+--- a/scripts/test-sicurezza.mjs
++++ b/scripts/test-sicurezza.mjs
+@@ -147,3 +147,104 @@ test("messaggioErroreAccesso: link scaduto o già usato, e qualunque altra cosa"
+     assert.ok(!/xyz/.test(m), "un messaggio sconosciuto non viene mostrato tale e quale");
+   }
+ });
++
++// ============================================================
++// Cancellazione dell'account
++// ============================================================
++
++import fs from "node:fs";
++const { CONFERMA_ELIMINAZIONE, confermaEliminazioneValida, BUCKET_FILE_UTENTE, eliminaFileUtente } =
++  caricaTs(path.join(radice, "src", "lib", "account.ts"));
++
++test("conferma: serve la parola giusta, non importa maiuscole e spazi", () => {
++  assert.equal(CONFERMA_ELIMINAZIONE, "ELIMINA");
++  for (const ok of ["ELIMINA", "elimina", "  Elimina  ", "eLiMiNa\n"]) assert.equal(confermaEliminazioneValida(ok), true, ok);
++  for (const no of ["", " ", "ELIMINA!", "elimina tutto", "SI", "cancella", "ELIM", "E L I M I N A"]) {
++    assert.equal(confermaEliminazioneValida(no), false, JSON.stringify(no));
++  }
++});
++
++test("OGNI bucket creato nelle migrazioni è nella lista dei file da cancellare", () => {
++  // Un bucket dimenticato lascerebbe nello Storage foto e documenti di
++  // persone che hanno chiesto di essere cancellate.
++  const cartella = path.join(radice, "supabase", "migrations");
++  const creati = new Set();
++  for (const f of fs.readdirSync(cartella).filter((x) => x.endsWith(".sql"))) {
++    const sql = fs.readFileSync(path.join(cartella, f), "utf8");
++    // insert into storage.buckets (id, name, public) values ('id', 'nome', ...)
++    for (const m of sql.matchAll(/insert\s+into\s+storage\.buckets[^;]*?values\s*\(\s*'([^']+)'/gis)) creati.add(m[1]);
++  }
++  assert.ok(creati.size >= 2, "dovrei aver trovato almeno i due bucket noti, ne ho trovati " + creati.size);
++  for (const b of creati) {
++    assert.ok(BUCKET_FILE_UTENTE.includes(b), `il bucket "${b}" non è in BUCKET_FILE_UTENTE (src/lib/account.ts): i suoi file resterebbero dopo la cancellazione`);
++  }
++});
++
++// un finto Storage: tiene i file in memoria e registra cosa gli viene chiesto
++function finto(file, { erroreLista = null, erroreRimozione = null } = {}) {
++  const chiamate = [];
++  const admin = { storage: { from: (bucket) => ({
++    list: async (cartella, opz) => {
++      chiamate.push(["list", bucket, cartella]);
++      if (erroreLista === bucket) return { data: null, error: { message: "boom" } };
++      const dentro = (file[bucket] ?? []).filter((p) => p.startsWith(cartella + "/")).map((p) => ({ name: p.slice(cartella.length + 1) }));
++      return { data: dentro.slice(0, opz?.limit ?? 100), error: null };
++    },
++    remove: async (percorsi) => {
++      chiamate.push(["remove", bucket, percorsi.length]);
++      if (erroreRimozione === bucket) return { error: { message: "boom" } };
++      file[bucket] = (file[bucket] ?? []).filter((p) => !percorsi.includes(p));
++      return { error: null };
++    },
++  }) } };
++  return { admin, chiamate };
++}
++
++test("eliminaFileUtente: toglie i file della persona e solo i suoi", async () => {
++  const file = {
++    "avatar-inquilini": ["utente-1/a.jpg", "utente-2/b.jpg"],
++    "immobili-foto": ["utente-1/c.jpg", "utente-1/d.jpg", "utente-2/e.jpg"],
++  };
++  const { admin } = finto(file);
++  assert.equal(await eliminaFileUtente(admin, "utente-1"), null);
++  assert.deepEqual(file["avatar-inquilini"], ["utente-2/b.jpg"]);
++  assert.deepEqual(file["immobili-foto"], ["utente-2/e.jpg"]);
++});
++
++test("eliminaFileUtente: un prefisso simile non si porta via i file di un altro", async () => {
++  // "utente-1" e "utente-10": la cartella giusta è "utente-1/", non il prefisso
++  const file = { "avatar-inquilini": ["utente-1/a.jpg", "utente-10/b.jpg"], "immobili-foto": [] };
++  await eliminaFileUtente(finto(file).admin, "utente-1");
++  assert.deepEqual(file["avatar-inquilini"], ["utente-10/b.jpg"]);
++});
++
++test("eliminaFileUtente: più di una pagina di file si svuota tutta", async () => {
++  const molti = Array.from({ length: 2500 }, (_, i) => `u/${i}.jpg`);
++  const file = { "avatar-inquilini": [], "immobili-foto": molti };
++  const { admin, chiamate } = finto(file);
++  assert.equal(await eliminaFileUtente(admin, "u"), null);
++  assert.equal(file["immobili-foto"].length, 0);
++  assert.ok(chiamate.filter((c) => c[0] === "remove").length >= 3, "doveva rimuovere a gruppi");
++});
++
++test("eliminaFileUtente: nessun file, nessun errore", async () => {
++  assert.equal(await eliminaFileUtente(finto({}).admin, "u"), null);
++});
++
++test("eliminaFileUtente: se lo Storage non risponde restituisce un errore, senza fingere di aver finito", async () => {
++  const file = { "avatar-inquilini": ["u/a.jpg"], "immobili-foto": ["u/b.jpg"] };
++  const r1 = await eliminaFileUtente(finto(file, { erroreLista: "immobili-foto" }).admin, "u");
++  assert.match(r1, /immobili-foto/);
++  const r2 = await eliminaFileUtente(finto({ "avatar-inquilini": ["u/a.jpg"] }, { erroreRimozione: "avatar-inquilini" }).admin, "u");
++  assert.match(r2, /avatar-inquilini/);
++});
++
++test("eliminaFileUtente: lo Storage che non toglie mai i file non fa girare per sempre", async () => {
++  let giri = 0;
++  const admin = { storage: { from: () => ({
++    list: async () => { giri++; return { data: [{ name: "a.jpg" }], error: null }; },
++    remove: async () => ({ error: null }),
++  }) } };
++  await eliminaFileUtente(admin, "u", ["un-bucket"]);
++  assert.ok(giri <= 51, "dopo " + giri + " giri non si è fermato");
++});
+diff --git a/src/app/(app)/profilo/OwnerProfiloClient.tsx b/src/app/(app)/profilo/OwnerProfiloClient.tsx
+index 4325bda..c188b58 100644
+--- a/src/app/(app)/profilo/OwnerProfiloClient.tsx
++++ b/src/app/(app)/profilo/OwnerProfiloClient.tsx
+@@ -116,6 +116,7 @@ export function OwnerProfiloClient({
+         nome={nome}
+         cognome={cognome}
+         email={email}
++        ruolo="proprietario"
+       />
+ 
+       <PrivacySheet
+diff --git a/src/app/(app)/profilo/ProfiloClient.tsx b/src/app/(app)/profilo/ProfiloClient.tsx
+index ff88d5b..cf8a4b0 100644
+--- a/src/app/(app)/profilo/ProfiloClient.tsx
++++ b/src/app/(app)/profilo/ProfiloClient.tsx
+@@ -262,6 +262,7 @@ export function ProfiloClient({
+         nome={nome}
+         cognome={cognome}
+         email={email}
++        ruolo="inquilino"
+       />
+ 
+       {/* ---- Sheet: Privacy e FAQ ---- */}
+diff --git a/src/app/(app)/profilo/account-actions.ts b/src/app/(app)/profilo/account-actions.ts
+index 5b950a5..280bae5 100644
+--- a/src/app/(app)/profilo/account-actions.ts
++++ b/src/app/(app)/profilo/account-actions.ts
+@@ -2,9 +2,9 @@
+ 
+ import { revalidatePath } from "next/cache";
+ import { headers } from "next/headers";
+-import { createClient as createPlainClient } from "@supabase/supabase-js";
+ import { createClient } from "@/lib/supabase/server";
+ import { validaNuovaPassword } from "@/lib/password";
++import { passwordCorretta } from "@/lib/supabase/password";
+ 
+ export type AccountState = {
+   error?: string;
+@@ -13,29 +13,6 @@ export type AccountState = {
+   messaggio?: string;
+ } | null;
+ 
+-/**
+- * Verifica che chi sta facendo la modifica conosca la password attuale.
+- *
+- * Supabase non la richiede per `updateUser`, ma senza questo controllo
+- * chiunque trovasse una sessione aperta potrebbe cambiare email e
+- * password e prendersi l'account. Uso un client separato con
+- * `persistSession: false` così il login di verifica non tocca i cookie
+- * della sessione in corso.
+- */
+-async function passwordCorretta(
+-  email: string,
+-  password: string
+-): Promise<boolean> {
+-  const verifica = createPlainClient(
+-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+-    { auth: { persistSession: false, autoRefreshToken: false } }
+-  );
+-
+-  const { error } = await verifica.auth.signInWithPassword({ email, password });
+-  return !error;
+-}
+-
+ /** Origine pubblica del sito, per costruire il link di conferma email. */
+ async function origine(): Promise<string> {
+   const h = await headers();
+diff --git a/src/app/(app)/profilo/elimina-actions.ts b/src/app/(app)/profilo/elimina-actions.ts
+new file mode 100644
+index 0000000..a30d094
+--- /dev/null
++++ b/src/app/(app)/profilo/elimina-actions.ts
+@@ -0,0 +1,86 @@
++"use server";
++
++import { cookies } from "next/headers";
++import { redirect } from "next/navigation";
++import { createClient } from "@/lib/supabase/server";
++import { clienteAmministratore } from "@/lib/supabase/admin";
++import { passwordCorretta } from "@/lib/supabase/password";
++import {
++  CONFERMA_ELIMINAZIONE,
++  confermaEliminazioneValida,
++  eliminaFileUtente,
++} from "@/lib/account";
++
++export type EliminaState = { error?: string } | null;
++
++/**
++ * Elimina l'account di chi sta chiedendo, con tutto ciò che ne consegue
++ * (vedi supabase/migrations/0010_cancellazione_account.sql per cosa
++ * sparisce e cosa resta).
++ *
++ * Si agisce SEMPRE sull'utente autenticato, mai su un id ricevuto dal
++ * modulo: questa azione usa la chiave di servizio, che può cancellare
++ * chiunque.
++ */
++export async function eliminaAccount(
++  _prevState: EliminaState,
++  formData: FormData
++): Promise<EliminaState> {
++  const supabase = await createClient();
++  const {
++    data: { user },
++  } = await supabase.auth.getUser();
++  if (!user?.email) return { error: "Non autenticato." };
++
++  if (!confermaEliminazioneValida(String(formData.get("conferma") || ""))) {
++    return { error: `Per confermare scrivi ${CONFERMA_ELIMINAZIONE}.` };
++  }
++
++  // Come per cambiare email o password: chi trovasse una sessione aperta
++  // non può cancellare l'account senza conoscere la password.
++  const password = String(formData.get("password_attuale") || "");
++  if (!password) return { error: "Inserisci la tua password per confermare." };
++  if (!(await passwordCorretta(user.email, password))) {
++    return { error: "Password non corretta." };
++  }
++
++  const admin = clienteAmministratore();
++  if (!admin) {
++    console.error("eliminaAccount: SUPABASE_SERVICE_ROLE_KEY non configurata");
++    return {
++      error:
++        "L'eliminazione dell'account non è ancora attiva su questo ambiente.",
++    };
++  }
++
++  // La libreria in certi casi LANCIA un'eccezione invece di restituire un
++  // errore (per esempio se l'id non è un UUID): senza questo riparo la
++  // persona vedrebbe una pagina d'errore invece di un messaggio.
++  try {
++    // 1. I file prima: se falliscono l'account resta intatto e si può riprovare.
++    const erroreFile = await eliminaFileUtente(admin, user.id);
++    if (erroreFile) return { error: erroreFile };
++
++    // 2. L'utente: il database porta via a cascata il resto.
++    const { error } = await admin.auth.admin.deleteUser(user.id);
++    if (error) {
++      console.error("eliminaAccount: deleteUser:", error.message);
++      return { error: "Non è stato possibile eliminare l'account. Riprova tra poco." };
++    }
++  } catch (e) {
++    console.error("eliminaAccount:", e);
++    return { error: "Non è stato possibile eliminare l'account. Riprova tra poco." };
++  }
++
++  // 3. La sessione locale. signOut parla con un server che non conosce più
++  // l'utente e può rispondere con un errore: i cookie si tolgono comunque.
++  await supabase.auth.signOut().catch(() => undefined);
++  const archivio = await cookies();
++  for (const c of archivio.getAll()) {
++    if (c.name.startsWith("sb-") || c.name === "recupero_password") {
++      archivio.delete(c.name);
++    }
++  }
++
++  redirect("/login?eliminato=1");
++}
+diff --git a/src/app/login/page.tsx b/src/app/login/page.tsx
+index 15417b4..2e32bc9 100644
+--- a/src/app/login/page.tsx
++++ b/src/app/login/page.tsx
+@@ -19,6 +19,7 @@ function LoginForm() {
+   const searchParams = useSearchParams();
+   const erroreConferma = searchParams.get("errore");
+   const next = searchParams.get("next") ?? "/";
++  const eliminato = searchParams.get("eliminato") === "1";
+ 
+   const [tab, setTab] = useState<"registrati" | "accedi" | "recupero">("registrati");
+   const [ruolo, setRuolo] = useState<Ruolo>("inquilino");
+@@ -51,6 +52,13 @@ function LoginForm() {
+           affitta. Tutto verificato, su MatchAmI.
+         </p>
+ 
++        {eliminato && (
++          <p className="login-consent mb-4" style={{ lineHeight: 1.55 }}>
++            Il tuo account è stato eliminato, insieme ai tuoi dati. Se vuoi
++            tornare, puoi registrarti di nuovo.
++          </p>
++        )}
++
+         {erroreConferma && (
+           <p className="login-error mb-4">
+             {erroreConferma}
+diff --git a/src/components/AccountSheet.tsx b/src/components/AccountSheet.tsx
+index 9c9b6fa..3cac70e 100644
+--- a/src/components/AccountSheet.tsx
++++ b/src/components/AccountSheet.tsx
+@@ -1,6 +1,6 @@
+ "use client";
+ 
+-import { useActionState } from "react";
++import { useActionState, useState } from "react";
+ import { Sheet } from "@/components/Sheet";
+ import { Field } from "@/components/ui/Field";
+ import {
+@@ -9,6 +9,11 @@ import {
+   updatePassword,
+   type AccountState,
+ } from "@/app/(app)/profilo/account-actions";
++import {
++  eliminaAccount,
++  type EliminaState,
++} from "@/app/(app)/profilo/elimina-actions";
++import { CONFERMA_ELIMINAZIONE } from "@/lib/account";
+ 
+ /**
+  * "Account e accesso": tre form indipendenti (nome, email, password),
+@@ -21,12 +26,14 @@ export function AccountSheet({
+   nome,
+   cognome,
+   email,
++  ruolo,
+ }: {
+   open: boolean;
+   onClose: () => void;
+   nome: string | null;
+   cognome: string | null;
+   email: string | null;
++  ruolo: "inquilino" | "proprietario";
+ }) {
+   return (
+     <Sheet open={open} onClose={onClose} title="Account e accesso">
+@@ -40,6 +47,8 @@ export function AccountSheet({
+       <FormEmail email={email} />
+       <Separatore />
+       <FormPassword />
++      <Separatore />
++      <EliminaAccount ruolo={ruolo} />
+     </Sheet>
+   );
+ }
+@@ -181,3 +190,94 @@ function FormPassword() {
+     </form>
+   );
+ }
++
++// ------------------------------------------------------------
++
++/**
++ * Cancellazione dell'account. Si apre in due tempi: prima la spiegazione di
++ * cosa sparisce, poi il modulo con la password e la parola di conferma. Così
++ * un tocco distratto non arriva mai a un modulo da inviare.
++ */
++function EliminaAccount({ ruolo }: { ruolo: "inquilino" | "proprietario" }) {
++  const [aperto, setAperto] = useState(false);
++  const [state, formAction, pending] = useActionState<EliminaState, FormData>(
++    eliminaAccount,
++    null
++  );
++
++  return (
++    <div>
++      <div className="pref-label">
++        <span style={{ color: "var(--clay)" }}>Elimina l&apos;account</span>
++      </div>
++
++      {ruolo === "inquilino" ? (
++        <p className="field-note" style={{ margin: "-4px 0 12px 0", lineHeight: 1.6 }}>
++          Verranno eliminati <b>subito e per sempre</b>: il tuo profilo e le
++          foto, la tua ricerca, le candidature, le chat, i contratti e le
++          recensioni scritte su di te. Non si può annullare.
++        </p>
++      ) : (
++        <p className="field-note" style={{ margin: "-4px 0 12px 0", lineHeight: 1.6 }}>
++          Verranno eliminati <b>subito e per sempre</b>: il tuo profilo, i tuoi
++          annunci con le foto, le candidature ricevute, le chat e i contratti,
++          anche quelli che gli inquilini vedono: se ne hai in corso, avvisali
++          prima. Restano, senza il tuo nome, le recensioni che hai scritto su
++          inquilini ancora iscritti. Non si può annullare.
++        </p>
++      )}
++
++      {!aperto ? (
++        <button
++          type="button"
++          className="btn-danger-outline"
++          onClick={() => setAperto(true)}
++        >
++          Voglio eliminare il mio account
++        </button>
++      ) : (
++        <form action={formAction}>
++          <Field label="La tua password">
++            <input
++              name="password_attuale"
++              type="password"
++              placeholder="Password attuale"
++              required
++              autoComplete="current-password"
++              className="contract-input"
++            />
++          </Field>
++          <Field label={`Scrivi ${CONFERMA_ELIMINAZIONE} per confermare`}>
++            <input
++              name="conferma"
++              placeholder={CONFERMA_ELIMINAZIONE}
++              required
++              autoComplete="off"
++              className="contract-input"
++            />
++            {state?.error && <p className="note-error">{state.error}</p>}
++          </Field>
++          <div className="flex gap-3">
++            <button
++              type="button"
++              className="btn-danger-outline"
++              style={{ borderColor: "rgba(16,21,26,.14)", color: "var(--ink)" }}
++              onClick={() => setAperto(false)}
++              disabled={pending}
++            >
++              Annulla
++            </button>
++            <button
++              type="submit"
++              disabled={pending}
++              className="opp-cta"
++              style={{ background: "var(--clay)" }}
++            >
++              {pending ? "Eliminazione..." : "Elimina per sempre"}
++            </button>
++          </div>
++        </form>
++      )}
++    </div>
++  );
++}
+diff --git a/src/lib/account.ts b/src/lib/account.ts
+new file mode 100644
+index 0000000..91c930a
+--- /dev/null
++++ b/src/lib/account.ts
+@@ -0,0 +1,73 @@
++/**
++ * Cancellazione dell'account: le parti che non dipendono dalla rete.
++ */
++
++/** Cosa scrivere per confermare. Si accetta anche in minuscolo. */
++export const CONFERMA_ELIMINAZIONE = "ELIMINA";
++
++export function confermaEliminazioneValida(testo: string): boolean {
++  return testo.trim().toUpperCase() === CONFERMA_ELIMINAZIONE;
++}
++
++/**
++ * I bucket di Storage che contengono file di una persona, ciascuno con una
++ * cartella che porta il suo id: "<id utente>/<file>".
++ *
++ * ATTENZIONE: quando si crea un nuovo bucket per file personali (documenti
++ * d'identità, buste paga, contratti...) va aggiunto QUI. Un test legge le
++ * migrazioni e fallisce se un bucket creato lì non è in questa lista,
++ * perché i file nello Storage NON si cancellano insieme all'utente: restano
++ * lì, orfani, e sono dati personali di chi ha chiesto di essere cancellato.
++ */
++export const BUCKET_FILE_UTENTE = ["avatar-inquilini", "immobili-foto"] as const;
++
++/** La parte della libreria di Storage che serve qui: permette di provarla con un finto. */
++export type StorageAmministratore = {
++  storage: {
++    from(bucket: string): {
++      list(
++        cartella: string,
++        opzioni?: { limit?: number }
++      ): Promise<{ data: { name: string }[] | null; error: { message: string } | null }>;
++      remove(
++        percorsi: string[]
++      ): Promise<{ error: { message: string } | null }>;
++    };
++  };
++};
++
++// Un utente con più di 50.000 file non è realistico: il limite evita solo
++// che un errore dello Storage trasformi il ciclo in uno senza fine.
++const MAX_GIRI = 50;
++
++/**
++ * Toglie dallo Storage tutti i file di una persona. Restituisce il
++ * messaggio d'errore, oppure `null` se è andato tutto bene.
++ *
++ * Va chiamata PRIMA di cancellare l'utente: se fallisce, l'account non
++ * viene toccato e la persona può riprovare. Il contrario lascerebbe file
++ * personali senza più un proprietario a cui ricondurli.
++ */
++export async function eliminaFileUtente(
++  admin: StorageAmministratore,
++  idUtente: string,
++  bucket: readonly string[] = BUCKET_FILE_UTENTE
++): Promise<string | null> {
++  for (const nome of bucket) {
++    const contenitore = admin.storage.from(nome);
++
++    for (let giro = 0; giro < MAX_GIRI; giro++) {
++      const { data, error } = await contenitore.list(idUtente, { limit: 1000 });
++      if (error) return `Non riesco a leggere i tuoi file (${nome}). Riprova tra poco.`;
++
++      const nomi = (data ?? []).map((f) => f.name).filter(Boolean);
++      if (nomi.length === 0) break;
++
++      const { error: eRimozione } = await contenitore.remove(
++        nomi.map((n) => `${idUtente}/${n}`)
++      );
++      if (eRimozione) return `Non riesco a eliminare i tuoi file (${nome}). Riprova tra poco.`;
++    }
++  }
++  return null;
++}
+diff --git a/src/lib/supabase/admin.ts b/src/lib/supabase/admin.ts
+new file mode 100644
+index 0000000..133ccd1
+--- /dev/null
++++ b/src/lib/supabase/admin.ts
+@@ -0,0 +1,30 @@
++import { createClient } from "@supabase/supabase-js";
++
++/**
++ * Client con la chiave di servizio: ignora la sicurezza a livello di riga
++ * e può fare qualunque cosa sul progetto, compresa la cancellazione di
++ * utenti e file.
++ *
++ * REGOLE:
++ *  - si importa SOLO da codice che gira sul server (azioni e route
++ *    handler), mai da un componente client: la chiave finirebbe nel
++ *    browser di chiunque;
++ *  - si usa solo dopo aver stabilito CHI sta chiedendo, e si agisce
++ *    sull'id dell'utente autenticato, mai su un id che arriva dal client;
++ *  - la variabile d'ambiente NON deve cominciare con NEXT_PUBLIC_.
++ *
++ * Restituisce `null` se la chiave non è configurata, così chi chiama può
++ * dare un messaggio chiaro invece di fallire in modo oscuro.
++ */
++export function clienteAmministratore() {
++  if (typeof window !== "undefined") {
++    throw new Error("clienteAmministratore va usato solo sul server");
++  }
++  const chiave = process.env.SUPABASE_SERVICE_ROLE_KEY;
++  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
++  if (!chiave || !url) return null;
++
++  return createClient(url, chiave, {
++    auth: { persistSession: false, autoRefreshToken: false },
++  });
++}
+diff --git a/src/lib/supabase/password.ts b/src/lib/supabase/password.ts
+new file mode 100644
+index 0000000..5783b67
+--- /dev/null
++++ b/src/lib/supabase/password.ts
+@@ -0,0 +1,28 @@
++import { createClient } from "@supabase/supabase-js";
++
++/**
++ * Verifica che chi sta facendo un'operazione delicata conosca la password
++ * attuale.
++ *
++ * Supabase non la richiede per cambiare email o password, né per altro:
++ * senza questo controllo chiunque trovasse una sessione aperta (un
++ * telefono lasciato sbloccato) potrebbe prendersi l'account. Si usa un
++ * client separato con `persistSession: false`, così il login di verifica
++ * non tocca i cookie della sessione in corso.
++ *
++ * Usata da "Account e accesso" (email, password) e dalla cancellazione
++ * dell'account: è la stessa regola, in un posto solo.
++ */
++export async function passwordCorretta(
++  email: string,
++  password: string
++): Promise<boolean> {
++  const verifica = createClient(
++    process.env.NEXT_PUBLIC_SUPABASE_URL!,
++    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
++    { auth: { persistSession: false, autoRefreshToken: false } }
++  );
++
++  const { error } = await verifica.auth.signInWithPassword({ email, password });
++  return !error;
++}
+diff --git a/supabase/migrations/0010_cancellazione_account.sql b/supabase/migrations/0010_cancellazione_account.sql
+new file mode 100644
+index 0000000..86741e3
+--- /dev/null
++++ b/supabase/migrations/0010_cancellazione_account.sql
+@@ -0,0 +1,98 @@
++-- ============================================================
++-- MatchAmI — cancellazione dell'account
++--
++-- Regole decise:
++--   - un INQUILINO che cancella l'account perde tutto: profilo, foto,
++--     candidature, chat, contratti e le recensioni scritte su di lui.
++--   - un PROPRIETARIO che cancella l'account perde tutto (annunci,
++--     candidature ricevute, chat, contratti) TRANNE le recensioni che ha
++--     scritto su inquilini ancora iscritti: restano, senza il suo nome.
++--
++-- Cosa serviva cambiare, verificato su un database vero:
++--   1. `recensioni.autore_id` era NOT NULL e senza azione a cascata: un
++--      proprietario che avesse scritto anche una sola recensione NON
++--      poteva essere cancellato.
++--   2. `messaggi.mittente_id` non aveva l'azione a cascata: chiunque
++--      avesse scritto anche un solo messaggio in una chat, inquilino o
++--      proprietario, NON poteva essere cancellato.
++--   In entrambi i casi il database rifiutava l'operazione.
++--
++-- Il resto della catena era già corretto: cancellare l'utente porta via
++-- profilo, annunci, candidature e contratti a cascata. I FILE
++-- (foto del profilo e degli annunci) stanno nello Storage e non fanno
++-- parte della catena: li toglie l'app prima della cancellazione.
++--
++-- ORDINE: esegui questa migrazione PRIMA del push del codice.
++-- ============================================================
++
++-- ------------------------------------------------------------
++-- 1. Le recensioni sopravvivono all'autore
++-- ------------------------------------------------------------
++
++alter table recensioni alter column autore_id drop not null;
++
++alter table recensioni drop constraint if exists recensioni_autore_id_fkey;
++alter table recensioni
++  add constraint recensioni_autore_id_fkey
++  foreign key (autore_id) references owner_profiles(profile_id)
++  on delete set null;
++
++comment on column recensioni.autore_id is
++  'Il proprietario che ha scritto la recensione. NULL se ha cancellato '
++  'l''account: la recensione resta finché l''inquilino è iscritto.';
++
++-- ------------------------------------------------------------
++-- 2. I messaggi di chi cancella l'account
++--
++-- Una chat vive dentro una candidatura, che sparisce comunque quando una
++-- delle due parti cancella l'account. Con il vincolo senza cascata, però,
++-- il database rifiutava la cancellazione di chiunque avesse scritto.
++-- ------------------------------------------------------------
++
++alter table messaggi drop constraint if exists messaggi_mittente_id_fkey;
++alter table messaggi
++  add constraint messaggi_mittente_id_fkey
++  foreign key (mittente_id) references profiles(id)
++  on delete cascade;
++
++-- ------------------------------------------------------------
++-- 3. Gli inviti non conservano i dati di un proprietario cancellato
++--
++-- Un invito contiene nome ed email del proprietario, scritti
++-- dall'inquilino. Se quel proprietario si iscrive e poi cancella
++-- l'account, quei dati personali non devono restare.
++-- ------------------------------------------------------------
++
++create or replace function public.anonimizza_inviti_proprietario()
++returns trigger
++language plpgsql
++security definer
++set search_path = public
++as $$
++begin
++  update inviti_proprietario
++     set nome_proprietario = 'Ex proprietario',
++         email_proprietario = null
++   where owner_id = old.profile_id;
++  return old;
++end;
++$$;
++
++drop trigger if exists proprietario_cancellato_anonimizza_inviti on owner_profiles;
++create trigger proprietario_cancellato_anonimizza_inviti
++  before delete on owner_profiles
++  for each row execute function public.anonimizza_inviti_proprietario();
++
++-- ------------------------------------------------------------
++-- Verifica
++-- ------------------------------------------------------------
++
++select is_nullable from information_schema.columns
++where table_name = 'recensioni' and column_name = 'autore_id';
++
++select conname, confdeltype from pg_constraint
++where conname in ('recensioni_autore_id_fkey', 'messaggi_mittente_id_fkey')
++order by conname;   -- n = SET NULL, c = CASCADE
++
++select tgname from pg_trigger
++where tgname = 'proprietario_cancellato_anonimizza_inviti';
+-- 
+2.43.0
+
+
+From 2eaa2b652b07ba1dc785ca75c4b4ce9bc5180a65 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 6 Oct 2026 15:07:02 +0000
+Subject: [PATCH 2/2] feat(verifiche): il feedback sull'inquilino solo da
+ proprietari verificati
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RICHIEDE LA MIGRAZIONE 0011 PRIMA DEL PUSH (dopo la 0010).
+
+La regola, per qualunque proprietario, invitato o no: una recensione su
+un inquilino si può lasciare solo se
+  1. il proprietario è verificato (ha un immobile verificato sul portale)
+  2. esiste un rapporto di locazione verificato tra lui e quell'inquilino
+Un rapporto vale per una sola recensione.
+
+Database (0011), scritta nel database e non solo nell'interfaccia:
+- listings.verifica_stato / verificato_at
+- rapporti_locazione: lo dichiara una delle due parti, 'da_verificare';
+  l'immobile deve essere del proprietario indicato; nessuna policy di
+  UPDATE, quindi lo stato lo cambia solo chi amministra
+- recensioni: nuova policy (proprietario verificato + rapporto verificato
+  + una per rapporto), al posto di quella che chiedeva un contratto
+  concluso nell'app
+- completa_invito applica la stessa regola, con errori distinti
+- requisiti_feedback_invito: cosa manca, per spiegarlo alla persona
+
+Buco chiuso, trovato provando: un inquilino poteva dichiararsi
+verificato = true da solo chiamando l'API, ottenendo 'reddito
+verificato' e 20 punti di affidabilità. Ora lo stato di verifica di
+immobili e inquilini lo cambia solo chi amministra (pannello SQL o chiave
+di servizio): trigger su listings e tenant_profiles.
+
+Pagina d'invito: per un proprietario che non soddisfa la regola mostra
+cosa manca (immobile, contratto, in verifica) invece del modulo; se la
+funzione dei requisiti non risponde, fallisce chiusa. Testi corretti:
+nessuna promessa di 'un minuto' e nessun pronome di genere ('con lui',
+'gli riconosci', 'la casa che gli hai affittato'), con un test che legge
+i file.
+
+I comandi per verificare immobili, rapporti e inquilini sono in fondo
+alla migrazione. L'upload dei documenti e il pannello di controllo non
+ci sono ancora: finché nessuno viene verificato nessuno può recensire.
+
+81 test. Verificato su PostgreSQL con 25 controlli sulle protezioni e sui
+rapporti e 37 sulla regola e sull'invito; la pagina su server Next contro
+un finto Supabase in 8 situazioni.
+---
+ scripts/test-sicurezza.mjs                    |  68 +++
+ src/app/(app)/profilo/invito-actions.ts       |   5 +
+ src/app/globals.css                           |  33 ++
+ src/app/invito/[token]/InvitoClient.tsx       |   4 +-
+ src/app/invito/[token]/page.tsx               |  55 ++-
+ src/components/InvitaProprietarioSheet.tsx    |  22 +-
+ src/lib/invito.ts                             |  66 +++
+ .../0011_verifiche_e_recensioni.sql           | 390 ++++++++++++++++++
+ 8 files changed, 621 insertions(+), 22 deletions(-)
+ create mode 100644 src/lib/invito.ts
+ create mode 100644 supabase/migrations/0011_verifiche_e_recensioni.sql
+
+diff --git a/scripts/test-sicurezza.mjs b/scripts/test-sicurezza.mjs
+index 6ae14b4..aad535d 100644
+--- a/scripts/test-sicurezza.mjs
++++ b/scripts/test-sicurezza.mjs
+@@ -248,3 +248,71 @@ test("eliminaFileUtente: lo Storage che non toglie mai i file non fa girare per
+   await eliminaFileUtente(admin, "u", ["un-bucket"]);
+   assert.ok(giri <= 51, "dopo " + giri + " giri non si è fermato");
+ });
++
++// ============================================================
++// Feedback del proprietario invitato: cosa si mostra
++// ============================================================
++
++const { descriviRequisiti, messaggioInvito } = caricaTs(path.join(radice, "src", "lib", "invito.ts"));
++const req = (v, r, iv = false) => ({ proprietario_verificato: v, rapporto_verificato: r, rapporto_in_verifica: iv });
++
++test("requisiti: il modulo compare SOLO con entrambi, in tutte e quattro le combinazioni", () => {
++  assert.equal(descriviRequisiti(req(true, true), "Tina").completi, true);
++  assert.equal(descriviRequisiti(req(true, false), "Tina").completi, false);
++  assert.equal(descriviRequisiti(req(false, true), "Tina").completi, false);
++  assert.equal(descriviRequisiti(req(false, false), "Tina").completi, false);
++});
++
++test("requisiti: se non si riesce a sapere, il modulo NON compare (si fallisce chiusi)", () => {
++  for (const x of [null, undefined, {}, { proprietario_verificato: "true", rapporto_verificato: 1 }]) {
++    assert.equal(descriviRequisiti(x, "Tina").completi, false, JSON.stringify(x));
++  }
++});
++
++test("requisiti: ogni voce dice a che punto è, e quella del contratto nomina l'inquilino", () => {
++  const d = descriviRequisiti(req(true, false, true), "Tina Rossi");
++  assert.deepEqual(d.voci.map((v) => [v.chiave, v.stato]), [["immobile", "ok"], ["contratto", "in_verifica"]]);
++  assert.match(d.voci[1].testo, /Tina Rossi/);
++  const niente = descriviRequisiti(req(false, false), "Tina");
++  assert.deepEqual(niente.voci.map((v) => v.stato), ["no", "no"]);
++});
++
++test("requisiti: un rapporto già verificato non appare mai 'in verifica'", () => {
++  assert.equal(descriviRequisiti(req(true, true, true), "T").voci[1].stato, "ok");
++});
++
++test("messaggioInvito: dice la verità, con il link e senza promettere 'un minuto'", () => {
++  const m = messaggioInvito("Tina", "https://sito.it/invito/abc");
++  assert.match(m, /https:\/\/sito\.it\/invito\/abc$/);
++  assert.match(m, /Sono Tina/);
++  assert.match(m, /verificat/);
++  assert.ok(!/un minuto/i.test(m), "promette un minuto");
++  assert.ok(!messaggioInvito(null, "x").includes("Sono "), "senza nome non deve scrivere 'Sono'");
++});
++
++test("i testi dell'invito non presumono il genere di nessuno", () => {
++  // Legge i file veri: l'inquilino può essere una donna, un uomo o altro, e un
++  // "lui" o un "gli riconosci" in una pagina rivolta a un estraneo sarebbe
++  // sbagliato. Controlla pronomi tonici e atoni di terza persona.
++  const file = [
++    path.join(radice, "src", "lib", "invito.ts"),
++    path.join(radice, "src", "components", "InvitaProprietarioSheet.tsx"),
++    path.join(radice, "src", "app", "invito", "[token]", "page.tsx"),
++    path.join(radice, "src", "app", "invito", "[token]", "InvitoClient.tsx"),
++  ];
++  for (const f of file) {
++    const testo = fs.readFileSync(f, "utf8")
++      .replace(/\/\*[\s\S]*?\*\//g, "")          // commenti a blocco
++      .replace(/^\s*\/\/.*$/gm, "");               // commenti di riga
++    // sia il testo tra i tag sia le stringhe di codice
++    const pezzi = [...testo.matchAll(/>([^<>{}]*)</g)].map((m) => m[1])
++      .concat([...testo.matchAll(/(["'`])((?:\\.|(?!\1).)*)\1/g)].map((m) => m[2]));
++    for (const t of pezzi) {
++      assert.ok(
++        !/\b(lui|lei)\b/i.test(t) && !/\bgli (riconosci|dai|scrivi|vedi|hai)\b/i.test(t) && !/\bche gli\b/i.test(t),
++        `${path.basename(f)}: "${t.trim()}"`
++      );
++    }
++  }
++  assert.ok(!/\blui\b|\blei\b/i.test(messaggioInvito("Tina", "x")));
++});
+diff --git a/src/app/(app)/profilo/invito-actions.ts b/src/app/(app)/profilo/invito-actions.ts
+index 2632e52..57a696e 100644
+--- a/src/app/(app)/profilo/invito-actions.ts
++++ b/src/app/(app)/profilo/invito-actions.ts
+@@ -101,6 +101,11 @@ const MESSAGGI: Record<string, string> = {
+   NON_PROPRIETARIO:
+     "Il tuo account è registrato come inquilino. Per lasciare un feedback serve un account proprietario.",
+   AUTO_INVITO: "Non puoi rispondere a un invito che hai creato tu.",
++  PROPRIETARIO_NON_VERIFICATO:
++    "Per lasciare un feedback serve un tuo immobile verificato su MatchAmI.",
++  RAPPORTO_NON_VERIFICATO:
++    "Per lasciare un feedback serve un contratto verificato con questa persona.",
++  RAPPORTO_GIA_RECENSITO: "Hai già lasciato il feedback per questo contratto.",
+ };
+ 
+ export async function completaInvito(
+diff --git a/src/app/globals.css b/src/app/globals.css
+index 894dd5b..5123914 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -2340,3 +2340,36 @@ input[type="range"]::-moz-range-thumb {
+   color: var(--body-text);
+   margin: 0 0 14px 0;
+ }
++
++/* Requisiti per lasciare un feedback (pagina d'invito, su fondo scuro). */
++.requisiti {
++  list-style: none;
++  margin: 4px 0;
++  padding: 0;
++  display: grid;
++  gap: 10px;
++}
++.requisiti li {
++  display: flex;
++  gap: 12px;
++  align-items: baseline;
++  font-size: 14px;
++  color: rgba(247, 244, 236, 0.85);
++}
++.requisito-simbolo {
++  flex: 0 0 20px;
++  text-align: center;
++  font-weight: 700;
++  color: var(--clay);
++}
++.requisiti li.ok .requisito-simbolo {
++  color: #8fe3b8;
++}
++.requisiti li.in_verifica .requisito-simbolo {
++  color: var(--gold);
++}
++.requisiti small {
++  display: block;
++  font-size: 11.5px;
++  color: var(--gold);
++}
+diff --git a/src/app/invito/[token]/InvitoClient.tsx b/src/app/invito/[token]/InvitoClient.tsx
+index 8decccf..d26d290 100644
+--- a/src/app/invito/[token]/InvitoClient.tsx
++++ b/src/app/invito/[token]/InvitoClient.tsx
+@@ -56,7 +56,7 @@ export function InvitoClient({
+       <div className="screen-inner" style={{ maxWidth: 560 }}>
+         <h1 className="screen-title">Com&apos;è andata con {inquilino}?</h1>
+         <p className="screen-sub">
+-          {indirizzo ? `${indirizzo}` : "La casa che gli hai affittato"}
++          {indirizzo ? `${indirizzo}` : `La casa che hai affittato a ${inquilino}`}
+           {periodo ? ` · ${periodo}` : ""}. Il tuo commento resta legato al
+           suo profilo e lo vedranno gli altri proprietari quando valuterà una
+           candidatura.
+@@ -91,7 +91,7 @@ export function InvitoClient({
+ 
+           <div className="pref-section">
+             <div className="pref-label">
+-              <span>Cosa gli riconosci</span>
++              <span>Cosa riconosci a {inquilino}</span>
+             </div>
+             <div className="chip-row">
+               {TAG_RECENSIONE.map((t) => (
+diff --git a/src/app/invito/[token]/page.tsx b/src/app/invito/[token]/page.tsx
+index 68cc5a9..ec64dd2 100644
+--- a/src/app/invito/[token]/page.tsx
++++ b/src/app/invito/[token]/page.tsx
+@@ -1,6 +1,8 @@
+ import Link from "next/link";
+ import { createClient } from "@/lib/supabase/server";
+ import { InvitoClient } from "./InvitoClient";
++import { descriviRequisiti } from "@/lib/invito";
++import type { RequisitiFeedback } from "@/lib/invito";
+ 
+ type InvitoPubblico = {
+   nome_inquilino: string | null;
+@@ -77,22 +79,23 @@ export default async function InvitoPage({
+     return (
+       <Cornice titolo={`${inquilino} ti ha invitato`}>
+         <p>
+-          {inquilino} sta usando MatchAmI e vorrebbe un tuo commento su
+-          com&apos;è andata con lui come inquilino
++          {inquilino} ti ha chiesto un commento su com&apos;è andata come
++          inquilino
+           {invito.indirizzo ? ` a ${invito.indirizzo}` : ""}
+           {invito.periodo ? `, ${invito.periodo}` : ""}.
+         </p>
+         <p>
+-          Per lasciarlo ti serve un account proprietario: bastano un minuto e
+-          un indirizzo email. Da lì potrai anche pubblicare i tuoi immobili,
+-          se un giorno ti servirà.
++          Su MatchAmI i commenti sono affidabili perché chi li scrive è
++          verificato. Per lasciarlo servono un account proprietario, un tuo
++          immobile verificato sul portale e un contratto verificato con{" "}
++          {inquilino}. Puoi cominciare registrandoti.
+         </p>
+         <Link
+           href={`/login?next=${encodeURIComponent(`/invito/${token}`)}`}
+           className="login-cta"
+           style={{ display: "block", textAlign: "center", marginTop: 8 }}
+         >
+-          Registrati e lascia il feedback
++          Registrati come proprietario
+         </Link>
+       </Cornice>
+     );
+@@ -112,6 +115,46 @@ export default async function InvitoPage({
+     );
+   }
+ 
++  // Un proprietario invitato è un proprietario come gli altri: per lasciare
++  // il feedback deve essere verificato e avere un contratto verificato con
++  // chi lo ha invitato. La regola vera sta nel database; qui si spiega.
++  const { data: righeRequisiti } = await supabase.rpc("requisiti_feedback_invito", {
++    p_token: token,
++  });
++  const { completi, voci } = descriviRequisiti(
++    (righeRequisiti?.[0] ?? null) as RequisitiFeedback | null,
++    inquilino || "l'inquilino"
++  );
++
++  if (!completi) {
++    return (
++      <Cornice titolo="Per lasciare il feedback serve ancora qualcosa">
++        <p>
++          MatchAmI accetta un commento su un inquilino solo da un proprietario
++          verificato, e solo se esiste un contratto verificato tra voi due.
++          Vale per tutti i proprietari.
++        </p>
++        <ul className="requisiti">
++          {voci.map((v) => (
++            <li key={v.chiave} className={v.stato}>
++              <span className="requisito-simbolo">
++                {v.stato === "ok" ? "✓" : v.stato === "in_verifica" ? "…" : "–"}
++              </span>
++              <span>
++                {v.testo}
++                {v.stato === "in_verifica" && <small>In verifica</small>}
++              </span>
++            </li>
++          ))}
++        </ul>
++        <p>
++          La verifica di immobili e contratti non è ancora attiva su MatchAmI.
++          Quando lo sarà potrai avviarla e poi tornare a questo link.
++        </p>
++      </Cornice>
++    );
++  }
++
+   return (
+     <InvitoClient
+       token={token}
+diff --git a/src/components/InvitaProprietarioSheet.tsx b/src/components/InvitaProprietarioSheet.tsx
+index bf70a89..82e55cf 100644
+--- a/src/components/InvitaProprietarioSheet.tsx
++++ b/src/components/InvitaProprietarioSheet.tsx
+@@ -9,6 +9,7 @@ import {
+   type InvitoState,
+ } from "@/app/(app)/profilo/invito-actions";
+ import type { Invito } from "@/lib/types";
++import { messaggioInvito } from "@/lib/invito";
+ 
+ const STATO_LABEL: Record<Invito["stato"], string> = {
+   inviato: "In attesa",
+@@ -21,16 +22,6 @@ const STATO_BADGE: Record<Invito["stato"], string> = {
+   annullato: "is-off",
+ };
+ 
+-/** Messaggio già pronto: all'inquilino resta solo da premere invia. */
+-function messaggio(nomeInquilino: string | null, link: string) {
+-  const io = nomeInquilino ? ` Sono ${nomeInquilino}.` : "";
+-  return (
+-    `Ciao!${io} Sto usando MatchAmI per la casa e mi piacerebbe che ` +
+-    `lasciassi un tuo commento su com'è andata con me come inquilino. ` +
+-    `Ci vuole un minuto: ${link}`
+-  );
+-}
+-
+ export function InvitaProprietarioSheet({
+   open,
+   onClose,
+@@ -57,8 +48,10 @@ export function InvitaProprietarioSheet({
+     <Sheet open={open} onClose={onClose} title="Invita il tuo proprietario">
+       <p className="sheet-sub">
+         Se hai già una casa in affitto, il tuo proprietario può lasciare un
+-        commento su com&apos;è andata con te. Conta sul tuo punteggio di
+-        affidabilità come qualsiasi altro feedback, e vale anche per gli
++        commento su com&apos;è andata con te, e conta sul tuo punteggio di
++        affidabilità. Per tenerlo affidabile, MatchAmI lo accetta solo da
++        proprietari verificati, con un immobile verificato sul portale, e solo
++        se esiste un contratto verificato tra voi due. Vale anche per gli
+         affitti iniziati fuori da MatchAmI.
+       </p>
+ 
+@@ -185,7 +178,7 @@ function LinkPronto({
+   onIndietro: () => void;
+ }) {
+   const [copiato, setCopiato] = useState(false);
+-  const testo = messaggio(nomeInquilino, link);
++  const testo = messaggioInvito(nomeInquilino, link);
+ 
+   async function copia() {
+     try {
+@@ -213,7 +206,8 @@ function LinkPronto({
+     <div>
+       <div className="note-ok" style={{ marginBottom: 16 }}>
+         Link pronto. Mandalo tu al proprietario: arrivando da te ha molte
+-        più probabilità di essere aperto.
++        più probabilità di essere aperto. Per lasciare il commento dovrà
++        verificare l&apos;immobile e il vostro contratto.
+       </div>
+ 
+       <Field label="Il messaggio da mandare">
+diff --git a/src/lib/invito.ts b/src/lib/invito.ts
+new file mode 100644
+index 0000000..90ce7eb
+--- /dev/null
++++ b/src/lib/invito.ts
+@@ -0,0 +1,66 @@
++/**
++ * Regola sul feedback del proprietario invitato, lato testi e requisiti.
++ *
++ * La regola vera sta nel database (migrazione 0011) e non dipende da
++ * questo file: qui si decide solo cosa mostrare alla persona.
++ */
++
++/** Ciò che risponde la funzione `requisiti_feedback_invito`. */
++export type RequisitiFeedback = {
++  proprietario_verificato: boolean;
++  rapporto_verificato: boolean;
++  rapporto_in_verifica: boolean;
++};
++
++export type VoceRequisito = {
++  chiave: "immobile" | "contratto";
++  testo: string;
++  stato: "ok" | "in_verifica" | "no";
++};
++
++/**
++ * Cosa ha già e cosa manca a un proprietario per poter lasciare il feedback.
++ *
++ * Se non si riesce a sapere (la funzione non risponde, per esempio perché la
++ * migrazione non è stata eseguita) si considera che NON abbia niente: il
++ * modulo non deve mai comparire per un errore.
++ */
++export function descriviRequisiti(
++  r: RequisitiFeedback | null | undefined,
++  nomeInquilino: string
++): { completi: boolean; voci: VoceRequisito[] } {
++  const verificato = r?.proprietario_verificato === true;
++  const rapportoOk = r?.rapporto_verificato === true;
++  const rapportoInVerifica = r?.rapporto_in_verifica === true;
++
++  return {
++    completi: verificato && rapportoOk,
++    voci: [
++      {
++        chiave: "immobile",
++        testo: "Un tuo immobile verificato su MatchAmI",
++        stato: verificato ? "ok" : "no",
++      },
++      {
++        chiave: "contratto",
++        testo: `Un contratto verificato con ${nomeInquilino}`,
++        stato: rapportoOk ? "ok" : rapportoInVerifica ? "in_verifica" : "no",
++      },
++    ],
++  };
++}
++
++/**
++ * Il messaggio che l'inquilino manda al proprietario. Dice la verità su cosa
++ * serve: non "ci vuole un minuto", perché per lasciare il feedback servono un
++ * immobile e un contratto verificati.
++ */
++export function messaggioInvito(nomeInquilino: string | null, link: string): string {
++  const io = nomeInquilino ? ` Sono ${nomeInquilino}.` : "";
++  return (
++    `Ciao!${io} Uso MatchAmI per l'affitto e vorrei che lasciassi un commento ` +
++    `su com'è andata con me come inquilino. Perché i commenti siano veri, ` +
++    `MatchAmI li accetta solo da proprietari verificati: ti chiede di ` +
++    `registrarti e di verificare l'immobile e il nostro contratto. ${link}`
++  );
++}
+diff --git a/supabase/migrations/0011_verifiche_e_recensioni.sql b/supabase/migrations/0011_verifiche_e_recensioni.sql
+new file mode 100644
+index 0000000..bf9bad0
+--- /dev/null
++++ b/supabase/migrations/0011_verifiche_e_recensioni.sql
+@@ -0,0 +1,390 @@
++-- ============================================================
++-- MatchAmI — verifiche e regola sulle recensioni
++--
++-- La regola, per qualunque proprietario, invitato o no:
++--   Una recensione su un inquilino si può lasciare SOLO se
++--     1. il proprietario è VERIFICATO, cioè ha almeno un immobile
++--        verificato sul portale; e
++--     2. esiste un RAPPORTO DI LOCAZIONE VERIFICATO tra lui e quell'inquilino
++--        (un contratto caricato che attesti una locazione in corso o
++--        passata, controllato da noi).
++--   Il rapporto vale per UNA recensione.
++--
++-- Questa migrazione scrive la regola nel database. La parte in cui si
++-- CARICANO i documenti e li controlliamo da un pannello non c'è ancora: per
++-- ora chi amministra imposta gli stati con i comandi in fondo a questo
++-- file. Finché un immobile e un rapporto non vengono verificati, nessuno può
++-- lasciare una recensione.
++--
++-- Chiude anche un buco trovato provando: un INQUILINO poteva dichiararsi
++-- `verificato = true` da solo chiamando l'API (ottenendo "reddito
++-- verificato" e 20 punti di affidabilità). Ora lo stato di verifica lo
++-- cambia solo chi amministra.
++--
++-- ORDINE: esegui questa migrazione PRIMA del push del codice.
++-- ============================================================
++
++-- ------------------------------------------------------------
++-- 1. Stato di verifica degli immobili
++-- ------------------------------------------------------------
++
++alter table listings
++  add column if not exists verifica_stato stato_verifica not null default 'non_avviata',
++  add column if not exists verificato_at timestamptz;
++
++-- ------------------------------------------------------------
++-- 2. Lo stato di verifica non si dichiara da soli
++--
++-- Il pannello SQL di Supabase e la chiave di servizio non portano un
++-- utente (auth.uid() è null): possono cambiare lo stato. Chi chiama
++-- dall'app, con la propria sessione, no.
++-- ------------------------------------------------------------
++
++create or replace function public.proteggi_verifica_immobile()
++returns trigger
++language plpgsql
++as $$
++begin
++  if auth.uid() is null then
++    return new;  -- chi amministra
++  end if;
++
++  if tg_op = 'INSERT' then
++    -- un annuncio nuovo parte sempre non verificato, qualunque cosa dica la richiesta
++    new.verifica_stato := 'non_avviata';
++    new.verificato_at := null;
++  elsif new.verifica_stato is distinct from old.verifica_stato
++     or new.verificato_at is distinct from old.verificato_at then
++    raise exception 'VERIFICA_RISERVATA: lo stato di verifica lo imposta solo chi gestisce MatchAmI'
++      using errcode = 'P0001';
++  end if;
++  return new;
++end;
++$$;
++
++drop trigger if exists immobile_verifica_protetta on listings;
++create trigger immobile_verifica_protetta
++  before insert or update on listings
++  for each row execute function public.proteggi_verifica_immobile();
++
++create or replace function public.proteggi_verifica_inquilino()
++returns trigger
++language plpgsql
++as $$
++begin
++  if auth.uid() is null then
++    return new;  -- chi amministra, o la registrazione
++  end if;
++
++  if tg_op = 'INSERT' then
++    new.verificato := false;
++    new.verifica_stato := 'non_avviata';
++  elsif new.verificato is distinct from old.verificato
++     or new.verifica_stato is distinct from old.verifica_stato then
++    raise exception 'VERIFICA_RISERVATA: lo stato di verifica lo imposta solo chi gestisce MatchAmI'
++      using errcode = 'P0001';
++  end if;
++  return new;
++end;
++$$;
++
++drop trigger if exists inquilino_verifica_protetta on tenant_profiles;
++create trigger inquilino_verifica_protetta
++  before insert or update on tenant_profiles
++  for each row execute function public.proteggi_verifica_inquilino();
++
++-- ------------------------------------------------------------
++-- 3. Un proprietario è verificato se ha un immobile verificato
++-- ------------------------------------------------------------
++
++create or replace function public.proprietario_verificato(p_owner uuid)
++returns boolean
++language sql
++security definer
++set search_path = public
++stable
++as $$
++  select exists (
++    select 1 from listings
++    where owner_id = p_owner and verifica_stato = 'verificato'
++  );
++$$;
++
++grant execute on function public.proprietario_verificato(uuid) to authenticated;
++
++-- ------------------------------------------------------------
++-- 4. Rapporti di locazione
++--
++-- Un rapporto dice: "questo proprietario ha affittato questo immobile a
++-- questo inquilino, in questo periodo", con il contratto a prova. Lo può
++-- dichiarare una delle due parti; diventa 'verificato' solo quando lo
++-- controlliamo noi.
++-- ------------------------------------------------------------
++
++create table if not exists rapporti_locazione (
++  id uuid primary key default gen_random_uuid(),
++  owner_id uuid not null references owner_profiles(profile_id) on delete cascade,
++  tenant_id uuid not null references tenant_profiles(profile_id) on delete cascade,
++  listing_id uuid not null references listings(id) on delete cascade,
++  periodo_da date not null,
++  periodo_a date,                       -- vuoto = locazione ancora in corso
++  documento_path text,                  -- il contratto caricato (bucket privato, passo successivo)
++  stato text not null default 'da_verificare'
++    check (stato in ('da_verificare', 'verificato', 'respinto')),
++  creato_da uuid not null references profiles(id) on delete cascade,
++  verificato_at timestamptz,
++  esito_note text,                      -- nota interna di chi ha controllato
++  created_at timestamptz not null default now(),
++  check (periodo_a is null or periodo_a >= periodo_da),
++  unique (owner_id, tenant_id, listing_id)
++);
++
++create index if not exists idx_rapporti_owner on rapporti_locazione(owner_id);
++create index if not exists idx_rapporti_tenant on rapporti_locazione(tenant_id);
++
++alter table rapporti_locazione enable row level security;
++
++-- Lo vedono solo le due parti.
++create policy "rapporti: le parti leggono" on rapporti_locazione
++  for select using (auth.uid() = owner_id or auth.uid() = tenant_id);
++
++-- Lo dichiara una delle due parti, sempre come 'da_verificare', e
++-- l'immobile deve essere davvero del proprietario indicato.
++create policy "rapporti: una parte lo dichiara" on rapporti_locazione
++  for insert with check (
++    auth.uid() = creato_da
++    and (auth.uid() = owner_id or auth.uid() = tenant_id)
++    and stato = 'da_verificare'
++    and verificato_at is null
++    and esito_note is null
++    and exists (
++      select 1 from listings l
++      where l.id = rapporti_locazione.listing_id
++        and l.owner_id = rapporti_locazione.owner_id
++    )
++  );
++
++-- Chi l'ha dichiarato può ritirarlo finché non è stato controllato.
++create policy "rapporti: chi lo ha dichiarato lo ritira" on rapporti_locazione
++  for delete using (auth.uid() = creato_da and stato = 'da_verificare');
++
++-- Nessuna policy di UPDATE: lo stato lo cambia solo chi amministra.
++
++-- ------------------------------------------------------------
++-- 5. Recensioni: solo con un rapporto verificato, e una per rapporto
++-- ------------------------------------------------------------
++
++alter table recensioni
++  add column if not exists rapporto_id uuid
++  references rapporti_locazione(id) on delete set null;
++
++-- Una recensione per rapporto: un solo contratto non può alimentare più
++-- voti. Le recensioni precedenti, senza rapporto, non sono toccate.
++create unique index if not exists recensioni_una_per_rapporto
++  on recensioni(rapporto_id) where rapporto_id is not null;
++
++drop policy if exists "recensioni: owner writes" on recensioni;
++
++create policy "recensioni: proprietario verificato con rapporto verificato" on recensioni
++  for insert with check (
++    auth.uid() = autore_id
++    and public.proprietario_verificato(auth.uid())
++    and exists (
++      select 1 from rapporti_locazione r
++      where r.id = recensioni.rapporto_id
++        and r.owner_id = auth.uid()
++        and r.tenant_id = recensioni.tenant_id
++        and r.stato = 'verificato'
++    )
++  );
++
++-- ------------------------------------------------------------
++-- 6. Il feedback dall'invito segue la stessa regola
++--
++-- Un proprietario invitato è un proprietario come gli altri: per
++-- lasciare il feedback deve essere verificato e avere un rapporto
++-- verificato con chi lo ha invitato.
++-- ------------------------------------------------------------
++
++create or replace function completa_invito(
++  p_token text,
++  p_voto smallint,
++  p_tag text[]
++)
++returns uuid
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_invito inviti_proprietario;
++  v_rapporto rapporti_locazione;
++  v_recensione_id uuid;
++begin
++  if auth.uid() is null then
++    raise exception 'NON_AUTENTICATO';
++  end if;
++
++  if p_voto is null or p_voto < 1 or p_voto > 5 then
++    raise exception 'VOTO_NON_VALIDO';
++  end if;
++
++  select * into v_invito from inviti_proprietario where token = p_token;
++  if not found then
++    raise exception 'INVITO_INESISTENTE';
++  end if;
++
++  if v_invito.stato <> 'inviato' then
++    raise exception 'INVITO_NON_PIU_VALIDO';
++  end if;
++
++  if not exists (select 1 from owner_profiles where profile_id = auth.uid()) then
++    raise exception 'NON_PROPRIETARIO';
++  end if;
++
++  if v_invito.tenant_id = auth.uid() then
++    raise exception 'AUTO_INVITO';
++  end if;
++
++  -- 1. il proprietario deve essere verificato
++  if not proprietario_verificato(auth.uid()) then
++    raise exception 'PROPRIETARIO_NON_VERIFICATO';
++  end if;
++
++  -- 2. deve esserci un rapporto verificato con questo inquilino, non
++  --    ancora usato per un'altra recensione
++  select r.* into v_rapporto
++    from rapporti_locazione r
++   where r.owner_id = auth.uid()
++     and r.tenant_id = v_invito.tenant_id
++     and r.stato = 'verificato'
++     and not exists (select 1 from recensioni x where x.rapporto_id = r.id)
++   order by r.created_at
++   limit 1;
++
++  if not found then
++    if exists (
++      select 1 from rapporti_locazione r
++       where r.owner_id = auth.uid()
++         and r.tenant_id = v_invito.tenant_id
++         and r.stato = 'verificato'
++    ) then
++      raise exception 'RAPPORTO_GIA_RECENSITO';
++    end if;
++    raise exception 'RAPPORTO_NON_VERIFICATO';
++  end if;
++
++  insert into recensioni (tenant_id, autore_id, voto, tag, invito_id, rapporto_id)
++  values (v_invito.tenant_id, auth.uid(), p_voto, coalesce(p_tag, '{}'), v_invito.id, v_rapporto.id)
++  returning id into v_recensione_id;
++
++  update inviti_proprietario
++     set stato = 'completato',
++         owner_id = auth.uid(),
++         completato_at = now()
++   where id = v_invito.id;
++
++  return v_recensione_id;
++end;
++$$;
++
++grant execute on function completa_invito(text, smallint, text[]) to authenticated;
++
++-- ------------------------------------------------------------
++-- 7. Cosa manca a un proprietario per poter lasciare il feedback
++--
++-- Serve alla pagina d'invito per spiegarlo. Risponde solo su chi la
++-- chiama e non rivela l'identità dell'inquilino.
++-- ------------------------------------------------------------
++
++create or replace function requisiti_feedback_invito(p_token text)
++returns table (
++  proprietario_verificato boolean,
++  rapporto_verificato boolean,
++  rapporto_in_verifica boolean
++)
++language sql
++security definer
++set search_path = public
++stable
++as $$
++  select
++    public.proprietario_verificato(auth.uid()),
++    exists (
++      select 1 from rapporti_locazione r
++      join inviti_proprietario i on i.tenant_id = r.tenant_id
++      where i.token = p_token and r.owner_id = auth.uid() and r.stato = 'verificato'
++    ),
++    exists (
++      select 1 from rapporti_locazione r
++      join inviti_proprietario i on i.tenant_id = r.tenant_id
++      where i.token = p_token and r.owner_id = auth.uid() and r.stato = 'da_verificare'
++    );
++$$;
++
++grant execute on function requisiti_feedback_invito(text) to authenticated;
++
++-- ------------------------------------------------------------
++-- Verifica
++-- ------------------------------------------------------------
++
++select column_name from information_schema.columns
++where table_name = 'listings' and column_name = 'verifica_stato';
++
++select tgname from pg_trigger
++where tgname in ('immobile_verifica_protetta', 'inquilino_verifica_protetta')
++order by tgname;
++
++select table_name from information_schema.tables where table_name = 'rapporti_locazione';
++
++select polname from pg_policy
++where polrelid = 'recensioni'::regclass and polname like 'recensioni: proprietario verificato%';
++
++select routine_name from information_schema.routines
++where routine_name in ('proprietario_verificato', 'completa_invito', 'requisiti_feedback_invito')
++order by routine_name;
++
++
++-- ============================================================
++-- PER CHI AMMINISTRA — comandi da eseguire a mano nel pannello SQL
++-- (finché non c'è un pannello interno). Funzionano perché il pannello
++-- non porta un utente, e solo così lo stato di verifica si può cambiare.
++-- ============================================================
++--
++-- Verificare un immobile (dopo aver controllato visura o atto, e che il
++-- nome coincida con quello del proprietario):
++--
++--   update listings
++--      set verifica_stato = 'verificato', verificato_at = now()
++--    where id = '<ID DELL''ANNUNCIO>';
++--
++-- Togliere la verifica a un immobile:
++--
++--   update listings set verifica_stato = 'non_avviata', verificato_at = null
++--    where id = '<ID DELL''ANNUNCIO>';
++--
++-- Verificare un rapporto di locazione (dopo aver controllato che nel
++-- contratto compaiano il proprietario, l'inquilino e l'immobile giusti):
++--
++--   update rapporti_locazione
++--      set stato = 'verificato', verificato_at = now(),
++--          esito_note = '<che cosa hai controllato>'
++--    where id = '<ID DEL RAPPORTO>';
++--
++-- Respingerlo:
++--
++--   update rapporti_locazione
++--      set stato = 'respinto', esito_note = '<perché>'
++--    where id = '<ID DEL RAPPORTO>';
++--
++-- Verificare un inquilino (reddito controllato con documenti):
++--
++--   update tenant_profiles
++--      set verificato = true, verifica_stato = 'verificato'
++--    where profile_id = '<ID DELL''INQUILINO>';
++--
++-- Vedere cosa è in attesa di essere controllato:
++--
++--   select r.id, r.owner_id, r.tenant_id, r.listing_id, r.periodo_da, r.periodo_a
++--     from rapporti_locazione r where r.stato = 'da_verificare' order by r.created_at;
++-- ============================================================
+-- 
+2.43.0
+

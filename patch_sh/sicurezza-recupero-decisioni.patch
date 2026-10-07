@@ -1,0 +1,1420 @@
+From 182dfb9b1eb004937920cb838b4e393619bfdc5a Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 6 Oct 2026 14:41:32 +0000
+Subject: [PATCH] feat(sicurezza): recupero password, decisioni con conferma e
+ motivo, chat chiusa
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RICHIEDE LA MIGRAZIONE 0009 PRIMA DEL PUSH.
+
+Recupero password:
+- 'Password dimenticata?' nel modulo di accesso; la risposta è sempre la
+  stessa, che l'indirizzo esista o no
+- il link passa dalla callback, che dà un segno (cookie httpOnly, 15
+  minuti) solo dopo uno scambio di codice riuscito verso /reset-password
+- /reset-password si apre SOLO con quel segno: una semplice sessione
+  aperta non basta, altrimenti si aggirerebbe la richiesta della password
+  attuale in 'Account e accesso'
+- errori in italiano: il caso frequente (link aperto da un altro browser)
+  ora dice cosa fare invece di mostrare il gergo di PKCE
+
+Callback:
+- 'next' ora passa da percorsoInterno: con next=@evil.com o .evil.com la
+  callback mandava fuori dal sito (redirect aperto)
+- la stessa funzione sostituisce il controllo duplicato nel login
+
+Decisioni sulle candidature:
+- accettare e rifiutare chiedono conferma; il rifiuto chiede un motivo da
+  una lista chiusa di cinque voci, che l'inquilino legge in Candidature
+- la decisione è definitiva: l'azione aggiorna solo candidature in
+  attesa e il database lo impone con un trigger
+
+Database (0009):
+- candidature.motivo_rifiuto con vincoli (lista chiusa; solo se rifiutata)
+- trigger candidature_decisione_definitiva
+- policy dei messaggi: si scrive solo dopo l'accettazione. Prima la sola
+  pagina controllava lo stato; il database lasciava scrivere a chiunque
+  avesse una candidatura
+
+Regole sulla password in un posto solo (lib/password.ts), con limite di
+72 byte (bcrypt) e usate anche da 'Account e accesso'.
+
+67 test (npm test). Verificato su PostgreSQL le regole di 0009, e su un
+server Next contro un finto Supabase il percorso completo del recupero.
+---
+ package.json                                  |   2 +-
+ scripts/carica-ts.mjs                         |  47 ++++++
+ scripts/test-match.mjs                        |  43 +----
+ scripts/test-sicurezza.mjs                    | 149 ++++++++++++++++++
+ .../(app)/candidature/CandidatureClient.tsx   |   3 +-
+ src/app/(app)/candidature/page.tsx            |   4 +-
+ src/app/(app)/database/DatabaseClient.tsx     | 137 +++++++++++++---
+ src/app/(app)/database/actions.ts             |  31 +++-
+ src/app/(app)/profilo/account-actions.ts      |   9 +-
+ src/app/auth/callback/route.ts                |  36 ++++-
+ src/app/globals.css                           |  21 +++
+ src/app/login/actions.ts                      |  58 +++++--
+ src/app/login/page.tsx                        |  74 ++++++++-
+ src/app/reset-password/ResetClient.tsx        |  53 +++++++
+ src/app/reset-password/actions.ts             |  43 +++++
+ src/app/reset-password/page.tsx               |  21 +++
+ src/lib/motivi-rifiuto.ts                     |  54 +++++++
+ src/lib/password.ts                           |  24 +++
+ src/lib/percorso.ts                           |  23 +++
+ src/lib/recupero.ts                           |  40 +++++
+ src/lib/types.ts                              |   2 +
+ .../migrations/0009_motivo_rifiuto_e_chat.sql | 110 +++++++++++++
+ 22 files changed, 888 insertions(+), 96 deletions(-)
+ create mode 100644 scripts/carica-ts.mjs
+ create mode 100644 scripts/test-sicurezza.mjs
+ create mode 100644 src/app/reset-password/ResetClient.tsx
+ create mode 100644 src/app/reset-password/actions.ts
+ create mode 100644 src/app/reset-password/page.tsx
+ create mode 100644 src/lib/motivi-rifiuto.ts
+ create mode 100644 src/lib/password.ts
+ create mode 100644 src/lib/percorso.ts
+ create mode 100644 src/lib/recupero.ts
+ create mode 100644 supabase/migrations/0009_motivo_rifiuto_e_chat.sql
+
+diff --git a/package.json b/package.json
+index d167aa2..72c9c94 100644
+--- a/package.json
++++ b/package.json
+@@ -7,7 +7,7 @@
+     "build": "next build",
+     "start": "next start",
+     "lint": "eslint",
+-    "test": "node --test scripts/test-match.mjs"
++    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/carica-ts.mjs b/scripts/carica-ts.mjs
+new file mode 100644
+index 0000000..3fbb400
+--- /dev/null
++++ b/scripts/carica-ts.mjs
+@@ -0,0 +1,47 @@
++/**
++ * Piccolo caricatore per i test: traduce al volo i file .ts del progetto
++ * (con il compilatore TypeScript già presente) e risolve gli import
++ * relativi. Evita di aggiungere un framework di test come dipendenza.
++ */
++import { createRequire } from "node:module";
++import fs from "node:fs";
++import path from "node:path";
++import { fileURLToPath } from "node:url";
++
++const require = createRequire(import.meta.url);
++const ts = require("typescript");
++
++export const radice = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
++
++const cache = new Map();
++
++export function caricaTs(file) {
++  const assoluto = path.resolve(file);
++  if (cache.has(assoluto)) return cache.get(assoluto).exports;
++
++  const sorgente = fs.readFileSync(assoluto, "utf8");
++  const { outputText } = ts.transpileModule(sorgente, {
++    compilerOptions: {
++      module: ts.ModuleKind.CommonJS,
++      target: ts.ScriptTarget.ES2020,
++    },
++  });
++
++  const modulo = { exports: {} };
++  cache.set(assoluto, modulo);
++
++  const richiedi = (spec) => {
++    if (!spec.startsWith(".")) return require(spec);
++    let p = path.resolve(path.dirname(assoluto), spec);
++    if (fs.existsSync(p + ".ts")) p += ".ts";
++    else if (fs.existsSync(path.join(p, "index.ts"))) p = path.join(p, "index.ts");
++    return caricaTs(p);
++  };
++
++  new Function("require", "module", "exports", outputText)(
++    richiedi,
++    modulo,
++    modulo.exports
++  );
++  return modulo.exports;
++}
+diff --git a/scripts/test-match.mjs b/scripts/test-match.mjs
+index db6da39..b0aa861 100644
+--- a/scripts/test-match.mjs
++++ b/scripts/test-match.mjs
+@@ -9,49 +9,10 @@
+  */
+ import { test } from "node:test";
+ import assert from "node:assert/strict";
+-import { createRequire } from "node:module";
+-import fs from "node:fs";
+ import path from "node:path";
+-import { fileURLToPath } from "node:url";
+-
+-const require = createRequire(import.meta.url);
+-const ts = require("typescript");
+-const radice = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+-
+-// ---- piccolo caricatore: traduce i .ts al volo e risolve gli import relativi
+-const cache = new Map();
+-function carica(file) {
+-  const assoluto = path.resolve(file);
+-  if (cache.has(assoluto)) return cache.get(assoluto).exports;
+-
+-  const sorgente = fs.readFileSync(assoluto, "utf8");
+-  const { outputText } = ts.transpileModule(sorgente, {
+-    compilerOptions: {
+-      module: ts.ModuleKind.CommonJS,
+-      target: ts.ScriptTarget.ES2020,
+-    },
+-  });
+-
+-  const modulo = { exports: {} };
+-  cache.set(assoluto, modulo);
+-
+-  const richiedi = (spec) => {
+-    if (!spec.startsWith(".")) return require(spec);
+-    let p = path.resolve(path.dirname(assoluto), spec);
+-    if (fs.existsSync(p + ".ts")) p += ".ts";
+-    else if (fs.existsSync(path.join(p, "index.ts"))) p = path.join(p, "index.ts");
+-    return carica(p);
+-  };
+-
+-  new Function("require", "module", "exports", outputText)(
+-    richiedi,
+-    modulo,
+-    modulo.exports
+-  );
+-  return modulo.exports;
+-}
++import { caricaTs, radice } from "./carica-ts.mjs";
+ 
+-const m = carica(path.join(radice, "src", "lib", "match", "index.ts"));
++const m = caricaTs(path.join(radice, "src", "lib", "match", "index.ts"));
+ const {
+   calcolaMatchInquilino,
+   ordinaAnnunci,
+diff --git a/scripts/test-sicurezza.mjs b/scripts/test-sicurezza.mjs
+new file mode 100644
+index 0000000..9877872
+--- /dev/null
++++ b/scripts/test-sicurezza.mjs
+@@ -0,0 +1,149 @@
++/**
++ * Test dei controlli di sicurezza che non dipendono dal database:
++ * percorsi interni e motivi di rifiuto. Si lancia con:   npm test
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const { percorsoInterno } = caricaTs(path.join(radice, "src", "lib", "percorso.ts"));
++const { MOTIVI_RIFIUTO, motivoRifiutoValido, messaggioMotivoRifiuto } = caricaTs(
++  path.join(radice, "src", "lib", "motivi-rifiuto.ts")
++);
++
++// ============================================================
++// Percorsi interni
++// ============================================================
++
++test("percorsoInterno: accetta i percorsi del sito", () => {
++  for (const ok of ["/", "/profilo", "/invito/abc123", "/invito/abc?x=1&y=2", "/reset-password", "/chat/uuid-123"]) {
++    assert.equal(percorsoInterno(ok), ok);
++  }
++});
++
++test("percorsoInterno: il caso che apriva il redirect, '@evil.com' e simili", () => {
++  // con `${origin}${next}` questi finivano su un altro sito
++  for (const attacco of ["@evil.com", ".evil.com", "evil.com", "https://evil.com", "http://evil.com/x", "javascript:alert(1)", "data:text/html,x"]) {
++    assert.equal(percorsoInterno(attacco), "/", `non doveva passare: ${attacco}`);
++  }
++});
++
++test("percorsoInterno: barre doppie e rovesciate, che i browser trattano da indirizzo assoluto", () => {
++  for (const attacco of ["//evil.com", "///evil.com", "/\\evil.com", "/\\/evil.com", "/ok\\evil", "\\evil.com"]) {
++    assert.equal(percorsoInterno(attacco), "/", `non doveva passare: ${JSON.stringify(attacco)}`);
++  }
++});
++
++test("percorsoInterno: caratteri di controllo e a capo", () => {
++  for (const attacco of ["/ok\nSet-Cookie: x=1", "/ok\rx", "/ok\tx", "/ok\u0000x", "/\u007f"]) {
++    assert.equal(percorsoInterno(attacco), "/", `non doveva passare: ${JSON.stringify(attacco)}`);
++  }
++});
++
++test("percorsoInterno: vuoto, null, non stringhe e valori enormi tornano alla riserva", () => {
++  for (const x of [undefined, null, "", 42, {}, [], "/" + "a".repeat(600)]) {
++    assert.equal(percorsoInterno(x), "/");
++  }
++  assert.equal(percorsoInterno(undefined, "/profilo"), "/profilo");
++  assert.equal(percorsoInterno("@evil.com", "/profilo"), "/profilo");
++});
++
++test("percorsoInterno: le barre codificate restano nel sito e quindi passano", () => {
++  // "%2f%2fevil.com" non è una barra doppia per il browser: resta un percorso
++  const p = "/%2f%2fevil.com";
++  assert.equal(percorsoInterno(p), p);
++  assert.equal(new URL("https://sito.it" + p).host, "sito.it");
++});
++
++test("percorsoInterno: ciò che accetta non può mai cambiare sito", () => {
++  const candidati = ["/", "/a", "/a?b=c", "/a#frag", "/%40evil.com", "/@evil.com", "/.evil.com", "/a/../b", "/?next=//evil.com"];
++  for (const c of candidati) {
++    const risultato = percorsoInterno(c);
++    if (risultato !== "/" || c === "/") {
++      assert.equal(new URL("https://sito.it" + risultato).host, "sito.it", `usciva dal sito: ${c}`);
++    }
++  }
++});
++
++// ============================================================
++// Motivi del rifiuto
++// ============================================================
++
++test("motivi del rifiuto: cinque, con chiavi uniche e un testo per ciascuno", () => {
++  assert.equal(MOTIVI_RIFIUTO.length, 5);
++  assert.equal(new Set(MOTIVI_RIFIUTO.map((m) => m.chiave)).size, 5);
++  for (const m of MOTIVI_RIFIUTO) {
++    assert.ok(m.scelta.length > 3 && m.messaggio.length > 3);
++  }
++});
++
++test("motivoRifiutoValido: solo le chiavi della lista, niente testo libero", () => {
++  for (const m of MOTIVI_RIFIUTO) assert.equal(motivoRifiutoValido(m.chiave), true);
++  for (const x of ["libero", "ALTRO_CANDIDATO", "", null, undefined, 5, {}, "constructor", "toString", "__proto__"]) {
++    assert.equal(motivoRifiutoValido(x), false, `non doveva valere: ${String(x)}`);
++  }
++});
++
++test("messaggioMotivoRifiuto: un valore sconosciuto non mostra mai niente di strano", () => {
++  assert.equal(messaggioMotivoRifiuto("altro_candidato"), "Il proprietario ha scelto un altro candidato.");
++  for (const x of [null, undefined, "boh", "<script>", 3]) {
++    assert.equal(messaggioMotivoRifiuto(x), "Il proprietario non ha indicato un motivo.");
++  }
++});
++
++test("nessun motivo di rifiuto parla di caratteristiche personali", () => {
++  const testo = MOTIVI_RIFIUTO.map((m) => m.scelta + " " + m.messaggio).join(" ").toLowerCase();
++  for (const parola of ["figli", "famiglia", "nazional", "etnia", "religion", "età", "sesso", "genere", "straniero", "origine"]) {
++    assert.ok(!testo.includes(parola), `compare "${parola}"`);
++  }
++});
++
++// ============================================================
++// Regole sulla nuova password
++// ============================================================
++
++const { validaNuovaPassword } = caricaTs(path.join(radice, "src", "lib", "password.ts"));
++const { messaggioErroreAccesso } = caricaTs(path.join(radice, "src", "lib", "recupero.ts"));
++
++test("validaNuovaPassword: i tre casi che l'interfaccia deve distinguere", () => {
++  assert.equal(validaNuovaPassword("passwordok1", "passwordok1"), null);
++  assert.equal(validaNuovaPassword("corta", "corta"), "La nuova password deve avere almeno 8 caratteri.");
++  assert.equal(validaNuovaPassword("passwordlunga1", "passwordlunga2"), "Le due password non coincidono.");
++});
++
++test("validaNuovaPassword: i limiti sono esatti", () => {
++  assert.equal(validaNuovaPassword("1234567", "1234567") !== null, true, "7 caratteri non bastano");
++  assert.equal(validaNuovaPassword("12345678", "12345678"), null, "8 sì");
++  const a72 = "a".repeat(72);
++  assert.equal(validaNuovaPassword(a72, a72), null, "72 byte sì");
++  const a73 = "a".repeat(73);
++  assert.match(validaNuovaPassword(a73, a73), /troppo lunga/, "73 no");
++});
++
++test("validaNuovaPassword: il limite è in byte, non in caratteri", () => {
++  // 40 lettere accentate sono 40 caratteri ma 80 byte: bcrypt ne guarderebbe 72
++  const accentata = "è".repeat(40);
++  assert.match(validaNuovaPassword(accentata, accentata), /troppo lunga/);
++});
++
++test("validaNuovaPassword: l'ordine dei controlli non nasconde il problema più grave", () => {
++  // corta e diversa: si dice prima che è corta
++  assert.match(validaNuovaPassword("abc", "xyz"), /almeno 8/);
++});
++
++test("messaggioErroreAccesso: il caso più frequente è il link aperto da un altro browser", () => {
++  const m = messaggioErroreAccesso("PKCE code verifier not found in storage. This can happen if the auth flow was initiated in a different browser");
++  assert.match(m, /stesso browser/);
++  assert.ok(!/PKCE|verifier|storage/i.test(m), "niente gergo tecnico");
++});
++
++test("messaggioErroreAccesso: link scaduto o già usato, e qualunque altra cosa", () => {
++  assert.match(messaggioErroreAccesso("Email link is invalid or has expired"), /scaduto/);
++  assert.match(messaggioErroreAccesso("One-time token already been used"), /scaduto/);
++  for (const x of [undefined, null, "", "errore sconosciuto xyz"]) {
++    const m = messaggioErroreAccesso(x);
++    assert.match(m, /Riprova/);
++    assert.ok(!/xyz/.test(m), "un messaggio sconosciuto non viene mostrato tale e quale");
++  }
++});
+diff --git a/src/app/(app)/candidature/CandidatureClient.tsx b/src/app/(app)/candidature/CandidatureClient.tsx
+index cc5765f..0b6ff02 100644
+--- a/src/app/(app)/candidature/CandidatureClient.tsx
++++ b/src/app/(app)/candidature/CandidatureClient.tsx
+@@ -5,6 +5,7 @@ import Link from "next/link";
+ import { Sheet } from "@/components/Sheet";
+ import type { CandidaturaConAnnuncio, StatoCandidatura } from "@/lib/types";
+ import { PageContainer } from "@/components/ui/PageContainer";
++import { messaggioMotivoRifiuto } from "@/lib/motivi-rifiuto";
+ import { IconChat } from "@/components/icons";
+ 
+ const STATO_LABEL: Record<StatoCandidatura, string> = {
+@@ -131,7 +132,7 @@ export function CandidatureClient({
+             )}
+             {selezionata.status === "rifiutata" && (
+               <div className="note-box mt-5">
+-                Il proprietario ha scelto un altro profilo per questo annuncio.
++                {messaggioMotivoRifiuto(selezionata.motivo_rifiuto)}
+               </div>
+             )}
+           </>
+diff --git a/src/app/(app)/candidature/page.tsx b/src/app/(app)/candidature/page.tsx
+index 9359c17..04a9868 100644
+--- a/src/app/(app)/candidature/page.tsx
++++ b/src/app/(app)/candidature/page.tsx
+@@ -10,7 +10,9 @@ export default async function CandidaturePage() {
+ 
+   const { data: candidature } = await supabase
+     .from("candidature")
+-    .select("id, status, match_pct, created_at, listings(titolo, zona, prezzo, locali, mq)")
++    .select(
++      "id, status, match_pct, motivo_rifiuto, created_at, listings(titolo, zona, prezzo, locali, mq)"
++    )
+     .eq("tenant_id", user!.id)
+     .order("created_at", { ascending: false });
+ 
+diff --git a/src/app/(app)/database/DatabaseClient.tsx b/src/app/(app)/database/DatabaseClient.tsx
+index 6ea17f0..275fd79 100644
+--- a/src/app/(app)/database/DatabaseClient.tsx
++++ b/src/app/(app)/database/DatabaseClient.tsx
+@@ -7,6 +7,9 @@ import type { CandidaturaRicevuta } from "@/lib/types";
+ import { ordinaCandidati } from "@/lib/match";
+ import { valutaCandidatura } from "./actions";
+ import { PageContainer } from "@/components/ui/PageContainer";
++import { Chip } from "@/components/ui/Chip";
++import { MOTIVI_RIFIUTO } from "@/lib/motivi-rifiuto";
++import type { ChiaveMotivoRifiuto } from "@/lib/motivi-rifiuto";
+ import { IconPersone } from "@/components/icons";
+ 
+ const BADGE: Record<string, string> = {
+@@ -45,6 +48,10 @@ export function DatabaseClient({
+   );
+   const [pending, startTransition] = useTransition();
+   const [errore, setErrore] = useState<string | null>(null);
++  // Accettare e rifiutare non si annullano: prima si chiede conferma, e per
++  // il rifiuto anche il motivo, che l'inquilino leggerà.
++  const [confermando, setConfermando] = useState<"accettata" | "rifiutata" | null>(null);
++  const [motivo, setMotivo] = useState<ChiaveMotivoRifiuto | null>(null);
+   const [aggiornate, setAggiornate] = useState<
+     Record<string, "accettata" | "rifiutata">
+   >({});
+@@ -53,16 +60,34 @@ export function DatabaseClient({
+     return aggiornate[c.id] ?? c.status;
+   }
+ 
++  function chiudi() {
++    setSelezionata(null);
++    setErrore(null);
++    setConfermando(null);
++    setMotivo(null);
++  }
++
++  function apri(c: CandidaturaRicevuta) {
++    setErrore(null);
++    setConfermando(null);
++    setMotivo(null);
++    setSelezionata(c);
++  }
++
+   function valuta(c: CandidaturaRicevuta, nuovo: "accettata" | "rifiutata") {
+     setErrore(null);
+     startTransition(async () => {
+-      const res = await valutaCandidatura(c.id, nuovo);
++      const res = await valutaCandidatura(
++        c.id,
++        nuovo,
++        nuovo === "rifiutata" ? (motivo ?? undefined) : undefined
++      );
+       if (res?.error) {
+         setErrore(res.error);
+         return;
+       }
+       setAggiornate((prev) => ({ ...prev, [c.id]: nuovo }));
+-      setSelezionata(null);
++      chiudi();
+     });
+   }
+ 
+@@ -114,16 +139,13 @@ export function DatabaseClient({
+           key={a.id}
+           annuncio={a}
+           stato={stato}
+-          onSelect={setSelezionata}
++          onSelect={apri}
+         />
+       ))}
+ 
+       <Sheet
+         open={selezionata !== null}
+-        onClose={() => {
+-          setSelezionata(null);
+-          setErrore(null);
+-        }}
++        onClose={chiudi}
+         title={
+           selezionata
+             ? `${selezionata.nome ?? "Inquilino"} ${selezionata.cognome ?? ""}`
+@@ -199,22 +221,91 @@ export function DatabaseClient({
+             )}
+ 
+             {stato(selezionata) === "in_attesa" ? (
+-              <div className="flex gap-3 mt-6">
+-                <button
+-                  onClick={() => valuta(selezionata, "rifiutata")}
+-                  disabled={pending}
+-                  className="btn-danger-outline"
+-                >
+-                  Rifiuta
+-                </button>
+-                <button
+-                  onClick={() => valuta(selezionata, "accettata")}
+-                  disabled={pending}
+-                  className="opp-cta"
+-                >
+-                  Accetta
+-                </button>
+-              </div>
++              confermando === null ? (
++                <div className="flex gap-3 mt-6">
++                  <button
++                    onClick={() => setConfermando("rifiutata")}
++                    className="btn-danger-outline"
++                  >
++                    Rifiuta
++                  </button>
++                  <button
++                    onClick={() => setConfermando("accettata")}
++                    className="opp-cta"
++                  >
++                    Accetta
++                  </button>
++                </div>
++              ) : confermando === "accettata" ? (
++                <div className="conferma">
++                  <p className="conferma-titolo">
++                    Accettare {selezionata.nome ?? "questo candidato"}?
++                  </p>
++                  <p className="conferma-testo">
++                    Si apre la chat con il candidato. La decisione non si può
++                    annullare.
++                  </p>
++                  {selezionata.valutazione?.match.bloccato && (
++                    <div className="note-stop">
++                      Attenzione: non soddisfa un criterio obbligatorio che hai
++                      chiesto ({selezionata.valutazione.match.mancanti.join(", ")}).
++                    </div>
++                  )}
++                  <div className="flex gap-3">
++                    <button
++                      onClick={() => setConfermando(null)}
++                      disabled={pending}
++                      className="btn-danger-outline"
++                      style={{ borderColor: "rgba(16,21,26,.14)", color: "var(--ink)" }}
++                    >
++                      Annulla
++                    </button>
++                    <button
++                      onClick={() => valuta(selezionata, "accettata")}
++                      disabled={pending}
++                      className="opp-cta"
++                    >
++                      {pending ? "Un momento..." : "Sì, accetta"}
++                    </button>
++                  </div>
++                </div>
++              ) : (
++                <div className="conferma">
++                  <p className="conferma-titolo">Perché rifiuti?</p>
++                  <p className="conferma-testo">
++                    L&apos;inquilino leggerà il motivo che scegli. La decisione
++                    non si può annullare.
++                  </p>
++                  <div className="chip-row" style={{ marginBottom: 16 }}>
++                    {MOTIVI_RIFIUTO.map((m) => (
++                      <Chip
++                        key={m.chiave}
++                        label={m.scelta}
++                        active={motivo === m.chiave}
++                        onClick={() => setMotivo(m.chiave)}
++                      />
++                    ))}
++                  </div>
++                  <div className="flex gap-3">
++                    <button
++                      onClick={() => setConfermando(null)}
++                      disabled={pending}
++                      className="btn-danger-outline"
++                      style={{ borderColor: "rgba(16,21,26,.14)", color: "var(--ink)" }}
++                    >
++                      Annulla
++                    </button>
++                    <button
++                      onClick={() => valuta(selezionata, "rifiutata")}
++                      disabled={pending || motivo === null}
++                      className="opp-cta"
++                      style={{ background: motivo ? "var(--clay)" : undefined }}
++                    >
++                      {pending ? "Un momento..." : "Conferma il rifiuto"}
++                    </button>
++                  </div>
++                </div>
++              )
+             ) : (
+               <div className="flex flex-col gap-3 mt-6">
+                 <div
+diff --git a/src/app/(app)/database/actions.ts b/src/app/(app)/database/actions.ts
+index 81a5613..0ccf675 100644
+--- a/src/app/(app)/database/actions.ts
++++ b/src/app/(app)/database/actions.ts
+@@ -4,10 +4,12 @@ import { revalidatePath } from "next/cache";
+ import { createClient } from "@/lib/supabase/server";
+ import { criteriDaRighe, valutaCandidato } from "@/lib/match";
+ import type { ProfiloCandidato, RigaCriterioDb } from "@/lib/match";
++import { motivoRifiutoValido } from "@/lib/motivi-rifiuto";
+ 
+ export async function valutaCandidatura(
+   candidaturaId: string,
+-  nuovoStato: "accettata" | "rifiutata"
++  nuovoStato: "accettata" | "rifiutata",
++  motivo?: string
+ ) {
+   const supabase = await createClient();
+   const {
+@@ -15,6 +17,12 @@ export async function valutaCandidatura(
+   } = await supabase.auth.getUser();
+   if (!user) return { error: "Non autenticato." };
+ 
++  // Rifiutare richiede un motivo, scelto da una lista chiusa: l'inquilino
++  // ha diritto di sapere perché, e un testo libero non lo vogliamo ospitare.
++  if (nuovoStato === "rifiutata" && !motivoRifiutoValido(motivo)) {
++    return { error: "Scegli un motivo per il rifiuto." };
++  }
++
+   // La decisione registra una fotografia del match di quel momento (D7):
+   // da qui in poi l'inquilino può cambiare il profilo, ma il proprietario
+   // continua a vedere su cosa ha deciso.
+@@ -59,11 +67,15 @@ export async function valutaCandidatura(
+     fotografia = null;
+   }
+ 
+-  const { error } = await supabase
++  // La decisione si prende una volta sola: si aggiorna solo se la
++  // candidatura è ancora in attesa. Il database lo impone anche da sé
++  // (migrazione 0009), qui serve a dare un messaggio chiaro.
++  const { data: aggiornate, error } = await supabase
+     .from("candidature")
+     .update({
+       status: nuovoStato,
+       updated_at: new Date().toISOString(),
++      motivo_rifiuto: nuovoStato === "rifiutata" ? motivo : null,
+       ...(fotografia
+         ? {
+             match_proprietario: fotografia,
+@@ -71,9 +83,20 @@ export async function valutaCandidatura(
+           }
+         : {}),
+     })
+-    .eq("id", candidaturaId);
++    .eq("id", candidaturaId)
++    .eq("status", "in_attesa")
++    .select("id");
+ 
+-  if (error) return { error: error.message };
++  if (error) {
++    return {
++      error: error.message.includes("DECISIONE_DEFINITIVA")
++        ? "Questa candidatura è già stata valutata."
++        : error.message,
++    };
++  }
++  if (!aggiornate || aggiornate.length === 0) {
++    return { error: "Questa candidatura è già stata valutata." };
++  }
+ 
+   revalidatePath("/database");
+   return { ok: true };
+diff --git a/src/app/(app)/profilo/account-actions.ts b/src/app/(app)/profilo/account-actions.ts
+index f974c71..5b950a5 100644
+--- a/src/app/(app)/profilo/account-actions.ts
++++ b/src/app/(app)/profilo/account-actions.ts
+@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
+ import { headers } from "next/headers";
+ import { createClient as createPlainClient } from "@supabase/supabase-js";
+ import { createClient } from "@/lib/supabase/server";
++import { validaNuovaPassword } from "@/lib/password";
+ 
+ export type AccountState = {
+   error?: string;
+@@ -138,12 +139,8 @@ export async function updatePassword(
+   const nuova = String(formData.get("password_nuova") || "");
+   const ripeti = String(formData.get("password_ripeti") || "");
+ 
+-  if (nuova.length < 8) {
+-    return { error: "La nuova password deve avere almeno 8 caratteri." };
+-  }
+-  if (nuova !== ripeti) {
+-    return { error: "Le due password non coincidono." };
+-  }
++  const erroreRegole = validaNuovaPassword(nuova, ripeti);
++  if (erroreRegole) return { error: erroreRegole };
+   if (nuova === attuale) {
+     return { error: "La nuova password è uguale a quella attuale." };
+   }
+diff --git a/src/app/auth/callback/route.ts b/src/app/auth/callback/route.ts
+index eaadbaf..b1a1798 100644
+--- a/src/app/auth/callback/route.ts
++++ b/src/app/auth/callback/route.ts
+@@ -1,25 +1,53 @@
+ import { NextResponse } from "next/server";
+ import { createClient } from "@/lib/supabase/server";
++import { percorsoInterno } from "@/lib/percorso";
++import {
++  COOKIE_RECUPERO,
++  DURATA_RECUPERO_SECONDI,
++  messaggioErroreAccesso,
++  PERCORSO_RESET,
++} from "@/lib/recupero";
+ 
+ export async function GET(request: Request) {
+   const { searchParams, origin } = new URL(request.url);
+   const code = searchParams.get("code");
+-  const next = searchParams.get("next") ?? "/";
++  // `next` arriva dall'esterno: senza controllo, "@evil.com" faceva
++  // finire l'utente su un altro sito dopo l'accesso.
++  const next = percorsoInterno(searchParams.get("next"));
+ 
+   if (code) {
+     const supabase = await createClient();
+     const { error } = await supabase.auth.exchangeCodeForSession(code);
+     if (!error) {
+-      return NextResponse.redirect(`${origin}${next}`);
++      const risposta = NextResponse.redirect(`${origin}${next}`);
++
++      // Un link di recupero: la pagina di reset si apre solo con questo
++      // segno, vedi lib/recupero.ts.
++      if (next === PERCORSO_RESET) {
++        risposta.cookies.set(COOKIE_RECUPERO, "1", {
++          httpOnly: true,
++          sameSite: "lax",
++          secure: process.env.NODE_ENV === "production",
++          path: "/",
++          maxAge: DURATA_RECUPERO_SECONDI,
++        });
++      }
++      return risposta;
+     }
++    // il messaggio tecnico resta nei log; alla persona va quello comprensibile
++    console.error("auth/callback:", error.message);
+     return NextResponse.redirect(
+-      `${origin}/login?errore=${encodeURIComponent(error.message)}`
++      `${origin}/login?errore=${encodeURIComponent(
++        messaggioErroreAccesso(error.message)
++      )}`
+     );
+   }
+ 
++  // Un link scaduto o già usato arriva senza codice: Supabase mette
++  // l'errore nel frammento dell'indirizzo, che il server non vede mai.
+   return NextResponse.redirect(
+     `${origin}/login?errore=${encodeURIComponent(
+-      "Link di conferma mancante o incompleto."
++      "Il link non è valido o è scaduto. Richiedine uno nuovo."
+     )}`
+   );
+ }
+diff --git a/src/app/globals.css b/src/app/globals.css
+index f014e50..894dd5b 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -2319,3 +2319,24 @@ input[type="range"]::-moz-range-thumb {
+   margin-left: 8px;
+   vertical-align: 1px;
+ }
++
++/* Conferma di una decisione irreversibile (accetta / rifiuta). */
++.conferma {
++  margin-top: 22px;
++  background: var(--paper-dim);
++  border-radius: 18px;
++  padding: 16px 16px 18px 16px;
++}
++.conferma-titolo {
++  font-family: var(--font-display);
++  font-size: 16.5px;
++  font-weight: 700;
++  color: var(--ink);
++  margin: 0 0 4px 0;
++}
++.conferma-testo {
++  font-size: 12.5px;
++  line-height: 1.55;
++  color: var(--body-text);
++  margin: 0 0 14px 0;
++}
+diff --git a/src/app/login/actions.ts b/src/app/login/actions.ts
+index 0220b2c..3aaf117 100644
+--- a/src/app/login/actions.ts
++++ b/src/app/login/actions.ts
+@@ -3,15 +3,8 @@
+ import { redirect } from "next/navigation";
+ import { headers } from "next/headers";
+ import { createClient } from "@/lib/supabase/server";
+-
+-/**
+- * Accetta solo percorsi interni: senza questo controllo `?next=` sarebbe
+- * un redirect aperto verso qualunque sito.
+- */
+-function destinazioneSicura(valore: FormDataEntryValue | null): string {
+-  const s = String(valore || "");
+-  return s.startsWith("/") && !s.startsWith("//") ? s : "/";
+-}
++import { percorsoInterno } from "@/lib/percorso";
++import { PERCORSO_RESET } from "@/lib/recupero";
+ 
+ async function origine(): Promise<string | null> {
+   const h = await headers();
+@@ -33,7 +26,7 @@ export async function signup(
+   const cognome = String(formData.get("cognome") || "");
+   const ruolo = String(formData.get("ruolo") || "inquilino");
+   const privacyAccettata = formData.get("privacy") === "on";
+-  const next = destinazioneSicura(formData.get("next"));
++  const next = percorsoInterno(String(formData.get("next") ?? ""));
+ 
+   if (!privacyAccettata) {
+     return { error: "Devi accettare la privacy per continuare." };
+@@ -76,7 +69,7 @@ export async function login(
+ ): Promise<AuthState> {
+   const email = String(formData.get("email") || "");
+   const password = String(formData.get("password") || "");
+-  const next = destinazioneSicura(formData.get("next"));
++  const next = percorsoInterno(String(formData.get("next") ?? ""));
+ 
+   const supabase = await createClient();
+   const { error } = await supabase.auth.signInWithPassword({ email, password });
+@@ -93,3 +86,46 @@ export async function logout() {
+   await supabase.auth.signOut();
+   redirect("/login");
+ }
++
++export type RecuperoState = { messaggio?: string; error?: string } | null;
++
++/**
++ * Manda il link per reimpostare la password.
++ *
++ * La risposta è SEMPRE la stessa, che l'indirizzo sia registrato o no:
++ * altrimenti questo modulo permetterebbe a chiunque di scoprire se una
++ * persona ha un account.
++ */
++export async function richiediReset(
++  _prevState: RecuperoState,
++  formData: FormData
++): Promise<RecuperoState> {
++  const email = String(formData.get("email") || "").trim().toLowerCase();
++  if (!email.includes("@")) {
++    return { error: "Inserisci un indirizzo email valido." };
++  }
++
++  const supabase = await createClient();
++  const base = await origine();
++
++  const { error } = await supabase.auth.resetPasswordForEmail(email, {
++    redirectTo: base
++      ? `${base}/auth/callback?next=${encodeURIComponent(PERCORSO_RESET)}`
++      : undefined,
++  });
++
++  // Un errore qui è quasi sempre il limite di invii di Supabase. Non si
++  // distingue "indirizzo sconosciuto" da "riuscito": per quello Supabase
++  // non restituisce errore.
++  if (error) {
++    return {
++      error:
++        "Non riesco a mandare l'email in questo momento. Riprova tra qualche minuto.",
++    };
++  }
++
++  return {
++    messaggio:
++      "Se l'indirizzo è registrato, riceverai un'email con il link per scegliere una nuova password. Aprilo dallo stesso browser da cui l'hai chiesto.",
++  };
++}
+diff --git a/src/app/login/page.tsx b/src/app/login/page.tsx
+index 56a32e7..15417b4 100644
+--- a/src/app/login/page.tsx
++++ b/src/app/login/page.tsx
+@@ -2,7 +2,7 @@
+ 
+ import { Suspense, useActionState, useState } from "react";
+ import { useSearchParams } from "next/navigation";
+-import { signup, login } from "./actions";
++import { signup, login, richiediReset } from "./actions";
+ import { IconCasa, IconPalazzo } from "@/components/icons";
+ 
+ type Ruolo = "inquilino" | "proprietario";
+@@ -20,7 +20,7 @@ function LoginForm() {
+   const erroreConferma = searchParams.get("errore");
+   const next = searchParams.get("next") ?? "/";
+ 
+-  const [tab, setTab] = useState<"registrati" | "accedi">("registrati");
++  const [tab, setTab] = useState<"registrati" | "accedi" | "recupero">("registrati");
+   const [ruolo, setRuolo] = useState<Ruolo>("inquilino");
+ 
+   const [signupState, signupAction, signupPending] = useActionState(
+@@ -28,6 +28,10 @@ function LoginForm() {
+     null
+   );
+   const [loginState, loginAction, loginPending] = useActionState(login, null);
++  const [recuperoState, recuperoAction, recuperoPending] = useActionState(
++    richiediReset,
++    null
++  );
+ 
+   return (
+     <main className="login-view">
+@@ -49,11 +53,12 @@ function LoginForm() {
+ 
+         {erroreConferma && (
+           <p className="login-error mb-4">
+-            Conferma email non riuscita: {erroreConferma}
++            {erroreConferma}
+           </p>
+         )}
+ 
+-        {/* Tab Registrati / Accedi */}
++        {/* Tab Registrati / Accedi (non durante il recupero della password) */}
++        {tab !== "recupero" && (
+         <div className="login-switch">
+           <button
+             type="button"
+@@ -70,6 +75,7 @@ function LoginForm() {
+             Accedi
+           </button>
+         </div>
++        )}
+ 
+         {tab === "registrati" ? (
+           <form action={signupAction} className="flex flex-col gap-3">
+@@ -118,6 +124,51 @@ function LoginForm() {
+               {signupPending ? "Creazione account..." : "Crea il tuo account"}
+             </button>
+           </form>
++        ) : tab === "recupero" ? (
++          <form action={recuperoAction} className="flex flex-col gap-3">
++            <h2 className="login-title" style={{ fontSize: 19, marginBottom: 2 }}>
++              Recupera la password
++            </h2>
++            <p className="login-tag" style={{ fontSize: 13, margin: "0 0 6px 0" }}>
++              Scrivi l&apos;email con cui ti sei registrato: ti mandiamo un link
++              per scegliere una nuova password.
++            </p>
++
++            {recuperoState?.messaggio ? (
++              <p className="login-consent" style={{ lineHeight: 1.55 }}>
++                {recuperoState.messaggio}
++              </p>
++            ) : (
++              <>
++                <Input name="email" type="email" placeholder="Email" required />
++                {recuperoState?.error && (
++                  <p className="login-error">{recuperoState.error}</p>
++                )}
++                <button
++                  type="submit"
++                  disabled={recuperoPending}
++                  className="login-cta mt-2"
++                >
++                  {recuperoPending ? "Invio..." : "Mandami il link"}
++                </button>
++              </>
++            )}
++
++            <button
++              type="button"
++              onClick={() => setTab("accedi")}
++              className="login-fine"
++              style={{
++                background: "none",
++                border: "none",
++                cursor: "pointer",
++                textDecoration: "underline",
++                marginTop: 4,
++              }}
++            >
++              Torna all&apos;accesso
++            </button>
++          </form>
+         ) : (
+           <form action={loginAction} className="flex flex-col gap-3">
+             <input type="hidden" name="next" value={next} />
+@@ -136,6 +187,21 @@ function LoginForm() {
+             <button type="submit" disabled={loginPending} className="login-cta mt-2">
+               {loginPending ? "Accesso..." : "Accedi"}
+             </button>
++
++            <button
++              type="button"
++              onClick={() => setTab("recupero")}
++              className="login-fine"
++              style={{
++                background: "none",
++                border: "none",
++                cursor: "pointer",
++                textDecoration: "underline",
++                marginTop: 2,
++              }}
++            >
++              Password dimenticata?
++            </button>
+           </form>
+         )}
+ 
+diff --git a/src/app/reset-password/ResetClient.tsx b/src/app/reset-password/ResetClient.tsx
+new file mode 100644
+index 0000000..fcfaa8a
+--- /dev/null
++++ b/src/app/reset-password/ResetClient.tsx
+@@ -0,0 +1,53 @@
++"use client";
++
++import { useActionState } from "react";
++import { impostaNuovaPassword } from "./actions";
++
++export function ResetClient() {
++  const [state, formAction, pending] = useActionState(impostaNuovaPassword, null);
++
++  return (
++    <main className="login-view">
++      <div
++        className="login-bg"
++        style={{ backgroundImage: "url(/login-bg.jpg)" }}
++      />
++      <div className="login-scrim" />
++
++      <div className="login-content">
++        <div className="login-brand">
++          Match<b>AmI</b>
++        </div>
++        <h1 className="login-title">Scegli una nuova password</h1>
++        <p className="login-tag" style={{ marginBottom: 22 }}>
++          Dopo il salvataggio entri direttamente nell&apos;app.
++        </p>
++
++        <form action={formAction} className="flex flex-col gap-3">
++          <input
++            name="password_nuova"
++            type="password"
++            placeholder="Nuova password (min. 8 caratteri)"
++            required
++            autoComplete="new-password"
++            className="login-input"
++          />
++          <input
++            name="password_ripeti"
++            type="password"
++            placeholder="Ripeti la nuova password"
++            required
++            autoComplete="new-password"
++            className="login-input"
++          />
++
++          {state?.error && <p className="login-error">{state.error}</p>}
++
++          <button type="submit" disabled={pending} className="login-cta mt-2">
++            {pending ? "Salvataggio..." : "Salva la nuova password"}
++          </button>
++        </form>
++      </div>
++    </main>
++  );
++}
+diff --git a/src/app/reset-password/actions.ts b/src/app/reset-password/actions.ts
+new file mode 100644
+index 0000000..66ec4ae
+--- /dev/null
++++ b/src/app/reset-password/actions.ts
+@@ -0,0 +1,43 @@
++"use server";
++
++import { cookies } from "next/headers";
++import { redirect } from "next/navigation";
++import { createClient } from "@/lib/supabase/server";
++import { COOKIE_RECUPERO } from "@/lib/recupero";
++import { validaNuovaPassword } from "@/lib/password";
++
++export type ResetState = { error?: string } | null;
++
++const LINK_NON_VALIDO =
++  "Il link per reimpostare la password non è più valido. Richiedine uno nuovo.";
++
++export async function impostaNuovaPassword(
++  _prevState: ResetState,
++  formData: FormData
++): Promise<ResetState> {
++  const archivio = await cookies();
++
++  // Senza il segno lasciato dalla callback non si è arrivati da un link di
++  // recupero: cambiare la password così aggirerebbe la richiesta della
++  // password attuale (vedi lib/recupero.ts).
++  if (!archivio.get(COOKIE_RECUPERO)) return { error: LINK_NON_VALIDO };
++
++  const nuova = String(formData.get("password_nuova") || "");
++  const ripeti = String(formData.get("password_ripeti") || "");
++
++  const errore = validaNuovaPassword(nuova, ripeti);
++  if (errore) return { error: errore };
++
++  const supabase = await createClient();
++  const {
++    data: { user },
++  } = await supabase.auth.getUser();
++  if (!user) return { error: LINK_NON_VALIDO };
++
++  const { error } = await supabase.auth.updateUser({ password: nuova });
++  if (error) return { error: error.message };
++
++  // Il link vale una volta sola: il segno si toglie subito.
++  archivio.delete(COOKIE_RECUPERO);
++  redirect("/");
++}
+diff --git a/src/app/reset-password/page.tsx b/src/app/reset-password/page.tsx
+new file mode 100644
+index 0000000..d138316
+--- /dev/null
++++ b/src/app/reset-password/page.tsx
+@@ -0,0 +1,21 @@
++import { cookies } from "next/headers";
++import { redirect } from "next/navigation";
++import { COOKIE_RECUPERO } from "@/lib/recupero";
++import { ResetClient } from "./ResetClient";
++
++export default async function ResetPasswordPage() {
++  const archivio = await cookies();
++
++  // Si arriva qui solo dal link ricevuto per email, passando dalla
++  // callback. Chi ha una semplice sessione aperta, o nessuna, torna
++  // all'accesso: vedi lib/recupero.ts per il perché.
++  if (!archivio.get(COOKIE_RECUPERO)) {
++    redirect(
++      `/login?errore=${encodeURIComponent(
++        "Il link per reimpostare la password non è più valido. Richiedine uno nuovo."
++      )}`
++    );
++  }
++
++  return <ResetClient />;
++}
+diff --git a/src/lib/motivi-rifiuto.ts b/src/lib/motivi-rifiuto.ts
+new file mode 100644
+index 0000000..4fa244d
+--- /dev/null
++++ b/src/lib/motivi-rifiuto.ts
+@@ -0,0 +1,54 @@
++/**
++ * Perché un proprietario rifiuta una candidatura.
++ *
++ * È una lista CHIUSA, non un testo libero: l'inquilino rifiutato merita di
++ * sapere perché, ma un campo libero permetterebbe di scrivere motivazioni
++ * che non vorreste ospitare. L'ultima voce è una scelta consapevole di non
++ * dire, così rifiutare resta sempre possibile.
++ */
++export const MOTIVI_RIFIUTO = [
++  {
++    chiave: "altro_candidato",
++    scelta: "Ho scelto un altro candidato",
++    messaggio: "Il proprietario ha scelto un altro candidato.",
++  },
++  {
++    chiave: "criteri",
++    scelta: "Non rispondeva ai criteri richiesti",
++    messaggio:
++      "Il profilo non rispondeva ai criteri richiesti per questo annuncio.",
++  },
++  {
++    chiave: "reddito",
++    scelta: "Reddito non adeguato al canone",
++    messaggio: "Il reddito dichiarato non era adeguato al canone.",
++  },
++  {
++    chiave: "profilo_incompleto",
++    scelta: "Profilo incompleto",
++    messaggio:
++      "Il profilo era incompleto: completarlo aumenta le possibilità.",
++  },
++  {
++    chiave: "non_indicato",
++    scelta: "Preferisco non indicarlo",
++    messaggio: "Il proprietario non ha indicato un motivo.",
++  },
++] as const;
++
++export type ChiaveMotivoRifiuto = (typeof MOTIVI_RIFIUTO)[number]["chiave"];
++
++export function motivoRifiutoValido(
++  valore: unknown
++): valore is ChiaveMotivoRifiuto {
++  return (
++    typeof valore === "string" &&
++    MOTIVI_RIFIUTO.some((m) => m.chiave === valore)
++  );
++}
++
++/** Il testo che l'inquilino legge. Per un valore sconosciuto o assente, nessun motivo. */
++export function messaggioMotivoRifiuto(valore: unknown): string {
++  const motivo = MOTIVI_RIFIUTO.find((m) => m.chiave === valore);
++  return motivo ? motivo.messaggio : "Il proprietario non ha indicato un motivo.";
++}
+diff --git a/src/lib/password.ts b/src/lib/password.ts
+new file mode 100644
+index 0000000..6209dd7
+--- /dev/null
++++ b/src/lib/password.ts
+@@ -0,0 +1,24 @@
++/**
++ * Regole per scegliere una nuova password, in un posto solo: le usano
++ * sia "Account e accesso" sia il recupero della password.
++ *
++ * Restituisce il messaggio da mostrare, oppure `null` se va bene.
++ */
++export const PASSWORD_MIN = 8;
++
++// bcrypt, che Supabase usa per conservare le password, guarda solo i
++// primi 72 byte: oltre quel limite il resto non conterebbe niente.
++export const PASSWORD_MAX_BYTE = 72;
++
++export function validaNuovaPassword(nuova: string, ripeti: string): string | null {
++  if (nuova.length < PASSWORD_MIN) {
++    return `La nuova password deve avere almeno ${PASSWORD_MIN} caratteri.`;
++  }
++  if (new TextEncoder().encode(nuova).length > PASSWORD_MAX_BYTE) {
++    return `La nuova password è troppo lunga: al massimo ${PASSWORD_MAX_BYTE} caratteri.`;
++  }
++  if (nuova !== ripeti) {
++    return "Le due password non coincidono.";
++  }
++  return null;
++}
+diff --git a/src/lib/percorso.ts b/src/lib/percorso.ts
+new file mode 100644
+index 0000000..1570f00
+--- /dev/null
++++ b/src/lib/percorso.ts
+@@ -0,0 +1,23 @@
++/**
++ * Riduce un valore arrivato dall'esterno (parametro `next` di un link,
++ * campo nascosto di un modulo) a un percorso INTERNO del sito, oppure
++ * al percorso di riserva.
++ *
++ * Serve perché `${origin}${next}` non è sicuro: con next = "@evil.com"
++ * il risultato è "https://sito@evil.com", che il browser interpreta come
++ * un indirizzo su evil.com. Qui si accetta solo ciò che comincia con una
++ * singola "/", senza barre rovesciate né caratteri di controllo.
++ */
++export function percorsoInterno(
++  valore: string | null | undefined,
++  riserva = "/"
++): string {
++  if (typeof valore !== "string" || valore.length === 0) return riserva;
++  if (valore.length > 500) return riserva;
++  if (!valore.startsWith("/")) return riserva;
++  // "//host" e "/\host" sono indirizzi assoluti mascherati
++  if (valore.startsWith("//") || valore.startsWith("/\\")) return riserva;
++  // nessuna barra rovesciata né carattere di controllo in nessun punto
++  if (/[\\\u0000-\u001f\u007f]/.test(valore)) return riserva;
++  return valore;
++}
+diff --git a/src/lib/recupero.ts b/src/lib/recupero.ts
+new file mode 100644
+index 0000000..66e9734
+--- /dev/null
++++ b/src/lib/recupero.ts
+@@ -0,0 +1,40 @@
++/**
++ * Recupero della password.
++ *
++ * Il link ricevuto per email porta a /auth/callback, che scambia il codice
++ * con una sessione. Quella sessione è una normale sessione di accesso:
++ * da sola non dice che l'utente sia arrivato da un link di recupero.
++ *
++ * Senza un segno distintivo, /reset-password sarebbe raggiungibile da
++ * chiunque abbia una sessione aperta (un telefono lasciato sbloccato) e
++ * permetterebbe di cambiare la password SENZA conoscere quella attuale,
++ * aggirando il controllo che c'è in "Account e accesso".
++ *
++ * Il segno distintivo è questo cookie: lo imposta solo la callback, dopo
++ * uno scambio di codice riuscito e solo se la destinazione è il reset, e
++ * dura pochi minuti.
++ */
++export const COOKIE_RECUPERO = "recupero_password";
++export const PERCORSO_RESET = "/reset-password";
++export const DURATA_RECUPERO_SECONDI = 15 * 60;
++
++/**
++ * Traduce gli errori che la libreria di accesso restituisce, quasi sempre
++ * in inglese e tecnici, in qualcosa che una persona possa usare.
++ *
++ * Il caso più frequente non è un guasto: il link di recupero si apre da un
++ * dispositivo o da un browser diverso da quello in cui è stato richiesto
++ * (si chiede dal computer e si apre l'email sul telefono). Il codice di
++ * verifica resta nel browser d'origine e lì soltanto.
++ */
++export function messaggioErroreAccesso(messaggio: string | null | undefined): string {
++  const m = (messaggio ?? "").toLowerCase();
++
++  if (m.includes("code verifier") || m.includes("pkce")) {
++    return "Apri il link dallo stesso browser e dallo stesso dispositivo da cui lo hai richiesto. Se non puoi, richiedine uno nuovo da quello che stai usando.";
++  }
++  if (m.includes("expired") || m.includes("invalid") || m.includes("already been used")) {
++    return "Il link non è più valido o è scaduto. Richiedine uno nuovo.";
++  }
++  return "Non è stato possibile completare l'operazione. Riprova o richiedi un nuovo link.";
++}
+diff --git a/src/lib/types.ts b/src/lib/types.ts
+index 01b1e93..5238c56 100644
+--- a/src/lib/types.ts
++++ b/src/lib/types.ts
+@@ -121,6 +121,8 @@ export type CandidaturaConAnnuncio = {
+   id: string;
+   status: StatoCandidatura;
+   match_pct: number | null;
++  /** chiave della lista chiusa in lib/motivi-rifiuto.ts; null se non rifiutata o rifiutata prima che esistesse */
++  motivo_rifiuto: string | null;
+   created_at: string;
+   listings: {
+     titolo: string;
+diff --git a/supabase/migrations/0009_motivo_rifiuto_e_chat.sql b/supabase/migrations/0009_motivo_rifiuto_e_chat.sql
+new file mode 100644
+index 0000000..38f6cf7
+--- /dev/null
++++ b/supabase/migrations/0009_motivo_rifiuto_e_chat.sql
+@@ -0,0 +1,110 @@
++-- ============================================================
++-- MatchAmI — motivo del rifiuto, decisioni irreversibili, chat chiusa
++--
++-- Aggiunge:
++--   1. `candidature.motivo_rifiuto`: perché il proprietario ha rifiutato,
++--      da una lista chiusa di cinque voci (niente testo libero).
++--   2. un vincolo che rende la decisione irreversibile ANCHE nel database:
++--      una candidatura già accettata o rifiutata non cambia più stato.
++--   3. una policy più stretta sui messaggi: si scrive solo dopo
++--      l'accettazione.
++--
++-- ORDINE: esegui questa migrazione PRIMA del push del codice.
++-- ============================================================
++
++-- ------------------------------------------------------------
++-- 1. Motivo del rifiuto
++--
++-- Le chiavi sono le stesse di src/lib/motivi-rifiuto.ts. Un motivo ha
++-- senso solo su una candidatura rifiutata.
++-- ------------------------------------------------------------
++
++alter table candidature
++  add column if not exists motivo_rifiuto text;
++
++alter table candidature
++  drop constraint if exists candidature_motivo_rifiuto_valido;
++alter table candidature
++  add constraint candidature_motivo_rifiuto_valido check (
++    motivo_rifiuto is null
++    or motivo_rifiuto in (
++      'altro_candidato', 'criteri', 'reddito', 'profilo_incompleto', 'non_indicato'
++    )
++  );
++
++alter table candidature
++  drop constraint if exists candidature_motivo_solo_se_rifiutata;
++alter table candidature
++  add constraint candidature_motivo_solo_se_rifiutata check (
++    motivo_rifiuto is null or status = 'rifiutata'
++  );
++
++-- ------------------------------------------------------------
++-- 2. La decisione non si cambia
++--
++-- L'app già nasconde i pulsanti dopo la decisione, ma chi chiama
++-- direttamente l'API poteva riportare una candidatura accettata a
++-- rifiutata (con la chat già aperta e la fotografia del match già
++-- scattata). Qui lo stato può uscire da 'in_attesa' una volta sola.
++--
++-- Chi lavora dal pannello SQL di Supabase può correggere un errore
++-- disattivando il trigger per il tempo necessario:
++--   alter table candidature disable trigger candidature_decisione_definitiva;
++-- ------------------------------------------------------------
++
++create or replace function public.blocca_cambio_decisione()
++returns trigger
++language plpgsql
++as $$
++begin
++  if old.status <> 'in_attesa' and new.status is distinct from old.status then
++    raise exception 'DECISIONE_DEFINITIVA: la candidatura è già stata valutata'
++      using errcode = 'P0001';
++  end if;
++  return new;
++end;
++$$;
++
++drop trigger if exists candidature_decisione_definitiva on candidature;
++create trigger candidature_decisione_definitiva
++  before update on candidature
++  for each row execute function public.blocca_cambio_decisione();
++
++-- ------------------------------------------------------------
++-- 3. Chat: si scrive solo dopo l'accettazione
++--
++-- La pagina della chat controllava già lo stato, ma il database lasciava
++-- scrivere a chiunque avesse una candidatura, anche in attesa o rifiutata.
++-- ------------------------------------------------------------
++
++drop policy if exists "messaggi: parties write" on messaggi;
++
++create policy "messaggi: parties write" on messaggi
++  for insert
++  with check (
++    auth.uid() = mittente_id
++    and exists (
++      select 1 from candidature c
++      join listings l on l.id = c.listing_id
++      where c.id = messaggi.candidatura_id
++        and c.status = 'accettata'
++        and (c.tenant_id = auth.uid() or l.owner_id = auth.uid())
++    )
++  );
++
++-- ------------------------------------------------------------
++-- Verifica
++-- ------------------------------------------------------------
++
++select column_name from information_schema.columns
++where table_name = 'candidature' and column_name = 'motivo_rifiuto';
++
++select conname from pg_constraint
++where conrelid = 'candidature'::regclass and conname like 'candidature_motivo%'
++order by conname;
++
++select tgname from pg_trigger
++where tgrelid = 'candidature'::regclass and tgname = 'candidature_decisione_definitiva';
++
++select polname from pg_policy
++where polrelid = 'messaggi'::regclass and polname = 'messaggi: parties write';
+-- 
+2.43.0
+

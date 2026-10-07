@@ -1,0 +1,2056 @@
+From 3b0551a04f881721dbe60bee34868ec96adb9419 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 6 Oct 2026 15:50:58 +0000
+Subject: [PATCH 1/2] fix(account): chiave di servizio col nome ufficiale e
+ controllo del tipo
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Supabase ha introdotto chiavi nuove e dismette service_role e anon entro
+fine 2026: la chiave segreta è sb_secret_..., la pubblica sb_publishable_.
+
+- la variabile ufficiale è SUPABASE_SECRET_KEY; SUPABASE_SERVICE_ROLE_KEY
+  resta valida per chi l'aveva già impostata (vince la nuova se ci sono
+  entrambe)
+- una chiave sbagliata viene rifiutata con il motivo nel log. Il caso da
+  evitare: la finestra 'Connect' del pannello mostra per prima la chiave
+  PUBBLICA, e incollata al posto di quella segreta farebbe fallire la
+  cancellazione dell'account in modo oscuro (la sicurezza di riga la
+  bloccherebbe senza dire perché)
+- riconosce anche la vecchia service_role in formato JWT dal ruolo
+  nel token, e rifiuta la vecchia anon
+
+Verificato su un server Next contro un finto Supabase: con la chiave nel
+formato nuovo la cancellazione completa funziona; con la chiave pubblica
+non parte nessuna chiamata privilegiata e il log dice cosa non va.
+La libreria invia la chiave sia in apikey sia in Authorization: è l'uso
+che la documentazione prevede, ma non è verificato contro un Supabase
+vero.
+
+92 test.
+---
+ scripts/test-sicurezza.mjs               | 92 ++++++++++++++++++++++++
+ src/app/(app)/profilo/elimina-actions.ts |  2 +-
+ src/lib/chiavi.ts                        | 75 +++++++++++++++++++
+ src/lib/supabase/admin.ts                | 23 ++++--
+ 4 files changed, 186 insertions(+), 6 deletions(-)
+ create mode 100644 src/lib/chiavi.ts
+
+diff --git a/scripts/test-sicurezza.mjs b/scripts/test-sicurezza.mjs
+index aad535d..3ba755e 100644
+--- a/scripts/test-sicurezza.mjs
++++ b/scripts/test-sicurezza.mjs
+@@ -316,3 +316,95 @@ test("i testi dell'invito non presumono il genere di nessuno", () => {
+   }
+   assert.ok(!/\blui\b|\blei\b/i.test(messaggioInvito("Tina", "x")));
+ });
++
++// ============================================================
++// Chiave di servizio di Supabase: si usa solo quella giusta
++// ============================================================
++
++const { controllaChiaveDiServizio, chiaveDiServizioDaAmbiente } = caricaTs(path.join(radice, "src", "lib", "chiavi.ts"));
++const jwt = (ruolo) => {
++  const b = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
++  return `${b({ alg: "HS256", typ: "JWT" })}.${b({ role: ruolo, iss: "supabase" })}.firma`;
++};
++
++test("chiave: la chiave segreta nuova va bene", () => {
++  const r = controllaChiaveDiServizio("sb_secret_abcdef123456");
++  assert.equal(r.ok, true);
++  assert.equal(r.tipo, "segreta");
++});
++
++test("chiave: la vecchia service_role, in formato JWT, va ancora bene", () => {
++  const r = controllaChiaveDiServizio(jwt("service_role"));
++  assert.equal(r.ok, true);
++  assert.equal(r.tipo, "service_role_legacy");
++});
++
++test("chiave: la chiave PUBBLICA incollata per errore viene rifiutata, con un motivo chiaro", () => {
++  // Il caso più probabile: la finestra "Connect" mostra per prima questa
++  const r = controllaChiaveDiServizio("sb_publishable_abcdef123456");
++  assert.equal(r.ok, false);
++  assert.match(r.motivo, /PUBBLICA/);
++  assert.match(r.motivo, /sb_secret_/, "deve dire cosa cercare");
++});
++
++test("chiave: la vecchia anon (JWT pubblico) viene rifiutata", () => {
++  const r = controllaChiaveDiServizio(jwt("anon"));
++  assert.equal(r.ok, false);
++  assert.match(r.motivo, /anon/);
++});
++
++test("chiave: un JWT con un ruolo qualunque non passa per service_role", () => {
++  for (const ruolo of ["authenticated", "supabase_admin", "", undefined, 42]) {
++    assert.equal(controllaChiaveDiServizio(jwt(ruolo)).ok, false, String(ruolo));
++  }
++});
++
++test("chiave: vuota, spazi, rovinata o di un altro tipo: mai accettata", () => {
++  for (const x of [undefined, null, "", "   ", "abc", "eyJ.rotto", "eyJ.eyJ.eyJ", "Bearer sb_secret_x", "sk_live_123", "sb_secret", "SB_SECRET_x"]) {
++    assert.equal(controllaChiaveDiServizio(x).ok, false, JSON.stringify(x));
++  }
++});
++
++test("chiave: spazi o a capo ai lati (capita copiando) non rompono una chiave giusta", () => {
++  const r = controllaChiaveDiServizio("  sb_secret_abc123\n");
++  assert.equal(r.ok, true);
++  assert.equal(r.chiave, "sb_secret_abc123", "restituisce la chiave già pulita");
++});
++
++test("ambiente: il nome ufficiale ha la precedenza e il vecchio resta valido", () => {
++  assert.equal(chiaveDiServizioDaAmbiente({ SUPABASE_SECRET_KEY: "sb_secret_nuova" }).chiave, "sb_secret_nuova");
++  assert.equal(chiaveDiServizioDaAmbiente({ SUPABASE_SERVICE_ROLE_KEY: jwt("service_role") }).ok, true);
++  const entrambe = chiaveDiServizioDaAmbiente({ SUPABASE_SECRET_KEY: "sb_secret_nuova", SUPABASE_SERVICE_ROLE_KEY: jwt("service_role") });
++  assert.equal(entrambe.chiave, "sb_secret_nuova", "con tutte e due vince quella nuova");
++});
++
++test("ambiente: nessuna variabile, o variabile vuota, vale 'non configurata'", () => {
++  assert.equal(chiaveDiServizioDaAmbiente({}).ok, false);
++  assert.equal(chiaveDiServizioDaAmbiente({ SUPABASE_SECRET_KEY: "" }).ok, false);
++  // vuota la nuova ma presente la vecchia: si usa la vecchia
++  assert.equal(chiaveDiServizioDaAmbiente({ SUPABASE_SECRET_KEY: "  ", SUPABASE_SERVICE_ROLE_KEY: jwt("service_role") }).ok, true);
++});
++
++test("ambiente: la chiave PUBBLICA nella variabile della segreta non diventa mai la chiave di servizio", () => {
++  const r = chiaveDiServizioDaAmbiente({ SUPABASE_SECRET_KEY: "sb_publishable_xyz" });
++  assert.equal(r.ok, false);
++  // e non ricade silenziosamente su altro
++  const r2 = chiaveDiServizioDaAmbiente({ SUPABASE_SECRET_KEY: "sb_publishable_xyz", SUPABASE_SERVICE_ROLE_KEY: "" });
++  assert.equal(r2.ok, false);
++});
++
++test("la chiave di servizio non è mai in una variabile NEXT_PUBLIC_ (finirebbe nel browser)", () => {
++  // Legge il codice: nessun file deve leggere la chiave segreta da una variabile pubblica.
++  const cartella = path.join(radice, "src");
++  const trovati = [];
++  const visita = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) {
++    const p = path.join(d, e.name);
++    if (e.isDirectory()) visita(p);
++    else if (/\.(ts|tsx)$/.test(e.name)) {
++      const t = fs.readFileSync(p, "utf8");
++      if (/NEXT_PUBLIC_[A-Z_]*(SECRET|SERVICE_ROLE)/.test(t)) trovati.push(path.relative(radice, p));
++    }
++  } };
++  visita(cartella);
++  assert.deepEqual(trovati, [], "una chiave segreta letta da NEXT_PUBLIC_: " + trovati.join(", "));
++});
+diff --git a/src/app/(app)/profilo/elimina-actions.ts b/src/app/(app)/profilo/elimina-actions.ts
+index a30d094..ce64bc8 100644
+--- a/src/app/(app)/profilo/elimina-actions.ts
++++ b/src/app/(app)/profilo/elimina-actions.ts
+@@ -46,7 +46,7 @@ export async function eliminaAccount(
+ 
+   const admin = clienteAmministratore();
+   if (!admin) {
+-    console.error("eliminaAccount: SUPABASE_SERVICE_ROLE_KEY non configurata");
++    console.error("eliminaAccount: chiave di servizio (SUPABASE_SECRET_KEY) non configurata o non valida");
+     return {
+       error:
+         "L'eliminazione dell'account non è ancora attiva su questo ambiente.",
+diff --git a/src/lib/chiavi.ts b/src/lib/chiavi.ts
+new file mode 100644
+index 0000000..f0759f2
+--- /dev/null
++++ b/src/lib/chiavi.ts
+@@ -0,0 +1,75 @@
++/**
++ * Lettura e controllo della chiave di servizio di Supabase.
++ *
++ * Supabase ha introdotto un nuovo sistema di chiavi e sta dismettendo le
++ * vecchie `anon` e `service_role` (entro fine 2026):
++ *   - chiave SEGRETA   `sb_secret_...`       (server, ignora la sicurezza di riga)
++ *   - chiave PUBBLICA  `sb_publishable_...`  (browser, rispetta la sicurezza di riga)
++ *   - vecchie, in formato JWT (cominciano con `eyJ`): `service_role` e `anon`
++ *
++ * Il rischio che questo file evita: incollare per sbaglio la chiave
++ * PUBBLICA al posto di quella segreta. La finestra "Connect" del pannello
++ * mostra quella pubblica per prima. Con la chiave sbagliata la cancellazione
++ * dell'account fallirebbe in modo oscuro, perché la sicurezza di riga la
++ * bloccherebbe senza dire perché.
++ */
++
++export type EsitoChiave =
++  | { ok: true; chiave: string; tipo: "segreta" | "service_role_legacy" }
++  | { ok: false; motivo: string };
++
++function leggiRuoloJwt(chiave: string): string | null {
++  const parti = chiave.split(".");
++  if (parti.length !== 3) return null;
++  try {
++    const payload = JSON.parse(Buffer.from(parti[1], "base64url").toString("utf8"));
++    return typeof payload?.role === "string" ? payload.role : null;
++  } catch {
++    return null;
++  }
++}
++
++/** Dice se una stringa è una chiave utilizzabile come chiave di servizio. */
++export function controllaChiaveDiServizio(valore: string | null | undefined): EsitoChiave {
++  const chiave = (valore ?? "").trim();
++  if (!chiave) return { ok: false, motivo: "chiave assente" };
++
++  if (chiave.startsWith("sb_secret_")) {
++    return { ok: true, chiave, tipo: "segreta" };
++  }
++  if (chiave.startsWith("sb_publishable_")) {
++    return {
++      ok: false,
++      motivo:
++        "è la chiave PUBBLICA (sb_publishable_...): serve quella SEGRETA (sb_secret_...)",
++    };
++  }
++  if (chiave.startsWith("eyJ")) {
++    const ruolo = leggiRuoloJwt(chiave);
++    if (ruolo === "service_role") return { ok: true, chiave, tipo: "service_role_legacy" };
++    if (ruolo === "anon") {
++      return {
++        ok: false,
++        motivo: "è la vecchia chiave anon, pubblica: serve la chiave segreta",
++      };
++    }
++    return { ok: false, motivo: "chiave JWT con un ruolo non riconosciuto" };
++  }
++  return { ok: false, motivo: "formato non riconosciuto: la chiave segreta comincia con sb_secret_" };
++}
++
++/**
++ * Trova la chiave di servizio nelle variabili d'ambiente.
++ *
++ * `SUPABASE_SECRET_KEY` è il nome ufficiale. `SUPABASE_SERVICE_ROLE_KEY`
++ * resta valido per chi aveva già impostato quello (le vecchie chiavi
++ * funzionano finché Supabase non le disattiva).
++ */
++export function chiaveDiServizioDaAmbiente(
++  env: Record<string, string | undefined>
++): EsitoChiave {
++  const candidata = env.SUPABASE_SECRET_KEY?.trim()
++    ? env.SUPABASE_SECRET_KEY
++    : env.SUPABASE_SERVICE_ROLE_KEY;
++  return controllaChiaveDiServizio(candidata);
++}
+diff --git a/src/lib/supabase/admin.ts b/src/lib/supabase/admin.ts
+index 133ccd1..7a616b0 100644
+--- a/src/lib/supabase/admin.ts
++++ b/src/lib/supabase/admin.ts
+@@ -1,4 +1,5 @@
+ import { createClient } from "@supabase/supabase-js";
++import { chiaveDiServizioDaAmbiente } from "@/lib/chiavi";
+ 
+ /**
+  * Client con la chiave di servizio: ignora la sicurezza a livello di riga
+@@ -13,18 +14,30 @@ import { createClient } from "@supabase/supabase-js";
+  *    sull'id dell'utente autenticato, mai su un id che arriva dal client;
+  *  - la variabile d'ambiente NON deve cominciare con NEXT_PUBLIC_.
+  *
+- * Restituisce `null` se la chiave non è configurata, così chi chiama può
+- * dare un messaggio chiaro invece di fallire in modo oscuro.
++ * La chiave è `SUPABASE_SECRET_KEY` (quella segreta, `sb_secret_...`). Si
++ * accetta anche il vecchio nome `SUPABASE_SERVICE_ROLE_KEY`. Una chiave
++ * sbagliata, per esempio quella pubblica incollata per errore, viene
++ * rifiutata con un motivo nel log.
++ *
++ * Restituisce `null` se la chiave manca o non è quella giusta, così chi
++ * chiama può dare un messaggio chiaro invece di fallire in modo oscuro.
+  */
+ export function clienteAmministratore() {
+   if (typeof window !== "undefined") {
+     throw new Error("clienteAmministratore va usato solo sul server");
+   }
+-  const chiave = process.env.SUPABASE_SERVICE_ROLE_KEY;
+   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+-  if (!chiave || !url) return null;
++  const esito = chiaveDiServizioDaAmbiente(process.env);
++  if (!esito.ok) {
++    console.error("clienteAmministratore: chiave di servizio non utilizzabile:", esito.motivo);
++    return null;
++  }
++  if (!url) {
++    console.error("clienteAmministratore: manca NEXT_PUBLIC_SUPABASE_URL");
++    return null;
++  }
+ 
+-  return createClient(url, chiave, {
++  return createClient(url, esito.chiave, {
+     auth: { persistSession: false, autoRefreshToken: false },
+   });
+ }
+-- 
+2.43.0
+
+
+From ed22b32d0793e312a2deccab0178f73f4ffdceb8 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 6 Oct 2026 16:02:30 +0000
+Subject: [PATCH 2/2] feat(verifica): immobili verificati, pannello staff e
+ documenti
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RICHIEDE LA MIGRAZIONE 0012 PRIMA DEL PUSH (dopo la 0011).
+
+Il flusso: il proprietario carica un immobile e i documenti che lo
+provano, li invia; lo staff li controlla e verifica o respinge con una
+nota; solo un immobile verificato diventa un annuncio visibile agli
+inquilini, e solo allora il proprietario risulta verificato.
+
+ATTENZIONE, effetto immediato: gli annunci esistenti non sono
+verificati, quindi gli inquilini smettono di vederli. Per dati di prova
+la migrazione riporta in fondo un comando per verificarli in blocco.
+
+Database (0012):
+- staff: tabella senza policy (non si legge né si scrive dall'API) e
+  is_staff(), che risponde solo per chi la chiama
+- annunci e foto visibili agli inquilini solo se pubblicati E
+  verificati; il proprietario vede sempre i suoi, lo staff tutto
+- ci si candida solo a un annuncio pubblicato e verificato: chiude anche
+  il buco della candidatura a un annuncio non pubblicato
+- documenti_verifica e bucket documenti-verifica PRIVATO, con limite di
+  10 MB e solo PDF/JPG/PNG; chi carica non può cancellare
+- richiedi_verifica_immobile (servono identità + prova di proprietà) ed
+  esito_verifica_immobile (solo staff; respingere richiede una nota)
+- i trigger sullo stato di verifica distinguono ora dal ruolo con cui
+  gira la richiesta (authenticated/anon contro funzioni e pannello SQL),
+  così le funzioni possono agire per conto dello staff senza che nessun
+  utente possa scrivere lo stato
+
+App:
+- /staff: elenco degli immobili in attesa, dettaglio con i documenti
+  (link firmati di 5 minuti, mai pubblici), verifica o rifiuto. Il
+  controllo dei permessi sta in layout, pagina e azione, e nella
+  funzione del database. Per chi non è staff risponde 404 senza leggere
+  nulla. Gli id dell'indirizzo si validano come UUID prima di ogni query
+- Home del proprietario non verificato: spiega cosa manca, carica
+  documento d'identità e prova di proprietà, invia; mostra l'esito e il
+  motivo di un rifiuto. Se la domanda sulla verifica non riesce si
+  resta su questa schermata
+- stato di verifica nell'elenco immobili e nel modulo
+- il bucket dei documenti è nella lista dei file cancellati con l'account
+
+Trovato provando: i tipi di file 'constructor' o 'toString' passavano il
+controllo del client (stesso difetto di un'altra funzione): corretto.
+
+106 test. Verificato su PostgreSQL con 80 controlli sulle regole; su un
+server Next contro un finto Supabase per l'accesso al pannello, le
+letture, i link firmati, gli id malformati e le azioni richiamate da
+sole; e con 16 prove di interazione sulla schermata del proprietario.
+---
+ package.json                                  |   2 +-
+ scripts/test-verifica.mjs                     | 131 ++++++
+ src/app/(app)/VerificaHome.tsx                | 281 +++++++++++++
+ src/app/(app)/immobili/ImmobiliClient.tsx     |  11 +-
+ src/app/(app)/immobili/page.tsx               |   4 +-
+ src/app/(app)/page.tsx                        |  46 +++
+ src/app/globals.css                           | 151 +++++++
+ src/app/staff/[id]/EsitoForm.tsx              |  53 +++
+ src/app/staff/[id]/page.tsx                   | 135 +++++++
+ src/app/staff/actions.ts                      |  42 ++
+ src/app/staff/layout.tsx                      |  15 +
+ src/app/staff/page.tsx                        |  68 ++++
+ src/lib/account.ts                            |   6 +-
+ src/lib/staff.ts                              |  37 ++
+ src/lib/types.ts                              |   3 +
+ src/lib/verifica.ts                           | 156 +++++++
+ .../migrations/0012_verifica_immobili.sql     | 381 ++++++++++++++++++
+ 17 files changed, 1518 insertions(+), 4 deletions(-)
+ create mode 100644 scripts/test-verifica.mjs
+ create mode 100644 src/app/(app)/VerificaHome.tsx
+ create mode 100644 src/app/staff/[id]/EsitoForm.tsx
+ create mode 100644 src/app/staff/[id]/page.tsx
+ create mode 100644 src/app/staff/actions.ts
+ create mode 100644 src/app/staff/layout.tsx
+ create mode 100644 src/app/staff/page.tsx
+ create mode 100644 src/lib/staff.ts
+ create mode 100644 src/lib/verifica.ts
+ create mode 100644 supabase/migrations/0012_verifica_immobili.sql
+
+diff --git a/package.json b/package.json
+index 72c9c94..e05bab2 100644
+--- a/package.json
++++ b/package.json
+@@ -7,7 +7,7 @@
+     "build": "next build",
+     "start": "next start",
+     "lint": "eslint",
+-    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs"
++    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-verifica.mjs b/scripts/test-verifica.mjs
+new file mode 100644
+index 0000000..0cee9d0
+--- /dev/null
++++ b/scripts/test-verifica.mjs
+@@ -0,0 +1,131 @@
++/**
++ * Test della logica di verifica degli immobili (src/lib/verifica.ts).
++ * Si lancia con:   npm test
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const v = caricaTs(path.join(radice, "src", "lib", "verifica.ts"));
++const {
++  descriviStato, cosaManca, puoInviare, proprietarioVerificato,
++  validaFileDocumento, estensioneDa, percorsoDocumento, messaggioErroreVerifica,
++  DIMENSIONE_MAX_BYTE,
++} = v;
++
++const imm = (o = {}) => ({ id: "L1", titolo: "Casa", zona: "Isola", stato: "non_avviata", note: null, nProprieta: 0, ...o });
++
++// ---------------- stati ----------------
++test("stato: ogni stato dice a che punto si è, con un tono diverso", () => {
++  assert.deepEqual(
++    ["non_avviata", "in_verifica", "verificato"].map((s) => descriviStato(s, null).tono),
++    ["da_fare", "attesa", "ok"]
++  );
++});
++
++test("stato: un rifiuto con nota si legge come 'da correggere', non come 'da verificare'", () => {
++  const d = descriviStato("non_avviata", "La visura non riporta il tuo nome");
++  assert.equal(d.etichetta, "Da correggere");
++  assert.equal(d.tono, "respinto");
++  assert.equal(descriviStato("non_avviata", "   ").etichetta, "Da verificare", "una nota vuota non conta");
++  assert.equal(descriviStato("non_avviata", null).etichetta, "Da verificare");
++});
++
++test("stato: non promette notifiche che non esistono", () => {
++  const t = descriviStato("in_verifica", null).testo;
++  assert.ok(!/ti avviseremo|riceverai (un'|una )?(email|notifica)/i.test(t), t);
++});
++
++// ---------------- cosa manca ----------------
++test("invio: servono il documento d'identità e una prova di proprietà", () => {
++  assert.deepEqual(cosaManca(false, imm()), ["il tuo documento d'identità", "una prova di proprietà dell'immobile (visura o atto)"]);
++  assert.deepEqual(cosaManca(true, imm()), ["una prova di proprietà dell'immobile (visura o atto)"]);
++  assert.deepEqual(cosaManca(false, imm({ nProprieta: 1 })), ["il tuo documento d'identità"]);
++  assert.deepEqual(cosaManca(true, imm({ nProprieta: 2 })), []);
++});
++
++test("invio: si può inviare solo un immobile non ancora inviato e con tutto il necessario", () => {
++  assert.equal(puoInviare(true, imm({ nProprieta: 1 })), true);
++  assert.equal(puoInviare(false, imm({ nProprieta: 1 })), false);
++  assert.equal(puoInviare(true, imm({ nProprieta: 0 })), false);
++  assert.equal(puoInviare(true, imm({ nProprieta: 1, stato: "in_verifica" })), false);
++  assert.equal(puoInviare(true, imm({ nProprieta: 1, stato: "verificato" })), false);
++});
++
++test("proprietario verificato: basta un immobile verificato, e nessuna lista non lo è", () => {
++  assert.equal(proprietarioVerificato([]), false);
++  assert.equal(proprietarioVerificato([imm(), imm({ stato: "in_verifica" })]), false);
++  assert.equal(proprietarioVerificato([imm(), imm({ stato: "verificato" })]), true);
++});
++
++// ---------------- file ----------------
++test("file: PDF, JPG e PNG fino a 10 MB", () => {
++  for (const type of ["application/pdf", "image/jpeg", "image/png"]) {
++    assert.equal(validaFileDocumento({ type, size: 1000 }), null, type);
++  }
++  assert.equal(validaFileDocumento({ type: "application/pdf", size: DIMENSIONE_MAX_BYTE }), null, "esattamente 10 MB sì");
++});
++
++test("file: tutto il resto viene rifiutato con un motivo", () => {
++  for (const type of ["image/gif", "text/html", "application/zip", "image/svg+xml", "application/x-msdownload", "", "image/webp"]) {
++    assert.match(validaFileDocumento({ type, size: 1000 }), /PDF/, type);
++  }
++  assert.match(validaFileDocumento({ type: "application/pdf", size: DIMENSIONE_MAX_BYTE + 1 }), /10 MB/);
++  assert.match(validaFileDocumento({ type: "application/pdf", size: 0 }), /vuoto/);
++});
++
++test("file: i nomi che ogni oggetto eredita non diventano mai tipi ammessi", () => {
++  for (const type of ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"]) {
++    assert.notEqual(validaFileDocumento({ type, size: 10 }), null, type);
++    assert.equal(estensioneDa(type), null, type);
++  }
++});
++
++test("file: un SVG o un HTML non passano mai per documenti (potrebbero contenere script)", () => {
++  assert.notEqual(validaFileDocumento({ type: "image/svg+xml", size: 10 }), null);
++  assert.notEqual(validaFileDocumento({ type: "text/html", size: 10 }), null);
++});
++
++test("file: l'estensione viene dal tipo, non dal nome scelto da chi carica", () => {
++  assert.equal(estensioneDa("application/pdf"), "pdf");
++  assert.equal(estensioneDa("image/jpeg"), "jpg");
++  assert.equal(estensioneDa("image/png"), "png");
++  assert.equal(estensioneDa("text/html"), null);
++  assert.equal(estensioneDa("__proto__"), null);
++  assert.equal(estensioneDa("constructor"), null);
++});
++
++// ---------------- percorsi ----------------
++const U = "11111111-2222-3333-4444-555555555555";
++const L = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
++
++test("percorso: comincia sempre con l'id di chi carica (è ciò che il database richiede)", () => {
++  assert.equal(percorsoDocumento({ userId: U, tipo: "identita", listingId: null, estensione: "pdf", id: "x1" }), `${U}/identita-x1.pdf`);
++  assert.equal(percorsoDocumento({ userId: U, tipo: "proprieta", listingId: L, estensione: "jpg", id: "x2" }), `${U}/proprieta-${L}-x2.jpg`);
++});
++
++test("percorso: nessun input riesce a uscire dalla propria cartella", () => {
++  const attacchi = ["../altro", "..\\altro", "a/b", "x/../y", "%2e%2e", "a b", "é", "a\nb", "/etc/passwd", "a;b"];
++  for (const a of attacchi) {
++    const p = percorsoDocumento({ userId: U, tipo: "proprieta", listingId: a, estensione: "pdf", id: a });
++    assert.ok(p.startsWith(U + "/"), p);
++    assert.ok(!p.slice(U.length + 1).includes("/"), "una sola barra, quella dopo l'id: " + p);
++    assert.ok(!p.includes(".."), p);
++  }
++  // anche un id utente ostile non fa uscire dalla struttura
++  const p = percorsoDocumento({ userId: "../x", tipo: "identita", listingId: null, estensione: "pdf", id: "1" });
++  assert.ok(!p.includes(".."), p);
++});
++
++// ---------------- errori ----------------
++test("errori: ogni codice del database ha una frase, e mai il testo tecnico", () => {
++  for (const c of ["NON_AUTENTICATO", "IMMOBILE_NON_TUO", "GIA_VERIFICATO", "GIA_IN_VERIFICA", "DOCUMENTI_MANCANTI", "NON_STAFF", "NON_IN_VERIFICA", "NOTA_OBBLIGATORIA", "IMMOBILE_INESISTENTE"]) {
++    const m = messaggioErroreVerifica("ERROR: " + c + " (P0001)");
++    assert.ok(!m.includes(c) && !/ERROR|P0001/.test(m), m);
++  }
++  assert.match(messaggioErroreVerifica("NOTA_OBBLIGATORIA"), /scrivi cosa non va/);
++  assert.match(messaggioErroreVerifica("errore sconosciuto con dettagli interni"), /Riprova/);
++  assert.ok(!messaggioErroreVerifica("errore sconosciuto con dettagli interni").includes("dettagli interni"));
++  assert.match(messaggioErroreVerifica(null), /Riprova/);
++});
+diff --git a/src/app/(app)/VerificaHome.tsx b/src/app/(app)/VerificaHome.tsx
+new file mode 100644
+index 0000000..9f4867c
+--- /dev/null
++++ b/src/app/(app)/VerificaHome.tsx
+@@ -0,0 +1,281 @@
++"use client";
++
++import { useState } from "react";
++import Link from "next/link";
++import { useRouter } from "next/navigation";
++import { createClient } from "@/lib/supabase/client";
++import { PageContainer } from "@/components/ui/PageContainer";
++import {
++  cosaManca,
++  descriviStato,
++  estensioneDa,
++  messaggioErroreVerifica,
++  percorsoDocumento,
++  puoInviare,
++  validaFileDocumento,
++} from "@/lib/verifica";
++import type { ImmobileVerifica } from "@/lib/verifica";
++
++const BADGE = {
++  ok: "is-match",
++  attesa: "is-wait",
++  da_fare: "is-off",
++  respinto: "is-alert",
++} as const;
++
++/**
++ * La Home di un proprietario che non ha ancora un immobile verificato.
++ *
++ * Spiega cosa manca e permette di farlo: caricare il documento d'identità,
++ * caricare la prova di proprietà di un immobile, inviarlo alla verifica. Il
++ * resto dell'app resta raggiungibile dalla barra in basso, ma senza un
++ * immobile verificato non c'è nulla da pubblicare né nessuno che si candidi.
++ */
++export function VerificaHome({
++  haIdentita,
++  immobili,
++}: {
++  haIdentita: boolean;
++  immobili: ImmobileVerifica[];
++}) {
++  const router = useRouter();
++  const [errore, setErrore] = useState<string | null>(null);
++  const [inCorso, setInCorso] = useState<string | null>(null);
++
++  async function carica(
++    tipo: "identita" | "proprieta",
++    listingId: string | null,
++    file: File | undefined,
++    chiave: string
++  ) {
++    if (!file) return;
++    setErrore(null);
++
++    const problema = validaFileDocumento(file);
++    if (problema) {
++      setErrore(problema);
++      return;
++    }
++    const estensione = estensioneDa(file.type);
++    if (!estensione) {
++      setErrore("Il file deve essere un PDF, una foto JPG o una foto PNG.");
++      return;
++    }
++
++    setInCorso(chiave);
++    try {
++      const supabase = createClient();
++      const {
++        data: { user },
++      } = await supabase.auth.getUser();
++      if (!user) {
++        setErrore(messaggioErroreVerifica("NON_AUTENTICATO"));
++        return;
++      }
++
++      const percorso = percorsoDocumento({
++        userId: user.id,
++        tipo,
++        listingId,
++        estensione,
++        id: crypto.randomUUID(),
++      });
++
++      const { error: eFile } = await supabase.storage
++        .from("documenti-verifica")
++        .upload(percorso, file, { contentType: file.type, upsert: false });
++      if (eFile) {
++        setErrore("Non sono riuscito a caricare il file. Riprova.");
++        return;
++      }
++
++      const { error: eRiga } = await supabase.from("documenti_verifica").insert({
++        owner_id: user.id,
++        listing_id: listingId,
++        tipo,
++        percorso,
++        nome_file: file.name.slice(0, 200),
++      });
++      if (eRiga) {
++        setErrore("Il file è stato caricato ma non registrato. Riprova.");
++        return;
++      }
++      router.refresh();
++    } finally {
++      setInCorso(null);
++    }
++  }
++
++  async function invia(listingId: string) {
++    setErrore(null);
++    setInCorso(`invia-${listingId}`);
++    try {
++      const { error } = await createClient().rpc("richiedi_verifica_immobile", {
++        p_listing: listingId,
++      });
++      if (error) {
++        setErrore(messaggioErroreVerifica(error.message));
++        return;
++      }
++      router.refresh();
++    } finally {
++      setInCorso(null);
++    }
++  }
++
++  return (
++    <PageContainer wide>
++      <h1 className="screen-title">Verifica il tuo account</h1>
++      <p className="screen-sub">
++        Per pubblicare un annuncio e ricevere candidature, MatchAmI controlla
++        che l&apos;immobile sia davvero tuo. Lo facciamo noi, a mano.
++      </p>
++
++      {errore && (
++        <p className="note-error" style={{ marginBottom: 14 }}>
++          {errore}
++        </p>
++      )}
++
++      {/* ---- Passo 1: documento d'identità ---- */}
++      <div className="passo-verifica">
++        <div className="passo-testa">
++          <span className={`passo-numero ${haIdentita ? "fatto" : ""}`}>
++            {haIdentita ? "✓" : "1"}
++          </span>
++          <div>
++            <b>Il tuo documento d&apos;identità</b>
++            <small>Serve per controllare che il nome coincida con quello sulla prova di proprietà.</small>
++          </div>
++        </div>
++        {!haIdentita && (
++          <SelettoreFile
++            etichetta="Carica il documento"
++            aria={"Carica il documento d'identità"}
++            occupato={inCorso === "identita"}
++            onFile={(f) => carica("identita", null, f, "identita")}
++          />
++        )}
++      </div>
++
++      {/* ---- Passo 2: l'immobile ---- */}
++      <div className="passo-verifica">
++        <div className="passo-testa">
++          <span className="passo-numero">2</span>
++          <div>
++            <b>Il tuo immobile</b>
++            <small>Visura catastale o atto di proprietà, in PDF o foto.</small>
++          </div>
++        </div>
++
++        {immobili.length === 0 ? (
++          <>
++            <p className="field-note" style={{ margin: "10px 0 12px 0" }}>
++              Non hai ancora aggiunto nessun immobile. Aggiungilo, poi torna
++              qui a caricare i documenti.
++            </p>
++            <Link href="/immobili" className="opp-cta block text-center">
++              Aggiungi un immobile
++            </Link>
++          </>
++        ) : (
++          <div className="immobili-verifica">
++            {immobili.map((im) => {
++              const d = descriviStato(im.stato, im.note);
++              const manca = cosaManca(haIdentita, im);
++
++              return (
++                <div key={im.id} className="verifica-card">
++                  <div className="verifica-card-testa">
++                    <div>
++                      <b>{im.titolo}</b>
++                      <small>{im.zona}</small>
++                    </div>
++                    <span className={`mc-pct ${BADGE[d.tono]}`}>{d.etichetta}</span>
++                  </div>
++
++                  {im.stato === "non_avviata" && im.note && (
++                    <div className="note-stop">Motivo del rifiuto: {im.note}</div>
++                  )}
++                  <p className="field-note" style={{ margin: "8px 0 10px 0" }}>
++                    {d.testo}
++                  </p>
++
++                  {im.stato === "non_avviata" && (
++                    <>
++                      <div className="riga-doc">
++                        <span>
++                          Prove di proprietà caricate: <b>{im.nProprieta}</b>
++                        </span>
++                        <SelettoreFile
++                          etichetta={im.nProprieta > 0 ? "Aggiungine un'altra" : "Carica visura o atto"}
++                          aria={`Carica la prova di proprietà di ${im.titolo}`}
++                          occupato={inCorso === `proprieta-${im.id}`}
++                          onFile={(f) => carica("proprieta", im.id, f, `proprieta-${im.id}`)}
++                        />
++                      </div>
++
++                      {manca.length > 0 && (
++                        <p className="field-note">Per inviare manca: {manca.join(" e ")}.</p>
++                      )}
++
++                      <button
++                        type="button"
++                        className="opp-cta"
++                        style={{ marginTop: 10 }}
++                        disabled={!puoInviare(haIdentita, im) || inCorso !== null}
++                        onClick={() => invia(im.id)}
++                      >
++                        {inCorso === `invia-${im.id}` ? "Invio..." : "Invia per la verifica"}
++                      </button>
++                    </>
++                  )}
++                </div>
++              );
++            })}
++
++            <Link href="/immobili" className="redo-link" style={{ marginTop: 6 }}>
++              Aggiungi un altro immobile
++            </Link>
++          </div>
++        )}
++      </div>
++
++      <div className="note-box" style={{ marginTop: 22 }}>
++        <b>I tuoi documenti.</b> Li vedi tu e il team di MatchAmI che li
++        controlla: non vengono mai mostrati agli inquilini e non hanno un
++        indirizzo pubblico. Si cancellano insieme al tuo account. Per ora non
++        ti avvisiamo quando l&apos;esito è pronto: torna qui per vederlo.
++      </div>
++    </PageContainer>
++  );
++}
++
++function SelettoreFile({
++  etichetta,
++  aria,
++  occupato,
++  onFile,
++}: {
++  etichetta: string;
++  aria: string;
++  occupato: boolean;
++  onFile: (file: File | undefined) => void;
++}) {
++  return (
++    <label className="chip selettore-file" aria-busy={occupato}>
++      {occupato ? "Caricamento..." : etichetta}
++      <input
++        type="file"
++        accept="application/pdf,image/jpeg,image/png"
++        aria-label={aria}
++        disabled={occupato}
++        className="hidden"
++        onChange={(e) => {
++          onFile(e.target.files?.[0]);
++          e.target.value = ""; // permette di riscegliere lo stesso file
++        }}
++      />
++    </label>
++  );
++}
+diff --git a/src/app/(app)/immobili/ImmobiliClient.tsx b/src/app/(app)/immobili/ImmobiliClient.tsx
+index cbe5284..cb781aa 100644
+--- a/src/app/(app)/immobili/ImmobiliClient.tsx
++++ b/src/app/(app)/immobili/ImmobiliClient.tsx
+@@ -12,6 +12,7 @@ import { ATTR_VOCAB, ZONE_MILANO } from "@/lib/constants";
+ import type { ImmobileDettaglio } from "@/lib/types";
+ import type { CriterioRichiesto } from "@/lib/match";
+ import { CriteriCandidati } from "@/components/CriteriCandidati";
++import { descriviStato } from "@/lib/verifica";
+ import { PageContainer } from "@/components/ui/PageContainer";
+ import { Chip } from "@/components/ui/Chip";
+ import { Field } from "@/components/ui/Field";
+@@ -81,7 +82,8 @@ export function ImmobiliClient({
+                 <div className="mc-zona">{im.zona}</div>
+                 <div className="mc-title">{im.titolo}</div>
+                 <div className="mc-meta">
+-                  €{im.prezzo.toLocaleString("it-IT")}/mese
++                  €{im.prezzo.toLocaleString("it-IT")}/mese ·{" "}
++                  {descriviStato(im.verifica_stato, im.verifica_esito_note).etichetta.toLowerCase()}
+                   {!im.pubblicato && " · non pubblicato"}
+                 </div>
+               </div>
+@@ -410,6 +412,13 @@ function ImmobileForm({
+           <Chip label="Pubblicato" active={pubblicato} onClick={() => setPubblicato(true)} />
+           <Chip label="Non pubblicato" active={!pubblicato} onClick={() => setPubblicato(false)} />
+         </div>
++        {immobile?.verifica_stato !== "verificato" && (
++          <p className="field-note">
++            Gli inquilini vedono un annuncio solo dopo che l&apos;immobile è
++            stato verificato, anche se è pubblicato. Puoi seguire la verifica
++            dalla Home.
++          </p>
++        )}
+       </Field>
+ 
+       {state?.error && <p className="note-error">{state.error}</p>}
+diff --git a/src/app/(app)/immobili/page.tsx b/src/app/(app)/immobili/page.tsx
+index ff082c2..a86461d 100644
+--- a/src/app/(app)/immobili/page.tsx
++++ b/src/app/(app)/immobili/page.tsx
+@@ -14,7 +14,7 @@ export default async function ImmobiliPage() {
+     supabase
+       .from("listings")
+       .select(
+-        "id, titolo, descrizione, zona, prezzo, locali, mq, attributi, pubblicato, listing_photos(url, ordine), listing_criteri(chiave, peso, modo, soglia_pct)"
++        "id, titolo, descrizione, zona, prezzo, locali, mq, attributi, pubblicato, verifica_stato, verifica_esito_note, listing_photos(url, ordine), listing_criteri(chiave, peso, modo, soglia_pct)"
+       )
+       .eq("owner_id", user!.id)
+       .order("created_at", { ascending: false }),
+@@ -40,6 +40,8 @@ export default async function ImmobiliPage() {
+     mq: l.mq,
+     attributi: (l.attributi as Record<string, boolean>) ?? {},
+     pubblicato: l.pubblicato,
++    verifica_stato: l.verifica_stato,
++    verifica_esito_note: l.verifica_esito_note ?? null,
+     foto: [...((l.listing_photos as { url: string; ordine: number }[]) ?? [])]
+       .sort((a, b) => (a.ordine ?? 0) - (b.ordine ?? 0))
+       .map((f) => f.url),
+diff --git a/src/app/(app)/page.tsx b/src/app/(app)/page.tsx
+index d6704de..14fca2c 100644
+--- a/src/app/(app)/page.tsx
++++ b/src/app/(app)/page.tsx
+@@ -1,6 +1,8 @@
+ import { createClient } from "@/lib/supabase/server";
+ import { HomeClient } from "./HomeClient";
+ import { OwnerHomeClient } from "./OwnerHomeClient";
++import { VerificaHome } from "./VerificaHome";
++import type { ImmobileVerifica } from "@/lib/verifica";
+ import { computeAffidabilita } from "@/lib/affidabilita";
+ import { haCriteriDiRicerca, preparaMazzo, profiloRicercaDaRighe } from "@/lib/match";
+ import type { ProfiloRicerca } from "@/lib/match";
+@@ -113,6 +115,50 @@ async function TenantHome({ userId }: { userId: string }) {
+ async function OwnerHome({ userId }: { userId: string }) {
+   const supabase = await createClient();
+ 
++  // Un proprietario è verificato se ha almeno un immobile verificato. Finché
++  // non lo è, la Home spiega cosa manca e permette di farlo. Se la domanda al
++  // database non riesce si resta su questa schermata: meglio mostrare la
++  // verifica a chi non serve che il resto dell'app a chi non l'ha ancora fatta.
++  const { data: verificato } = await supabase.rpc("proprietario_verificato", {
++    p_owner: userId,
++  });
++  if (verificato !== true) {
++    const [{ data: miei }, { data: documenti }] = await Promise.all([
++      supabase
++        .from("listings")
++        .select("id, titolo, zona, verifica_stato, verifica_esito_note")
++        .eq("owner_id", userId)
++        .order("created_at", { ascending: false }),
++      supabase.from("documenti_verifica").select("tipo, listing_id").eq("owner_id", userId),
++    ]);
++
++    const proprietaPerImmobile = new Map<string, number>();
++    for (const d of documenti ?? []) {
++      if (d.tipo === "proprieta" && d.listing_id) {
++        proprietaPerImmobile.set(
++          d.listing_id as string,
++          (proprietaPerImmobile.get(d.listing_id as string) ?? 0) + 1
++        );
++      }
++    }
++
++    const immobili: ImmobileVerifica[] = (miei ?? []).map((l) => ({
++      id: l.id as string,
++      titolo: l.titolo as string,
++      zona: l.zona as string,
++      stato: l.verifica_stato as ImmobileVerifica["stato"],
++      note: (l.verifica_esito_note as string | null) ?? null,
++      nProprieta: proprietaPerImmobile.get(l.id as string) ?? 0,
++    }));
++
++    return (
++      <VerificaHome
++        haIdentita={(documenti ?? []).some((d) => d.tipo === "identita")}
++        immobili={immobili}
++      />
++    );
++  }
++
+   const [{ data: listings }, { data: candidature }] = await Promise.all([
+     supabase
+       .from("listings")
+diff --git a/src/app/globals.css b/src/app/globals.css
+index 5123914..28a6d8c 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -2373,3 +2373,154 @@ input[type="range"]::-moz-range-thumb {
+   font-size: 11.5px;
+   color: var(--gold);
+ }
++
++/* ============================================================
++   PANNELLO STAFF (/staff)
++   ============================================================ */
++.staff-shell {
++  min-height: 100vh;
++  background: var(--paper);
++}
++.staff-testata {
++  background: var(--ink);
++  padding: 16px 24px;
++}
++.brand-staff {
++  font-family: var(--font-display);
++  font-style: italic;
++  font-weight: 700;
++  font-size: 20px;
++  color: var(--paper);
++}
++.brand-staff b {
++  color: var(--gold);
++  font-style: normal;
++}
++.brand-staff span {
++  font-family: var(--font-sans);
++  font-style: normal;
++  font-size: 12px;
++  font-weight: 600;
++  letter-spacing: 0.1em;
++  text-transform: uppercase;
++  color: rgba(247, 244, 236, 0.6);
++}
++.staff-contenuto {
++  max-width: 760px;
++  margin: 0 auto;
++  padding: 32px 24px 80px 24px;
++}
++.staff-lista .match-card {
++  text-decoration: none;
++}
++.staff-documenti {
++  display: grid;
++  gap: 8px;
++}
++.staff-doc {
++  display: block;
++  background: #fff;
++  border: 1.5px solid rgba(16, 21, 26, 0.1);
++  border-radius: 12px;
++  padding: 11px 14px;
++  font-size: 13px;
++  font-weight: 600;
++  color: var(--moss);
++  text-decoration: none;
++  word-break: break-all;
++}
++.staff-doc.errore {
++  color: var(--clay);
++}
++.staff-esito {
++  background: var(--paper-dim);
++  border-radius: 18px;
++  padding: 18px;
++}
++
++/* ============================================================
++   VERIFICA DEL PROPRIETARIO (Home)
++   ============================================================ */
++.passo-verifica {
++  background: #fff;
++  border: 1.5px solid rgba(16, 21, 26, 0.1);
++  border-radius: 18px;
++  padding: 16px;
++  margin-bottom: 14px;
++}
++.passo-testa {
++  display: flex;
++  gap: 12px;
++  align-items: flex-start;
++}
++.passo-testa b {
++  display: block;
++  font-size: 14px;
++  color: var(--ink);
++}
++.passo-testa small {
++  display: block;
++  font-size: 12px;
++  color: var(--muted);
++  line-height: 1.45;
++  margin-top: 2px;
++}
++.passo-numero {
++  flex: 0 0 26px;
++  width: 26px;
++  height: 26px;
++  border-radius: 50%;
++  background: var(--paper-dim);
++  color: var(--body-soft);
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  font-size: 12.5px;
++  font-weight: 700;
++}
++.passo-numero.fatto {
++  background: var(--moss);
++  color: #fff;
++}
++.passo-verifica > .selettore-file {
++  margin-top: 12px;
++}
++.immobili-verifica {
++  display: grid;
++  gap: 10px;
++  margin-top: 12px;
++}
++.verifica-card {
++  background: var(--paper);
++  border-radius: 14px;
++  padding: 13px 14px;
++}
++.verifica-card-testa {
++  display: flex;
++  justify-content: space-between;
++  align-items: flex-start;
++  gap: 10px;
++}
++.verifica-card-testa b {
++  display: block;
++  font-size: 13.5px;
++  color: var(--ink);
++}
++.verifica-card-testa small {
++  display: block;
++  font-size: 11.5px;
++  color: var(--muted);
++}
++.riga-doc {
++  display: flex;
++  justify-content: space-between;
++  align-items: center;
++  gap: 10px;
++  flex-wrap: wrap;
++  font-size: 12.5px;
++  color: var(--body-text);
++}
++.selettore-file {
++  cursor: pointer;
++  display: inline-block;
++}
+diff --git a/src/app/staff/[id]/EsitoForm.tsx b/src/app/staff/[id]/EsitoForm.tsx
+new file mode 100644
+index 0000000..865a521
+--- /dev/null
++++ b/src/app/staff/[id]/EsitoForm.tsx
+@@ -0,0 +1,53 @@
++"use client";
++
++import { useActionState } from "react";
++import { decidiVerifica, type EsitoState } from "../actions";
++
++export function EsitoForm({ id }: { id: string }) {
++  const [state, formAction, pending] = useActionState<EsitoState, FormData>(
++    decidiVerifica,
++    null
++  );
++
++  return (
++    <form action={formAction} className="staff-esito">
++      <input type="hidden" name="id" value={id} />
++
++      <div className="pref-label">
++        <span>Se respingi, scrivi cosa non va</span>
++      </div>
++      <textarea
++        name="nota"
++        className="ob-textarea"
++        placeholder="Es. La visura non riporta il tuo nome: carica quella aggiornata"
++        rows={3}
++      />
++      <p className="field-note">
++        Il proprietario leggerà questa nota. Serve solo per respingere.
++      </p>
++
++      {state?.error && <p className="note-error">{state.error}</p>}
++
++      <div className="flex gap-3" style={{ marginTop: 14 }}>
++        <button
++          type="submit"
++          name="esito"
++          value="respingi"
++          disabled={pending}
++          className="btn-danger-outline"
++        >
++          Respingi
++        </button>
++        <button
++          type="submit"
++          name="esito"
++          value="verifica"
++          disabled={pending}
++          className="opp-cta"
++        >
++          Verifica l&apos;immobile
++        </button>
++      </div>
++    </form>
++  );
++}
+diff --git a/src/app/staff/[id]/page.tsx b/src/app/staff/[id]/page.tsx
+new file mode 100644
+index 0000000..c9bbe62
+--- /dev/null
++++ b/src/app/staff/[id]/page.tsx
+@@ -0,0 +1,135 @@
++import Link from "next/link";
++import { notFound } from "next/navigation";
++import { richiediStaff, èUuid } from "@/lib/staff";
++import { EsitoForm } from "./EsitoForm";
++
++type Documento = { id: string; tipo: string; percorso: string; nome_file: string; listing_id: string | null };
++
++export default async function StaffDettaglioPage({
++  params,
++}: {
++  params: Promise<{ id: string }>;
++}) {
++  const supabase = await richiediStaff();
++  const { id } = await params;
++  // l'id arriva dall'indirizzo: si controlla prima di usarlo in una query
++  if (!èUuid(id)) notFound();
++
++  const { data: immobile } = await supabase
++    .from("listings")
++    .select("id, titolo, descrizione, zona, prezzo, locali, mq, owner_id, verifica_stato, verifica_inviata_at, verifica_esito_note")
++    .eq("id", id)
++    .single();
++  if (!immobile) notFound();
++
++  const [{ data: profilo }, { data: proprieta }, { data: identita }] = await Promise.all([
++    supabase.from("profiles").select("nome, cognome").eq("id", immobile.owner_id).single(),
++    supabase
++      .from("documenti_verifica")
++      .select("id, tipo, percorso, nome_file, listing_id")
++      .eq("listing_id", id)
++      .eq("tipo", "proprieta"),
++    supabase
++      .from("documenti_verifica")
++      .select("id, tipo, percorso, nome_file, listing_id")
++      .eq("owner_id", immobile.owner_id)
++      .eq("tipo", "identita"),
++  ]);
++
++  // Indirizzi temporanei di 5 minuti, generati con la sessione dello staff:
++  // i documenti non hanno mai un indirizzo pubblico.
++  async function conLink(docs: Documento[] | null) {
++    return Promise.all(
++      (docs ?? []).map(async (d) => {
++        const { data } = await supabase.storage
++          .from("documenti-verifica")
++          .createSignedUrl(d.percorso, 300);
++        return { ...d, url: data?.signedUrl ?? null };
++      })
++    );
++  }
++  const [docProprieta, docIdentita] = await Promise.all([
++    conLink(proprieta as Documento[] | null),
++    conLink(identita as Documento[] | null),
++  ]);
++
++  const nome = [profilo?.nome, profilo?.cognome].filter(Boolean).join(" ") || "Senza nome";
++  const decidibile = immobile.verifica_stato === "in_verifica";
++
++  return (
++    <>
++      <Link href="/staff" className="redo-link">
++        ← Torna all&apos;elenco
++      </Link>
++      <h1 className="screen-title" style={{ marginTop: 14 }}>
++        {immobile.titolo}
++      </h1>
++      <p className="screen-sub">
++        {immobile.zona} · €{Number(immobile.prezzo).toLocaleString("it-IT")}/mese
++        {immobile.locali ? ` · ${immobile.locali} locali` : ""}
++        {immobile.mq ? ` · ${immobile.mq} m²` : ""}
++      </p>
++
++      <div className="feat-row">
++        <span className="k">Proprietario</span>
++        <span className="v">{nome}</span>
++      </div>
++      <div className="feat-row">
++        <span className="k">Stato</span>
++        <span className="v">{immobile.verifica_stato.replace("_", " ")}</span>
++      </div>
++
++      <div className="pref-label" style={{ marginTop: 24 }}>
++        <span>Documento d&apos;identità del proprietario</span>
++      </div>
++      <ElencoDocumenti documenti={docIdentita} vuoto="Non ha caricato il documento d'identità." />
++
++      <div className="pref-label" style={{ marginTop: 24 }}>
++        <span>Prova di proprietà dell&apos;immobile</span>
++      </div>
++      <ElencoDocumenti documenti={docProprieta} vuoto="Non ha caricato nessuna prova di proprietà." />
++
++      <p className="field-note" style={{ marginTop: 14 }}>
++        Controlla che il nome sulla prova di proprietà coincida con quello sul
++        documento d&apos;identità. I link durano 5 minuti: ricarica la pagina
++        se scadono.
++      </p>
++
++      <div style={{ marginTop: 26 }}>
++        {decidibile ? (
++          <EsitoForm id={id} />
++        ) : (
++          <div className="note-box">
++            Questo immobile non è in attesa di verifica (stato:{" "}
++            {immobile.verifica_stato.replace("_", " ")}).
++          </div>
++        )}
++      </div>
++    </>
++  );
++}
++
++function ElencoDocumenti({
++  documenti,
++  vuoto,
++}: {
++  documenti: { id: string; nome_file: string; url: string | null }[];
++  vuoto: string;
++}) {
++  if (documenti.length === 0) return <p className="note-error">{vuoto}</p>;
++  return (
++    <div className="staff-documenti">
++      {documenti.map((d) =>
++        d.url ? (
++          <a key={d.id} href={d.url} target="_blank" rel="noopener noreferrer" className="staff-doc">
++            {d.nome_file}
++          </a>
++        ) : (
++          <span key={d.id} className="staff-doc errore">
++            {d.nome_file} (non apribile)
++          </span>
++        )
++      )}
++    </div>
++  );
++}
+diff --git a/src/app/staff/actions.ts b/src/app/staff/actions.ts
+new file mode 100644
+index 0000000..3d6f87c
+--- /dev/null
++++ b/src/app/staff/actions.ts
+@@ -0,0 +1,42 @@
++"use server";
++
++import { revalidatePath } from "next/cache";
++import { redirect } from "next/navigation";
++import { richiediStaff, èUuid } from "@/lib/staff";
++import { messaggioErroreVerifica } from "@/lib/verifica";
++
++export type EsitoState = { error?: string } | null;
++
++/**
++ * Verifica o respinge un immobile. Il controllo dei permessi sta in tre
++ * posti: qui, nel layout, e soprattutto nella funzione del database, che
++ * risponde NON_STAFF a chiunque non lo sia. Questa azione si può chiamare
++ * da sola, senza passare dalla pagina.
++ */
++export async function decidiVerifica(
++  _prev: EsitoState,
++  formData: FormData
++): Promise<EsitoState> {
++  const supabase = await richiediStaff();
++
++  const id = String(formData.get("id") || "");
++  const esito = String(formData.get("esito") || "");
++  const nota = String(formData.get("nota") || "").trim();
++
++  if (!èUuid(id)) return { error: "Immobile non valido." };
++  if (esito !== "verifica" && esito !== "respingi") return { error: "Scelta non valida." };
++  if (esito === "respingi" && nota.length < 3) {
++    return { error: messaggioErroreVerifica("NOTA_OBBLIGATORIA") };
++  }
++
++  const { error } = await supabase.rpc("esito_verifica_immobile", {
++    p_listing: id,
++    p_verificato: esito === "verifica",
++    p_note: esito === "respingi" ? nota : null,
++  });
++  if (error) return { error: messaggioErroreVerifica(error.message) };
++
++  revalidatePath("/staff");
++  revalidatePath("/");
++  redirect("/staff");
++}
+diff --git a/src/app/staff/layout.tsx b/src/app/staff/layout.tsx
+new file mode 100644
+index 0000000..0d330a1
+--- /dev/null
++++ b/src/app/staff/layout.tsx
+@@ -0,0 +1,15 @@
++import { richiediStaff } from "@/lib/staff";
++
++export default async function StaffLayout({ children }: { children: React.ReactNode }) {
++  await richiediStaff();
++  return (
++    <div className="staff-shell">
++      <header className="staff-testata">
++        <div className="brand-staff">
++          Match<b>AmI</b> <span>· Staff</span>
++        </div>
++      </header>
++      <main className="staff-contenuto">{children}</main>
++    </div>
++  );
++}
+diff --git a/src/app/staff/page.tsx b/src/app/staff/page.tsx
+new file mode 100644
+index 0000000..ef009d1
+--- /dev/null
++++ b/src/app/staff/page.tsx
+@@ -0,0 +1,68 @@
++import Link from "next/link";
++import { richiediStaff } from "@/lib/staff";
++
++type Riga = {
++  id: string;
++  titolo: string;
++  zona: string;
++  prezzo: number;
++  owner_id: string;
++  verifica_inviata_at: string | null;
++};
++
++function quandoFa(iso: string | null): string {
++  if (!iso) return "";
++  const ore = Math.floor((Date.now() - new Date(iso).getTime()) / 3_600_000);
++  if (ore < 1) return "meno di un'ora fa";
++  if (ore < 48) return `${ore} ore fa`;
++  return `${Math.floor(ore / 24)} giorni fa`;
++}
++
++export default async function StaffPage() {
++  const supabase = await richiediStaff();
++
++  const { data } = await supabase
++    .from("listings")
++    .select("id, titolo, zona, prezzo, owner_id, verifica_inviata_at")
++    .eq("verifica_stato", "in_verifica")
++    .order("verifica_inviata_at", { ascending: true });
++  const immobili = (data ?? []) as Riga[];
++
++  // I nomi dei proprietari, con la lettura che la sicurezza concede allo staff
++  const ids = [...new Set(immobili.map((i) => i.owner_id))];
++  const { data: profili } =
++    ids.length > 0
++      ? await supabase.from("profiles").select("id, nome, cognome").in("id", ids)
++      : { data: [] };
++  const nomi = new Map(
++    (profili ?? []).map((p) => [p.id as string, [p.nome, p.cognome].filter(Boolean).join(" ")])
++  );
++
++  return (
++    <>
++      <h1 className="screen-title">Immobili da verificare</h1>
++      <p className="screen-sub">
++        {immobili.length === 0
++          ? "Nessun immobile in attesa."
++          : `${immobili.length} in attesa, i più vecchi per primi.`}
++      </p>
++
++      <div className="staff-lista">
++        {immobili.map((i) => (
++          <Link key={i.id} href={`/staff/${i.id}`} className="match-card">
++            <div className="mc-avatar">{i.titolo.slice(0, 2).toUpperCase()}</div>
++            <div className="mc-body">
++              <div className="mc-zona">{i.zona}</div>
++              <div className="mc-title">{i.titolo}</div>
++              <div className="mc-meta">
++                {nomi.get(i.owner_id) || "Proprietario senza nome"} · inviato{" "}
++                {quandoFa(i.verifica_inviata_at)}
++              </div>
++            </div>
++            <div className="mc-pct is-wait">Da controllare</div>
++          </Link>
++        ))}
++      </div>
++    </>
++  );
++}
+diff --git a/src/lib/account.ts b/src/lib/account.ts
+index 91c930a..9f4490c 100644
+--- a/src/lib/account.ts
++++ b/src/lib/account.ts
+@@ -19,7 +19,11 @@ export function confermaEliminazioneValida(testo: string): boolean {
+  * perché i file nello Storage NON si cancellano insieme all'utente: restano
+  * lì, orfani, e sono dati personali di chi ha chiesto di essere cancellato.
+  */
+-export const BUCKET_FILE_UTENTE = ["avatar-inquilini", "immobili-foto"] as const;
++export const BUCKET_FILE_UTENTE = [
++  "avatar-inquilini",
++  "immobili-foto",
++  "documenti-verifica",
++] as const;
+ 
+ /** La parte della libreria di Storage che serve qui: permette di provarla con un finto. */
+ export type StorageAmministratore = {
+diff --git a/src/lib/staff.ts b/src/lib/staff.ts
+new file mode 100644
+index 0000000..f5294dd
+--- /dev/null
++++ b/src/lib/staff.ts
+@@ -0,0 +1,37 @@
++import { notFound } from "next/navigation";
++import { createClient } from "@/lib/supabase/server";
++
++/**
++ * Chi sta guardando è staff?
++ *
++ * Si chiede al database (`is_staff()`), che risponde solo per chi la chiama.
++ * Se la chiamata fallisce per qualunque motivo la risposta è NO: un errore
++ * non deve mai aprire il pannello.
++ */
++export async function eStaff(
++  supabase: Awaited<ReturnType<typeof createClient>>
++): Promise<boolean> {
++  try {
++    const { data, error } = await supabase.rpc("is_staff");
++    return !error && data === true;
++  } catch {
++    return false;
++  }
++}
++
++/**
++ * Da chiamare in OGNI pagina e azione dello staff, non solo nel layout: in
++ * Next layout e pagina si caricano in parallelo, e le azioni si possono
++ * richiamare da sole. Per chi non è staff risponde 404, come se la pagina
++ * non esistesse, invece di un "vietato" che ne rivela l'esistenza.
++ */
++export async function richiediStaff() {
++  const supabase = await createClient();
++  if (!(await eStaff(supabase))) notFound();
++  return supabase;
++}
++
++const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
++export function èUuid(valore: string): boolean {
++  return UUID.test(valore);
++}
+diff --git a/src/lib/types.ts b/src/lib/types.ts
+index 5238c56..c64be1b 100644
+--- a/src/lib/types.ts
++++ b/src/lib/types.ts
+@@ -55,6 +55,9 @@ export type ImmobileDettaglio = {
+   pubblicato: boolean;
+   /** galleria dell'annuncio, già ordinata */
+   foto: string[];
++  /** stato della verifica dell'immobile e, se respinto, il motivo */
++  verifica_stato: "non_avviata" | "in_verifica" | "verificato";
++  verifica_esito_note: string | null;
+   /** cosa chiede il proprietario ai candidati, con peso e obbligatorietà */
+   criteri: import("@/lib/match").CriterioRichiesto[];
+   nCandidature: number;
+diff --git a/src/lib/verifica.ts b/src/lib/verifica.ts
+new file mode 100644
+index 0000000..605145e
+--- /dev/null
++++ b/src/lib/verifica.ts
+@@ -0,0 +1,156 @@
++/**
++ * Verifica degli immobili: la parte che non dipende dalla rete.
++ *
++ * Le regole vere stanno nel database (migrazione 0012). Qui si decide cosa
++ * mostrare, cosa mancherebbe, e si controlla un file PRIMA di caricarlo,
++ * per dire subito alla persona cosa non va.
++ */
++
++export type StatoImmobile = "non_avviata" | "in_verifica" | "verificato";
++
++export type ImmobileVerifica = {
++  id: string;
++  titolo: string;
++  zona: string;
++  stato: StatoImmobile;
++  /** il motivo dell'ultimo rifiuto, se c'è */
++  note: string | null;
++  /** quante prove di proprietà ha già caricato per questo immobile */
++  nProprieta: number;
++};
++
++export type DescrizioneStato = {
++  etichetta: string;
++  tono: "ok" | "attesa" | "da_fare" | "respinto";
++  testo: string;
++};
++
++export function descriviStato(stato: StatoImmobile, note: string | null): DescrizioneStato {
++  if (stato === "verificato") {
++    return {
++      etichetta: "Verificato",
++      tono: "ok",
++      testo: "L'immobile è verificato: gli inquilini lo vedono se è pubblicato.",
++    };
++  }
++  if (stato === "in_verifica") {
++    return {
++      etichetta: "In verifica",
++      tono: "attesa",
++      testo: "Stiamo controllando i documenti. Troverai qui l'esito.",
++    };
++  }
++  if (note && note.trim()) {
++    return {
++      etichetta: "Da correggere",
++      tono: "respinto",
++      testo: "La verifica non è andata a buon fine. Correggi e invia di nuovo.",
++    };
++  }
++  return {
++    etichetta: "Da verificare",
++    tono: "da_fare",
++    testo: "Carica i documenti e invia l'immobile per la verifica.",
++  };
++}
++
++/** Cosa manca perché un immobile si possa inviare alla verifica. */
++export function cosaManca(haIdentita: boolean, immobile: ImmobileVerifica): string[] {
++  const manca: string[] = [];
++  if (!haIdentita) manca.push("il tuo documento d'identità");
++  if (immobile.nProprieta === 0) manca.push("una prova di proprietà dell'immobile (visura o atto)");
++  return manca;
++}
++
++export function puoInviare(haIdentita: boolean, immobile: ImmobileVerifica): boolean {
++  return immobile.stato === "non_avviata" && cosaManca(haIdentita, immobile).length === 0;
++}
++
++/** Il proprietario è verificato se ha almeno un immobile verificato. */
++export function proprietarioVerificato(immobili: ImmobileVerifica[]): boolean {
++  return immobili.some((i) => i.stato === "verificato");
++}
++
++// ------------------------------------------------------------
++// File
++// ------------------------------------------------------------
++
++export const TIPI_FILE_AMMESSI = {
++  "application/pdf": "pdf",
++  "image/jpeg": "jpg",
++  "image/png": "png",
++} as const;
++
++export const DIMENSIONE_MAX_BYTE = 10 * 1024 * 1024; // 10 MB, come il limite del bucket
++
++/**
++ * `hasOwnProperty` e non `in`: con `in`, un tipo dichiarato "constructor" o
++ * "toString" risulterebbe tra quelli ammessi, perché sono proprietà che ogni
++ * oggetto eredita.
++ */
++function tipoAmmesso(tipo: string): boolean {
++  return Object.prototype.hasOwnProperty.call(TIPI_FILE_AMMESSI, tipo);
++}
++
++/** Controlla un file prima di caricarlo. Restituisce il messaggio, o `null` se va bene. */
++export function validaFileDocumento(file: { type: string; size: number }): string | null {
++  if (!tipoAmmesso(file.type)) {
++    return "Il file deve essere un PDF, una foto JPG o una foto PNG.";
++  }
++  if (file.size <= 0) return "Il file è vuoto.";
++  if (file.size > DIMENSIONE_MAX_BYTE) {
++    return "Il file supera i 10 MB. Riducilo o scansionalo a una risoluzione più bassa.";
++  }
++  return null;
++}
++
++/** L'estensione si ricava dal tipo dichiarato, non dal nome: il nome lo sceglie chi carica. */
++export function estensioneDa(tipo: string): string | null {
++  return tipoAmmesso(tipo)
++    ? (TIPI_FILE_AMMESSI as Record<string, string>)[tipo]
++    : null;
++}
++
++/**
++ * Il percorso di un documento nel bucket. Comincia SEMPRE con l'id di chi
++ * carica: è la condizione che il database richiede, e quella che tiene i
++ * documenti di una persona in una cartella sua.
++ */
++export function percorsoDocumento(input: {
++  userId: string;
++  tipo: "identita" | "proprieta";
++  listingId: string | null;
++  estensione: string;
++  id: string;
++}): string {
++  const pulito = (s: string) => s.replace(/[^a-zA-Z0-9-]/g, "");
++  const base =
++    input.tipo === "identita"
++      ? "identita"
++      : `proprieta-${pulito(input.listingId ?? "")}`;
++  return `${pulito(input.userId)}/${base}-${pulito(input.id)}.${pulito(input.estensione)}`;
++}
++
++// ------------------------------------------------------------
++// Errori
++// ------------------------------------------------------------
++
++const MESSAGGI: Record<string, string> = {
++  NON_AUTENTICATO: "Devi accedere per continuare.",
++  IMMOBILE_NON_TUO: "Questo immobile non risulta tuo.",
++  GIA_VERIFICATO: "Questo immobile è già verificato.",
++  GIA_IN_VERIFICA: "Questo immobile è già in verifica.",
++  DOCUMENTI_MANCANTI:
++    "Mancano dei documenti: servono il tuo documento d'identità e una prova di proprietà dell'immobile.",
++  NON_STAFF: "Non hai i permessi per farlo.",
++  NON_IN_VERIFICA: "Questo immobile non è in attesa di verifica.",
++  NOTA_OBBLIGATORIA: "Per respingere scrivi cosa non va: il proprietario la leggerà.",
++  IMMOBILE_INESISTENTE: "Immobile non trovato.",
++};
++
++/** Traduce gli errori del database in frasi comprensibili. Mai il testo tecnico. */
++export function messaggioErroreVerifica(errore: string | null | undefined): string {
++  const e = errore ?? "";
++  const chiave = Object.keys(MESSAGGI).find((k) => e.includes(k));
++  return chiave ? MESSAGGI[chiave] : "Non è stato possibile completare l'operazione. Riprova.";
++}
+diff --git a/supabase/migrations/0012_verifica_immobili.sql b/supabase/migrations/0012_verifica_immobili.sql
+new file mode 100644
+index 0000000..3fa1a80
+--- /dev/null
++++ b/supabase/migrations/0012_verifica_immobili.sql
+@@ -0,0 +1,381 @@
++-- ============================================================
++-- MatchAmI — verifica degli immobili, staff e annunci visibili solo
++-- dopo la verifica
++--
++-- Il flusso:
++--   1. un proprietario carica un immobile e i documenti che lo provano
++--      (il proprio documento d'identità, e visura o atto dell'immobile);
++--   2. li invia per la verifica;
++--   3. lo staff li controlla e verifica o respinge, con una nota;
++--   4. solo un immobile VERIFICATO diventa un annuncio visibile agli
++--      inquilini, e solo allora il proprietario risulta verificato.
++--
++-- Questa migrazione scrive tutto nel database, così nessuna scorciatoia
++-- dall'app può aggirarlo.
++--
++-- ATTENZIONE, effetto immediato: gli annunci esistenti non sono
++-- verificati, quindi gli inquilini smettono di vederli finché non vengono
++-- verificati. Se hai solo dati di prova, in fondo a questo file c'è un
++-- comando per verificarli tutti in blocco. Non usarlo con dati veri.
++--
++-- ORDINE: esegui questa migrazione PRIMA del push del codice.
++-- ============================================================
++
++-- ------------------------------------------------------------
++-- 1. Chi è staff
++--
++-- Una tabella con gli id degli utenti che possono verificare. Ha la
++-- sicurezza di riga attiva e NESSUNA policy: dall'API non si legge né si
++-- scrive. Solo la funzione `is_staff()` la consulta, e risponde soltanto
++-- per chi la chiama (non si può chiedere "questa persona è staff?").
++--
++-- Per aggiungere il primo membro, dal pannello SQL:
++--   insert into staff (user_id)
++--   select id from auth.users where email = 'la-tua-email@esempio.it';
++-- ------------------------------------------------------------
++
++create table if not exists staff (
++  user_id uuid primary key references auth.users(id) on delete cascade,
++  created_at timestamptz not null default now()
++);
++
++alter table staff enable row level security;
++
++create or replace function public.is_staff()
++returns boolean
++language sql
++security definer
++set search_path = public
++stable
++as $$
++  select exists (select 1 from staff where user_id = auth.uid());
++$$;
++
++grant execute on function public.is_staff() to authenticated;
++
++-- ------------------------------------------------------------
++-- 2. Lo stato di verifica lo cambiano solo le funzioni di questa
++--    migrazione e chi amministra
++--
++-- La 0011 distingueva "chi amministra" da "chi chiama dall'app" guardando
++-- se c'era un utente. Ora le funzioni qui sotto devono poter cambiare lo
++-- stato PER CONTO di un utente (lo staff, con la sua sessione). Si
++-- distingue allora dal ruolo con cui gira la richiesta: dall'API un utente
++-- è sempre 'authenticated' o 'anon'; dentro una funzione `security definer`
++-- è il proprietario della funzione; il pannello SQL è 'postgres'.
++-- ------------------------------------------------------------
++
++alter table listings
++  add column if not exists verifica_esito_note text,
++  add column if not exists verifica_inviata_at timestamptz;
++
++create or replace function public.proteggi_verifica_immobile()
++returns trigger
++language plpgsql
++as $$
++begin
++  if current_user not in ('authenticated', 'anon') then
++    return new;  -- pannello SQL, chiave di servizio, o funzione di questa migrazione
++  end if;
++
++  if tg_op = 'INSERT' then
++    new.verifica_stato := 'non_avviata';
++    new.verificato_at := null;
++    new.verifica_esito_note := null;
++    new.verifica_inviata_at := null;
++  elsif new.verifica_stato is distinct from old.verifica_stato
++     or new.verificato_at is distinct from old.verificato_at
++     or new.verifica_esito_note is distinct from old.verifica_esito_note
++     or new.verifica_inviata_at is distinct from old.verifica_inviata_at then
++    raise exception 'VERIFICA_RISERVATA: lo stato di verifica lo imposta solo chi gestisce MatchAmI'
++      using errcode = 'P0001';
++  end if;
++  return new;
++end;
++$$;
++
++create or replace function public.proteggi_verifica_inquilino()
++returns trigger
++language plpgsql
++as $$
++begin
++  if current_user not in ('authenticated', 'anon') then
++    return new;
++  end if;
++
++  if tg_op = 'INSERT' then
++    new.verificato := false;
++    new.verifica_stato := 'non_avviata';
++  elsif new.verificato is distinct from old.verificato
++     or new.verifica_stato is distinct from old.verifica_stato then
++    raise exception 'VERIFICA_RISERVATA: lo stato di verifica lo imposta solo chi gestisce MatchAmI'
++      using errcode = 'P0001';
++  end if;
++  return new;
++end;
++$$;
++
++-- ------------------------------------------------------------
++-- 3. Un annuncio è visibile agli inquilini solo se è verificato
++--
++-- Prima bastava `pubblicato`. Ora servono entrambe le cose. Il
++-- proprietario vede sempre i suoi, e lo staff vede tutto per poter
++-- verificare.
++-- ------------------------------------------------------------
++
++drop policy if exists "listings: read published" on listings;
++create policy "listings: lettura" on listings
++  for select using (
++    (pubblicato = true and verifica_stato = 'verificato')
++    or owner_id = auth.uid()
++    or public.is_staff()
++  );
++
++drop policy if exists "listing_photos: read with listing" on listing_photos;
++create policy "listing_photos: lettura" on listing_photos
++  for select using (
++    exists (
++      select 1 from listings l
++      where l.id = listing_photos.listing_id
++        and (
++          (l.pubblicato = true and l.verifica_stato = 'verificato')
++          or l.owner_id = auth.uid()
++          or public.is_staff()
++        )
++    )
++  );
++
++-- Ci si può candidare solo a un annuncio visibile. Chiude anche un buco
++-- trovato provando: prima si poteva inserire una candidatura su un
++-- annuncio non pubblicato conoscendone l'id.
++drop policy if exists "candidature: tenant creates" on candidature;
++create policy "candidature: tenant creates" on candidature
++  for insert
++  with check (
++    auth.uid() = tenant_id
++    and status = 'in_attesa'
++    and match_proprietario is null
++    and match_proprietario_at is null
++    and exists (
++      select 1 from listings l
++      where l.id = candidature.listing_id
++        and l.pubblicato = true
++        and l.verifica_stato = 'verificato'
++    )
++  );
++
++-- Lo staff deve poter leggere nome e cognome di chi chiede la verifica.
++drop policy if exists "profiles: staff reads" on profiles;
++create policy "profiles: staff reads" on profiles
++  for select using (public.is_staff());
++
++-- ------------------------------------------------------------
++-- 4. Documenti per la verifica
++--
++-- Bucket PRIVATO (a differenza delle foto): i documenti d'identità e
++-- gli atti di proprietà non devono mai avere un indirizzo pubblico. Si
++-- leggono con indirizzi temporanei, e solo il proprietario e lo staff
++-- possono generarli.
++--
++-- Chi carica un file non lo può cancellare: così non si può togliere la
++-- prova mentre è in verifica. I file si cancellano insieme all'account.
++-- ------------------------------------------------------------
++
++insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
++values (
++  'documenti-verifica', 'documenti-verifica', false,
++  10485760,                                            -- 10 MB
++  array['application/pdf', 'image/jpeg', 'image/png']
++)
++on conflict (id) do nothing;
++
++drop policy if exists "documenti-verifica: carica nella propria cartella" on storage.objects;
++create policy "documenti-verifica: carica nella propria cartella" on storage.objects
++  for insert to authenticated
++  with check (
++    bucket_id = 'documenti-verifica'
++    and (storage.foldername(name))[1] = auth.uid()::text
++  );
++
++drop policy if exists "documenti-verifica: legge il proprietario o lo staff" on storage.objects;
++create policy "documenti-verifica: legge il proprietario o lo staff" on storage.objects
++  for select to authenticated
++  using (
++    bucket_id = 'documenti-verifica'
++    and ((storage.foldername(name))[1] = auth.uid()::text or public.is_staff())
++  );
++
++create table if not exists documenti_verifica (
++  id uuid primary key default gen_random_uuid(),
++  owner_id uuid not null references owner_profiles(profile_id) on delete cascade,
++  listing_id uuid references listings(id) on delete cascade,
++  tipo text not null check (tipo in ('identita', 'proprieta')),
++  percorso text not null unique,
++  nome_file text not null,
++  created_at timestamptz not null default now(),
++  -- l'identità è della persona, la prova di proprietà è di un immobile
++  check (
++    (tipo = 'proprieta' and listing_id is not null)
++    or (tipo = 'identita' and listing_id is null)
++  )
++);
++
++create index if not exists idx_documenti_owner on documenti_verifica(owner_id);
++create index if not exists idx_documenti_listing on documenti_verifica(listing_id);
++
++alter table documenti_verifica enable row level security;
++
++create policy "documenti: legge il proprietario o lo staff" on documenti_verifica
++  for select using (owner_id = auth.uid() or public.is_staff());
++
++-- Si registra un documento solo nella propria cartella e, se è la prova di
++-- un immobile, di un immobile proprio. Nessuna policy di UPDATE o DELETE.
++create policy "documenti: il proprietario registra i suoi" on documenti_verifica
++  for insert with check (
++    owner_id = auth.uid()
++    and percorso like auth.uid()::text || '/%'
++    and (
++      listing_id is null
++      or exists (
++        select 1 from listings l
++        where l.id = documenti_verifica.listing_id and l.owner_id = auth.uid()
++      )
++    )
++  );
++
++-- ------------------------------------------------------------
++-- 5. Invio per la verifica e esito
++-- ------------------------------------------------------------
++
++-- Il proprietario invia un immobile. Servono il proprio documento
++-- d'identità e almeno una prova di proprietà di QUELL'immobile.
++create or replace function public.richiedi_verifica_immobile(p_listing uuid)
++returns void
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_listing listings;
++begin
++  if auth.uid() is null then
++    raise exception 'NON_AUTENTICATO';
++  end if;
++
++  select * into v_listing from listings where id = p_listing and owner_id = auth.uid();
++  if not found then
++    raise exception 'IMMOBILE_NON_TUO';
++  end if;
++  if v_listing.verifica_stato = 'verificato' then
++    raise exception 'GIA_VERIFICATO';
++  end if;
++  if v_listing.verifica_stato = 'in_verifica' then
++    raise exception 'GIA_IN_VERIFICA';
++  end if;
++
++  if not exists (
++       select 1 from documenti_verifica
++        where owner_id = auth.uid() and tipo = 'identita')
++     or not exists (
++       select 1 from documenti_verifica
++        where owner_id = auth.uid() and tipo = 'proprieta' and listing_id = p_listing)
++  then
++    raise exception 'DOCUMENTI_MANCANTI';
++  end if;
++
++  update listings
++     set verifica_stato = 'in_verifica',
++         verifica_inviata_at = now(),
++         verifica_esito_note = null
++   where id = p_listing;
++end;
++$$;
++
++grant execute on function public.richiedi_verifica_immobile(uuid) to authenticated;
++
++-- Lo staff verifica o respinge. Respingere richiede una nota, che il
++-- proprietario legge per sapere cosa correggere.
++create or replace function public.esito_verifica_immobile(
++  p_listing uuid,
++  p_verificato boolean,
++  p_note text default null
++)
++returns void
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_stato stato_verifica;
++begin
++  if not public.is_staff() then
++    raise exception 'NON_STAFF';
++  end if;
++
++  select verifica_stato into v_stato from listings where id = p_listing;
++  if not found then
++    raise exception 'IMMOBILE_INESISTENTE';
++  end if;
++  if v_stato <> 'in_verifica' then
++    raise exception 'NON_IN_VERIFICA';
++  end if;
++
++  if p_verificato then
++    update listings
++       set verifica_stato = 'verificato',
++           verificato_at = now(),
++           verifica_esito_note = null
++     where id = p_listing;
++  else
++    if p_note is null or length(btrim(p_note)) < 3 then
++      raise exception 'NOTA_OBBLIGATORIA';
++    end if;
++    update listings
++       set verifica_stato = 'non_avviata',
++           verificato_at = null,
++           verifica_inviata_at = null,
++           verifica_esito_note = btrim(p_note)
++     where id = p_listing;
++  end if;
++end;
++$$;
++
++grant execute on function public.esito_verifica_immobile(uuid, boolean, text) to authenticated;
++
++-- ------------------------------------------------------------
++-- Verifica
++-- ------------------------------------------------------------
++
++select table_name from information_schema.tables
++where table_name in ('staff', 'documenti_verifica') order by table_name;
++
++select routine_name from information_schema.routines
++where routine_name in ('is_staff', 'richiedi_verifica_immobile', 'esito_verifica_immobile')
++order by routine_name;
++
++select id, public from storage.buckets where id = 'documenti-verifica';  -- public deve essere false
++
++select polname from pg_policy
++where polrelid = 'listings'::regclass and polname = 'listings: lettura';
++
++
++-- ============================================================
++-- PER CHI AMMINISTRA
++-- ============================================================
++--
++-- 1) Aggiungere il primo membro dello staff (una volta sola):
++--
++--      insert into staff (user_id)
++--      select id from auth.users where email = 'la-tua-email@esempio.it';
++--
++--    Dopo aver fatto l'accesso con quell'account, il pannello si apre
++--    all'indirizzo /staff.
++--
++-- 2) SOLO PER DATI DI PROVA: verificare in blocco tutti gli immobili
++--    esistenti, così gli inquilini tornano a vederli. Non usarlo con
++--    dati veri: toglie proprio il controllo che questa migrazione
++--    introduce.
++--
++--      update listings
++--         set verifica_stato = 'verificato', verificato_at = now();
++-- ============================================================
+-- 
+2.43.0
+
