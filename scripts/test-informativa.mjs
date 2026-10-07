@@ -267,18 +267,36 @@ test("documenti: il testo dice che la verifica del reddito non è automatica e c
 // Ciò che il testo dice della pulizia delle notifiche è vero
 // ------------------------------------------------------------
 
-/** Tutti i file di codice dell'app (non le migrazioni, non i test). */
+/**
+ * Tutti i file di codice dell'app (non le migrazioni, non i test).
+ *
+ * I file che cominciano con «__» sono copie temporanee che altri test creano
+ * e cancellano nel giro di pochi millisecondi (test-candidati ne scrive una in
+ * src/lib): i test girano in parallelo, quindi si possono incontrare a metà.
+ * Non sono codice dell'app e si saltano.
+ */
 function tuttoIlCodice(dir = path.join(radice, "src")) {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    if (e.name.startsWith("__")) return [];
     const p = path.join(dir, e.name);
     return e.isDirectory() ? tuttoIlCodice(p) : /\.(ts|tsx)$/.test(e.name) ? [p] : [];
   });
 }
 
+/** Il contenuto di un file, o una stringa vuota se nel frattempo è sparito. */
+function leggiSePresente(file) {
+  try {
+    return fs.readFileSync(file, "utf8");
+  } catch (e) {
+    if (e && e.code === "ENOENT") return "";
+    throw e;
+  }
+}
+
 test("notifiche: il testo dice che la pulizia non è attiva solo finché nessuno la esegue", () => {
   const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
   const dice_non_attiva = /pulizia non è ancora attiva/.test(tutto);
-  const qualcunoLaChiama = tuttoIlCodice().some((f) => fs.readFileSync(f, "utf8").includes("pulisci_notifiche"));
+  const qualcunoLaChiama = tuttoIlCodice().some((f) => leggiSePresente(f).includes("pulisci_notifiche"));
   assert.equal(dice_non_attiva, !qualcunoLaChiama,
     dice_non_attiva
       ? "il testo dice che la pulizia non è attiva, ma un codice la chiama: aggiorna il testo"
