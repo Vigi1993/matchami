@@ -2613,3 +2613,74 @@ mark.segnaposto {
   background: rgba(201, 105, 78, 0.12);
   color: var(--ink);
 }
+
+/* ============================================================
+   Notifiche
+   ============================================================ */
+
+.tab-icona {
+  position: relative;
+  display: inline-flex;
+}
+.tab-icona .tab-badge {
+  top: -7px;
+  right: -12px;
+}
+
+.notifiche-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.notifica {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  text-align: left;
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid rgba(16, 21, 26, 0.1);
+  border-radius: 14px;
+  padding: 12px 14px;
+  color: var(--ink);
+}
+.notifica.nuova {
+  border-color: var(--clay);
+  background: rgba(201, 105, 78, 0.07);
+}
+.notifica .pallino {
+  flex-shrink: 0;
+  width: 9px;
+  height: 9px;
+  margin-top: 5px;
+  border-radius: 999px;
+  background: var(--clay);
+}
+.notifica-corpo {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.notifica-titolo {
+  font-size: 14px;
+  font-weight: 600;
+}
+.notifica:not(.nuova) .notifica-titolo {
+  font-weight: 500;
+}
+.notifica-testo {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+.notifica-tempo {
+  font-size: 11px;
+  color: var(--muted);
+}

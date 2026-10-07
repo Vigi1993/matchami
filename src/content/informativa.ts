@@ -28,7 +28,7 @@ export const INFORMATIVA = {
    * controllo che fa il database (migrazione 0017): un test fallisce se
    * questa stringa non lo supera.
    */
-  versione: "2026-10-provvisoria-2",
+  versione: "2026-10-provvisoria-3",
   provvisoria: true,
   titolo: "Informativa sulla privacy",
   aggiornata: "ottobre 2026",
@@ -54,7 +54,7 @@ export const INFORMATIVA = {
         "Se sei inquilino: lavoro, reddito tuo e del tuo nucleo, garante, fideiussione, protesti (li dichiari tu e non vengono verificati), animali, composizione del nucleo, numero di figli, presentazione, foto del profilo e le tue preferenze di ricerca (budget, zone, locali, metri, caratteristiche).",
         "Se sei proprietario: tipo di proprietario, numero di immobili, obiettivo; gli annunci con titolo, descrizione, zona, prezzo, caratteristiche e foto; i criteri che chiedi ai candidati.",
         "Per le verifiche: il documento d'identità e la prova di proprietà dell'immobile (proprietari); se sei inquilino e chiedi di verificare il reddito, un documento d'identità e una prova del reddito (una busta paga, la CU o la dichiarazione dei redditi); e i contratti di affitto caricati per dichiarare un affitto. Non chiediamo lo stato di famiglia.",
-        "Mentre usi l'app: candidature, messaggi, contratti, recensioni, richieste di conferma di un affitto e inviti.",
+        "Mentre usi l'app: candidature, messaggi, contratti, recensioni, richieste di conferma di un affitto e inviti. Inoltre le notifiche sulle novità del tuo account (per esempio l'esito di una verifica o la risposta a una candidatura): contengono il tipo di evento e, al massimo, il titolo di un annuncio, mai nomi di persone.",
         "Dati di un'altra persona: se inviti il tuo proprietario, scrivi il suo nome e, se vuoi, la sua email.",
       ],
     },
@@ -93,7 +93,7 @@ export const INFORMATIVA = {
     {
       titolo: "Per quanto tempo conserviamo i dati",
       paragrafi: [
-        "Al momento non c'è una scadenza automatica: una candidatura, un messaggio, un invito o un documento restano finché non cancelli l'account. Un documento caricato per la verifica del reddito puoi toglierlo tu, ma solo finché non hai inviato la richiesta. I tempi di conservazione saranno definiti nel testo definitivo.",
+        "Al momento non c'è una scadenza automatica: una candidatura, un messaggio, un invito o un documento restano finché non cancelli l'account. Un documento caricato per la verifica del reddito puoi toglierlo tu, ma solo finché non hai inviato la richiesta. Le notifiche sono pensate per sparire dopo 60 giorni se lette e dopo 180 se non lette, ma questa pulizia non è ancora attiva. I tempi di conservazione saranno definiti nel testo definitivo.",
       ],
     },
     {

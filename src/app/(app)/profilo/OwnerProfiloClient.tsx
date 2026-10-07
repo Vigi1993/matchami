@@ -1,5 +1,6 @@
 "use client";
 
+import { RigaNovita } from "@/components/RigaNovita";
 import { useActionState, useEffect, useState } from "react";
 import { Sheet } from "@/components/Sheet";
 import type { OwnerProfile } from "@/lib/types";
@@ -31,6 +32,7 @@ const OBIETTIVO_VOCAB = [
 ];
 
 export function OwnerProfiloClient({
+  nonLette,
   nome,
   cognome,
   email,
@@ -38,6 +40,8 @@ export function OwnerProfiloClient({
   consensoMarketingIniziale,
   consensoTerziIniziale,
 }: {
+  /** le novità non ancora lette */
+  nonLette: number;
   nome: string | null;
   cognome: string | null;
   email: string | null;
@@ -62,6 +66,7 @@ export function OwnerProfiloClient({
       </div>
 
       <div className="card-grid">
+        <RigaNovita nonLette={nonLette} />
         <Row
           color="var(--ink)"
           icon={<IconPersona className="fill-none stroke-white stroke-2" />}

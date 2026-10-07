@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { etichettaConteggio } from "@/lib/notifiche";
 import {
   IconCasa,
   IconChat,
@@ -34,13 +35,17 @@ const OWNER_TABS: Tab[] = [
 
 export function Navigation({
   ruolo,
+  nonLette = 0,
 }: {
   ruolo: string;
+  /** Le novità non ancora lette: se ce ne sono, un numero sulla voce Profilo. */
+  nonLette?: number;
   /** Non più mostrato in barra: il nome resta nella schermata Profilo. */
   nome?: string | null;
 }) {
   const pathname = usePathname();
   const tabs = ruolo === "proprietario" ? OWNER_TABS : TENANT_TABS;
+  const etichetta = etichettaConteggio(nonLette);
 
   return (
     <nav className="tabbar">
@@ -56,7 +61,14 @@ export function Navigation({
             href={href}
             className={`tab-btn ${active ? "active" : ""}`}
           >
-            <Icon />
+            <span className="tab-icona">
+              <Icon />
+              {href === "/profilo" && etichetta !== "" && (
+                <span className="tab-badge" role="status" aria-label={`${etichetta} novità da leggere`}>
+                  {etichetta}
+                </span>
+              )}
+            </span>
             <span className="tab-label">{label}</span>
           </Link>
         );

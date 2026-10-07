@@ -28,6 +28,13 @@ export default async function AppLayout({
 
   const ruolo = profile?.ruolo ?? "inquilino";
 
+  // Quante novità non sono state lette. Se la domanda non riesce, si mostra
+  // zero: un numero che manca è meglio di una pagina che non si apre.
+  const { count } = await supabase
+    .from("notifiche")
+    .select("id", { count: "exact", head: true })
+    .is("letta_at", null);
+
   /*
     Come nel prototipo: un unico "telaio" da 480px centrato, alto quanto
     la viewport e senza scroll di pagina. Dentro, l'area delle schermate
@@ -36,7 +43,7 @@ export default async function AppLayout({
   return (
     <div className="app-shell">
       <div className="screens">{children}</div>
-      <Navigation ruolo={ruolo} nome={profile?.nome} />
+      <Navigation ruolo={ruolo} nome={profile?.nome} nonLette={count ?? 0} />
     </div>
   );
 }

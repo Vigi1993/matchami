@@ -214,6 +214,7 @@ test("i testi dei rapporti non presumono il genere di nessuno", () => {
     "src/app/invito/[token]/InvitoClient.tsx",
     "src/components/VerificaRedditoPanel.tsx", "src/components/SelettoreFile.tsx",
     "src/lib/verifica-inquilino.ts", "src/content/informativa.ts",
+    "src/lib/notifiche.ts", "src/components/RigaNovita.tsx", "src/app/(app)/notifiche/NotificheLista.tsx",
     "src/app/staff/inquilini/[id]/page.tsx", "src/app/staff/inquilini/[id]/EsitoInquilinoForm.tsx",
   ].map((f) => path.join(radice, f));
   // tutte le pagine e i moduli delle cartelle nuove, compresi i sottolivelli

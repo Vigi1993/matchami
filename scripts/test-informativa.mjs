@@ -262,3 +262,39 @@ test("documenti: il testo dice che la verifica del reddito non è automatica e c
   assert.match(tutto, /non è automatica/);
   assert.match(tutto, /la verifica decade e va rifatta/);
 });
+
+// ------------------------------------------------------------
+// Ciò che il testo dice della pulizia delle notifiche è vero
+// ------------------------------------------------------------
+
+/** Tutti i file di codice dell'app (non le migrazioni, non i test). */
+function tuttoIlCodice(dir = path.join(radice, "src")) {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const p = path.join(dir, e.name);
+    return e.isDirectory() ? tuttoIlCodice(p) : /\.(ts|tsx)$/.test(e.name) ? [p] : [];
+  });
+}
+
+test("notifiche: il testo dice che la pulizia non è attiva solo finché nessuno la esegue", () => {
+  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
+  const dice_non_attiva = /pulizia non è ancora attiva/.test(tutto);
+  const qualcunoLaChiama = tuttoIlCodice().some((f) => fs.readFileSync(f, "utf8").includes("pulisci_notifiche"));
+  assert.equal(dice_non_attiva, !qualcunoLaChiama,
+    dice_non_attiva
+      ? "il testo dice che la pulizia non è attiva, ma un codice la chiama: aggiorna il testo"
+      : "il testo non dice che la pulizia non è attiva, ma nessun codice la esegue: o la si attiva, o lo si dice");
+});
+
+test("notifiche: i tempi scritti nel testo sono quelli della funzione del database", () => {
+  const sqlN = fs.readFileSync(path.join(migrazioni, "0019_notifiche.sql"), "utf8");
+  assert.match(sqlN, /letta_at < now\(\) - interval '60 days'/);
+  assert.match(sqlN, /created_at < now\(\) - interval '180 days'/);
+  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
+  assert.match(tutto, /60 giorni se lette e dopo 180 se non lette/);
+});
+
+test("notifiche: il testo le nomina e dice che non contengono nomi di persone", () => {
+  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
+  assert.match(tutto, /notifiche sulle novità del tuo account/);
+  assert.match(tutto, /mai nomi di persone/);
+});

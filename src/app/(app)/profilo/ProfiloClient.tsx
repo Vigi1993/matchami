@@ -1,5 +1,6 @@
 "use client";
 
+import { RigaNovita } from "@/components/RigaNovita";
 import { rigaProfilo } from "@/lib/verifica-inquilino";
 import { useActionState, useState } from "react";
 import { Sheet } from "@/components/Sheet";
@@ -32,6 +33,8 @@ import {
 } from "@/components/icons";
 
 type Props = {
+  /** le novità non ancora lette */
+  nonLette: number;
   /** gli affitti dichiarati e confermati, costruiti dal server */
   affittiPanel: React.ReactNode;
   /** il pannello per verificare il reddito con i documenti, costruito dal server */
@@ -50,6 +53,7 @@ type Props = {
 };
 
 export function ProfiloClient({
+  nonLette,
   nome,
   cognome,
   email,
@@ -145,6 +149,7 @@ export function ProfiloClient({
       </div>
 
       <div className="card-grid">
+        <RigaNovita nonLette={nonLette} />
         {/* I tuoi dati */}
         <Row
           color="var(--ink)"

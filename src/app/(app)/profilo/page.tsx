@@ -13,6 +13,13 @@ export default async function ProfiloPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
+  // le novità non lette, per la riga «Novità» in cima al profilo
+  const { count: nonLetteCount } = await supabase
+    .from("notifiche")
+    .select("id", { count: "exact", head: true })
+    .is("letta_at", null);
+  const nonLette = nonLetteCount ?? 0;
+
   const { data: profile } = await supabase
     .from("profiles")
     .select("nome, cognome, ruolo, consenso_marketing, consenso_terzi")
@@ -28,6 +35,7 @@ export default async function ProfiloPage() {
 
     return (
       <OwnerProfiloClient
+        nonLette={nonLette}
         nome={profile?.nome ?? null}
         cognome={profile?.cognome ?? null}
         email={user!.email ?? null}
@@ -79,6 +87,7 @@ export default async function ProfiloPage() {
 
   return (
     <ProfiloClient
+      nonLette={nonLette}
       nome={profile?.nome ?? null}
       cognome={profile?.cognome ?? null}
       email={user!.email ?? null}
