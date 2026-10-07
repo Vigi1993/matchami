@@ -45,6 +45,18 @@ export async function caricaRapportiMiei(supabase: Supabase, userId: string) {
     (profili ?? []).map((p) => [p.id as string, [p.nome, p.cognome].filter(Boolean).join(" ")])
   );
 
+  // Quali affitti hanno già un feedback. Le recensioni si possono leggere,
+  // ma il VOTO lo riporto solo a chi l'ha dato: l'inquilino sa che c'è un
+  // feedback, non cosa dice.
+  const idRapporti = (rapporti ?? []).map((r) => r.id as string);
+  const { data: feedback } =
+    idRapporti.length > 0
+      ? await supabase.from("recensioni").select("rapporto_id, voto").in("rapporto_id", idRapporti)
+      : { data: [] };
+  const votoPerRapporto = new Map(
+    (feedback ?? []).map((f) => [f.rapporto_id as string, f.voto as number])
+  );
+
   const ora = Date.now();
 
   const richiesteMie: RichiestaMia[] = (richieste ?? []).map((r) => {
@@ -72,6 +84,8 @@ export async function caricaRapportiMiei(supabase: Supabase, userId: string) {
       immobile: l?.titolo ?? null,
       controparte: nomi.get(altro) || null,
       creatoDaMe: r.creato_da === userId,
+      recensito: votoPerRapporto.has(r.id as string),
+      votoDato: r.owner_id === userId ? (votoPerRapporto.get(r.id as string) ?? null) : null,
     };
   });
 

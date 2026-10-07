@@ -167,6 +167,15 @@ const MESSAGGI: Record<string, string> = {
   STESSO_RUOLO:
     "Per rispondere serve un account di tipo diverso da chi ha creato la richiesta: se l'ha creata un inquilino risponde un proprietario, e viceversa.",
   RAPPORTO_ESISTENTE: "Questo affitto risulta già dichiarato tra voi due.",
+  // feedback
+  RAPPORTO_NON_TUO: "Questo affitto non risulta tuo.",
+  VOTO_NON_VALIDO: "Scegli un voto da 1 a 5.",
+  TAG_NON_VALIDI: "Una delle qualità scelte non è valida. Ricarica la pagina e riprova.",
+  PROPRIETARIO_NON_VERIFICATO:
+    "Per lasciare un feedback serve un tuo immobile verificato su MatchAmI.",
+  RAPPORTO_NON_VERIFICATO:
+    "Per lasciare un feedback l'affitto deve essere verificato: lo controlliamo noi.",
+  RAPPORTO_GIA_RECENSITO: "Hai già lasciato il feedback per questo affitto.",
 };
 
 /** Traduce gli errori del database in frasi comprensibili. Mai il testo tecnico. */

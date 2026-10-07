@@ -81,8 +81,9 @@ export default async function GestioneAffittiPage() {
 
   // Gli affitti dichiarati fuori da MatchAmI (o prima), con la conferma
   // dell'altra persona: servono per poter lasciare un feedback.
-  const [rapporti, { data: immobili }] = await Promise.all([
+  const [rapporti, { data: verificato }, { data: immobili }] = await Promise.all([
     caricaRapportiMiei(supabase, user!.id),
+    supabase.rpc("proprietario_verificato", { p_owner: user!.id }),
     supabase
       .from("listings")
       .select("id, titolo, zona")
@@ -101,6 +102,9 @@ export default async function GestioneAffittiPage() {
           immobili={(immobili ?? []) as { id: string; titolo: string; zona: string }[]}
           richieste={rapporti.richieste}
           rapporti={rapporti.rapporti}
+          // se la domanda non riesce si presume NON verificato: meglio un
+          // avviso in più che un pulsante che poi dà errore
+          puoLasciareFeedback={verificato === true}
         />
       }
     />

@@ -57,9 +57,9 @@ export function InvitoClient({
         <h1 className="screen-title">Com&apos;è andata con {inquilino}?</h1>
         <p className="screen-sub">
           {indirizzo ? `${indirizzo}` : `La casa che hai affittato a ${inquilino}`}
-          {periodo ? ` · ${periodo}` : ""}. Il tuo commento resta legato al
-          suo profilo e lo vedranno gli altri proprietari quando valuterà una
-          candidatura.
+          {periodo ? ` · ${periodo}` : ""}. Il tuo voto entra nel punteggio di
+          affidabilità, che gli altri proprietari vedono quando valutano una
+          candidatura. Le qualità per ora non sono visibili ad altri.
         </p>
 
         <form action={formAction}>

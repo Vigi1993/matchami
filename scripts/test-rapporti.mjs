@@ -140,6 +140,46 @@ test("errori: chi risponde con il ruolo sbagliato capisce cosa serve", () => {
   assert.match(m, /inquilino/); assert.match(m, /proprietario/);
 });
 
+// ---------------- feedback: tag e messaggi ----------------
+const tra = (testo, apertura, chiusura) => {
+  const i = testo.indexOf(apertura); assert.ok(i >= 0, "non trovato: " + apertura);
+  const j = testo.indexOf(chiusura, i); assert.ok(j > i, "non chiuso: " + chiusura);
+  return testo.slice(i + apertura.length, j);
+};
+const stringhe = (testo) => [...testo.matchAll(/'((?:[^']|'')*)'|"((?:[^"\\]|\\.)*)"/g)].map((m) => (m[1] ?? m[2]).replace(/''/g, "'"));
+
+test("i TAG dell'app e del database sono la stessa lista", () => {
+  // Se divergono, l'app mostra una qualità che il database rifiuta (o viceversa).
+  const app = stringhe(tra(fs.readFileSync(path.join(radice, "src", "lib", "constants.ts"), "utf8"), "TAG_RECENSIONE = [", "] as const"));
+  const migrazione = fs.readFileSync(path.join(radice, "supabase", "migrations", "0014_recensione_da_rapporto.sql"), "utf8");
+  const db = stringhe(tra(migrazione, "tag_recensione_ammessi()\nreturns text[]", "];").replace(/^[\s\S]*?array\[/, ""));
+  assert.equal(app.length, 6, "l'app dovrebbe avere 6 tag, ne ha " + app.length);
+  assert.deepEqual([...db].sort(), [...app].sort(), "le due liste divergono");
+});
+
+test("i dati di prova usano solo tag ammessi (altrimenti il vincolo li rifiuterebbe)", () => {
+  const app = stringhe(tra(fs.readFileSync(path.join(radice, "src", "lib", "constants.ts"), "utf8"), "TAG_RECENSIONE = [", "] as const"));
+  const seed = fs.readFileSync(path.join(radice, "supabase", "migrations", "seed_demo_data.sql"), "utf8");
+  const usati = stringhe(tra(seed, "insert into recensioni", ";")).filter((x) => !/^\s*$/.test(x) && !/^(tenant_id|autore_id|voto|tag)$/.test(x));
+  const tag = usati.filter((x) => x.length > 8);
+  assert.ok(tag.length >= 1, "non ho trovato tag nel seed");
+  for (const t of tag) assert.ok(app.includes(t), `il seed usa un tag fuori lista: "${t}"`);
+});
+
+test("feedback: ogni errore della funzione ha una frase sua, mai quella generica", () => {
+  const codici = ["RAPPORTO_NON_TUO", "VOTO_NON_VALIDO", "TAG_NON_VALIDI", "PROPRIETARIO_NON_VERIFICATO", "RAPPORTO_NON_VERIFICATO", "RAPPORTO_GIA_RECENSITO"];
+  const frasi = codici.map((c) => messaggioErroreVerifica("ERROR: " + c + " (P0001)"));
+  for (let i = 0; i < codici.length; i++) {
+    assert.ok(!/Riprova\.$/.test(frasi[i]) && !frasi[i].includes(codici[i]), `${codici[i]} -> ${frasi[i]}`);
+  }
+  assert.equal(new Set(frasi).size, codici.length, "due codici diversi mostrano la stessa frase: una corrispondenza per sottostringa li confonde");
+});
+
+test("feedback: il messaggio per chi riprova una recensione è chiaro", () => {
+  assert.match(messaggioErroreVerifica("RAPPORTO_GIA_RECENSITO"), /già lasciato/);
+  assert.match(messaggioErroreVerifica("VOTO_NON_VALIDO"), /da 1 a 5/);
+});
+
 // ---------------- token e id che arrivano dall'indirizzo ----------------
 test("token del rapporto: solo 32 caratteri esadecimali minuscoli", () => {
   assert.equal(èTokenRapporto("0123456789abcdef0123456789abcdef"), true);
@@ -170,7 +210,8 @@ test("UUID: la forma standard e basta", () => {
 test("i testi dei rapporti non presumono il genere di nessuno", () => {
   const file = [
     "src/lib/rapporti.ts", "src/lib/verifica.ts", "src/components/RapportiPanel.tsx",
-    "src/components/CorniceScura.tsx", "src/app/staff/actions.ts",
+    "src/components/CorniceScura.tsx", "src/components/FormFeedback.tsx", "src/app/staff/actions.ts",
+    "src/app/invito/[token]/InvitoClient.tsx",
   ].map((f) => path.join(radice, f));
   // tutte le pagine e i moduli delle cartelle nuove, compresi i sottolivelli
   const visita = (d) => { if (!fs.existsSync(d)) return; for (const e of fs.readdirSync(d, { withFileTypes: true })) {

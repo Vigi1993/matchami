@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Field } from "@/components/ui/Field";
+import { FormFeedback } from "@/components/FormFeedback";
 import {
   descriviRapporto,
   descriviRichiesta,
@@ -47,18 +48,22 @@ export function RapportiPanel({
   immobili,
   richieste,
   rapporti,
+  puoLasciareFeedback = false,
 }: {
   ruolo: RuoloRapporto;
   nomeCreatore: string | null;
   immobili: ImmobileScelta[];
   richieste: RichiestaMia[];
   rapporti: RapportoMio[];
+  /** il proprietario è verificato: solo allora può lasciare un feedback */
+  puoLasciareFeedback?: boolean;
 }) {
   const router = useRouter();
   const [form, setForm] = useState(false);
   const [errore, setErrore] = useState<string | null>(null);
   const [occupato, setOccupato] = useState(false);
   const [linkAperto, setLinkAperto] = useState<string | null>(null);
+  const [feedbackPer, setFeedbackPer] = useState<string | null>(null);
 
   const [immobileId, setImmobileId] = useState("");
   const [indirizzo, setIndirizzo] = useState("");
@@ -191,6 +196,20 @@ export function RapportiPanel({
                   <p className="field-note" style={{ margin: "8px 0 0 0" }}>
                     {d.testo}
                   </p>
+                  {r.stato === "verificato" && (
+                    <FeedbackAffitto
+                      ruolo={ruolo}
+                      rapporto={r}
+                      puoLasciare={puoLasciareFeedback}
+                      aperto={feedbackPer === r.id}
+                      onApri={() => setFeedbackPer(r.id)}
+                      onChiudi={() => setFeedbackPer(null)}
+                      onFatto={() => {
+                        setFeedbackPer(null);
+                        router.refresh();
+                      }}
+                    />
+                  )}
                   {r.creatoDaMe && r.stato !== "verificato" && (
                     <button type="button" className="redo-link" style={{ marginTop: 8 }} onClick={() => ritiraRapporto(r.id)}>
                       Ritira
@@ -421,5 +440,69 @@ function LinkCondiviso({
         Chiudi
       </button>
     </div>
+  );
+}
+
+/**
+ * Cosa si può fare, per un affitto verificato, sul feedback. Il proprietario
+ * lo lascia (una volta sola, se è verificato); l'inquilino sa solo se c'è.
+ */
+function FeedbackAffitto({
+  ruolo,
+  rapporto,
+  puoLasciare,
+  aperto,
+  onApri,
+  onChiudi,
+  onFatto,
+}: {
+  ruolo: RuoloRapporto;
+  rapporto: RapportoMio;
+  puoLasciare: boolean;
+  aperto: boolean;
+  onApri: () => void;
+  onChiudi: () => void;
+  onFatto: () => void;
+}) {
+  if (ruolo === "inquilino") {
+    return rapporto.recensito ? (
+      <p className="field-note" style={{ margin: "8px 0 0 0" }}>
+        <b>Feedback ricevuto</b>
+      </p>
+    ) : null;
+  }
+
+  if (rapporto.recensito) {
+    return (
+      <p className="field-note" style={{ margin: "8px 0 0 0" }}>
+        <b>Feedback lasciato</b>
+        {rapporto.votoDato ? ` · ${rapporto.votoDato}/5` : ""}
+      </p>
+    );
+  }
+
+  if (!puoLasciare) {
+    return (
+      <p className="field-note" style={{ margin: "8px 0 0 0" }}>
+        Per lasciare un feedback ti serve un immobile verificato.
+      </p>
+    );
+  }
+
+  if (aperto) {
+    return (
+      <FormFeedback
+        rapportoId={rapporto.id}
+        nome={rapporto.controparte}
+        onFatto={onFatto}
+        onAnnulla={onChiudi}
+      />
+    );
+  }
+
+  return (
+    <button type="button" className="opp-cta" style={{ marginTop: 10 }} onClick={onApri}>
+      Lascia un feedback
+    </button>
   );
 }

@@ -29,6 +29,10 @@ export type RapportoMio = {
   controparte: string | null;
   /** l'ho dichiarato io: solo chi lo ha dichiarato può ritirarlo */
   creatoDaMe: boolean;
+  /** c'è già un feedback legato a questo affitto */
+  recensito: boolean;
+  /** il voto, solo per chi l'ha dato (il proprietario); l'inquilino non lo vede */
+  votoDato: number | null;
 };
 
 export type ImmobileScelta = { id: string; titolo: string; zona: string };
