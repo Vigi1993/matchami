@@ -148,8 +148,12 @@ export default async function InvitoPage({
           ))}
         </ul>
         <p>
-          La verifica di immobili e contratti non è ancora attiva su MatchAmI.
-          Quando lo sarà potrai avviarla e poi tornare a questo link.
+          Come si fa: l&apos;immobile lo verifichi dalla Home, caricando i
+          documenti. Il contratto lo dichiara uno di voi due, {inquilino} da
+          &quot;I tuoi affitti&quot; nel suo profilo oppure tu da
+          &quot;Gestione affitti&quot;: l&apos;altra persona lo conferma da un
+          link e poi lo controlliamo noi. Quando entrambi i punti risultano a
+          posto, torna a questo link.
         </p>
       </Cornice>
     );

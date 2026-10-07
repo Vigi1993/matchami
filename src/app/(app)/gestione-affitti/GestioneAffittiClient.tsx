@@ -32,9 +32,12 @@ const STATI: StatoContratto[] = ["bozza", "in_firma", "firmato", "concluso"];
 export function GestioneAffittiClient({
   candidatureSenzaContratto,
   contratti,
+  rapportiPanel,
 }: {
   candidatureSenzaContratto: CandidaturaSenzaContratto[];
   contratti: ContrattoProprietario[];
+  /** gli affitti dichiarati e confermati, costruiti dal server */
+  rapportiPanel: React.ReactNode;
 }) {
   const [nuovaDa, setNuovaDa] = useState<CandidaturaSenzaContratto | null>(
     null
@@ -49,6 +52,11 @@ export function GestioneAffittiClient({
       <p className="screen-sub">
         Contratti dei tuoi immobili, dalla bozza alla firma.
       </p>
+
+      <div className="pref-label" style={{ marginTop: 8 }}>
+        <span>Affitti passati e in corso</span>
+      </div>
+      {rapportiPanel}
 
       {candidatureSenzaContratto.length > 0 && (
         <>

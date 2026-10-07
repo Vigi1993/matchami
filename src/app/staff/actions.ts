@@ -40,3 +40,35 @@ export async function decidiVerifica(
   revalidatePath("/");
   redirect("/staff");
 }
+
+/**
+ * Verifica o respinge un rapporto di locazione già confermato dalle due
+ * parti. Stessi controlli di `decidiVerifica`: permessi qui, nel layout e
+ * nella funzione del database.
+ */
+export async function decidiRapporto(
+  _prev: EsitoState,
+  formData: FormData
+): Promise<EsitoState> {
+  const supabase = await richiediStaff();
+
+  const id = String(formData.get("id") || "");
+  const esito = String(formData.get("esito") || "");
+  const nota = String(formData.get("nota") || "").trim();
+
+  if (!èUuid(id)) return { error: "Affitto non valido." };
+  if (esito !== "verifica" && esito !== "respingi") return { error: "Scelta non valida." };
+  if (esito === "respingi" && nota.length < 3) {
+    return { error: messaggioErroreVerifica("NOTA_OBBLIGATORIA") };
+  }
+
+  const { error } = await supabase.rpc("esito_rapporto", {
+    p_rapporto: id,
+    p_verificato: esito === "verifica",
+    p_note: esito === "respingi" ? nota : null,
+  });
+  if (error) return { error: messaggioErroreVerifica(error.message) };
+
+  revalidatePath("/staff");
+  redirect("/staff");
+}

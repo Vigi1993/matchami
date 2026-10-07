@@ -1,6 +1,9 @@
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
+// l'implementazione sta in lib/uuid.ts, che non dipende dal server
+export { èUuid } from "@/lib/uuid";
+
 /**
  * Chi sta guardando è staff?
  *
@@ -29,9 +32,4 @@ export async function richiediStaff() {
   const supabase = await createClient();
   if (!(await eStaff(supabase))) notFound();
   return supabase;
-}
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export function èUuid(valore: string): boolean {
-  return UUID.test(valore);
 }

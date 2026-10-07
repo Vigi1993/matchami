@@ -1,5 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { GestioneAffittiClient } from "./GestioneAffittiClient";
+import { RapportiPanel } from "@/components/RapportiPanel";
+import { caricaRapportiMiei } from "@/lib/rapporti-server";
 import type { CandidaturaSenzaContratto, ContrattoProprietario } from "@/lib/types";
 
 export default async function GestioneAffittiPage() {
@@ -77,10 +79,30 @@ export default async function GestioneAffittiPage() {
     };
   });
 
+  // Gli affitti dichiarati fuori da MatchAmI (o prima), con la conferma
+  // dell'altra persona: servono per poter lasciare un feedback.
+  const [rapporti, { data: immobili }] = await Promise.all([
+    caricaRapportiMiei(supabase, user!.id),
+    supabase
+      .from("listings")
+      .select("id, titolo, zona")
+      .eq("owner_id", user!.id)
+      .order("created_at", { ascending: false }),
+  ]);
+
   return (
     <GestioneAffittiClient
       candidatureSenzaContratto={candidatureSenzaContratto}
       contratti={contrattiCompleti}
+      rapportiPanel={
+        <RapportiPanel
+          ruolo="proprietario"
+          nomeCreatore={rapporti.nome}
+          immobili={(immobili ?? []) as { id: string; titolo: string; zona: string }[]}
+          richieste={rapporti.richieste}
+          rapporti={rapporti.rapporti}
+        />
+      }
     />
   );
 }

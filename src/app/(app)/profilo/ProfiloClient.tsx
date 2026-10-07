@@ -27,9 +27,12 @@ import {
   IconPersone,
   IconScudo,
   IconStella,
+  IconDocumento,
 } from "@/components/icons";
 
 type Props = {
+  /** gli affitti dichiarati e confermati, costruiti dal server */
+  affittiPanel: React.ReactNode;
   nome: string | null;
   cognome: string | null;
   email: string | null;
@@ -49,6 +52,7 @@ export function ProfiloClient({
   email,
   tenant,
   inviti,
+  affittiPanel,
   zoneIniziali,
   interessiIniziali,
   mediaRecensioni,
@@ -61,6 +65,7 @@ export function ProfiloClient({
     | "dati"
     | "ricerca"
     | "invito"
+    | "affitti"
     | "account"
     | "privacy"
     | "faq"
@@ -167,6 +172,15 @@ export function ProfiloClient({
         onClick={() => setSheetAperta("invito")}
       />
 
+      <Row
+        color="var(--moss)"
+        icon={<IconDocumento className="fill-none stroke-white stroke-2" />}
+        title="I tuoi affitti"
+        subtitle="Dichiara un affitto con il suo contratto: se la controparte lo conferma e lo verifichiamo, il feedback del proprietario può contare."
+        cta="Gestisci gli affitti"
+        onClick={() => setSheetAperta("affitti")}
+      />
+
       {/* Account */}
         <Row
           color="var(--ink-soft)"
@@ -254,6 +268,15 @@ export function ProfiloClient({
         nomeInquilino={nome}
         inviti={inviti}
       />
+
+      {/* ---- Sheet: I tuoi affitti ---- */}
+      <Sheet
+        open={sheetAperta === "affitti"}
+        onClose={() => setSheetAperta(null)}
+        title="I tuoi affitti"
+      >
+        {affittiPanel}
+      </Sheet>
 
       {/* ---- Sheet: Account ---- */}
       <AccountSheet

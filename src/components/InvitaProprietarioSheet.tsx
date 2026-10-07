@@ -52,7 +52,9 @@ export function InvitaProprietarioSheet({
         affidabilità. Per tenerlo affidabile, MatchAmI lo accetta solo da
         proprietari verificati, con un immobile verificato sul portale, e solo
         se esiste un contratto verificato tra voi due. Vale anche per gli
-        affitti iniziati fuori da MatchAmI.
+        affitti iniziati fuori da MatchAmI. Il contratto lo dichiari tu da
+        &quot;I tuoi affitti&quot;, nel tuo profilo: il proprietario lo
+        conferma da un link.
       </p>
 
       {link ? (

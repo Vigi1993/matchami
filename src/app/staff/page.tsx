@@ -38,6 +38,26 @@ export default async function StaffPage() {
     (profili ?? []).map((p) => [p.id as string, [p.nome, p.cognome].filter(Boolean).join(" ")])
   );
 
+  // Gli affitti già confermati dalle due parti, in attesa del controllo del contratto
+  const { data: rapportiData } = await supabase
+    .from("rapporti_locazione")
+    .select("id, owner_id, tenant_id, periodo_da, periodo_a, created_at, listings(titolo, zona)")
+    .eq("stato", "da_verificare")
+    .order("created_at", { ascending: true });
+  const rapporti = (rapportiData ?? []) as unknown as {
+    id: string; owner_id: string; tenant_id: string; periodo_da: string; periodo_a: string | null;
+    created_at: string; listings: { titolo: string; zona: string } | { titolo: string; zona: string }[] | null;
+  }[];
+
+  const idPersone = [...new Set(rapporti.flatMap((r) => [r.owner_id, r.tenant_id]))];
+  const { data: persone } =
+    idPersone.length > 0
+      ? await supabase.from("profiles").select("id, nome, cognome").in("id", idPersone)
+      : { data: [] };
+  const nomiPersone = new Map(
+    (persone ?? []).map((p) => [p.id as string, [p.nome, p.cognome].filter(Boolean).join(" ") || "Senza nome"])
+  );
+
   return (
     <>
       <h1 className="screen-title">Immobili da verificare</h1>
@@ -62,6 +82,33 @@ export default async function StaffPage() {
             <div className="mc-pct is-wait">Da controllare</div>
           </Link>
         ))}
+      </div>
+
+      <h1 className="screen-title" style={{ marginTop: 36 }}>
+        Affitti da verificare
+      </h1>
+      <p className="screen-sub">
+        {rapporti.length === 0
+          ? "Nessun affitto in attesa."
+          : `${rapporti.length} già confermati da entrambe le persone, i più vecchi per primi.`}
+      </p>
+      <div className="staff-lista">
+        {rapporti.map((r) => {
+          const l = Array.isArray(r.listings) ? r.listings[0] : r.listings;
+          return (
+            <Link key={r.id} href={`/staff/rapporti/${r.id}`} className="match-card">
+              <div className="mc-avatar">AF</div>
+              <div className="mc-body">
+                <div className="mc-zona">{l?.zona ?? "Immobile"}</div>
+                <div className="mc-title">{l?.titolo ?? "Affitto"}</div>
+                <div className="mc-meta">
+                  {nomiPersone.get(r.owner_id)} (proprietario) · {nomiPersone.get(r.tenant_id)} (inquilino)
+                </div>
+              </div>
+              <div className="mc-pct is-wait">Da controllare</div>
+            </Link>
+          );
+        })}
       </div>
     </>
   );

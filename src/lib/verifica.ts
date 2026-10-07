@@ -118,16 +118,21 @@ export function estensioneDa(tipo: string): string | null {
  */
 export function percorsoDocumento(input: {
   userId: string;
-  tipo: "identita" | "proprieta";
+  tipo: "identita" | "proprieta" | "contratto";
   listingId: string | null;
   estensione: string;
   id: string;
 }): string {
   const pulito = (s: string) => s.replace(/[^a-zA-Z0-9-]/g, "");
+  // Il contratto si chiama "contratto-...": è ciò che la funzione del database
+  // `crea_richiesta_rapporto` richiede, e impedisce di presentare come
+  // contratto un altro file della propria cartella.
   const base =
     input.tipo === "identita"
       ? "identita"
-      : `proprieta-${pulito(input.listingId ?? "")}`;
+      : input.tipo === "contratto"
+        ? "contratto"
+        : `proprieta-${pulito(input.listingId ?? "")}`;
   return `${pulito(input.userId)}/${base}-${pulito(input.id)}.${pulito(input.estensione)}`;
 }
 
@@ -146,6 +151,22 @@ const MESSAGGI: Record<string, string> = {
   NON_IN_VERIFICA: "Questo immobile non è in attesa di verifica.",
   NOTA_OBBLIGATORIA: "Per respingere scrivi cosa non va: il proprietario la leggerà.",
   IMMOBILE_INESISTENTE: "Immobile non trovato.",
+  // rapporti di locazione
+  RAPPORTO_INESISTENTE: "Affitto non trovato.",
+  INDIRIZZO_NON_VALIDO: "Scrivi l'indirizzo dell'immobile, in poche parole.",
+  PERIODO_NON_VALIDO:
+    "Il periodo non è valido: l'affitto deve essere già cominciato e la fine non può precedere l'inizio.",
+  PERCORSO_NON_VALIDO: "Il file del contratto non è valido. Caricalo di nuovo.",
+  FILE_NON_TROVATO: "Il contratto non risulta caricato. Caricalo di nuovo.",
+  TROPPE_RICHIESTE:
+    "Hai già molte richieste senza risposta. Aspetta che qualcuna venga confermata o ritirane qualcuna.",
+  RICHIESTA_INESISTENTE: "Questo link non è valido.",
+  RICHIESTA_GIA_RISPOSTA: "A questa richiesta è già stata data una risposta.",
+  RICHIESTA_SCADUTA: "Questa richiesta è scaduta. Chiedi di crearne una nuova.",
+  RICHIESTA_TUA: "Questa è una richiesta che hai creato tu: la conferma spetta all'altra persona.",
+  STESSO_RUOLO:
+    "Per rispondere serve un account di tipo diverso da chi ha creato la richiesta: se l'ha creata un inquilino risponde un proprietario, e viceversa.",
+  RAPPORTO_ESISTENTE: "Questo affitto risulta già dichiarato tra voi due.",
 };
 
 /** Traduce gli errori del database in frasi comprensibili. Mai il testo tecnico. */

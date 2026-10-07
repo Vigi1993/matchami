@@ -1,4 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
+import { RapportiPanel } from "@/components/RapportiPanel";
+import { caricaRapportiMiei } from "@/lib/rapporti-server";
 import { ProfiloClient } from "./ProfiloClient";
 import { OwnerProfiloClient } from "./OwnerProfiloClient";
 import type { TenantProfile, OwnerProfile, Invito } from "@/lib/types";
@@ -55,6 +57,8 @@ export default async function ProfiloPage() {
       .order("created_at", { ascending: false }),
   ]);
 
+  const rapporti = await caricaRapportiMiei(supabase, user!.id);
+
   const zoneIniziali = (zoneRows ?? []).map((r) => r.zona as string);
   const interessiIniziali = Object.fromEntries(
     (interessiRows ?? []).map((r) => [r.attributo_key as string, r.peso as number])
@@ -72,6 +76,15 @@ export default async function ProfiloPage() {
       email={user!.email ?? null}
       tenant={tenant as TenantProfile}
       inviti={(inviti ?? []) as Invito[]}
+      affittiPanel={
+        <RapportiPanel
+          ruolo="inquilino"
+          nomeCreatore={rapporti.nome}
+          immobili={[]}
+          richieste={rapporti.richieste}
+          rapporti={rapporti.rapporti}
+        />
+      }
       zoneIniziali={zoneIniziali}
       interessiIniziali={interessiIniziali}
       mediaRecensioni={mediaRecensioni}
