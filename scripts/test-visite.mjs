@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import { caricaTs, radice } from "./carica-ts.mjs";
 
 const percorso = path.join(radice, "src", "lib", "visite.ts");
@@ -94,8 +95,11 @@ test("andata e ritorno: ogni quarto d'ora del 2026 e del 2027 si converte e si r
 });
 
 test("il fuso del telefono non conta: lo stesso risultato da Auckland, New York, Tokyo e Roma", () => {
+  // Un modulo ESM si importa con un URL «file://», non con un percorso: su Windows un percorso
+  // come «C:\\Users\\...» sarebbe preso per un URL con schema «c:» e non partirebbe.
+  const caricatore = pathToFileURL(path.join(radice, "scripts", "carica-ts.mjs")).href;
   const script = `
-    import { caricaTs } from ${JSON.stringify(path.join(radice, "scripts", "carica-ts.mjs"))};
+    import { caricaTs } from ${JSON.stringify(caricatore)};
     const v = caricaTs(${JSON.stringify(percorso)});
     console.log(JSON.stringify([
       v.daInputRoma("2026-10-12T10:00"), v.daInputRoma("2026-10-25T02:30"), v.daInputRoma("2026-03-29T02:30"),
@@ -382,4 +386,28 @@ test("chiamate: la guardia sa riconoscere un argomento sbagliato", () => {
   const m = sbagliata.match(/"prenota_visita"\s*,\s*\{([^}]*)\}/);
   const usati = [...m[1].matchAll(/\b(p_\w+)\s*:/g)].map((x) => x[1]).sort();
   assert.notDeepEqual(usati, funzioni.get("prenota_visita"));
+});
+
+// ------------------------------------------------------------
+// Compatibilità con Windows
+// ------------------------------------------------------------
+
+test("windows: nessuno script di test importa un modulo con un percorso al posto di un URL", () => {
+  // Su Linux un percorso assoluto funziona anche come specificatore, su Windows no: l'errore
+  // si vedrebbe solo là. Si cerca la forma sbagliata nel testo degli script.
+  const sbagliata = /\bfrom\s+\$\{JSON\.stringify\((?!\s*(?:caricatore|pathToFileURL|url))/;
+  for (const f of fs.readdirSync(path.join(radice, "scripts")).filter((x) => x.endsWith(".mjs"))) {
+    const testo = fs.readFileSync(path.join(radice, "scripts", f), "utf8");
+    // la riga di questa stessa guardia contiene la forma sbagliata scritta come espressione regolare
+    const righe = testo.split("\n").filter((r) => !r.includes("const sbagliata"));
+    assert.ok(!righe.some((r) => sbagliata.test(r)), `${f} importa un modulo con un percorso: usa pathToFileURL(...).href`);
+  }
+});
+
+test("windows: lo specificatore usato è un URL «file://» valido, anche per un percorso in stile Windows", () => {
+  const u = pathToFileURL(path.join(radice, "scripts", "carica-ts.mjs")).href;
+  assert.match(u, /^file:\/\/\//);
+  // e un percorso Windows, convertito allo stesso modo, non ha schema «c:»
+  const w = pathToFileURL("C:\\Users\\marco\\scripts\\carica-ts.mjs", { windows: true }).href;
+  assert.match(w, /^file:\/\/\/C:\//);
 });
