@@ -7,27 +7,19 @@ import type {
   ContrattoProprietario,
   StatoContratto,
 } from "@/lib/types";
+import {
+  NESSUN_CONTRATTO_IN_CORSO,
+  STATI_CONTRATTO,
+  STATO_LABEL,
+  badgeStato,
+  etichettaStato,
+  raggruppaContratti,
+} from "@/lib/contratti";
 import { creaContratto, aggiornaContratto, type SaveState } from "./actions";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { Chip } from "@/components/ui/Chip";
 import { Field } from "@/components/ui/Field";
 import { IconDocumento } from "@/components/icons";
-
-const STATO_LABEL: Record<StatoContratto, string> = {
-  bozza: "Bozza",
-  in_firma: "In firma",
-  firmato: "Firmato",
-  concluso: "Concluso",
-};
-
-const STATO_BADGE: Record<StatoContratto, string> = {
-  bozza: "is-off",
-  in_firma: "is-wait",
-  firmato: "is-match",
-  concluso: "is-off",
-};
-
-const STATI: StatoContratto[] = ["bozza", "in_firma", "firmato", "concluso"];
 
 export function GestioneAffittiClient({
   candidatureSenzaContratto,
@@ -45,6 +37,9 @@ export function GestioneAffittiClient({
   const [selezionato, setSelezionato] = useState<ContrattoProprietario | null>(
     null
   );
+
+  // I contratti conclusi vanno nello storico: non restano mescolati a quelli in corso.
+  const { inCorso, storico } = raggruppaContratti(contratti);
 
   return (
     <PageContainer wide>
@@ -89,9 +84,7 @@ export function GestioneAffittiClient({
       )}
 
       <div className="pref-label" style={{ marginTop: 20 }}>
-        <span>
-          I tuoi contratti {contratti.length > 0 && `· ${contratti.length}`}
-        </span>
+        <span>I tuoi contratti</span>
       </div>
 
       {contratti.length === 0 && candidatureSenzaContratto.length === 0 ? (
@@ -104,32 +97,39 @@ export function GestioneAffittiClient({
           </p>
         </div>
       ) : (
-        <div className="card-grid">
-          {contratti.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => setSelezionato(c)}
-              className="match-card"
-            >
-              <div className="mc-avatar">
-                {`${c.nome?.[0] ?? ""}${c.cognome?.[0] ?? ""}`.toUpperCase() ||
-                  "IN"}
+        <>
+          {inCorso.length > 0 ? (
+            <>
+              <div className="pref-label" style={{ marginTop: 12 }}>
+                <span>In corso — {inCorso.length}</span>
               </div>
-              <div className="mc-body">
-                <div className="mc-zona">{c.candidature?.listings?.titolo}</div>
-                <div className="mc-title">
-                  {c.nome} {c.cognome}
-                </div>
-                <div className="mc-meta">
-                  {c.canone ? `€${c.canone.toLocaleString("it-IT")}/mese` : "—"}
-                </div>
+              <div className="card-grid">
+                {inCorso.map((c) => (
+                  <SchedaContratto key={c.id} c={c} onSelect={setSelezionato} />
+                ))}
               </div>
-              <div className={`mc-pct ${STATO_BADGE[c.stato]}`}>
-                {STATO_LABEL[c.stato]}
+            </>
+          ) : (
+            contratti.length > 0 && (
+              <div className="note-box" style={{ marginTop: 12 }}>
+                {NESSUN_CONTRATTO_IN_CORSO}
               </div>
-            </button>
-          ))}
-        </div>
+            )
+          )}
+
+          {storico.length > 0 && (
+            <>
+              <div className="pref-label" style={{ marginTop: 20 }}>
+                <span>Storico — {storico.length}</span>
+              </div>
+              <div className="card-grid">
+                {storico.map((c) => (
+                  <SchedaContratto key={c.id} c={c} onSelect={setSelezionato} passato />
+                ))}
+              </div>
+            </>
+          )}
+        </>
       )}
 
       {/* ---- Sheet: crea contratto da candidatura accettata ---- */}
@@ -213,7 +213,7 @@ function ContrattoForm({
 
       <Field label="Stato">
         <div className="flex flex-wrap gap-2">
-          {STATI.map((s) => (
+          {STATI_CONTRATTO.map((s) => (
             <Chip
               key={s}
               label={STATO_LABEL[s]}
@@ -285,5 +285,32 @@ function ContrattoForm({
         {pending ? "Salvataggio..." : "Salva"}
       </button>
     </form>
+  );
+}
+
+/** La scheda di un contratto nell'elenco. Quelle dello storico sono attenuate, come le candidature chiuse. */
+function SchedaContratto({
+  c,
+  onSelect,
+  passato = false,
+}: {
+  c: ContrattoProprietario;
+  onSelect: (c: ContrattoProprietario) => void;
+  passato?: boolean;
+}) {
+  return (
+    <button onClick={() => onSelect(c)} className="match-card" style={passato ? { opacity: 0.55 } : undefined}>
+      <div className="mc-avatar">
+        {`${c.nome?.[0] ?? ""}${c.cognome?.[0] ?? ""}`.toUpperCase() || "IN"}
+      </div>
+      <div className="mc-body">
+        <div className="mc-zona">{c.candidature?.listings?.titolo}</div>
+        <div className="mc-title">
+          {c.nome} {c.cognome}
+        </div>
+        <div className="mc-meta">{c.canone ? `€${c.canone.toLocaleString("it-IT")}/mese` : "—"}</div>
+      </div>
+      <div className={`mc-pct ${badgeStato(c.stato)}`}>{etichettaStato(c.stato)}</div>
+    </button>
   );
 }

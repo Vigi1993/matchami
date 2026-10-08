@@ -2,23 +2,15 @@
 
 import { useState } from "react";
 import { Sheet } from "@/components/Sheet";
-import type { ContrattoConAnnuncio, StatoContratto } from "@/lib/types";
+import type { ContrattoConAnnuncio } from "@/lib/types";
+import {
+  NESSUN_CONTRATTO_IN_CORSO,
+  badgeStato,
+  etichettaStato,
+  raggruppaContratti,
+} from "@/lib/contratti";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { IconDocumento } from "@/components/icons";
-
-const STATO_LABEL: Record<StatoContratto, string> = {
-  bozza: "Bozza",
-  in_firma: "In firma",
-  firmato: "Firmato",
-  concluso: "Concluso",
-};
-
-const STATO_BADGE: Record<StatoContratto, string> = {
-  bozza: "is-off",
-  in_firma: "is-wait",
-  firmato: "is-match",
-  concluso: "is-off",
-};
 
 function formatData(d: string | null): string {
   if (!d) return "—";
@@ -39,6 +31,9 @@ export function GestioneClient({
   );
   const [bolletteAperto, setBolletteAperto] = useState(false);
 
+  // I contratti conclusi vanno nello storico: non restano mescolati a quelli in corso.
+  const { inCorso, storico } = raggruppaContratti(contratti);
+
   return (
     <PageContainer wide>
       <h1 className="screen-title">Gestione affitto</h1>
@@ -48,9 +43,7 @@ export function GestioneClient({
 
       {/* ---- I tuoi contratti ---- */}
       <div className="pref-label">
-        <span>
-          I tuoi contratti {contratti.length > 0 && `· ${contratti.length}`}
-        </span>
+        <span>I tuoi contratti</span>
       </div>
 
       {contratti.length === 0 ? (
@@ -63,31 +56,37 @@ export function GestioneClient({
           </p>
         </div>
       ) : (
-        <div className="card-grid">
-          {contratti.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => setSelezionato(c)}
-              className="match-card"
-            >
-              <div className="mc-avatar">
-                {(c.candidature?.listings?.titolo ?? "IM").slice(0, 2).toUpperCase()}
+        <>
+          {inCorso.length > 0 ? (
+            <>
+              <div className="pref-label" style={{ marginTop: 12 }}>
+                <span>In corso — {inCorso.length}</span>
               </div>
-              <div className="mc-body">
-                <div className="mc-zona">{c.candidature?.listings?.zona ?? ""}</div>
-                <div className="mc-title">
-                  {c.candidature?.listings?.titolo ?? "Immobile"}
-                </div>
-                <div className="mc-meta">
-                  {c.canone ? `€${c.canone.toLocaleString("it-IT")}/mese` : "—"}
-                </div>
+              <div className="card-grid">
+                {inCorso.map((c) => (
+                  <SchedaContratto key={c.id} c={c} onSelect={setSelezionato} />
+                ))}
               </div>
-              <div className={`mc-pct ${STATO_BADGE[c.stato]}`}>
-                {STATO_LABEL[c.stato]}
+            </>
+          ) : (
+            <div className="note-box" style={{ marginTop: 12 }}>
+              {NESSUN_CONTRATTO_IN_CORSO}
+            </div>
+          )}
+
+          {storico.length > 0 && (
+            <>
+              <div className="pref-label" style={{ marginTop: 20 }}>
+                <span>Storico — {storico.length}</span>
               </div>
-            </button>
-          ))}
-        </div>
+              <div className="card-grid">
+                {storico.map((c) => (
+                  <SchedaContratto key={c.id} c={c} onSelect={setSelezionato} passato />
+                ))}
+              </div>
+            </>
+          )}
+        </>
       )}
 
       {/* ---- Bollette e utenze ---- */}
@@ -119,8 +118,8 @@ export function GestioneClient({
         {selezionato && (
           <>
             <div className="mb-4">
-              <span className={`mc-pct ${STATO_BADGE[selezionato.stato]}`}>
-                {STATO_LABEL[selezionato.stato]}
+              <span className={`mc-pct ${badgeStato(selezionato.stato)}`}>
+                {etichettaStato(selezionato.stato)}
               </span>
             </div>
             <DettaglioRow
@@ -183,5 +182,28 @@ function DettaglioRow({ label, value }: { label: string; value: string }) {
       <span className="k">{label}</span>
       <span className="v">{value}</span>
     </div>
+  );
+}
+
+/** La scheda di un contratto nell'elenco. Quelle dello storico sono attenuate, come le candidature chiuse. */
+function SchedaContratto({
+  c,
+  onSelect,
+  passato = false,
+}: {
+  c: ContrattoConAnnuncio;
+  onSelect: (c: ContrattoConAnnuncio) => void;
+  passato?: boolean;
+}) {
+  return (
+    <button onClick={() => onSelect(c)} className="match-card" style={passato ? { opacity: 0.55 } : undefined}>
+      <div className="mc-avatar">{(c.candidature?.listings?.titolo ?? "IM").slice(0, 2).toUpperCase()}</div>
+      <div className="mc-body">
+        <div className="mc-zona">{c.candidature?.listings?.zona ?? ""}</div>
+        <div className="mc-title">{c.candidature?.listings?.titolo ?? "Immobile"}</div>
+        <div className="mc-meta">{c.canone ? `€${c.canone.toLocaleString("it-IT")}/mese` : "—"}</div>
+      </div>
+      <div className={`mc-pct ${badgeStato(c.stato)}`}>{etichettaStato(c.stato)}</div>
+    </button>
   );
 }
