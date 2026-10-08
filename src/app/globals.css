@@ -2881,3 +2881,69 @@ mark.segnaposto {
   font-size: 12px;
   color: var(--muted);
 }
+
+/* ============================================================
+   Visite
+   ============================================================ */
+
+.visite-panel {
+  margin-bottom: 22px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid rgba(16, 21, 26, 0.1);
+}
+.visite-aggiungi {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.visite-lista {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+.visite-lista li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  font-size: 13px;
+  border-bottom: 1px solid rgba(16, 21, 26, 0.08);
+}
+.visite-conferma {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  font-size: 12px;
+}
+.visite-chiuse {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.visite-chiuse summary {
+  cursor: pointer;
+}
+.chat-visita {
+  flex-shrink: 0;
+  margin: 0 12px 6px;
+  font-size: 12.5px;
+  background: rgba(62, 107, 87, 0.12);
+  border-radius: 12px;
+  max-height: 45vh;
+  overflow-y: auto;
+}
+.chat-visita > summary {
+  cursor: pointer;
+  padding: 9px 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.chat-visita-corpo {
+  padding: 0 14px 12px;
+}
+.chat-visita-corpo p {
+  margin: 0 0 8px;
+}

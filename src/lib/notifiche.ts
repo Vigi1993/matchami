@@ -8,6 +8,7 @@
  * compone qui, così le parole si possono cambiare senza toccare i dati.
  */
 import { percorsoInterno } from "./percorso";
+import { formattaQuando } from "./visite";
 
 /** Gli stessi tipi del vincolo sulla tabella `notifiche`: un test li tiene allineati. */
 export const TIPI_NOTIFICA = [
@@ -24,6 +25,8 @@ export const TIPI_NOTIFICA = [
   "rapporto_confermato",
   "rapporto_rifiutato",
   "feedback_ricevuto",
+  "visita_prenotata",
+  "visita_annullata",
 ] as const;
 
 export type TipoNotifica = (typeof TIPI_NOTIFICA)[number];
@@ -115,6 +118,20 @@ export function descriviNotifica(
         titolo: "Affitto non confermato",
         testo: "L'altra persona non ha confermato l'affitto che hai dichiarato.",
       };
+    case "visita_prenotata": {
+      const quando = formattaQuando(dati?.quando);
+      return {
+        titolo: "Visita prenotata",
+        testo: `Una persona ha prenotato una visita a ${annuncio(dati, "un tuo immobile")}${quando ? `: ${quando}` : ""}.`,
+      };
+    }
+    case "visita_annullata": {
+      const quando = formattaQuando(dati?.quando);
+      return {
+        titolo: "Visita annullata",
+        testo: `La visita a ${annuncio(dati, "un immobile")}${quando ? ` di ${quando}` : ""} è stata annullata.`,
+      };
+    }
     case "feedback_ricevuto":
       return {
         titolo: "Nuovo feedback",

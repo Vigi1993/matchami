@@ -19,6 +19,8 @@ import { Field } from "@/components/ui/Field";
 import { Stepper } from "@/components/ui/Stepper";
 import { createClient } from "@/lib/supabase/client";
 import { IconPalazzo } from "@/components/icons";
+import { VisiteImmobile } from "@/components/VisiteImmobile";
+import type { VisitaProprietario } from "@/lib/visite";
 import {
   creaImmobile,
   aggiornaImmobile,
@@ -28,8 +30,11 @@ import {
 
 export function ImmobiliClient({
   immobili,
+  visite = [],
 }: {
   immobili: ImmobileDettaglio[];
+  /** i posti liberi e le prenotazioni di tutti i miei immobili */
+  visite?: VisitaProprietario[];
 }) {
   const [nuovoAperto, setNuovoAperto] = useState(false);
   const [selezionato, setSelezionato] = useState<ImmobileDettaglio | null>(
@@ -125,11 +130,14 @@ export function ImmobiliClient({
         title={selezionato?.titolo ?? "Immobile"}
       >
         {selezionato && (
-          <ImmobileForm
-            action={aggiornaImmobile}
-            immobile={selezionato}
-            onSaved={() => setSelezionato(null)}
-          />
+          <>
+            <VisiteImmobile immobileId={selezionato.id} visite={visite} />
+            <ImmobileForm
+              action={aggiornaImmobile}
+              immobile={selezionato}
+              onSaved={() => setSelezionato(null)}
+            />
+          </>
         )}
       </Sheet>
     </PageContainer>

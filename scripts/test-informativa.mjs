@@ -377,3 +377,31 @@ test("messaggi letti: nessuna schermata mostra a chi ha scritto se il messaggio 
   const pagina = fs.readFileSync(path.join(radice, "src", "app", "chat", "[id]", "page.tsx"), "utf8");
   assert.match(pagina, /\.select\("id, mittente_id, testo, created_at"\)/);
 });
+
+// ------------------------------------------------------------
+// Ciò che il testo dice delle visite è vero
+// ------------------------------------------------------------
+
+test("visite: il testo le dichiara, dice chi le vede e cosa contengono le notifiche, e la migrazione lo fa davvero", () => {
+  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
+  assert.match(tutto, /visite \(giorno e ora, e chi le ha prenotate\)/);
+  assert.match(tutto, /Li vedono solo le persone che hanno un match accettato su quell'immobile/);
+  assert.match(tutto, /nome e cognome di chi ha prenotato, per le visite degli ultimi 30 giorni/);
+  assert.match(tutto, /per le visite, il giorno e l'ora; mai nomi di persone/);
+  assert.match(tutto, /una visita, un invito o un documento restano finché non cancelli l'account \(o, per le visite, l'immobile\)/);
+
+  const sql22 = fs.readFileSync(path.join(migrazioni, "0022_visite.sql"), "utf8");
+  // chi non ha un match accettato non vede i posti liberi
+  assert.match(sql22, /c\.tenant_id = auth\.uid\(\)\s+and c\.status = 'accettata'/);
+  // il proprietario vede gli ultimi 30 giorni
+  assert.match(sql22, /v\.data_ora >= now\(\) - interval '30 days'/);
+  // e nelle notifiche delle visite ci sono solo il titolo e la data, mai nomi
+  const trigger = sql22.slice(sql22.indexOf("create or replace function public.notifica_visita()"), sql22.indexOf("drop trigger if exists notifica_visita"));
+  assert.match(trigger, /jsonb_build_object\('titolo', left\(l\.titolo, 80\), 'quando', new\.data_ora\)/);
+  assert.ok(!/nome|cognome/i.test(trigger), "le notifiche delle visite contengono un nome");
+  // chi cancella l'immobile o l'account: le visite non restano appese
+  const tabella = fs.readFileSync(path.join(migrazioni, "0001_init.sql"), "utf8").match(/create table visite \(([\s\S]*?)\n\);/);
+  assert.ok(tabella, "non trovo la tabella delle visite");
+  assert.match(tabella[1], /listing_id uuid not null references listings\(id\) on delete cascade/);
+  assert.match(tabella[1], /candidatura_id uuid references candidature\(id\) on delete set null/);
+});

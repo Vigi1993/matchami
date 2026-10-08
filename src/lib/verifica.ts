@@ -192,6 +192,19 @@ const MESSAGGI: Record<string, string> = {
   INQUILINO_INESISTENTE: "Inquilino non trovato.",
   // decisioni sulle candidature
   CANDIDATURA_NON_TUA: "Questa candidatura non risulta tua.",
+  // visite
+  DATA_NON_VALIDA: "Scegli una data e un'ora valide.",
+  DATA_TROPPO_VICINA: "Il posto deve essere tra almeno un'ora.",
+  DATA_TROPPO_LONTANA: "Il posto deve essere entro 90 giorni.",
+  TROPPI_POSTI: "Hai già 30 posti liberi su questo immobile: toglierne uno, o aspetta che qualcuno prenoti.",
+  POSTO_TROPPO_VICINO: "Tra due visite sullo stesso immobile servono almeno 30 minuti.",
+  VISITA_NON_TUA: "Questa visita non risulta tua.",
+  VISITA_PRENOTATA: "Questo posto è già stato prenotato: per toglierlo, annulla la visita.",
+  VISITA_NON_DISPONIBILE: "Questo posto non è più disponibile. Scegline un altro.",
+  VISITA_GIA_PRENOTATA: "Hai già una visita prenotata: annullala se vuoi sceglierne un'altra.",
+  VISITA_NON_ANNULLABILE: "Questa visita non si può annullare.",
+  VISITA_GIA_PASSATA: "Questa visita è già passata.",
+  CANDIDATURA_NON_ACCETTATA: "Puoi prenotare una visita solo dopo che il proprietario ha accettato la tua candidatura.",
   CONVERSAZIONE_NON_TUA: "Questa conversazione non è tua.",
   CANDIDATURA_RITIRATA: "La persona ha ritirato la candidatura: non c'è più nulla da valutare.",
   CANDIDATURA_NON_RITIRABILE:

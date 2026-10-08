@@ -15,12 +15,13 @@ const sql = fs.readFileSync(path.join(radice, "supabase", "migrations", "0019_no
 // Dopo la 0019 l'elenco dei tipi e il trigger delle candidature sono stati riscritti dalla 0020
 // (il ritiro di una candidatura): la verità è l'ultima definizione.
 const sql0020 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0020_ritira_candidatura.sql"), "utf8");
+const sql0022 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0022_visite.sql"), "utf8");
 
 /** I tipi che il vincolo sulla tabella ammette. */
 function tipiDelDatabase() {
   // l'ultima definizione del vincolo, in ordine di migrazione
-  const tutte = [...(sql + "\n" + sql0020).matchAll(/check \(tipo in \(([\s\S]*?)\)\)/g)];
-  assert.ok(tutte.length >= 2, "dovrei trovare il vincolo della 0019 e quello della 0020");
+  const tutte = [...(sql + "\n" + sql0020 + "\n" + sql0022).matchAll(/check \(tipo in \(([\s\S]*?)\)\)/g)];
+  assert.ok(tutte.length >= 3, "dovrei trovare il vincolo della 0019, quello della 0020 e quello della 0022");
   return [...tutte[tutte.length - 1][1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
 }
 
@@ -29,7 +30,10 @@ const trigger =
   sql.slice(sql.indexOf("-- 4. I trigger"), sql.indexOf("-- 5. Pulizia")) +
   "\n" +
   // la 0020 riscrive la funzione delle candidature: si guarda solo da lì in poi
-  sql0020.slice(sql0020.indexOf("-- 5. La notifica al proprietario"));
+  sql0020.slice(sql0020.indexOf("-- 5. La notifica al proprietario")) +
+  "\n" +
+  // la 0022 aggiunge il trigger delle visite: si guarda la sua funzione
+  sql0022.slice(sql0022.indexOf("create or replace function public.notifica_visita()"), sql0022.indexOf("drop trigger if exists notifica_visita"));
 
 // ------------------------------------------------------------
 // I tipi
@@ -67,6 +71,7 @@ const ROTTE = {
   "/profilo": ["src", "app", "(app)", "profilo", "page.tsx"],
   "/gestione-affitti": ["src", "app", "(app)", "gestione-affitti", "page.tsx"],
   "/chat/": ["src", "app", "chat", "[id]", "page.tsx"],
+  "/immobili": ["src", "app", "(app)", "immobili", "page.tsx"],
 };
 
 test("link: ogni percorso che i trigger scrivono esiste nell'app", () => {
@@ -105,7 +110,7 @@ test("testi: ogni tipo ha un titolo e un testo suoi, mai la formula generica", (
     const d = n.descriviNotifica(t, { titolo: "Casa" });
     assert.ok(d.titolo.trim() && d.testo.trim(), t);
     assert.notEqual(d.titolo, generico.titolo, `«${t}» usa il titolo generico`);
-    assert.ok(!/undefined|null|\[object/.test(d.titolo + d.testo), `${t}: ${d.testo}`);
+    assert.ok(!/\bundefined\b|\bnull\b|\[object/.test(d.titolo + d.testo), `${t}: ${d.testo}`);
     assert.ok(!visti.has(d.titolo), `due tipi con lo stesso titolo: ${d.titolo}`);
     visti.add(d.titolo);
   }

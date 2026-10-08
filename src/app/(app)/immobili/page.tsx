@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { ImmobiliClient } from "./ImmobiliClient";
 import type { ImmobileDettaglio } from "@/lib/types";
+import type { VisitaProprietario } from "@/lib/visite";
 import { criteriDaRighe } from "@/lib/match";
 import type { RigaCriterioDb } from "@/lib/match";
 
@@ -10,7 +11,7 @@ export default async function ImmobiliPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const [{ data: listings }, { data: candidature }] = await Promise.all([
+  const [{ data: listings }, { data: candidature }, { data: visite }] = await Promise.all([
     supabase
       .from("listings")
       .select(
@@ -22,6 +23,8 @@ export default async function ImmobiliPage() {
       .from("candidature")
       .select("id, listing_id, listings!inner(owner_id)")
       .eq("listings.owner_id", user!.id),
+    // i posti liberi e le prenotazioni di tutti i miei immobili, in una chiamata sola
+    supabase.rpc("visite_del_proprietario"),
   ]);
 
   const nCandidaturePerListing = new Map<string, number>();
@@ -49,5 +52,5 @@ export default async function ImmobiliPage() {
     nCandidature: nCandidaturePerListing.get(l.id) ?? 0,
   }));
 
-  return <ImmobiliClient immobili={immobili} />;
+  return <ImmobiliClient immobili={immobili} visite={(visite ?? []) as VisitaProprietario[]} />;
 }

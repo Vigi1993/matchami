@@ -4,6 +4,7 @@ import { INFORMATIVA } from "@/content/informativa";
 import { haAccettatoInformativa } from "@/lib/informativa";
 import { ChatClient } from "./ChatClient";
 import type { Messaggio } from "@/lib/types";
+import type { PostoLibero, VisitaCandidatura } from "@/lib/visite";
 
 export default async function ChatPage({
   params,
@@ -60,6 +61,15 @@ export default async function ChatPage({
     .eq("candidatura_id", id)
     .order("created_at", { ascending: true });
 
+  // Le visite di questo match, e per l'inquilino i posti tra cui scegliere. Se una lettura
+  // non riesce, la chat si apre lo stesso: il pannello dirà che non ci sono posti.
+  const [{ data: visite }, { data: posti }] = await Promise.all([
+    supabase.rpc("visite_della_candidatura", { p_candidatura: id }),
+    isTenant
+      ? supabase.rpc("posti_liberi_per_candidatura", { p_candidatura: id })
+      : Promise.resolve({ data: [] as PostoLibero[] }),
+  ]);
+
   const altroNome =
     `${altroProfilo?.nome ?? ""} ${altroProfilo?.cognome ?? ""}`.trim() ||
     "Utente";
@@ -70,6 +80,9 @@ export default async function ChatPage({
       userId={user!.id}
       altroNome={altroNome}
       titoloAnnuncio={listing?.titolo ?? ""}
+      ruolo={isTenant ? "inquilino" : "proprietario"}
+      visite={(visite ?? []) as VisitaCandidatura[]}
+      posti={(posti ?? []) as PostoLibero[]}
       messaggiIniziali={(messaggi ?? []) as Messaggio[]}
     />
   );

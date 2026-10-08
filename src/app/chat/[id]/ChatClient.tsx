@@ -6,6 +6,8 @@ import { createClient } from "@/lib/supabase/client";
 import type { Messaggio } from "@/lib/types";
 import { IconIndietro, IconInvia } from "@/components/icons";
 import { AvvisoMessaggio, AvvisoTruffe, ConfermaInvioRischioso } from "@/components/AvvisiChat";
+import { VisitaChat } from "@/components/VisitaChat";
+import type { PostoLibero, VisitaCandidatura } from "@/lib/visite";
 import { rilevaRischioPagamento, type Rischio } from "@/lib/truffe";
 
 export function ChatClient({
@@ -14,12 +16,19 @@ export function ChatClient({
   altroNome,
   titoloAnnuncio,
   messaggiIniziali,
+  ruolo = "inquilino",
+  visite = [],
+  posti = [],
 }: {
   candidaturaId: string;
   userId: string;
   altroNome: string;
   titoloAnnuncio: string;
   messaggiIniziali: Messaggio[];
+  /** i dati delle visite: se il caricamento non è riuscito, la chat si apre lo stesso */
+  ruolo?: string;
+  visite?: VisitaCandidatura[];
+  posti?: PostoLibero[];
 }) {
   const router = useRouter();
   const [messaggi, setMessaggi] = useState<Messaggio[]>(messaggiIniziali);
@@ -132,6 +141,8 @@ export function ChatClient({
       </div>
 
       <AvvisoTruffe />
+
+      <VisitaChat candidaturaId={candidaturaId} ruolo={ruolo} visite={visite} posti={posti} />
 
       <div className="chat-scroll">
         {messaggi.length === 0 && (
