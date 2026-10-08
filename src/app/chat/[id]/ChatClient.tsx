@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { Messaggio } from "@/lib/types";
@@ -29,6 +29,22 @@ export function ChatClient({
   const [daConfermare, setDaConfermare] = useState<Rischio | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  // Si segnano come letti i messaggi dell'altra persona: quando si apre la chat e ogni
+  // volta che ne arriva uno mentre è aperta. La chiamata è «pigra»: parte solo
+  // quando qualcuno ne attende il risultato, e `.then` è ciò che la fa partire.
+  const segnaLetti = useCallback(() => {
+    createClient()
+      .rpc("segna_messaggi_letti", { p_candidatura: candidaturaId })
+      .then(
+        () => undefined,
+        () => undefined
+      );
+  }, [candidaturaId]);
+
+  useEffect(() => {
+    segnaLetti();
+  }, [segnaLetti]);
+
   useEffect(() => {
     const supabase = createClient();
     const channel = supabase
@@ -46,6 +62,8 @@ export function ChatClient({
           setMessaggi((prev) =>
             prev.some((m) => m.id === nuovo.id) ? prev : [...prev, nuovo]
           );
+          // se arriva dall'altra persona mentre la chat è aperta, è già letto
+          if (nuovo.mittente_id !== userId) segnaLetti();
         }
       )
       .subscribe();
@@ -53,7 +71,7 @@ export function ChatClient({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [candidaturaId]);
+  }, [candidaturaId, userId, segnaLetti]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });

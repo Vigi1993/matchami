@@ -333,8 +333,13 @@ test("privacy: la chat non manda il risultato da nessuna parte: nell'invio ci so
   assert.equal(inserimenti.length, 1, "dovrebbe esserci un solo inserimento");
   const campi = [...inserimenti[0][1].matchAll(/(\w+):/g)].map((m) => m[1]).sort();
   assert.deepEqual(campi, ["candidatura_id", "mittente_id", "testo"]);
-  // e il rischio non viene usato in nessun'altra chiamata verso il database
-  assert.equal((chat.match(/createClient\(\)/g) ?? []).length, 2, "attese solo le due chiamate esistenti (canale e invio)");
+  // E il rischio non viene usato in nessun'altra chiamata verso il database. Le chiamate sono tre:
+  // il canale in tempo reale, l'invio (qui sopra) e «segna come letti» (messaggi non letti).
+  assert.equal((chat.match(/createClient\(\)/g) ?? []).length, 3, "attese solo le tre chiamate note (canale, segna come letti, invio)");
+  const rpc = [...chat.matchAll(/\.rpc\(\s*"([a-z_]+)"\s*,\s*\{([^}]*)\}/g)];
+  assert.equal(rpc.length, 1, "attesa una sola chiamata rpc");
+  assert.equal(rpc[0][1], "segna_messaggi_letti");
+  assert.equal(rpc[0][2].trim(), "p_candidatura: candidaturaId", "la chiamata deve portare solo l'id della conversazione, mai il testo o il rischio");
 });
 
 test("privacy: i componenti degli avvisi non fanno chiamate di rete", () => {

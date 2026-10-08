@@ -35,6 +35,15 @@ export default async function AppLayout({
     .select("id", { count: "exact", head: true })
     .is("letta_at", null);
 
+  // I messaggi dell'altra persona non ancora letti. La sicurezza del database
+  // limita il conteggio alle proprie conversazioni. Come sopra: se non riesce,
+  // zero, non una pagina che non si apre.
+  const { count: messaggiNonLetti } = await supabase
+    .from("messaggi")
+    .select("id", { count: "exact", head: true })
+    .eq("letto", false)
+    .neq("mittente_id", user!.id);
+
   /*
     Come nel prototipo: un unico "telaio" da 480px centrato, alto quanto
     la viewport e senza scroll di pagina. Dentro, l'area delle schermate
@@ -43,7 +52,7 @@ export default async function AppLayout({
   return (
     <div className="app-shell">
       <div className="screens">{children}</div>
-      <Navigation ruolo={ruolo} nome={profile?.nome} nonLette={count ?? 0} />
+      <Navigation ruolo={ruolo} nome={profile?.nome} nonLette={count ?? 0} messaggiNonLetti={messaggiNonLetti ?? 0} />
     </div>
   );
 }

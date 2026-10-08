@@ -2761,3 +2761,88 @@ mark.segnaposto {
 .chat-conferma p {
   margin: 0 0 8px;
 }
+
+/* ============================================================
+   Messaggi: l'elenco delle conversazioni
+   ============================================================ */
+
+.conversazioni-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.conversazione {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  text-decoration: none;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid rgba(16, 21, 26, 0.1);
+  border-radius: 14px;
+}
+.conversazione.nuova {
+  border-color: var(--clay);
+  background: rgba(201, 105, 78, 0.07);
+}
+.conversazione-corpo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.conversazione-nome {
+  font-size: 14px;
+  font-weight: 600;
+}
+.conversazione.nuova .conversazione-nome {
+  font-weight: 700;
+}
+.conversazione-annuncio {
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conversazione-anteprima {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conversazione.nuova .conversazione-anteprima {
+  color: var(--ink);
+  font-weight: 600;
+}
+.conversazione-lato {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.conversazione-tempo {
+  font-size: 11px;
+  color: var(--muted);
+}
+.conversazione-conto {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--clay);
+  border-radius: 999px;
+}

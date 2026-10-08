@@ -352,3 +352,28 @@ test("chat: il testo dichiara che l'app legge i messaggi per avvisare, e che non
   // il testo NON deve dire che il controllo avviene solo sul dispositivo: la prima versione della pagina si costruisce sul server
   assert.ok(!/sul tuo dispositivo|solo sul tuo telefono|resta sul tuo/i.test(tutto), "non è vero che il controllo avviene solo sul dispositivo");
 });
+
+// ------------------------------------------------------------
+// Ciò che il testo dice dei messaggi letti è vero
+// ------------------------------------------------------------
+
+test("messaggi letti: il testo dichiara che l'app li ricorda e che non lo mostra all'altra persona", () => {
+  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
+  assert.match(tutto, /L'app ricorda quali messaggi hai già letto, solo per mostrarti quanti ne restano da leggere/);
+  assert.match(tutto, /non lo mostra all'altra persona/);
+});
+
+test("messaggi letti: nessuna schermata mostra a chi ha scritto se il messaggio è stato letto", () => {
+  // il testo promette «non lo mostra all'altra persona»: l'interfaccia non deve farlo
+  const file = [
+    ["src", "app", "chat", "[id]", "ChatClient.tsx"], ["src", "app", "chat", "[id]", "page.tsx"],
+    ["src", "app", "(app)", "messaggi", "ConversazioniLista.tsx"], ["src", "components", "AvvisiChat.tsx"],
+  ];
+  for (const parti of file) {
+    const codice = fs.readFileSync(path.join(radice, ...parti), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+    assert.ok(!/\.letto\b|["']letto["']|\bvisto\b|\bletto il\b|spunta/i.test(codice), `${parti.join("/")} mostra o legge lo stato «letto»`);
+  }
+  // e la chat non chiede la colonna «letto» al database
+  const pagina = fs.readFileSync(path.join(radice, "src", "app", "chat", "[id]", "page.tsx"), "utf8");
+  assert.match(pagina, /\.select\("id, mittente_id, testo, created_at"\)/);
+});
