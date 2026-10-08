@@ -7,6 +7,7 @@ import { computeAffidabilita } from "@/lib/affidabilita";
 import { haCriteriDiRicerca, preparaMazzo, profiloRicercaDaRighe } from "@/lib/match";
 import type { ProfiloRicerca } from "@/lib/match";
 import type { TenantProfile, ListingConMatch, ListingProprietario } from "@/lib/types";
+import { idsNascosti } from "@/lib/scelte";
 
 export default async function Home() {
   const supabase = await createClient();
@@ -36,6 +37,7 @@ async function TenantHome({ userId }: { userId: string }) {
     { data: interessiRows },
     { data: recensioni },
     { data: giaCandidato },
+    { data: nascostiRighe },
   ] = await Promise.all([
     supabase.from("tenant_profiles").select("*").eq("profile_id", userId).single(),
     supabase.from("tenant_zone_interesse").select("zona").eq("tenant_id", userId),
@@ -45,6 +47,9 @@ async function TenantHome({ userId }: { userId: string }) {
       .eq("tenant_id", userId),
     supabase.from("recensioni").select("voto").eq("tenant_id", userId),
     supabase.from("candidature").select("listing_id").eq("tenant_id", userId),
+    // i preferiti e gli scarti degli ultimi 30 giorni: non si rimettono nel mazzo.
+    // Se la lettura non riesce, il mazzo si vede intero: meglio un annuncio in più che nessuno.
+    supabase.rpc("annunci_nascosti"),
   ]);
 
   const numeroRecensioni = recensioni?.length ?? 0;
@@ -78,7 +83,11 @@ async function TenantHome({ userId }: { userId: string }) {
     )
     .eq("pubblicato", true);
 
-  const listingIdsEsclusi = (giaCandidato ?? []).map((c) => c.listing_id as string);
+  // Gli identificativi dei nascosti entrano in un filtro: passano solo se sono identificativi veri.
+  const idsScelti = idsNascosti(nascostiRighe);
+  const listingIdsEsclusi = [
+    ...new Set([...(giaCandidato ?? []).map((c) => c.listing_id as string), ...idsScelti]),
+  ];
   if (listingIdsEsclusi.length > 0) {
     query = query.not("id", "in", `(${listingIdsEsclusi.join(",")})`);
   }
@@ -102,12 +111,24 @@ async function TenantHome({ userId }: { userId: string }) {
 
   const { mazzo, esclusi } = preparaMazzo(listingsOrdinati, profiloRicerca);
 
+  // Se il mazzo è vuoto, bisogna dire PERCHÉ: nessun annuncio, o li ha già scelti tutti.
+  let nascosti = 0;
+  if (listingsOrdinati.length === 0 && idsScelti.length > 0) {
+    const { count } = await supabase
+      .from("listings")
+      .select("id", { count: "exact", head: true })
+      .in("id", idsScelti)
+      .eq("pubblicato", true);
+    nascosti = count ?? 0;
+  }
+
   return (
     <HomeClient
       affidabilita={affidabilita}
       listings={mazzo as unknown as ListingConMatch[]}
       esclusi={esclusi}
       mostraMatch={haCriteriDiRicerca(profiloRicerca)}
+      nascosti={nascosti}
     />
   );
 }

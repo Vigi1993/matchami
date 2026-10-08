@@ -405,3 +405,39 @@ test("visite: il testo le dichiara, dice chi le vede e cosa contengono le notifi
   assert.match(tabella[1], /listing_id uuid not null references listings\(id\) on delete cascade/);
   assert.match(tabella[1], /candidatura_id uuid references candidature\(id\) on delete set null/);
 });
+
+// ------------------------------------------------------------
+// Ciò che il testo dice dei preferiti e degli scarti è vero
+// ------------------------------------------------------------
+
+test("preferiti e scarti: il testo li dichiara, dice chi li vede e per quanto si conservano, e la migrazione lo fa davvero", () => {
+  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
+  assert.match(tutto, /gli annunci che salvi tra i preferiti o che scarti/);
+  assert.match(tutto, /il proprietario non sa quali annunci hai salvato o scartato/);
+  assert.match(tutto, /I preferiti restano finché li togli\. Gli annunci che scarti smettono di contare dopo 30 giorni e si cancellano la volta successiva che scarti o salvi un annuncio/);
+
+  const sql23 = fs.readFileSync(path.join(migrazioni, "0023_preferiti.sql"), "utf8");
+  // solo chi sceglie le legge, e nessuno scrive direttamente
+  assert.match(sql23, /for select using \(tenant_id = auth\.uid\(\)\)/);
+  assert.match(sql23, /revoke insert, update, delete on scelte_annunci from authenticated;/);
+  // gli scarti vecchi si cancellano DAVVERO, nel momento in cui chi li ha fatti sceglie di nuovo
+  const funzioni = [...sql23.matchAll(/create or replace function public\.(scarta_annuncio|salva_preferito)\([\s\S]*?\n\$\$;/g)];
+  assert.equal(funzioni.length, 2, "attese le due funzioni che scelgono");
+  for (const f of funzioni) assert.match(f[0], /delete from scelte_annunci\s+where tenant_id = auth\.uid\(\) and tipo = 'scartato'\s+and created_at <= now\(\) - interval '30 days'/, `${f[1]} non cancella gli scarti vecchi`);
+  // e i preferiti non scadono: nessuna cancellazione dei preferiti per età
+  assert.ok(!/tipo = 'preferito'[^;]*interval '30 days'[^;]*delete|delete[^;]*tipo = 'preferito'[^;]*interval/.test(sql23), "i preferiti scadono");
+});
+
+test("preferiti e scarti: nessun codice dell'app legge la tabella direttamente, e nessuna funzione per i proprietari la espone", () => {
+  // si legge solo con le funzioni (che guardano chi chiama): un proprietario non ha modo di arrivarci
+  function filiDiCodice(dir = path.join(radice, "src")) {
+    return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+      if (e.name.startsWith("__")) return [];
+      const p = path.join(dir, e.name);
+      return e.isDirectory() ? filiDiCodice(p) : /\.(ts|tsx)$/.test(e.name) ? [p] : [];
+    });
+  }
+  for (const f of filiDiCodice()) assert.ok(!/scelte_annunci/.test(fs.readFileSync(f, "utf8")), `${path.relative(radice, f)} nomina la tabella delle scelte`);
+  const altre = fs.readdirSync(migrazioni).filter((x) => /^\d{4}_.*\.sql$/.test(x) && x !== "0023_preferiti.sql");
+  for (const f of altre) assert.ok(!/scelte_annunci/.test(fs.readFileSync(path.join(migrazioni, f), "utf8")), `${f} nomina la tabella delle scelte`);
+});

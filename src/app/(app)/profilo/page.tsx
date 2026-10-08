@@ -85,9 +85,13 @@ export default async function ProfiloPage() {
       ? recensioni!.reduce((s, r) => s + (r.voto as number), 0) / numeroRecensioni
       : null;
 
+  // quanti annunci ha salvato (solo quelli ancora disponibili); se non si legge, zero
+  const { data: numeroPreferiti } = await supabase.rpc("numero_preferiti");
+
   return (
     <ProfiloClient
       nonLette={nonLette}
+      preferiti={typeof numeroPreferiti === "number" ? numeroPreferiti : 0}
       nome={profile?.nome ?? null}
       cognome={profile?.cognome ?? null}
       email={user!.email ?? null}

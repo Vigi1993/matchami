@@ -192,6 +192,11 @@ const MESSAGGI: Record<string, string> = {
   INQUILINO_INESISTENTE: "Inquilino non trovato.",
   // decisioni sulle candidature
   CANDIDATURA_NON_TUA: "Questa candidatura non risulta tua.",
+  // preferiti e scarti
+  SOLO_INQUILINI: "Solo chi cerca casa può salvare o scartare gli annunci.",
+  ANNUNCIO_NON_DISPONIBILE: "Questo annuncio non è più disponibile.",
+  GIA_CANDIDATO: "Hai già inviato la candidatura per questo annuncio.",
+  TROPPI_PREFERITI: "Hai già 100 preferiti: togline qualcuno per salvarne un altro.",
   // visite
   DATA_NON_VALIDA: "Scegli una data e un'ora valide.",
   DATA_TROPPO_VICINA: "Il posto deve essere tra almeno un'ora.",

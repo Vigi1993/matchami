@@ -28,7 +28,7 @@ export const INFORMATIVA = {
    * controllo che fa il database (migrazione 0017): un test fallisce se
    * questa stringa non lo supera.
    */
-  versione: "2026-10-provvisoria-6",
+  versione: "2026-10-provvisoria-7",
   provvisoria: true,
   titolo: "Informativa sulla privacy",
   aggiornata: "ottobre 2026",
@@ -51,7 +51,7 @@ export const INFORMATIVA = {
       titolo: "Quali dati raccogliamo",
       elenco: [
         "Account: email, password (conservata come impronta, non in chiaro), nome, cognome e ruolo, inquilino o proprietario.",
-        "Se sei inquilino: lavoro, reddito tuo e del tuo nucleo, garante, fideiussione, protesti (li dichiari tu e non vengono verificati), animali, composizione del nucleo, numero di figli, presentazione, foto del profilo e le tue preferenze di ricerca (budget, zone, locali, metri, caratteristiche).",
+        "Se sei inquilino: lavoro, reddito tuo e del tuo nucleo, garante, fideiussione, protesti (li dichiari tu e non vengono verificati), animali, composizione del nucleo, numero di figli, presentazione, foto del profilo, le tue preferenze di ricerca (budget, zone, locali, metri, caratteristiche) e gli annunci che salvi tra i preferiti o che scarti.",
         "Se sei proprietario: tipo di proprietario, numero di immobili, obiettivo; gli annunci con titolo, descrizione, zona, prezzo, caratteristiche e foto; i criteri che chiedi ai candidati.",
         "Per le verifiche: il documento d'identità e la prova di proprietà dell'immobile (proprietari); se sei inquilino e chiedi di verificare il reddito, un documento d'identità e una prova del reddito (una busta paga, la CU o la dichiarazione dei redditi); e i contratti di affitto caricati per dichiarare un affitto. Non chiediamo lo stato di famiglia.",
         "Mentre usi l'app: candidature, messaggi, visite (giorno e ora, e chi le ha prenotate), contratti, recensioni, richieste di conferma di un affitto e inviti. Inoltre le notifiche sulle novità del tuo account (per esempio l'esito di una verifica o la risposta a una candidatura): contengono il tipo di evento e, al massimo, il titolo di un annuncio e, per le visite, il giorno e l'ora; mai nomi di persone.",
@@ -79,6 +79,7 @@ export const INFORMATIVA = {
         "Se rifiuta la tua candidatura, del tuo profilo gli resta solo il tuo nome, oltre alla valutazione che aveva già fatto. Tu vedi il motivo del rifiuto, non la sua valutazione completa.",
         "Se ritiri una candidatura mentre è ancora in attesa, il proprietario non la vede più: non legge né il tuo profilo né le recensioni su di te, e riceve solo una notifica con il titolo dell'annuncio. La candidatura resta nel tuo elenco e non puoi candidarti di nuovo allo stesso annuncio.",
         "I messaggi li leggono solo le due persone, dopo che la candidatura è stata accettata. L'app ricorda quali messaggi hai già letto, solo per mostrarti quanti ne restano da leggere: non lo mostra all'altra persona.",
+        "I preferiti e gli annunci che scarti li vede solo chi li sceglie: il proprietario non sa quali annunci hai salvato o scartato.",
         "Le visite: il proprietario indica i giorni e gli orari in cui è disponibile per un suo immobile. Li vedono solo le persone che hanno un match accettato su quell'immobile; chi non lo ha non vede nemmeno quali orari ci sono. Chi prenota vede la propria visita, e il proprietario vede nome e cognome di chi ha prenotato, per le visite degli ultimi 30 giorni.",
         "Nella chat, l'app evidenzia i messaggi che parlano di pagamenti sospetti (per esempio un IBAN, una caparra o un anticipo) e ti avvisa prima di inviarne uno così, per aiutarti a riconoscere una truffa. È un controllo automatico che fa parte della visualizzazione della chat: non salviamo il risultato e non lo comunichiamo a nessuno, e non impedisce mai di inviare un messaggio.",
         "Le recensioni su un inquilino le leggono la persona recensita, chi le ha scritte e i proprietari a cui ha inviato una candidatura.",
@@ -96,7 +97,7 @@ export const INFORMATIVA = {
     {
       titolo: "Per quanto tempo conserviamo i dati",
       paragrafi: [
-        "Al momento non c'è una scadenza automatica: una candidatura, un messaggio, una visita, un invito o un documento restano finché non cancelli l'account (o, per le visite, l'immobile). Un documento caricato per la verifica del reddito puoi toglierlo tu, ma solo finché non hai inviato la richiesta. Le notifiche sono pensate per sparire dopo 60 giorni se lette e dopo 180 se non lette, ma questa pulizia non è ancora attiva. I tempi di conservazione saranno definiti nel testo definitivo.",
+        "Al momento non c'è una scadenza automatica: una candidatura, un messaggio, una visita, un invito o un documento restano finché non cancelli l'account (o, per le visite, l'immobile). I preferiti restano finché li togli. Gli annunci che scarti smettono di contare dopo 30 giorni e si cancellano la volta successiva che scarti o salvi un annuncio. Un documento caricato per la verifica del reddito puoi toglierlo tu, ma solo finché non hai inviato la richiesta. Le notifiche sono pensate per sparire dopo 60 giorni se lette e dopo 180 se non lette, ma questa pulizia non è ancora attiva. I tempi di conservazione saranno definiti nel testo definitivo.",
       ],
     },
     {

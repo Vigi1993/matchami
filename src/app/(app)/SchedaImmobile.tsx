@@ -14,6 +14,7 @@ export function SchedaImmobile({
   mostraMatch,
   onClose,
   onPassa,
+  onSalva,
   onCandidati,
   inCorso,
 }: {
@@ -22,6 +23,8 @@ export function SchedaImmobile({
   mostraMatch: boolean;
   onClose: () => void;
   onPassa: () => void;
+  /** salvare tra i preferiti, per decidere dopo */
+  onSalva?: () => void;
   onCandidati: () => void;
   inCorso: boolean;
 }) {
@@ -115,6 +118,11 @@ export function SchedaImmobile({
         >
           Passo
         </button>
+        {onSalva && (
+          <button type="button" onClick={onSalva} disabled={inCorso} className="btn-neutro">
+            Salva
+          </button>
+        )}
         <button
           type="button"
           onClick={onCandidati}

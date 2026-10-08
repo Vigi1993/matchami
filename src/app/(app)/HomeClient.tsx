@@ -6,12 +6,28 @@ import type { AffidabilitaResult } from "@/lib/affidabilita";
 import type { ListingConMatch } from "@/lib/types";
 import { TOLLERANZA_BUDGET, statoMazzo } from "@/lib/match";
 import { candidati } from "./actions";
+import { createClient } from "@/lib/supabase/client";
+import { messaggioErroreVerifica } from "@/lib/verifica";
+import {
+  TESTO_DOVE_SONO,
+  TESTO_PREFERITO_TOLTO,
+  TESTO_SALVATO,
+  TESTO_SCARTO_ANNULLATO,
+  TITOLO_TUTTI_SCELTI,
+  annullaUltima,
+  registra,
+  svuota,
+  ultimaScelta,
+  type Scelta,
+} from "@/lib/scelte";
 import {
   IconChevronSu,
   IconCuore,
   IconX,
   IconCasa,
   IconInfo,
+  IconAnnulla,
+  IconSegnalibro,
 } from "@/components/icons";
 import { SchedaImmobile } from "./SchedaImmobile";
 
@@ -23,6 +39,7 @@ export function HomeClient({
   listings,
   esclusi,
   mostraMatch,
+  nascosti = 0,
 }: {
   affidabilita: AffidabilitaResult;
   /** il mazzo già ordinato: prima gli annunci in ricerca, poi gli altri */
@@ -31,6 +48,8 @@ export function HomeClient({
   esclusi: number;
   /** false se l'inquilino non ha impostato nessun criterio di ricerca */
   mostraMatch: boolean;
+  /** annunci disponibili che l'inquilino ha già scartato (di recente) o salvato */
+  nascosti?: number;
 }) {
   // Il mazzo si congela alla prima visualizzazione. Dopo una candidatura
   // la pagina viene rigenerata dal server senza l'annuncio appena scelto:
@@ -43,6 +62,9 @@ export function HomeClient({
     new Set()
   );
   const [pending, startTransition] = useTransition();
+  // Le scelte fatte in questa sessione, per «annulla»; e l'ultimo avviso mostrato.
+  const [storia, setStoria] = useState<Scelta[]>([]);
+  const [avviso, setAvviso] = useState<{ errore: boolean; testo: string } | null>(null);
 
   // ---- stato del trascinamento della card ----
   const [fotoIdx, setFotoIdx] = useState(0);
@@ -67,8 +89,58 @@ export function HomeClient({
   const oltreBudget = mazzo.filter((l) => l.match.sforoBudgetPct !== null).length;
   const tolleranzaPct = Math.round(TOLLERANZA_BUDGET * 100);
 
+  // Le chiamate di Supabase partono solo se qualcuno ne attende il risultato:
+  // il `.then` (o un `await`) è ciò che le fa partire.
+
+  // Scartare è immediato e non si ferma per un errore di rete: se il ricordo non
+  // si salva, l'annuncio ricompare un'altra volta, nient'altro.
   function scarta() {
+    if (attuale) {
+      setStoria((s) => registra(s, { listingId: attuale.id, tipo: "scartato" }));
+      createClient()
+        .rpc("scarta_annuncio", { p_listing: attuale.id })
+        .then(undefined, () => undefined);
+    }
+    setAvviso(null);
     setIndex((i) => i + 1);
+    setFotoIdx(0);
+  }
+
+  // Salvare, invece, è una scelta voluta: se non riesce lo si dice e si resta sulla stessa casa.
+  function salva() {
+    if (!attuale || pending || mostraSeparatore) return;
+    const listing = attuale;
+    startTransition(async () => {
+      let errore: string | null = null;
+      try {
+        const { error } = await createClient().rpc("salva_preferito", { p_listing: listing.id });
+        if (error) errore = messaggioErroreVerifica(error.message);
+      } catch {
+        errore = messaggioErroreVerifica("");
+      }
+      if (errore) {
+        setAvviso({ errore: true, testo: errore });
+        return;
+      }
+      setStoria((s) => registra(s, { listingId: listing.id, tipo: "preferito" }));
+      setAvviso({ errore: false, testo: TESTO_SALVATO });
+      setSchedaAperta(false);
+      setIndex((i) => i + 1);
+      setFotoIdx(0);
+    });
+  }
+
+  // Torna indietro di una scelta (uno scarto o un salvataggio) e la toglie dal database.
+  function annulla() {
+    const { storia: nuova, annullata } = annullaUltima(storia);
+    if (!annullata || pending) return;
+    setStoria(nuova);
+    createClient()
+      .rpc("annulla_scelta", { p_listing: annullata.listingId })
+      .then(undefined, () => undefined);
+    setAvviso({ errore: false, testo: annullata.tipo === "preferito" ? TESTO_PREFERITO_TOLTO : TESTO_SCARTO_ANNULLATO });
+    setSchedaAperta(false);
+    setIndex((i) => Math.max(0, i - 1));
     setFotoIdx(0);
   }
 
@@ -78,10 +150,16 @@ export function HomeClient({
       if (!res?.error) {
         setCandidatureInviate((prev) => new Set(prev).add(listing.id));
       }
+      // una candidatura non si annulla da qui (si ritira da «Candidature»): dopo,
+      // «annulla» non torna indietro oltre questo punto
+      setStoria(svuota());
+      setAvviso(null);
       setIndex((i) => i + 1);
       setFotoIdx(0);
     });
   }
+
+  const puoAnnullare = ultimaScelta(storia) !== null && !pending;
 
   // Azionata sia dal rilascio del trascinamento sia dai pulsanti: fa
   // "volare via" la card nella direzione scelta, poi passa alla prossima.
@@ -224,12 +302,16 @@ export function HomeClient({
               <IconCasa className="icon-ring" />
             </div>
             <h2>
-              {esclusi > 0
-                ? "Nessuna casa nel tuo budget"
-                : "Nessun annuncio per la tua ricerca"}
+              {nascosti > 0
+                ? TITOLO_TUTTI_SCELTI
+                : esclusi > 0
+                  ? "Nessuna casa nel tuo budget"
+                  : "Nessun annuncio per la tua ricerca"}
             </h2>
             <p>
-              {esclusi > 0
+              {nascosti > 0
+                ? TESTO_DOVE_SONO
+                : esclusi > 0
                 ? `Ci sono ${esclusi} ${esclusi === 1 ? "casa" : "case"} oltre il ${tolleranzaPct}% del tuo budget, che non ti mostriamo. Se vuoi vederle, aggiorna il budget in Profilo → La tua ricerca.`
                 : "Appena ci saranno immobili pubblicati che rientrano nei tuoi criteri, li vedrai qui. Nel frattempo puoi aggiornare i criteri in Profilo → La tua ricerca."}
             </p>
@@ -244,10 +326,16 @@ export function HomeClient({
             </div>
             <h2>Hai visto tutti gli annunci disponibili</h2>
             <p>
-              Torna più tardi: ne arrivano di nuovi appena vengono pubblicati.
+              Torna più tardi: ne arrivano di nuovi appena vengono pubblicati.{" "}
+              {TESTO_DOVE_SONO}
               {esclusi > 0 &&
                 ` Altre ${esclusi} ${esclusi === 1 ? "casa è" : "case sono"} oltre il ${tolleranzaPct}% del tuo budget e non te ${esclusi === 1 ? "la" : "le"} mostriamo: se vuoi vederle, aggiorna il budget in Profilo.`}
             </p>
+            {puoAnnullare && (
+              <button type="button" className="link-quiet" onClick={annulla}>
+                Annulla l&apos;ultima scelta
+              </button>
+            )}
           </div>
         )}
 
@@ -276,6 +364,11 @@ export function HomeClient({
             <Link href="/profilo" className="link-quiet">
               Modifica la tua ricerca
             </Link>
+            {puoAnnullare && (
+              <button type="button" className="link-quiet" onClick={annulla}>
+                Annulla l&apos;ultima scelta
+              </button>
+            )}
           </div>
         )}
 
@@ -393,12 +486,28 @@ export function HomeClient({
       {attuale && !finito && !mostraSeparatore && (
         <div className="actions">
           <button
+            className="btn-undo"
+            onClick={annulla}
+            disabled={!puoAnnullare}
+            aria-label="Annulla l'ultima scelta"
+          >
+            <IconAnnulla />
+          </button>
+          <button
             className="btn-pass"
             onClick={() => swipe("left")}
             disabled={pending}
             aria-label="Scarta"
           >
             <IconX />
+          </button>
+          <button
+            className="btn-save"
+            onClick={salva}
+            disabled={pending}
+            aria-label="Salva nei preferiti"
+          >
+            <IconSegnalibro />
           </button>
           <button
             className="btn-like"
@@ -416,11 +525,18 @@ export function HomeClient({
         mostraMatch={mostraMatch}
         onClose={() => setSchedaAperta(false)}
         onPassa={() => swipe("left")}
+        onSalva={salva}
         onCandidati={() => swipe("right")}
         inCorso={pending}
       />
 
-      {candidatureInviate.size > 0 && (
+      {avviso && (
+        <div className={`toast-inline ${avviso.errore ? "is-no" : ""}`} role={avviso.errore ? "alert" : "status"}>
+          {avviso.testo}
+        </div>
+      )}
+
+      {!avviso && candidatureInviate.size > 0 && (
         <div className="toast-inline">
           Candidatura inviata — la trovi in &quot;Candidature&quot;.
         </div>

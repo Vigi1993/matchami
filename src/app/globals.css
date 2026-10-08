@@ -2947,3 +2947,66 @@ mark.segnaposto {
 .chat-visita-corpo p {
   margin: 0 0 8px;
 }
+
+/* ============================================================
+   Preferiti e annulla (mazzo)
+   ============================================================ */
+
+.actions .btn-undo,
+.actions .btn-save {
+  width: 46px;
+  height: 46px;
+}
+.actions .btn-undo svg,
+.actions .btn-save svg {
+  width: 20px;
+  height: 20px;
+  stroke: var(--paper);
+}
+.btn-neutro {
+  flex: 1;
+  padding: 12px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid rgba(16, 21, 26, 0.18);
+  border-radius: 12px;
+  cursor: pointer;
+}
+.btn-neutro:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.preferiti-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.preferito {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  background: #fff;
+  border: 1px solid rgba(16, 21, 26, 0.1);
+  border-radius: 14px;
+}
+.preferito > img,
+.preferito > .mc-avatar {
+  flex-shrink: 0;
+  width: 72px;
+  height: 72px;
+  border-radius: 12px;
+  object-fit: cover;
+}
+.preferito-azioni {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+}
