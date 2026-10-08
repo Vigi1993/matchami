@@ -11,6 +11,16 @@ import { Chip } from "@/components/ui/Chip";
 import { MOTIVI_RIFIUTO } from "@/lib/motivi-rifiuto";
 import type { ChiaveMotivoRifiuto } from "@/lib/motivi-rifiuto";
 import { IconPersone } from "@/components/icons";
+import { RicercaCandidati } from "@/components/RicercaCandidati";
+import {
+  FILTRI_VUOTI,
+  TESTO_NESSUN_RISULTATO,
+  filtraCandidature,
+  filtriValidi,
+  haPunteggi,
+  opzioniAnnunci,
+  type Filtri,
+} from "@/lib/ricerca-candidati";
 
 const BADGE: Record<string, string> = {
   in_attesa: "is-wait",
@@ -55,6 +65,8 @@ export function DatabaseClient({
   const [aggiornate, setAggiornate] = useState<
     Record<string, "accettata" | "rifiutata">
   >({});
+  // La ricerca e i filtri restano in questa pagina: non si salvano né si inviano.
+  const [filtriScelti, setFiltriScelti] = useState<Filtri>(FILTRI_VUOTI);
 
   function stato(c: CandidaturaRicevuta): string {
     return aggiornate[c.id] ?? c.status;
@@ -91,9 +103,16 @@ export function DatabaseClient({
     });
   }
 
-  // ---- raggruppo per annuncio ----
+  // ---- ricerca e filtri ----
+  // L'elenco si ricarica quando si decide: i filtri che non hanno più senso
+  // (un annuncio sparito, una soglia senza percentuali) si ripuliscono, altrimenti
+  // la schermata resterebbe vuota senza che si capisca perché.
+  const filtri = filtriValidi(filtriScelti, candidature);
+  const visibili = filtraCandidature(candidature, filtri, stato);
+
+  // ---- raggruppo per annuncio (solo ciò che passa i filtri) ----
   const perAnnuncio = new Map<string, Annuncio>();
-  for (const c of candidature) {
+  for (const c of visibili) {
     const gruppo = perAnnuncio.get(c.listing_id) ?? {
       id: c.listing_id,
       titolo: c.listings?.titolo ?? "Annuncio",
@@ -131,6 +150,27 @@ export function DatabaseClient({
             Appena qualcuno si candiderà su un tuo annuncio pubblicato, lo
             vedrai qui.
           </p>
+        </div>
+      )}
+
+      {candidature.length > 0 && (
+        <RicercaCandidati
+          filtri={filtri}
+          onCambia={setFiltriScelti}
+          annunci={opzioniAnnunci(candidature)}
+          conPunteggi={haPunteggi(candidature)}
+          visibili={visibili.length}
+          totale={candidature.length}
+        />
+      )}
+
+      {candidature.length > 0 && visibili.length === 0 && (
+        <div className="empty-inline">
+          <IconPersone className="icon-empty" />
+          <h3>{TESTO_NESSUN_RISULTATO}</h3>
+          <button type="button" className="redo-link" onClick={() => setFiltriScelti(FILTRI_VUOTI)}>
+            Azzera filtri
+          </button>
         </div>
       )}
 

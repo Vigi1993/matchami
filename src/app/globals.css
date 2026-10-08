@@ -2846,3 +2846,38 @@ mark.segnaposto {
   background: var(--clay);
   border-radius: 999px;
 }
+
+/* ============================================================
+   Database inquilini: ricerca e filtri
+   ============================================================ */
+
+.ricerca-barra {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 4px 0 6px;
+}
+.ricerca-input,
+.ricerca-select {
+  width: 100%;
+  padding: 11px 14px;
+  font-size: 14px;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid rgba(16, 21, 26, 0.14);
+  border-radius: 12px;
+  outline: none;
+}
+.ricerca-input:focus,
+.ricerca-select:focus {
+  border-color: var(--ink);
+}
+.ricerca-riepilogo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 18px;
+  font-size: 12px;
+  color: var(--muted);
+}
