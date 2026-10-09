@@ -28,7 +28,7 @@ export const INFORMATIVA = {
    * controllo che fa il database (migrazione 0017): un test fallisce se
    * questa stringa non lo supera.
    */
-  versione: "2026-10-provvisoria-8",
+  versione: "2026-10-provvisoria-9",
   /**
    * Versioni precedenti che chi le ha accettate NON deve riaccettare.
    *
@@ -50,6 +50,7 @@ export const INFORMATIVA = {
     "2026-10-provvisoria-5",
     "2026-10-provvisoria-6",
     "2026-10-provvisoria-7",
+    "2026-10-provvisoria-8",
   ] as readonly string[],
   provvisoria: true,
   titolo: "Informativa sulla privacy",
@@ -135,6 +136,7 @@ export const INFORMATIVA = {
       paragrafi: [
         "Usiamo Supabase (database, accessi, file e le email di accesso) e Vercel (per ospitare l'app, che può conservare registri tecnici delle richieste). La regione dei dati è [da indicare].",
         "Per ora la posizione di un immobile sulla mappa è calcolata dall'app, senza inviare l'indirizzo a nessun servizio esterno.",
+        "Nella sezione bollette ci sono link ai siti di alcuni fornitori: aprirli ti porta fuori dall'app, e non registriamo su quali clicchi né passiamo ai fornitori nessun dato su di te.",
         "Nell'app non ci sono strumenti di analisi né pubblicità. Usiamo solo cookie tecnici, necessari a mantenerti connesso.",
       ],
     },

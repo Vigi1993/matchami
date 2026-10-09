@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { Sheet } from "@/components/Sheet";
 import type { ContrattoConAnnuncio } from "@/lib/types";
+import { LinkUtenze } from "@/components/LinkUtenze";
+import { SOTTOTITOLO_UTENZE } from "@/lib/utenze";
 import {
   NESSUN_CONTRATTO_IN_CORSO,
   badgeStato,
@@ -104,8 +106,8 @@ export function GestioneClient({
           <div className="pv-label-row">
             <b>Luce, gas e internet</b>
           </div>
-          <p>Stato attivazioni e prossime scadenze.</p>
-          <span className="pv-readmore">Vedi le bollette</span>
+          <p>{SOTTOTITOLO_UTENZE}</p>
+          <span className="pv-readmore">Vedi i fornitori</span>
         </div>
       </button>
 
@@ -158,19 +160,8 @@ export function GestioneClient({
         onClose={() => setBolletteAperto(false)}
         title="Bollette e utenze"
       >
-        <p className="sheet-sub">
-          Luce, gas e internet della casa in affitto: qui vedrai stato
-          attivazioni, importi e scadenze.
-        </p>
-        <div className="empty-inline" style={{ padding: "30px 10px" }}>
-          <IconDocumento className="icon-empty" />
-          <h3>Nessuna utenza attiva ancora</h3>
-          <p>
-            Attiva luce, gas e internet nella tua nuova casa e da qui potrai
-            seguire importi e scadenze delle bollette.
-          </p>
-        </div>
-        <button className="opp-cta">Attiva luce, gas e internet</button>
+        <p className="sheet-sub">{SOTTOTITOLO_UTENZE}</p>
+        <LinkUtenze />
       </Sheet>
     </PageContainer>
   );

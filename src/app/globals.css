@@ -3084,3 +3084,46 @@ mark.segnaposto {
 .chat-indirizzo {
   background: rgba(16, 21, 26, 0.06);
 }
+
+/* ============================================================
+   Bollette e utenze: i link ai fornitori
+   ============================================================ */
+
+.utenze-lista {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.utenza-link {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  text-decoration: none;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid rgba(16, 21, 26, 0.1);
+  border-radius: 12px;
+}
+.utenza-nome {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.utenza-desc {
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+.utenza-sponsor {
+  padding: 1px 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--ink);
+  background: rgba(201, 161, 90, 0.3);
+  border-radius: 999px;
+}
