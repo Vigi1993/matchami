@@ -1,0 +1,1955 @@
+From 5396655e3bbebec2cc74437fd1bef06051a6ddec Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 7 Oct 2026 21:47:58 +0000
+Subject: [PATCH 1/2] feat(candidature): ritirare una candidatura in attesa
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RICHIEDE LA MIGRAZIONE 0020 PRIMA DEL PUSH.
+
+Fin qui una candidatura inviata non si annullava. Ora l'inquilino la può
+ritirare finché il proprietario non l'ha valutata.
+
+Database (0020):
+- nuovo stato 'ritirata', raggiungibile solo da 'in attesa' con
+  ritira_candidatura (solo la propria; un id inesistente e uno altrui
+  rispondono allo stesso modo). È DEFINITIVO: il trigger che già impedisce di
+  cambiare una decisione vale anche qui. Non ci si può ricandidare allo stesso
+  annuncio (una candidatura per coppia), altrimenti ritirare e riproporre di
+  continuo riempirebbe di notifiche il proprietario
+- il proprietario non la vede più: sparisce dalle candidature ricevute, dalla
+  vista dei candidati e dai conteggi, e non legge più né il profilo né le
+  recensioni di quella persona; l'inquilino non legge più il profilo del
+  proprietario
+- se il proprietario decide un istante dopo il ritiro legge 'la persona ha
+  ritirato la candidatura', non 'già valutata'
+- notifica al proprietario (13° tipo) con il solo titolo dell'annuncio
+- INSIDIA di PostgreSQL gestita: un valore aggiunto a un enumerato non si può
+  usare nella stessa transazione, e l'editor SQL di Supabase esegue lo script
+  come un blocco. Dove si compila subito (policy, vista) lo stato si confronta
+  come testo; verificato che il confronto diretto dà 'unsafe use of new
+  value'. Un test fa fallire chi scrivesse un confronto diretto
+
+App:
+- 'Ritira la candidatura' nella scheda di una candidatura in attesa, con
+  conferma in due tempi che dice le due conseguenze; gruppo 'Ritirate' nella
+  schermata; riepilogo che le conta; nessun pulsante su una già accettata,
+  rifiutata o ritirata
+- messaggi di errore propri; testo dell'informativa (versione
+  2026-10-provvisoria-4: chi aveva accettato la precedente deve riaccettare)
+
+Test: i tipi, i link e gli stati sono controllati contro le migrazioni; un
+test lega ciò che l'informativa dice del ritiro ai filtri della migrazione.
+Verificato su PostgreSQL costruito da zero e in UNA transazione, come la
+esegue l'editor, anche rilanciata; con una gara reale tra ritiro e decisione
+(20 prove: mai riuscite entrambe, mai nessuna delle due); 19 prove di
+interazione. Difetti reintrodotti di proposito: tutti presi.
+---
+ package.json                                  |   2 +-
+ scripts/test-candidature.mjs                  | 213 ++++++++++++++
+ scripts/test-informativa.mjs                  |  23 ++
+ scripts/test-notifiche.mjs                    |  16 +-
+ .../(app)/candidature/CandidatureClient.tsx   |  62 ++--
+ src/components/RitiraCandidatura.tsx          |  82 ++++++
+ src/content/informativa.ts                    |   3 +-
+ src/lib/candidature.ts                        |  67 +++++
+ src/lib/notifiche.ts                          |   6 +
+ src/lib/types.ts                              |   2 +-
+ src/lib/verifica.ts                           |   3 +
+ .../migrations/0020_ritira_candidatura.sql    | 274 ++++++++++++++++++
+ 12 files changed, 721 insertions(+), 32 deletions(-)
+ create mode 100644 scripts/test-candidature.mjs
+ create mode 100644 src/components/RitiraCandidatura.tsx
+ create mode 100644 src/lib/candidature.ts
+ create mode 100644 supabase/migrations/0020_ritira_candidatura.sql
+
+diff --git a/package.json b/package.json
+index 76a5a9d..82cccda 100644
+--- a/package.json
++++ b/package.json
+@@ -7,7 +7,7 @@
+     "build": "next build",
+     "start": "next start",
+     "lint": "eslint",
+-    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-candidature.mjs b/scripts/test-candidature.mjs
+new file mode 100644
+index 0000000..f43ac3c
+--- /dev/null
++++ b/scripts/test-candidature.mjs
+@@ -0,0 +1,213 @@
++/**
++ * Test del ritiro di una candidatura (src/lib/candidature.ts). Si lancia con:   npm test
++ *
++ * Oltre alla logica, tengono allineati l'app e la migrazione 0020: gli stati,
++ * il momento in cui si può ritirare, i codici di errore. E controllano la
++ * regola di PostgreSQL che su Supabase si scoprirebbe solo eseguendo la
++ * migrazione: un valore aggiunto a un enumerato non si può usare nella stessa
++ * transazione.
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const c = caricaTs(path.join(radice, "src", "lib", "candidature.ts"));
++const v = caricaTs(path.join(radice, "src", "lib", "verifica.ts"));
++const migrazioni = path.join(radice, "supabase", "migrations");
++const sql = fs.readFileSync(path.join(migrazioni, "0020_ritira_candidatura.sql"), "utf8");
++const sql0001 = fs.readFileSync(path.join(migrazioni, "0001_init.sql"), "utf8");
++const tipi = fs.readFileSync(path.join(radice, "src", "lib", "types.ts"), "utf8");
++
++// ------------------------------------------------------------
++// Gli stati
++// ------------------------------------------------------------
++
++/** Gli stati di una candidatura nel database: quelli della 0001 più quelli aggiunti dopo. */
++function statiDelDatabase() {
++  const m = sql0001.match(/create type stato_candidatura as enum \(([^)]*)\)/);
++  assert.ok(m, "non trovo l'enumerato nella 0001");
++  const stati = [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
++  for (const f of fs.readdirSync(migrazioni).filter((x) => /^\d{4}_.*\.sql$/.test(x)).sort()) {
++    const testo = fs.readFileSync(path.join(migrazioni, f), "utf8");
++    for (const a of testo.matchAll(/alter type stato_candidatura add value (?:if not exists )?'([^']+)'/g)) stati.push(a[1]);
++  }
++  return stati;
++}
++
++test("stati: quelli dell'app sono quelli del database", () => {
++  const m = tipi.match(/export type StatoCandidatura = ([^;]+);/);
++  assert.ok(m, "non trovo il tipo nell'app");
++  const nellApp = [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]).sort();
++  assert.deepEqual(nellApp, [...new Set(statiDelDatabase())].sort());
++});
++
++test("stati: ognuno ha un'etichetta e un aspetto, e «ritirata» non si confonde con gli altri", () => {
++  const stati = [...new Set(statiDelDatabase())];
++  assert.deepEqual(Object.keys(c.STATO_LABEL).sort(), [...stati].sort());
++  assert.deepEqual(Object.keys(c.STATO_BADGE).sort(), [...stati].sort());
++  const etichette = Object.values(c.STATO_LABEL);
++  assert.equal(new Set(etichette).size, etichette.length, "due stati con la stessa etichetta");
++  assert.equal(c.STATO_LABEL.ritirata, "Ritirata");
++});
++
++// ------------------------------------------------------------
++// Quando si può ritirare
++// ------------------------------------------------------------
++
++test("ritiro: si può solo da «in attesa», come nel database", () => {
++  assert.ok(sql.includes("if v_stato <> 'in_attesa' then"), "la funzione del database è cambiata");
++  assert.equal(c.puoRitirare("in_attesa"), true);
++  for (const s of ["accettata", "rifiutata", "ritirata"]) assert.equal(c.puoRitirare(s), false, s);
++});
++
++// ------------------------------------------------------------
++// I gruppi e il riepilogo
++// ------------------------------------------------------------
++
++const cand = (id, status) => ({ id, status });
++
++test("gruppi: ogni candidatura sta in uno e un solo gruppo", () => {
++  const e = [cand(1, "in_attesa"), cand(2, "accettata"), cand(3, "rifiutata"), cand(4, "ritirata"), cand(5, "in_attesa"), cand(6, "ritirata")];
++  const g = c.raggruppaCandidature(e);
++  assert.equal(g.accettate.length + g.inAttesa.length + g.rifiutate.length + g.ritirate.length, e.length);
++  assert.deepEqual(g.ritirate.map((x) => x.id), [4, 6]);
++  assert.deepEqual(g.inAttesa.map((x) => x.id), [1, 5]);
++  assert.deepEqual(g.accettate.map((x) => x.id), [2]);
++  assert.deepEqual(g.rifiutate.map((x) => x.id), [3]);
++});
++
++test("gruppi: l'elenco vuoto e uno stato mai visto non fanno crollare niente", () => {
++  const g = c.raggruppaCandidature([]);
++  assert.deepEqual([g.accettate, g.inAttesa, g.rifiutate, g.ritirate], [[], [], [], []]);
++  const strano = c.raggruppaCandidature([cand(1, "stato_di_domani")]);
++  assert.equal(strano.accettate.length + strano.inAttesa.length + strano.rifiutate.length + strano.ritirate.length, 0);
++});
++
++test("riepilogo: nessuna, una, più, con match e con ritirate", () => {
++  assert.equal(c.riepilogoCandidature([]), "Gli annunci a cui ti candidi arrivano qui.");
++  assert.equal(c.riepilogoCandidature([cand(1, "in_attesa")]), "1 candidatura inviata.");
++  assert.equal(c.riepilogoCandidature([cand(1, "in_attesa"), cand(2, "rifiutata")]), "2 candidature inviate.");
++  assert.equal(c.riepilogoCandidature([cand(1, "accettata"), cand(2, "in_attesa")]), "2 candidature inviate · 1 match.");
++  assert.equal(c.riepilogoCandidature([cand(1, "in_attesa"), cand(2, "ritirata")]), "2 candidature inviate · 1 ritirata.");
++  assert.equal(c.riepilogoCandidature([cand(1, "accettata"), cand(2, "ritirata"), cand(3, "ritirata")]), "3 candidature inviate · 1 match · 2 ritirate.");
++  assert.equal(c.riepilogoCandidature([cand(1, "ritirata")]), "1 candidatura inviata · 1 ritirata.");
++});
++
++// ------------------------------------------------------------
++// Cosa si dice prima di ritirare
++// ------------------------------------------------------------
++
++test("conferma: dice le due conseguenze, con il titolo se c'è", () => {
++  const t = c.testoConfermaRitiro("Bilocale Isola");
++  assert.match(t, /«Bilocale Isola»/);
++  assert.match(t, /il proprietario non la vedrà più/);
++  assert.match(t, /non potrai candidarti di nuovo a questo annuncio/);
++  assert.match(t, /Puoi comunque candidarti ad altri/);
++});
++
++test("conferma: senza titolo usa una formula neutra, mai «undefined» o «null»", () => {
++  for (const x of [null, undefined, "", "   "]) {
++    const t = c.testoConfermaRitiro(x);
++    assert.match(t, /questo annuncio/);
++    assert.ok(!/undefined|null|«»/.test(t), t);
++  }
++});
++
++test("conferma: un titolo con codice dentro resta testo", () => {
++  const titolo = '<img src=x onerror="alert(1)">';
++  assert.ok(c.testoConfermaRitiro(titolo).includes(titolo));
++});
++
++test("testi: non presumono il genere di nessuno", () => {
++  for (const t of [c.testoConfermaRitiro("Casa"), c.NOTA_RITIRATA]) {
++    assert.ok(!/\b(lui|lei|candidato|iscritto|iscritta)\b/i.test(t), t);
++  }
++});
++
++test("la nota di una ritirata dice le stesse cose della conferma", () => {
++  assert.match(c.NOTA_RITIRATA, /il proprietario non la vede più/);
++  assert.match(c.NOTA_RITIRATA, /non puoi ricandidarti a questo annuncio/);
++});
++
++// ------------------------------------------------------------
++// Gli errori
++// ------------------------------------------------------------
++
++const GENERICO = v.messaggioErroreVerifica("qualcosa di sconosciuto");
++
++test("errori: ogni codice che la migrazione può sollevare ha una frase sua", () => {
++  const codici = [...new Set([...sql.matchAll(/raise exception '([A-Z_]+)'/g)].map((m) => m[1]))];
++  assert.ok(codici.length >= 7, `trovati solo ${codici.length} codici`);
++  for (const cod of codici) {
++    const frase = v.messaggioErroreVerifica(`ERROR: ${cod} (P0001)`);
++    assert.notEqual(frase, GENERICO, `il codice ${cod} non ha un messaggio: la persona vedrebbe «Riprova»`);
++    assert.ok(!frase.includes(cod), `${cod} compare nella frase`);
++  }
++});
++
++test("errori: la candidatura ritirata e quella non ritirabile non si confondono con «già valutata»", () => {
++  const ritirata = v.messaggioErroreVerifica("CANDIDATURA_RITIRATA");
++  const valutata = v.messaggioErroreVerifica("CANDIDATURA_GIA_VALUTATA");
++  const nonRitirabile = v.messaggioErroreVerifica("CANDIDATURA_NON_RITIRABILE");
++  assert.notEqual(ritirata, valutata);
++  assert.notEqual(nonRitirabile, valutata);
++  assert.match(ritirata, /ritirato la candidatura/);
++  assert.match(nonRitirabile, /non si può più ritirare/);
++  assert.ok(!/[A-Z_]{8,}/.test(ritirata + nonRitirabile), "codice tecnico nella frase");
++});
++
++// ------------------------------------------------------------
++// La regola di PostgreSQL sull'enumerato (la insidia di questa migrazione)
++// ------------------------------------------------------------
++
++/** La migrazione senza commenti e senza i corpi delle funzioni (si compilano alla prima esecuzione). */
++function partiCheSiCompilanoSubito(testo) {
++  return testo
++    .replace(/--[^\n]*/g, "")
++    .replace(/\$\$[\s\S]*?\$\$/g, "$$$$");
++}
++
++test("migrazione: il valore nuovo si aggiunge con «if not exists» (si può rilanciare)", () => {
++  assert.match(sql, /alter type stato_candidatura add value if not exists 'ritirata';/);
++});
++
++test("migrazione: dove si compila subito, «ritirata» si confronta come TESTO, mai come enumerato", () => {
++  const subito = partiCheSiCompilanoSubito(sql);
++  const usi = [...subito.matchAll(/'ritirata'/g)];
++  assert.ok(usi.length >= 4, `attesi almeno 4 usi (policy, vista), trovati ${usi.length}`);
++  for (const m of usi) {
++    const prima = subito.slice(Math.max(0, m.index - 90), m.index);
++    const ammesso = /alter type stato_candidatura add value (if not exists )?$/.test(prima) || /::text\s*(<>|=)\s*$/.test(prima);
++    assert.ok(ammesso, `uso non sicuro di 'ritirata' fuori da una funzione: «…${prima.trim().slice(-30)} 'ritirata'»`);
++  }
++});
++
++test("migrazione: il controllo sa fermare un confronto diretto con l'enumerato", () => {
++  const cattiva = "create policy x on t using (status <> 'ritirata');";
++  const subito = partiCheSiCompilanoSubito(cattiva);
++  const m = [...subito.matchAll(/'ritirata'/g)][0];
++  const prima = subito.slice(Math.max(0, m.index - 90), m.index);
++  assert.ok(!(/alter type stato_candidatura add value (if not exists )?$/.test(prima) || /::text\s*(<>|=)\s*$/.test(prima)));
++  // e uno corretto passa
++  const buona = partiCheSiCompilanoSubito("create policy x on t using (status::text <> 'ritirata');");
++  const m2 = [...buona.matchAll(/'ritirata'/g)][0];
++  assert.ok(/::text\s*(<>|=)\s*$/.test(buona.slice(Math.max(0, m2.index - 90), m2.index)));
++});
++
++test("migrazione: i corpi delle funzioni non vengono scambiati per parti che si compilano subito", () => {
++  const subito = partiCheSiCompilanoSubito("create function f() returns void as $$ begin update t set status = 'ritirata'; end; $$ language plpgsql;");
++  assert.ok(!subito.includes("'ritirata'"));
++});
++
++test("migrazione: la vista mantiene le opzioni di sicurezza e i permessi della 0016", () => {
++  assert.match(sql, /create or replace view public\.candidati_del_proprietario\s+with \(security_barrier = true\)/);
++  assert.match(sql, /revoke all on public\.candidati_del_proprietario from public, anon;/);
++  assert.match(sql, /grant select on public\.candidati_del_proprietario to authenticated;/);
++});
++
++test("migrazione: il ritiro non è chiamabile da chi non ha un account", () => {
++  assert.match(sql, /grant execute on function public\.ritira_candidatura\(uuid\) to authenticated;/);
++  assert.ok(!/ritira_candidatura\(uuid\) to anon/.test(sql));
++});
+diff --git a/scripts/test-informativa.mjs b/scripts/test-informativa.mjs
+index 84e4c09..f61aaa6 100644
+--- a/scripts/test-informativa.mjs
++++ b/scripts/test-informativa.mjs
+@@ -316,3 +316,26 @@ test("notifiche: il testo le nomina e dice che non contengono nomi di persone",
+   assert.match(tutto, /notifiche sulle novità del tuo account/);
+   assert.match(tutto, /mai nomi di persone/);
+ });
++
++// ------------------------------------------------------------
++// Ciò che il testo dice del ritiro di una candidatura è vero
++// ------------------------------------------------------------
++
++test("ritiro: il testo dice cosa vede il proprietario, e la migrazione lo fa davvero", () => {
++  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
++  assert.match(tutto, /Se ritiri una candidatura mentre è ancora in attesa, il proprietario non la vede più/);
++  assert.match(tutto, /non legge né il tuo profilo né le recensioni su di te/);
++  assert.match(tutto, /non puoi candidarti di nuovo allo stesso annuncio/);
++
++  const sql20 = fs.readFileSync(path.join(migrazioni, "0020_ritira_candidatura.sql"), "utf8");
++  // il proprietario non legge più né la candidatura, né il profilo (vista), né le recensioni
++  const filtro = /status::text <> 'ritirata'/g;
++  assert.ok((sql20.match(filtro) ?? []).length >= 4, "i filtri sulla candidatura ritirata sono meno di quelli attesi");
++  assert.match(sql20, /create policy "candidature: owner reads received"[\s\S]*?status::text <> 'ritirata'/);
++  assert.match(sql20, /create or replace view public\.candidati_del_proprietario[\s\S]*?where c\.status::text <> 'ritirata'/);
++  assert.match(sql20, /create policy "recensioni: lettura limitata"[\s\S]*?c\.status::text <> 'ritirata'/);
++
++  // e non ci si può ricandidare: una sola candidatura per annuncio e per persona
++  const sql1 = fs.readFileSync(path.join(migrazioni, "0001_init.sql"), "utf8");
++  assert.match(sql1, /unique \(listing_id, tenant_id\)/);
++});
+diff --git a/scripts/test-notifiche.mjs b/scripts/test-notifiche.mjs
+index 234f473..16190f0 100644
+--- a/scripts/test-notifiche.mjs
++++ b/scripts/test-notifiche.mjs
+@@ -12,16 +12,24 @@ import { caricaTs, radice } from "./carica-ts.mjs";
+ 
+ const n = caricaTs(path.join(radice, "src", "lib", "notifiche.ts"));
+ const sql = fs.readFileSync(path.join(radice, "supabase", "migrations", "0019_notifiche.sql"), "utf8");
++// Dopo la 0019 l'elenco dei tipi e il trigger delle candidature sono stati riscritti dalla 0020
++// (il ritiro di una candidatura): la verità è l'ultima definizione.
++const sql0020 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0020_ritira_candidatura.sql"), "utf8");
+ 
+ /** I tipi che il vincolo sulla tabella ammette. */
+ function tipiDelDatabase() {
+-  const m = sql.match(/tipo text not null check \(tipo in \(([\s\S]*?)\)\),/);
+-  assert.ok(m, "non trovo il vincolo sui tipi");
+-  return [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
++  // l'ultima definizione del vincolo, in ordine di migrazione
++  const tutte = [...(sql + "\n" + sql0020).matchAll(/check \(tipo in \(([\s\S]*?)\)\)/g)];
++  assert.ok(tutte.length >= 2, "dovrei trovare il vincolo della 0019 e quello della 0020");
++  return [...tutte[tutte.length - 1][1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
+ }
+ 
+ /** Il corpo di tutte le funzioni dei trigger (tutto ciò che sta dopo la sezione 4). */
+-const trigger = sql.slice(sql.indexOf("-- 4. I trigger"), sql.indexOf("-- 5. Pulizia"));
++const trigger =
++  sql.slice(sql.indexOf("-- 4. I trigger"), sql.indexOf("-- 5. Pulizia")) +
++  "\n" +
++  // la 0020 riscrive la funzione delle candidature: si guarda solo da lì in poi
++  sql0020.slice(sql0020.indexOf("-- 5. La notifica al proprietario"));
+ 
+ // ------------------------------------------------------------
+ // I tipi
+diff --git a/src/app/(app)/candidature/CandidatureClient.tsx b/src/app/(app)/candidature/CandidatureClient.tsx
+index 0b6ff02..55c5c5e 100644
+--- a/src/app/(app)/candidature/CandidatureClient.tsx
++++ b/src/app/(app)/candidature/CandidatureClient.tsx
+@@ -2,46 +2,39 @@
+ 
+ import { useState } from "react";
+ import Link from "next/link";
++import { useRouter } from "next/navigation";
+ import { Sheet } from "@/components/Sheet";
+-import type { CandidaturaConAnnuncio, StatoCandidatura } from "@/lib/types";
++import type { CandidaturaConAnnuncio } from "@/lib/types";
++import {
++  NOTA_RITIRATA,
++  STATO_BADGE,
++  STATO_LABEL,
++  puoRitirare,
++  raggruppaCandidature,
++  riepilogoCandidature,
++} from "@/lib/candidature";
++import { RitiraCandidatura } from "@/components/RitiraCandidatura";
+ import { PageContainer } from "@/components/ui/PageContainer";
+ import { messaggioMotivoRifiuto } from "@/lib/motivi-rifiuto";
+ import { IconChat } from "@/components/icons";
+ 
+-const STATO_LABEL: Record<StatoCandidatura, string> = {
+-  in_attesa: "In attesa",
+-  accettata: "Match",
+-  rifiutata: "Non accettata",
+-};
+-
+-const STATO_BADGE: Record<StatoCandidatura, string> = {
+-  in_attesa: "is-wait",
+-  accettata: "is-match",
+-  rifiutata: "is-off",
+-};
+-
+ export function CandidatureClient({
+   candidature,
+ }: {
+   candidature: CandidaturaConAnnuncio[];
+ }) {
++  const router = useRouter();
+   const [selezionata, setSelezionata] = useState<CandidaturaConAnnuncio | null>(
+     null
+   );
+ 
+-  const inAttesa = candidature.filter((c) => c.status === "in_attesa");
+-  const accettate = candidature.filter((c) => c.status === "accettata");
+-  const rifiutate = candidature.filter((c) => c.status === "rifiutata");
++  const { inAttesa, accettate, rifiutate, ritirate } = raggruppaCandidature(candidature);
+ 
+   return (
+     <PageContainer wide>
+       <h1 className="screen-title">I tuoi match</h1>
+       <p className="screen-sub">
+-        {candidature.length === 0
+-          ? "Gli annunci a cui ti candidi arrivano qui."
+-          : `${candidature.length} candidatur${candidature.length === 1 ? "a inviata" : "e inviate"}${
+-              accettate.length > 0 ? ` · ${accettate.length} match` : ""
+-            }.`}
++        {riepilogoCandidature(candidature)}
+       </p>
+ 
+       {candidature.length === 0 ? (
+@@ -72,6 +65,9 @@ export function CandidatureClient({
+               onSelect={setSelezionata}
+             />
+           )}
++          {ritirate.length > 0 && (
++            <Gruppo titolo="Ritirate" items={ritirate} onSelect={setSelezionata} />
++          )}
+         </>
+       )}
+ 
+@@ -126,9 +122,25 @@ export function CandidatureClient({
+               </div>
+             )}
+             {selezionata.status === "in_attesa" && (
+-              <div className="note-box mt-5">
+-                Il proprietario non ha ancora valutato questa candidatura.
+-              </div>
++              <>
++                <div className="note-box mt-5">
++                  Il proprietario non ha ancora valutato questa candidatura.
++                </div>
++                {puoRitirare(selezionata.status) && (
++                  <RitiraCandidatura
++                    key={selezionata.id}
++                    candidaturaId={selezionata.id}
++                    titolo={selezionata.listings?.titolo ?? null}
++                    onFatto={() => {
++                      setSelezionata(null);
++                      router.refresh();
++                    }}
++                  />
++                )}
++              </>
++            )}
++            {selezionata.status === "ritirata" && (
++              <div className="note-box mt-5">{NOTA_RITIRATA}</div>
+             )}
+             {selezionata.status === "rifiutata" && (
+               <div className="note-box mt-5">
+@@ -164,7 +176,7 @@ function Gruppo({
+             key={c.id}
+             onClick={() => onSelect(c)}
+             className="match-card"
+-            style={c.status === "rifiutata" ? { opacity: 0.55 } : undefined}
++            style={c.status === "rifiutata" || c.status === "ritirata" ? { opacity: 0.55 } : undefined}
+           >
+             <div className="mc-avatar">
+               {(c.listings?.titolo ?? "IM").slice(0, 2).toUpperCase()}
+diff --git a/src/components/RitiraCandidatura.tsx b/src/components/RitiraCandidatura.tsx
+new file mode 100644
+index 0000000..c2a3259
+--- /dev/null
++++ b/src/components/RitiraCandidatura.tsx
+@@ -0,0 +1,82 @@
++"use client";
++
++import { useState } from "react";
++import { createClient } from "@/lib/supabase/client";
++import { testoConfermaRitiro } from "@/lib/candidature";
++import { messaggioErroreVerifica } from "@/lib/verifica";
++
++/**
++ * Il ritiro di una candidatura in attesa, in due tempi: prima un avviso che
++ * dice cosa comporta (il proprietario non la vede più, e non ci si può
++ * ricandidare allo stesso annuncio), poi la conferma.
++ *
++ * Le regole vere (solo la propria, solo se in attesa) stanno nella funzione
++ * `ritira_candidatura` del database.
++ */
++export function RitiraCandidatura({
++  candidaturaId,
++  titolo,
++  onFatto,
++}: {
++  candidaturaId: string;
++  titolo: string | null;
++  onFatto: () => void;
++}) {
++  const [confermando, setConfermando] = useState(false);
++  const [inCorso, setInCorso] = useState(false);
++  const [errore, setErrore] = useState<string | null>(null);
++
++  async function ritira() {
++    setErrore(null);
++    setInCorso(true);
++    try {
++      const { error } = await createClient().rpc("ritira_candidatura", {
++        p_candidatura: candidaturaId,
++      });
++      if (error) {
++        setErrore(messaggioErroreVerifica(error.message));
++        return;
++      }
++      onFatto();
++    } finally {
++      setInCorso(false);
++    }
++  }
++
++  if (!confermando) {
++    return (
++      <button
++        type="button"
++        className="btn-danger-outline"
++        style={{ marginTop: 16 }}
++        onClick={() => {
++          setErrore(null);
++          setConfermando(true);
++        }}
++      >
++        Ritira la candidatura
++      </button>
++    );
++  }
++
++  return (
++    <div className="note-box is-no" style={{ marginTop: 16 }} role="alertdialog" aria-label="Conferma il ritiro">
++      <p style={{ margin: "0 0 10px 0" }}>{testoConfermaRitiro(titolo)}</p>
++      {errore && <p className="note-error">{errore}</p>}
++      <div className="flex gap-3">
++        <button
++          type="button"
++          className="btn-danger-outline"
++          style={{ borderColor: "rgba(16,21,26,.14)", color: "var(--ink)" }}
++          disabled={inCorso}
++          onClick={() => setConfermando(false)}
++        >
++          Annulla
++        </button>
++        <button type="button" className="opp-cta" disabled={inCorso} onClick={ritira}>
++          {inCorso ? "Ritiro..." : "Sì, ritira la candidatura"}
++        </button>
++      </div>
++    </div>
++  );
++}
+diff --git a/src/content/informativa.ts b/src/content/informativa.ts
+index bfcf0cd..e60d910 100644
+--- a/src/content/informativa.ts
++++ b/src/content/informativa.ts
+@@ -28,7 +28,7 @@ export const INFORMATIVA = {
+    * controllo che fa il database (migrazione 0017): un test fallisce se
+    * questa stringa non lo supera.
+    */
+-  versione: "2026-10-provvisoria-3",
++  versione: "2026-10-provvisoria-4",
+   provvisoria: true,
+   titolo: "Informativa sulla privacy",
+   aggiornata: "ottobre 2026",
+@@ -77,6 +77,7 @@ export const INFORMATIVA = {
+         "Tu vedi tutti i tuoi dati.",
+         "Il proprietario di un annuncio a cui ti candidi vede il tuo nome e cognome, il lavoro, il reddito, garante e fideiussione, i protesti che hai dichiarato, se il tuo reddito è verificato, la presentazione, la foto, il punteggio di affidabilità e la compatibilità. Non vede il numero di figli, la composizione del nucleo né se hai animali: sa solo se hai compilato quei campi, per contare quanto è completo il tuo profilo. Non vede le tue preferenze di ricerca.",
+         "Se rifiuta la tua candidatura, del tuo profilo gli resta solo il tuo nome, oltre alla valutazione che aveva già fatto. Tu vedi il motivo del rifiuto, non la sua valutazione completa.",
++        "Se ritiri una candidatura mentre è ancora in attesa, il proprietario non la vede più: non legge né il tuo profilo né le recensioni su di te, e riceve solo una notifica con il titolo dell'annuncio. La candidatura resta nel tuo elenco e non puoi candidarti di nuovo allo stesso annuncio.",
+         "I messaggi li leggono solo le due persone, dopo che la candidatura è stata accettata.",
+         "Le recensioni su un inquilino le leggono la persona recensita, chi le ha scritte e i proprietari a cui ha inviato una candidatura.",
+         "Gli annunci pubblicati e verificati li vedono tutti gli utenti connessi. L'indirizzo esatto degli immobili non lo raccogliamo.",
+diff --git a/src/lib/candidature.ts b/src/lib/candidature.ts
+new file mode 100644
+index 0000000..0736b4e
+--- /dev/null
++++ b/src/lib/candidature.ts
+@@ -0,0 +1,67 @@
++/**
++ * Le candidature dal lato dell'inquilino: come si chiamano gli stati, come si
++ * raggruppano, quando si può ritirare una candidatura e cosa si dice prima di
++ * farlo. Logica pura, senza database: si prova con `npm test`.
++ *
++ * Il ritiro vero lo fa la funzione `ritira_candidatura` del database
++ * (migrazione 0020): qui si evita solo di offrire a una persona un'azione che
++ * il database rifiuterebbe.
++ */
++import type { StatoCandidatura } from "./types";
++
++export const STATO_LABEL: Record<StatoCandidatura, string> = {
++  in_attesa: "In attesa",
++  accettata: "Match",
++  rifiutata: "Non accettata",
++  ritirata: "Ritirata",
++};
++
++export const STATO_BADGE: Record<StatoCandidatura, string> = {
++  in_attesa: "is-wait",
++  accettata: "is-match",
++  rifiutata: "is-off",
++  ritirata: "is-off",
++};
++
++/** Una candidatura si ritira solo finché il proprietario non l'ha valutata. */
++export function puoRitirare(stato: StatoCandidatura): boolean {
++  return stato === "in_attesa";
++}
++
++/** Le candidature divise per stato, nell'ordine in cui le mostra la schermata. */
++export function raggruppaCandidature<T extends { status: StatoCandidatura }>(
++  elenco: T[]
++): { accettate: T[]; inAttesa: T[]; rifiutate: T[]; ritirate: T[] } {
++  return {
++    accettate: elenco.filter((c) => c.status === "accettata"),
++    inAttesa: elenco.filter((c) => c.status === "in_attesa"),
++    rifiutate: elenco.filter((c) => c.status === "rifiutata"),
++    ritirate: elenco.filter((c) => c.status === "ritirata"),
++  };
++}
++
++/** La riga sotto il titolo della schermata. Le ritirate si contano ancora tra le inviate. */
++export function riepilogoCandidature(
++  elenco: { status: StatoCandidatura }[]
++): string {
++  const n = elenco.length;
++  if (n === 0) return "Gli annunci a cui ti candidi arrivano qui.";
++  const { accettate, ritirate } = raggruppaCandidature(elenco);
++  let testo = `${n} candidatur${n === 1 ? "a inviata" : "e inviate"}`;
++  if (accettate.length > 0) testo += ` · ${accettate.length} match`;
++  if (ritirate.length > 0) testo += ` · ${ritirate.length} ritirat${ritirate.length === 1 ? "a" : "e"}`;
++  return testo + ".";
++}
++
++/**
++ * Ciò che si dice prima di ritirare. Dice le due cose che contano: il
++ * proprietario non la vede più, e non ci si può ricandidare allo stesso
++ * annuncio.
++ */
++export function testoConfermaRitiro(titolo: string | null | undefined): string {
++  const t = titolo && titolo.trim() ? `«${titolo.trim()}»` : "questo annuncio";
++  return `Se ritiri la candidatura per ${t}, il proprietario non la vedrà più e non potrai candidarti di nuovo a questo annuncio. Puoi comunque candidarti ad altri.`;
++}
++
++export const NOTA_RITIRATA =
++  "Hai ritirato questa candidatura: il proprietario non la vede più e non puoi ricandidarti a questo annuncio.";
+diff --git a/src/lib/notifiche.ts b/src/lib/notifiche.ts
+index 3f8bf25..fe554e5 100644
+--- a/src/lib/notifiche.ts
++++ b/src/lib/notifiche.ts
+@@ -14,6 +14,7 @@ export const TIPI_NOTIFICA = [
+   "candidatura_ricevuta",
+   "candidatura_accettata",
+   "candidatura_rifiutata",
++  "candidatura_ritirata",
+   "immobile_verificato",
+   "immobile_respinto",
+   "reddito_verificato",
+@@ -69,6 +70,11 @@ export function descriviNotifica(
+         titolo: "Candidatura non accettata",
+         testo: `La tua candidatura per ${annuncio(dati, "un annuncio")} non è stata accettata. Nella scheda trovi il motivo.`,
+       };
++    case "candidatura_ritirata":
++      return {
++        titolo: "Candidatura ritirata",
++        testo: `Una persona ha ritirato la candidatura a ${annuncio(dati, "un tuo annuncio")}.`,
++      };
+     case "immobile_verificato":
+       return {
+         titolo: "Immobile verificato",
+diff --git a/src/lib/types.ts b/src/lib/types.ts
+index 73b807c..dd5b657 100644
+--- a/src/lib/types.ts
++++ b/src/lib/types.ts
+@@ -28,7 +28,7 @@ export type TenantProfile = {
+ 
+ export type StatoContratto = "bozza" | "in_firma" | "firmato" | "concluso";
+ 
+-export type StatoCandidatura = "in_attesa" | "accettata" | "rifiutata";
++export type StatoCandidatura = "in_attesa" | "accettata" | "rifiutata" | "ritirata";
+ 
+ export type ListingProprietario = {
+   id: string;
+diff --git a/src/lib/verifica.ts b/src/lib/verifica.ts
+index d06e70f..dd9297c 100644
+--- a/src/lib/verifica.ts
++++ b/src/lib/verifica.ts
+@@ -192,6 +192,9 @@ const MESSAGGI: Record<string, string> = {
+   INQUILINO_INESISTENTE: "Inquilino non trovato.",
+   // decisioni sulle candidature
+   CANDIDATURA_NON_TUA: "Questa candidatura non risulta tua.",
++  CANDIDATURA_RITIRATA: "La persona ha ritirato la candidatura: non c'è più nulla da valutare.",
++  CANDIDATURA_NON_RITIRABILE:
++    "Questa candidatura non si può più ritirare: il proprietario l'ha già valutata.",
+   CANDIDATURA_GIA_VALUTATA: "Questa candidatura è già stata valutata.",
+   MOTIVO_OBBLIGATORIO: "Scegli un motivo per il rifiuto.",
+   STATO_NON_VALIDO: "Scelta non valida.",
+diff --git a/supabase/migrations/0020_ritira_candidatura.sql b/supabase/migrations/0020_ritira_candidatura.sql
+new file mode 100644
+index 0000000..1fa816e
+--- /dev/null
++++ b/supabase/migrations/0020_ritira_candidatura.sql
+@@ -0,0 +1,274 @@
++-- ============================================================
++-- MatchAmI — ritirare una candidatura
++--
++-- Fin qui una candidatura inviata non si annullava. Ora l'inquilino la può
++-- ritirare finché il proprietario non l'ha valutata.
++--
++-- COME FUNZIONA
++--   - un nuovo stato, `ritirata`, raggiungibile solo da «in attesa» con la
++--     funzione `ritira_candidatura`;
++--   - è DEFINITIVO: il trigger che già impedisce di cambiare una decisione
++--     (`blocca_cambio_decisione`) vale anche qui. Non ci si può ricandidare
++--     allo stesso annuncio: altrimenti ritirare e riproporre di continuo
++--     riempirebbe di notifiche il proprietario;
++--   - il proprietario NON la vede più: sparisce dall'elenco e dai conteggi, e
++--     non legge più né il profilo né le recensioni di quella persona;
++--   - riceve una notifica con il solo titolo dell'annuncio.
++--
++-- ATTENZIONE, UN VINCOLO DI POSTGRESQL. Un valore aggiunto a un tipo
++-- enumerato non si può usare nella stessa transazione in cui nasce, e
++-- l'editor SQL di Supabase esegue lo script come un blocco. Per questo, in
++-- tutto ciò che si compila subito (policy, vista, vincolo), lo stato si
++-- confronta come TESTO (`status::text <> 'ritirata'`), mai con il valore
++-- dell'enumerato. Nei corpi delle funzioni non serve: si compilano alla prima
++-- esecuzione, a migrazione finita.
++--
++-- ORDINE: esegui questa migrazione PRIMA del push del codice.
++-- ============================================================
++
++-- ------------------------------------------------------------
++-- 1. Lo stato
++-- ------------------------------------------------------------
++
++alter type stato_candidatura add value if not exists 'ritirata';
++
++-- ------------------------------------------------------------
++-- 2. Ritirare
++--
++-- Solo la persona che si è candidata, solo da «in attesa». Un id inesistente
++-- e una candidatura altrui rispondono allo stesso modo: non si scopre se
++-- esiste. L'aggiornamento condizionato rende sicuro il caso di un
++-- proprietario che decide nello stesso istante: vince uno solo.
++-- ------------------------------------------------------------
++
++create or replace function public.ritira_candidatura(p_candidatura uuid)
++returns void
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_tenant uuid;
++  v_stato text;
++begin
++  if auth.uid() is null then
++    raise exception 'NON_AUTENTICATO';
++  end if;
++
++  select tenant_id, status::text into v_tenant, v_stato
++    from candidature where id = p_candidatura;
++  if v_tenant is distinct from auth.uid() then
++    raise exception 'CANDIDATURA_NON_TUA';
++  end if;
++
++  if v_stato <> 'in_attesa' then
++    raise exception 'CANDIDATURA_NON_RITIRABILE';
++  end if;
++
++  update candidature
++     set status = 'ritirata', updated_at = now()
++   where id = p_candidatura and status = 'in_attesa';
++  if not found then
++    raise exception 'CANDIDATURA_NON_RITIRABILE';
++  end if;
++end;
++$$;
++
++grant execute on function public.ritira_candidatura(uuid) to authenticated;
++
++-- ------------------------------------------------------------
++-- 3. Il proprietario non la vede più
++-- ------------------------------------------------------------
++
++-- 3.1 Le righe di candidatura
++drop policy if exists "candidature: owner reads received" on candidature;
++create policy "candidature: owner reads received" on candidature
++  for select using (
++    status::text <> 'ritirata'
++    and exists (
++      select 1 from listings l
++      where l.id = candidature.listing_id and l.owner_id = auth.uid()
++    )
++  );
++
++-- 3.2 L'elenco dei candidati (stessa vista della 0016, con il filtro in più)
++create or replace view public.candidati_del_proprietario
++with (security_barrier = true) as
++select
++  c.id as candidatura_id,
++  c.listing_id,
++  c.tenant_id,
++  c.status as stato,
++  p.nome,
++  p.cognome,
++  case when c.status <> 'rifiutata' then t.professione end as professione,
++  case when c.status <> 'rifiutata' then t.reddito_mensile end as reddito_mensile,
++  case when c.status <> 'rifiutata' then t.reddito_nucleo end as reddito_nucleo,
++  case when c.status <> 'rifiutata' then t.garante end as garante,
++  case when c.status <> 'rifiutata' then t.fideiussione end as fideiussione,
++  case when c.status <> 'rifiutata' then t.protestato end as protestato,
++  case when c.status <> 'rifiutata' then t.verificato end as verificato,
++  case when c.status <> 'rifiutata' then t.presentazione end as presentazione,
++  case when c.status <> 'rifiutata' then t.avatar_url end as avatar_url,
++  case when c.status <> 'rifiutata' then (t.animali is not null) end as animali_compilato,
++  case when c.status <> 'rifiutata' then (t.nucleo is not null) end as nucleo_compilato
++from candidature c
++join listings l on l.id = c.listing_id and l.owner_id = auth.uid()
++join profiles p on p.id = c.tenant_id
++left join tenant_profiles t on t.profile_id = c.tenant_id
++where c.status::text <> 'ritirata';
++
++revoke all on public.candidati_del_proprietario from public, anon;
++grant select on public.candidati_del_proprietario to authenticated;
++
++-- 3.3 Le recensioni su un inquilino le leggono, tra i proprietari, solo quelli
++-- a cui ha una candidatura ancora valida
++drop policy if exists "recensioni: lettura limitata" on recensioni;
++create policy "recensioni: lettura limitata" on recensioni
++  for select using (
++    tenant_id = auth.uid()
++    or autore_id = auth.uid()
++    or exists (
++      select 1
++      from candidature c
++      join listings l on l.id = c.listing_id
++      where c.tenant_id = recensioni.tenant_id
++        and l.owner_id = auth.uid()
++        and c.status::text <> 'ritirata'
++    )
++  );
++
++-- 3.4 E l'inquilino non continua a leggere il profilo del proprietario di un
++-- annuncio da cui si è ritirato
++drop policy if exists "owner_profiles: applicant reads" on owner_profiles;
++create policy "owner_profiles: applicant reads" on owner_profiles
++  for select using (
++    exists (
++      select 1
++      from candidature c
++      join listings l on l.id = c.listing_id
++      where l.owner_id = owner_profiles.profile_id
++        and c.tenant_id = auth.uid()
++        and c.status::text <> 'ritirata'
++    )
++  );
++
++-- ------------------------------------------------------------
++-- 4. Decidere su una candidatura ritirata: un errore chiaro
++--
++-- Stessa funzione della 0016, con un controllo in più. Senza, il proprietario
++-- che decide un istante dopo il ritiro leggerebbe «già valutata».
++-- ------------------------------------------------------------
++
++create or replace function public.decidi_candidatura(
++  p_candidatura uuid,
++  p_stato text,
++  p_motivo text,
++  p_valutazione jsonb
++)
++returns void
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_owner uuid;
++  v_stato_attuale text;
++begin
++  if auth.uid() is null then
++    raise exception 'NON_AUTENTICATO';
++  end if;
++
++  if p_stato not in ('accettata', 'rifiutata') then
++    raise exception 'STATO_NON_VALIDO';
++  end if;
++
++  if p_stato = 'rifiutata' and p_motivo is null then
++    raise exception 'MOTIVO_OBBLIGATORIO';
++  end if;
++
++  -- Un id inesistente e una candidatura altrui rispondono allo stesso modo.
++  select l.owner_id, c.status::text into v_owner, v_stato_attuale
++    from candidature c join listings l on l.id = c.listing_id
++   where c.id = p_candidatura;
++  if v_owner is distinct from auth.uid() then
++    raise exception 'CANDIDATURA_NON_TUA';
++  end if;
++
++  if v_stato_attuale = 'ritirata' then
++    raise exception 'CANDIDATURA_RITIRATA';
++  end if;
++
++  update candidature
++     set status = p_stato::stato_candidatura,
++         motivo_rifiuto = case when p_stato = 'rifiutata' then p_motivo else null end,
++         updated_at = now()
++   where id = p_candidatura and status = 'in_attesa';
++  if not found then
++    raise exception 'CANDIDATURA_GIA_VALUTATA';
++  end if;
++
++  if p_valutazione is not null then
++    insert into valutazioni_candidati (candidatura_id, valutazione)
++    values (p_candidatura, p_valutazione)
++    on conflict do nothing;
++  end if;
++end;
++$$;
++
++-- ------------------------------------------------------------
++-- 5. La notifica al proprietario
++-- ------------------------------------------------------------
++
++alter table notifiche drop constraint if exists notifiche_tipo_check;
++alter table notifiche add constraint notifiche_tipo_check check (tipo in (
++  'candidatura_ricevuta', 'candidatura_accettata', 'candidatura_rifiutata', 'candidatura_ritirata',
++  'immobile_verificato', 'immobile_respinto',
++  'reddito_verificato', 'reddito_respinto',
++  'affitto_verificato', 'affitto_respinto',
++  'rapporto_confermato', 'rapporto_rifiutato',
++  'feedback_ricevuto'
++));
++
++-- Stessa funzione della 0019, con il ramo del ritiro. Il confronto con lo
++-- stato nuovo è dentro il corpo della funzione: si compila alla prima
++-- esecuzione, quando il valore dell'enumerato esiste già.
++create or replace function public.notifica_candidatura_decisa()
++returns trigger
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  l listings;
++begin
++  select * into l from listings where id = new.listing_id;
++  if new.status = 'accettata' then
++    perform public.crea_notifica(new.tenant_id, 'candidatura_accettata',
++      jsonb_build_object('titolo', left(l.titolo, 80)), '/chat/' || new.id::text);
++  elsif new.status = 'rifiutata' then
++    perform public.crea_notifica(new.tenant_id, 'candidatura_rifiutata',
++      jsonb_build_object('titolo', left(l.titolo, 80)), '/candidature');
++  elsif new.status::text = 'ritirata' then
++    perform public.crea_notifica(l.owner_id, 'candidatura_ritirata',
++      jsonb_build_object('titolo', left(l.titolo, 80)), '/database');
++  end if;
++  return new;
++end;
++$$;
++
++revoke all on function public.notifica_candidatura_decisa() from public, anon, authenticated;
++
++-- ------------------------------------------------------------
++-- Verifica
++-- ------------------------------------------------------------
++
++select enumlabel from pg_enum e join pg_type t on t.oid = e.enumtypid
++where t.typname = 'stato_candidatura' order by e.enumsortorder;   -- 4 righe, l'ultima è «ritirata»
++
++select routine_name from information_schema.routines
++where routine_name in ('ritira_candidatura', 'decidi_candidatura') order by 1;   -- 2 righe
++
++select count(*) as notifica_ritirata_ammessa
++from pg_constraint where conname = 'notifiche_tipo_check'
++  and pg_get_constraintdef(oid) like '%candidatura_ritirata%';   -- 1
+-- 
+2.43.0
+
+
+From ba4705013514941ba364438bd3c1ac55b0f56521 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 7 Oct 2026 21:51:31 +0000
+Subject: [PATCH 2/2] feat(chat): avvisi contro la truffa dei pagamenti
+ anticipati
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Dove nasce la truffa classica dell'affitto: una richiesta di soldi prima di
+aver visto la casa, fatta con un mezzo difficile da annullare.
+
+- avviso fisso in cima a ogni chat (la regola in una riga) con l'elenco dei
+  cinque segni di una truffa, che si apre
+- un segnale sotto i messaggi RICEVUTI che parlano di: IBAN (anche a gruppi
+  di quattro, con somma di controllo), Western Union / MoneyGram / Postepay /
+  ricariche / criptovalute / buoni regalo, un pagamento chiesto prima di
+  vedere la casa, la storia delle chiavi da spedire dall'estero (livello
+  forte); una caparra o un anticipo (livello misurato). Riconosce anche le
+  scritture offuscate (b0nifico, c4parra, W3stern Un10n)
+- un avviso prima di INVIARE un messaggio così, con 'Modifica' e 'Invia
+  comunque'. NON blocca mai: è un consiglio, non un divieto, e un proprietario
+  onesto può chiedere una caparra dopo la firma
+
+Prudenza sui falsi allarmi: se si segnala ogni frase di tutti i giorni la
+gente smette di leggere gli avvisi. La sola parola 'bonifico' non segnala
+(l'affitto si paga con bonifico), 'anticipo' solo con un discorso di soldi
+('anticipo la visita' no), 'sono all'estero' solo con le chiavi, la ricarica
+solo di una carta (non del telefono). 39 frasi di tutti i giorni verificate.
+
+Difetto di progetto trovato e corretto: una prima versione guardava solo i
+primi 5000 caratteri di un messaggio, e bastava del riempimento davanti a un
+IBAN per non farlo vedere. Misurato: un milione di caratteri costa meno di
+300 ms. Ora si analizza tutto; oltre 200.000 caratteri si guardano inizio e
+fine.
+
+PRIVACY. Il rilevatore legge il contenuto dei messaggi privati. L'informativa
+lo dichiara (non salviamo il risultato e non lo comunichiamo a nessuno), e due
+test lo difendono: il rilevatore non ha dipendenze né accesso alla rete; la
+chat invia al database solo i tre campi di sempre. Il testo NON dice che il
+controllo avviene sul dispositivo: la prima versione della pagina si costruisce
+sul server e il test lo impedisce.
+
+Test: 95 sul rilevatore (frasi da segnalare, da non segnalare, IBAN,
+grammatica dei motivi, input estremi); 19 prove di interazione sulla chat.
+Difetti reintrodotti di proposito: tutti presi.
+---
+ package.json                     |   2 +-
+ scripts/test-informativa.mjs     |  13 ++
+ scripts/test-truffe.mjs          | 353 +++++++++++++++++++++++++++++++
+ src/app/chat/[id]/ChatClient.tsx |  56 ++++-
+ src/app/globals.css              |  77 +++++++
+ src/components/AvvisiChat.tsx    |  69 ++++++
+ src/content/informativa.ts       |   1 +
+ src/lib/truffe.ts                | 216 +++++++++++++++++++
+ 8 files changed, 777 insertions(+), 10 deletions(-)
+ create mode 100644 scripts/test-truffe.mjs
+ create mode 100644 src/components/AvvisiChat.tsx
+ create mode 100644 src/lib/truffe.ts
+
+diff --git a/package.json b/package.json
+index 82cccda..4ddf02c 100644
+--- a/package.json
++++ b/package.json
+@@ -7,7 +7,7 @@
+     "build": "next build",
+     "start": "next start",
+     "lint": "eslint",
+-    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-informativa.mjs b/scripts/test-informativa.mjs
+index f61aaa6..616d176 100644
+--- a/scripts/test-informativa.mjs
++++ b/scripts/test-informativa.mjs
+@@ -339,3 +339,16 @@ test("ritiro: il testo dice cosa vede il proprietario, e la migrazione lo fa dav
+   const sql1 = fs.readFileSync(path.join(migrazioni, "0001_init.sql"), "utf8");
+   assert.match(sql1, /unique \(listing_id, tenant_id\)/);
+ });
++
++// ------------------------------------------------------------
++// Ciò che il testo dice dell'avviso nella chat è vero
++// ------------------------------------------------------------
++
++test("chat: il testo dichiara che l'app legge i messaggi per avvisare, e che non salva né comunica il risultato", () => {
++  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
++  assert.match(tutto, /Nella chat, l'app evidenzia i messaggi che parlano di pagamenti sospetti/);
++  assert.match(tutto, /non salviamo il risultato e non lo comunichiamo a nessuno/);
++  assert.match(tutto, /non impedisce mai di inviare un messaggio/);
++  // il testo NON deve dire che il controllo avviene solo sul dispositivo: la prima versione della pagina si costruisce sul server
++  assert.ok(!/sul tuo dispositivo|solo sul tuo telefono|resta sul tuo/i.test(tutto), "non è vero che il controllo avviene solo sul dispositivo");
++});
+diff --git a/scripts/test-truffe.mjs b/scripts/test-truffe.mjs
+new file mode 100644
+index 0000000..4778a6e
+--- /dev/null
++++ b/scripts/test-truffe.mjs
+@@ -0,0 +1,353 @@
++/**
++ * Test del rilevatore di messaggi sui pagamenti sospetti (src/lib/truffe.ts).
++ * Si lancia con:   npm test
++ *
++ * Il rilevatore è un consiglio, non un divieto, e può sbagliare nei due sensi.
++ * Questi test fissano cosa deve segnalare e, soprattutto, cosa NON deve
++ * segnalare: un avviso che scatta sulle frasi di tutti i giorni insegna a non
++ * leggere gli avvisi.
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const t = caricaTs(path.join(radice, "src", "lib", "truffe.ts"));
++const r = (s) => t.rilevaRischioPagamento(s);
++
++// ------------------------------------------------------------
++// Cosa DEVE far scattare l'avviso forte
++// ------------------------------------------------------------
++
++const ALTO = [
++  // IBAN: compatto, a gruppi, con punti, dentro una frase, con un finto prefisso
++  "Ti mando l'IBAN: IT60X0542811101000000123456",
++  "IBAN IT60 X054 2811 1010 0000 0123 456 intestato a Mario Rossi",
++  "it60x0542811101000000123456",
++  "Fai il bonifico qui: IT60-X054-2811-1010-0000-0123-456, grazie",
++  "GB82 WEST 1234 5698 7654 32",
++  "DE89 3704 0044 0532 0130 00",
++  // un IBAN italiano ricopiato male resta un IBAN
++  "IT12 A123 4567 8901 2345 6789 012",
++  // mezzi di pagamento difficili da annullare
++  "Puoi pagare con Western Union, è sicuro",
++  "paga con western-union e mi mandi la ricevuta",
++  "MoneyGram o Western Union, come preferisci",
++  "Ricaricami la Postepay con 500 euro",
++  "fai una ricarica sulla carta prepagata",
++  "Ti mando il numero della Poste Pay",
++  "Preferisco ricevere in bitcoin",
++  "possiamo fare in criptovalute?",
++  "Mi bastano delle gift card da 100 euro",
++  "compra dei buoni amazon e mandami i codici",
++  "paypal con la formula amici e familiari così non ci sono commissioni",
++  // pagamento prima di vedere la casa
++  "Prima di vedere la casa devi pagare la caparra",
++  "Puoi inviare il pagamento senza vedere l'appartamento",
++  "non serve vedere la casa, mandami solo la caparra",
++  "Non è necessario vedere la casa, mandami la caparra",
++  "pagamento anticipato, senza visitare niente",
++  // la storia delle chiavi
++  "Sono all'estero per lavoro, ti spedisco le chiavi con un corriere dopo il pagamento",
++  "Mi trovo attualmente in Inghilterra, le chiavi te le mando io",
++  "Vivo all'estero e per questo ti invio le chiavi per pacco",
++  // forme offuscate
++  "W3stern Un10n va benissimo",
++  "ricarica la P0stepay",
++  "per pagare usa B1tcoin",
++];
++
++for (const frase of ALTO) {
++  test(`ALTO: ${frase.slice(0, 70)}`, () => {
++    const x = r(frase);
++    assert.equal(x.livello, "alto", JSON.stringify(x));
++    assert.ok(x.segnali.length >= 1);
++  });
++}
++
++// ------------------------------------------------------------
++// Cosa fa scattare l'avviso più misurato
++// ------------------------------------------------------------
++
++const ATTENZIONE = [
++  "Mi serve una caparra di 800 euro per bloccare l'appartamento",
++  "Per bloccare la casa serve una caparra",
++  "Devi versare un anticipo di 500 euro",
++  "per bloccare l'appartamento serve un acconto di 300 euro",
++  "mandami l'acconto di 1000 euro",
++  "Ti chiedo un bonifico per bloccare la casa",
++  "Fai un bonifico di caparra",
++  "b0nifico per la c4parra",
++  "Per la c a p a r r a ti mando i dati",
++];
++
++for (const frase of ATTENZIONE) {
++  test(`ATTENZIONE: ${frase.slice(0, 70)}`, () => {
++    const x = r(frase);
++    assert.equal(x.livello, "attenzione", JSON.stringify(x));
++  });
++}
++
++// ------------------------------------------------------------
++// Cosa NON deve segnalare (le frasi di tutti i giorni)
++// ------------------------------------------------------------
++
++const NESSUNO_ATTESO = [
++  "Buongiorno, l'appartamento è ancora disponibile?",
++  "Possiamo vederci sabato alle 10 per una visita?",
++  "Il canone è di 1200 euro al mese, spese escluse.",
++  "Il prezzo è 900 euro, trattabile.",
++  "Ti mando il mio numero: 333 123 4567",
++  "Il mio numero è 02 1234567",
++  "Il mio codice fiscale è RSSMRA80A01F205X",
++  "Il contratto numero 2023ABC12345678 è registrato",
++  "Anticipo la visita a venerdì, va bene?",
++  "Posso anticipare l'ingresso di una settimana?",
++  "Ti anticipo che il garage è piccolo",
++  "Il contratto si firma il 15, porta un documento d'identità.",
++  "L'affitto si paga entro il 5 di ogni mese.",
++  "Il deposito cauzionale è di tre mensilità, lo versiamo alla firma del contratto.",
++  "Ti va bene un bonifico bancario per le mensilità?",
++  "La casa è al terzo piano senza ascensore.",
++  "Sono all'estero per lavoro fino a domenica, ci sentiamo lunedì.",
++  "Sono all'estero, ti spedisco i documenti per email.",
++  "Appena controllo la posta ti rispondo",
++  "Ricarica il telefono prima di venire, la zona non prende bene",
++  "Ricarica la scheda del telefono prima di venire",
++  "Ricarica una scheda telefonica, qui non c'è campo",
++  "Ricarica la batteria del telefono",
++  "Hai un garante o una fideiussione?",
++  "Mi mandi una foto del tuo contratto di lavoro?",
++  "Le chiavi te le do io di persona alla firma",
++  "Ti aspetto davanti al portone con le chiavi",
++  "Hai già visto la casa? Possiamo organizzare una seconda visita.",
++  "La caldaia è nuova e le spese di condominio sono 80 euro",
++  "Grazie mille, a presto!",
++  "ok",
++  "👍",
++  "Posso portare il mio cane?",
++  "Posso chiamarti alle 18?",
++  "Scrivimi su WhatsApp se preferisci",
++];
++
++for (const frase of NESSUNO_ATTESO) {
++  test(`NESSUNO: ${frase.slice(0, 70)}`, () => {
++    const x = r(frase);
++    assert.equal(x.livello, "nessuno", `ha segnalato «${frase}»: ${JSON.stringify(x)}`);
++    assert.deepEqual(x.segnali, []);
++  });
++}
++
++// ------------------------------------------------------------
++// IBAN: la somma di controllo e i falsi positivi
++// ------------------------------------------------------------
++
++test("IBAN: un codice fiscale non è un IBAN", () => {
++  for (const cf of ["RSSMRA80A01F205X", "VRDLGU75C15H501Z", "il codice è BNCLRA90D45F205K ok"]) {
++    assert.equal(r(cf).livello, "nessuno", cf);
++  }
++});
++
++test("IBAN: un numero lungo qualunque, o una targa, non lo è", () => {
++  for (const f of ["Il mio numero è 3331234567890", "targa AB123CD", "pratica 12345678901234567890", "cap 20121 Milano, via Roma 12"]) {
++    assert.equal(r(f).livello, "nessuno", f);
++  }
++});
++
++test("IBAN: viene riconosciuto anche con maiuscole e minuscole miste e con ritorni a capo", () => {
++  assert.equal(r("iT60 x054 2811\n1010 0000 0123 456").livello, "alto");
++  assert.equal(r("Ecco:\nIT60X0542811101000000123456\nGrazie").livello, "alto");
++});
++
++test("IBAN: il motivo detto alla persona è quello giusto", () => {
++  assert.deepEqual(r("IT60X0542811101000000123456").segnali, ["un IBAN o un numero di conto"]);
++});
++
++// ------------------------------------------------------------
++// Più segnali, livello, ordine
++// ------------------------------------------------------------
++
++test("un messaggio con più segnali li elenca tutti e prende il livello più alto", () => {
++  const x = r("Per la caparra usa Western Union, oppure IT60X0542811101000000123456");
++  assert.equal(x.livello, "alto");
++  assert.equal(x.segnali.length, 3);
++  assert.ok(x.segnali.includes("un IBAN o un numero di conto"));
++  assert.ok(x.segnali.some((s) => /Western Union/.test(s)));
++  assert.ok(x.segnali.includes("una caparra o un anticipo da versare"));
++});
++
++test("lo stesso segnale non si ripete, anche se la parola compare più volte", () => {
++  const x = r("caparra caparra caparra, una caparra");
++  assert.equal(x.livello, "attenzione");
++  assert.equal(x.segnali.length, 1);
++});
++
++test("il risultato non dipende da una chiamata precedente", () => {
++  const a = r("Western Union"); r("caparra"); r("ciao"); const b = r("Western Union");
++  assert.deepEqual(a, b);
++});
++
++// ------------------------------------------------------------
++// Input strani: mai un errore, mai lentezza
++// ------------------------------------------------------------
++
++test("input non valido: nessun rischio, nessun errore", () => {
++  for (const x of [null, undefined, "", "   ", "\n\n", 42, {}, [], NaN]) {
++    assert.deepEqual(r(x), { livello: "nessuno", segnali: [] }, String(x));
++  }
++});
++
++test("un messaggio enorme non rallenta e non fa crollare niente", () => {
++  for (const grande of ["a".repeat(1_000_000), "IT60 ".repeat(200_000), "caparra ".repeat(100_000), "sono all'estero ".repeat(50_000) + "chiavi", " ".repeat(1_000_000) + "Western Union", "a b ".repeat(333_333)]) {
++    const inizio = Date.now();
++    r(grande);
++    assert.ok(Date.now() - inizio < 1500, `troppo lento: ${Date.now() - inizio} ms`);
++  }
++});
++
++test("del riempimento davanti non nasconde un IBAN: si guarda tutto il messaggio", () => {
++  // il difetto di una versione precedente: si leggevano solo i primi 5000 caratteri
++  const IBAN = "IT60X0542811101000000123456";
++  assert.equal(r("ciao ".repeat(1200) + " " + IBAN).livello, "alto");
++  assert.equal(r("ciao ".repeat(20_000) + " " + IBAN).livello, "alto");
++  assert.equal(r(IBAN + " " + "ciao ".repeat(20_000)).livello, "alto");
++});
++
++test("oltre il limite enorme si guardano inizio e fine, e questo limite è dichiarato", () => {
++  assert.equal(t.LIMITE_ANALISI, 200_000);
++  const riempimento = "ciao ".repeat(300_000);
++  assert.equal(r("Western Union " + riempimento).livello, "alto", "inizio");
++  assert.equal(r(riempimento + " Western Union").livello, "alto", "fine");
++  // nel mezzo di un messaggio da un milione e mezzo di caratteri non si guarda: è il limite, e qui è documentato
++  assert.equal(r(riempimento + " Western Union " + riempimento).livello, "nessuno", "metà: fuori dall'analisi");
++});
++
++test("stringhe costruite per far impazzire le espressioni regolari non bloccano", () => {
++  const inizio = Date.now();
++  for (const x of ["IT12" + "A123".repeat(5000), "A1 ".repeat(3000), "prima di vedere " + "x ".repeat(2500) + "pagare", "b ".repeat(2500), "ricarica " + "la ".repeat(2000)]) r(x);
++  assert.ok(Date.now() - inizio < 3000, `troppo lento: ${Date.now() - inizio} ms`);
++});
++
++test("accenti, apostrofi tipografici e maiuscole non cambiano il risultato", () => {
++  assert.equal(r("SONO ALL’ESTERO E TI SPEDISCO LE CHIAVI CON UN CORRIERE").livello, "alto");
++  assert.equal(r("Sono all’estero, ti spedisco le chiavi con un corrière").livello, "alto");
++  assert.equal(r("CAPARRA").livello, "attenzione");
++});
++
++test("importi, orari e numeri di piano non fanno scattare niente", () => {
++  assert.equal(r("Il canone è 1000 euro, 3 mesi di cauzione, 4 locali, 5 piano").livello, "nessuno");
++  assert.equal(r("ci vediamo alle 10 e 30 al 4 piano").livello, "nessuno");
++});
++
++// ------------------------------------------------------------
++// I testi
++// ------------------------------------------------------------
++
++const alto = r("Western Union");
++const medio = r("Mi serve una caparra");
++
++test("testi: un messaggio ricevuto, due livelli, con tono diverso", () => {
++  const a = t.testoAvvisoMessaggio(alto), m = t.testoAvvisoMessaggio(medio);
++  assert.match(a, /Non mandare soldi prima di aver visto la casa e firmato il contratto/);
++  assert.match(m, /Ricorda: niente pagamenti prima di aver visto la casa e firmato il contratto/);
++  assert.notEqual(a, m);
++  assert.equal(t.testoAvvisoMessaggio({ livello: "nessuno", segnali: [] }), "");
++});
++
++test("testi: prima di inviare non accusa chi scrive, ricorda la regola", () => {
++  const c = t.testoConfermaInvio(alto);
++  assert.match(c, /Il messaggio che stai per inviare parla di/);
++  assert.match(c, /nessun pagamento va fatto prima di aver visto la casa e firmato il contratto/);
++  assert.ok(!/\b(sei un truffatore|truffatore|truffa tu)\b/i.test(c), c);
++  assert.equal(t.testoConfermaInvio({ livello: "nessuno", segnali: [] }), "");
++});
++
++test("testi: l'elenco dei motivi è grammaticale con uno, due, tre", () => {
++  assert.match(t.testoAvvisoMessaggio({ livello: "alto", segnali: ["un IBAN"] }), /parla di un IBAN\./);
++  assert.match(t.testoAvvisoMessaggio({ livello: "alto", segnali: ["un IBAN", "una caparra"] }), /parla di un IBAN e una caparra\./);
++  assert.match(t.testoAvvisoMessaggio({ livello: "alto", segnali: ["un IBAN", "una caparra", "le chiavi"] }), /parla di un IBAN, una caparra e le chiavi\./);
++});
++
++test("testi: l'avviso fisso e l'elenco dei segni sono completi e senza promesse che non si mantengono", () => {
++  assert.match(t.AVVISO_FISSO, /Non pagare mai caparre, anticipi o affitti prima di aver visto la casa e firmato un contratto/);
++  assert.equal(t.SEGNI_DI_TRUFFA.length, 5);
++  assert.ok(t.SEGNI_DI_TRUFFA.every((x) => x.trim().endsWith(".")), "ogni segno è una frase");
++  // oggi non esiste la segnalazione di una conversazione (punto 25) né un assistente: non si promettono
++  const tutto = [t.AVVISO_FISSO, t.CONSIGLIO_FINALE, ...t.SEGNI_DI_TRUFFA].join(" ");
++  assert.ok(!/segnal(a|i|are|azione)|scrivici|contattaci|assistenza|supporto|bloccheremo|verifichiamo i messaggi/i.test(tutto), tutto);
++  assert.equal(t.CONSIGLIO_FINALE, "Se hai un dubbio, non pagare.");
++});
++
++test("testi: non presumono il genere di nessuno", () => {
++  const tutto = [t.AVVISO_FISSO, t.CONSIGLIO_FINALE, ...t.SEGNI_DI_TRUFFA, t.testoAvvisoMessaggio(alto), t.testoConfermaInvio(alto), t.testoAvvisoMessaggio(medio)].join(" ");
++  assert.ok(!/\b(lui|lei|il truffatore|la truffatrice)\b/i.test(tutto), tutto);
++});
++
++// ------------------------------------------------------------
++// Grammatica: i motivi si leggono dopo «parla di»
++// ------------------------------------------------------------
++
++/** Tutti i motivi che il rilevatore può dare, ottenuti da messaggi che li fanno scattare. */
++const TUTTI_I_MOTIVI = [...new Set([
++  "IT60X0542811101000000123456", "Western Union", "Prima di vedere la casa devi pagare la caparra",
++  "Sono all'estero e ti spedisco le chiavi", "Mi serve una caparra",
++].flatMap((f) => r(f).segnali))];
++
++test("grammatica: i motivi sono cinque e nessuno comincia con un articolo determinativo", () => {
++  assert.equal(TUTTI_I_MOTIVI.length, 5, TUTTI_I_MOTIVI.join(" | "));
++  for (const m of TUTTI_I_MOTIVI) {
++    assert.ok(!/^(la|il|lo|le|i|gli|l')\b/i.test(m), `«${m}» comincia con un articolo: «parla di ${m}» è sbagliato`);
++  }
++});
++
++test("grammatica: ogni frase che li usa è italiano corretto, mai «di la», «di il», «di le»…", () => {
++  for (const motivo of TUTTI_I_MOTIVI) {
++    for (const frase of [t.testoAvvisoMessaggio({ livello: "alto", segnali: [motivo] }), t.testoConfermaInvio({ livello: "attenzione", segnali: [motivo] })]) {
++      assert.ok(!/\b(di|a|da|in|su) (la|il|lo|le|i|gli) /i.test(frase), `preposizione e articolo non fusi: ${frase}`);
++    }
++  }
++});
++
++test("grammatica: il controllo sa fermare un motivo con l'articolo (la prova che non è vuoto)", () => {
++  const sbagliato = t.testoAvvisoMessaggio({ livello: "alto", segnali: ["la richiesta di una caparra"] });
++  assert.ok(/\b(di|a|da|in|su) (la|il|lo|le|i|gli) /i.test(sbagliato), sbagliato);
++});
++
++// ------------------------------------------------------------
++// Il risultato non esce da lì: non si salva e non si invia (è ciò che dice l'informativa)
++// ------------------------------------------------------------
++
++const leggi = (...parti) => fs.readFileSync(path.join(radice, ...parti), "utf8");
++
++test("privacy: il rilevatore non ha dipendenze né accesso alla rete, né salva niente", () => {
++  const codice = leggi("src", "lib", "truffe.ts").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
++  for (const vietato of [/\bimport\b/, /\brequire\(/, /\bfetch\(/, /XMLHttpRequest/, /WebSocket/, /sendBeacon/, /localStorage/, /sessionStorage/, /indexedDB/, /document\.cookie/, /supabase/i, /console\./]) {
++    assert.ok(!vietato.test(codice), `il rilevatore usa ${vietato}`);
++  }
++});
++
++test("privacy: la chat non manda il risultato da nessuna parte: nell'invio ci sono solo i tre campi di sempre", () => {
++  const chat = leggi("src", "app", "chat", "[id]", "ChatClient.tsx");
++  const inserimenti = [...chat.matchAll(/\.insert\(\{([^}]*)\}\)/g)];
++  assert.equal(inserimenti.length, 1, "dovrebbe esserci un solo inserimento");
++  const campi = [...inserimenti[0][1].matchAll(/(\w+):/g)].map((m) => m[1]).sort();
++  assert.deepEqual(campi, ["candidatura_id", "mittente_id", "testo"]);
++  // e il rischio non viene usato in nessun'altra chiamata verso il database
++  assert.equal((chat.match(/createClient\(\)/g) ?? []).length, 2, "attese solo le due chiamate esistenti (canale e invio)");
++});
++
++test("privacy: i componenti degli avvisi non fanno chiamate di rete", () => {
++  const comp = leggi("src", "components", "AvvisiChat.tsx");
++  for (const vietato of [/fetch\(/, /createClient/, /supabase/i, /XMLHttpRequest/, /sendBeacon/, /localStorage/]) {
++    assert.ok(!vietato.test(comp), `AvvisiChat usa ${vietato}`);
++  }
++});
++
++test("privacy: i controlli sanno fermare un rilevatore che comunica il risultato", () => {
++  const cattivo = 'export function f(t) { fetch("/api/segnala", { method: "POST", body: t }); }';
++  assert.ok(/\bfetch\(/.test(cattivo));
++  const cattivaChat = 'await supabase.from("messaggi").insert({ candidatura_id: 1, testo: t, rischio: "alto" })';
++  const campi = [...cattivaChat.matchAll(/\.insert\(\{([^}]*)\}\)/g)][0][1].match(/(\w+):/g).map((x) => x.slice(0, -1)).sort();
++  assert.notDeepEqual(campi, ["candidatura_id", "mittente_id", "testo"]);
++});
+diff --git a/src/app/chat/[id]/ChatClient.tsx b/src/app/chat/[id]/ChatClient.tsx
+index d5f3f38..263227f 100644
+--- a/src/app/chat/[id]/ChatClient.tsx
++++ b/src/app/chat/[id]/ChatClient.tsx
+@@ -1,10 +1,12 @@
+ "use client";
+ 
+-import { useEffect, useRef, useState } from "react";
++import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+ import { useRouter } from "next/navigation";
+ import { createClient } from "@/lib/supabase/client";
+ import type { Messaggio } from "@/lib/types";
+ import { IconIndietro, IconInvia } from "@/components/icons";
++import { AvvisoMessaggio, AvvisoTruffe, ConfermaInvioRischioso } from "@/components/AvvisiChat";
++import { rilevaRischioPagamento, type Rischio } from "@/lib/truffe";
+ 
+ export function ChatClient({
+   candidaturaId,
+@@ -23,6 +25,8 @@ export function ChatClient({
+   const [messaggi, setMessaggi] = useState<Messaggio[]>(messaggiIniziali);
+   const [testo, setTesto] = useState("");
+   const [invio, setInvio] = useState(false);
++  // il messaggio che si sta per inviare e che parla di soldi: si chiede conferma
++  const [daConfermare, setDaConfermare] = useState<Rischio | null>(null);
+   const bottomRef = useRef<HTMLDivElement>(null);
+ 
+   useEffect(() => {
+@@ -55,9 +59,30 @@ export function ChatClient({
+     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+   }, [messaggi]);
+ 
+-  async function invia() {
++  // Il rischio dei messaggi RICEVUTI. Si calcola una volta per messaggio, non a ogni
++  // battuta nel campo di testo. I propri messaggi non si segnalano: si è già avvisati prima di inviarli.
++  const rischi = useMemo(
++    () =>
++      new Map(
++        messaggi.map((m) => [m.id, m.mittente_id === userId ? null : rilevaRischioPagamento(m.testo)] as const)
++      ),
++    [messaggi, userId]
++  );
++
++  async function invia(conferma = false) {
+     const testoTrim = testo.trim();
+     if (!testoTrim) return;
++
++    // Un consiglio, non un divieto: se il messaggio parla di soldi si chiede una conferma,
++    // e «Invia comunque» lo manda così com'è.
++    if (!conferma) {
++      const rischio = rilevaRischioPagamento(testoTrim);
++      if (rischio.livello !== "nessuno") {
++        setDaConfermare(rischio);
++        return;
++      }
++    }
++    setDaConfermare(null);
+     setInvio(true);
+     setTesto("");
+ 
+@@ -88,6 +113,8 @@ export function ChatClient({
+         </div>
+       </div>
+ 
++      <AvvisoTruffe />
++
+       <div className="chat-scroll">
+         {messaggi.length === 0 && (
+           <p className="chat-empty">
+@@ -96,18 +123,25 @@ export function ChatClient({
+         )}
+         {messaggi.map((m) => {
+           const mio = m.mittente_id === userId;
++          const rischio = rischi.get(m.id);
+           return (
+-            <div
+-              key={m.id}
+-              className={`chat-msg ${mio ? "mine" : "theirs"}`}
+-            >
+-              {m.testo}
+-            </div>
++            <Fragment key={m.id}>
++              <div className={`chat-msg ${mio ? "mine" : "theirs"}`}>{m.testo}</div>
++              {rischio && <AvvisoMessaggio rischio={rischio} />}
++            </Fragment>
+           );
+         })}
+         <div ref={bottomRef} />
+       </div>
+ 
++      {daConfermare && (
++        <ConfermaInvioRischioso
++          rischio={daConfermare}
++          onModifica={() => setDaConfermare(null)}
++          onInvia={() => invia(true)}
++        />
++      )}
++
+       <form
+         onSubmit={(e) => {
+           e.preventDefault();
+@@ -117,7 +151,11 @@ export function ChatClient({
+       >
+         <input
+           value={testo}
+-          onChange={(e) => setTesto(e.target.value)}
++          onChange={(e) => {
++            setTesto(e.target.value);
++            // il testo è cambiato: la conferma riguardava quello di prima
++            setDaConfermare(null);
++          }}
+           placeholder="Scrivi un messaggio..."
+         />
+         <button type="submit" disabled={invio || !testo.trim()} aria-label="Invia">
+diff --git a/src/app/globals.css b/src/app/globals.css
+index 3cd85ba..e7c0688 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -2684,3 +2684,80 @@ mark.segnaposto {
+   font-size: 11px;
+   color: var(--muted);
+ }
++
++/* ============================================================
++   Chat: avvisi contro la truffa dell'affitto
++   ============================================================ */
++
++.chat-avviso {
++  flex-shrink: 0;
++  margin: 0 12px 6px;
++  padding: 8px 12px;
++  font-size: 12px;
++  line-height: 1.45;
++  color: var(--ink);
++  background: rgba(201, 161, 90, 0.16);
++  border-radius: 12px;
++}
++.chat-avviso summary {
++  display: flex;
++  gap: 8px;
++  align-items: flex-start;
++  cursor: pointer;
++  list-style: none;
++}
++.chat-avviso summary::-webkit-details-marker {
++  display: none;
++}
++.chat-avviso-icona {
++  flex-shrink: 0;
++  width: 16px;
++  height: 16px;
++  margin-top: 1px;
++  fill: none;
++  stroke: currentColor;
++  stroke-width: 2;
++}
++.chat-avviso-apri {
++  font-weight: 600;
++  text-decoration: underline;
++  white-space: nowrap;
++}
++.chat-avviso ul {
++  margin: 8px 0 4px 24px;
++  padding: 0;
++}
++.chat-avviso li {
++  margin-bottom: 3px;
++}
++.chat-avviso p {
++  margin: 6px 0 0 24px;
++  font-weight: 600;
++}
++.chat-rischio {
++  align-self: flex-start;
++  max-width: 85%;
++  margin: -2px 0 6px;
++  padding: 7px 11px;
++  font-size: 12px;
++  line-height: 1.45;
++  color: var(--ink);
++  background: rgba(201, 161, 90, 0.2);
++  border-radius: 10px;
++}
++.chat-rischio.alto {
++  background: rgba(201, 105, 78, 0.16);
++  border-left: 3px solid var(--clay);
++}
++.chat-conferma {
++  flex-shrink: 0;
++  margin: 0 12px 8px;
++  padding: 10px 12px;
++  font-size: 12.5px;
++  line-height: 1.5;
++  background: rgba(201, 105, 78, 0.12);
++  border-radius: 12px;
++}
++.chat-conferma p {
++  margin: 0 0 8px;
++}
+diff --git a/src/components/AvvisiChat.tsx b/src/components/AvvisiChat.tsx
+new file mode 100644
+index 0000000..28abea0
+--- /dev/null
++++ b/src/components/AvvisiChat.tsx
+@@ -0,0 +1,69 @@
++import { IconInfo } from "@/components/icons";
++import {
++  AVVISO_FISSO,
++  CONSIGLIO_FINALE,
++  SEGNI_DI_TRUFFA,
++  testoAvvisoMessaggio,
++  testoConfermaInvio,
++  type Rischio,
++} from "@/lib/truffe";
++
++/**
++ * Gli avvisi contro la truffa dell'affitto nella chat. Sono consigli: non
++ * bloccano niente (vedi lib/truffe.ts).
++ */
++
++/** Sempre visibile in cima a ogni chat: una riga, e l'elenco dei segni si apre se serve. */
++export function AvvisoTruffe() {
++  return (
++    <details className="chat-avviso">
++      <summary>
++        <IconInfo className="chat-avviso-icona" />
++        <span>
++          {AVVISO_FISSO} <span className="chat-avviso-apri">Come riconoscere una truffa</span>
++        </span>
++      </summary>
++      <ul>
++        {SEGNI_DI_TRUFFA.map((s) => (
++          <li key={s}>{s}</li>
++        ))}
++      </ul>
++      <p>{CONSIGLIO_FINALE}</p>
++    </details>
++  );
++}
++
++/** Sotto un messaggio RICEVUTO che parla di soldi in modo sospetto. */
++export function AvvisoMessaggio({ rischio }: { rischio: Rischio }) {
++  if (rischio.livello === "nessuno") return null;
++  return (
++    <div className={`chat-rischio ${rischio.livello === "alto" ? "alto" : ""}`} role="note">
++      {testoAvvisoMessaggio(rischio)}
++    </div>
++  );
++}
++
++/** Prima di inviare un messaggio che parla di soldi: si può modificare o inviare comunque. */
++export function ConfermaInvioRischioso({
++  rischio,
++  onModifica,
++  onInvia,
++}: {
++  rischio: Rischio;
++  onModifica: () => void;
++  onInvia: () => void;
++}) {
++  return (
++    <div className="chat-conferma" role="alertdialog" aria-label="Messaggio che parla di soldi">
++      <p>{testoConfermaInvio(rischio)}</p>
++      <div className="flex gap-3">
++        <button type="button" className="btn-danger-outline" style={{ borderColor: "rgba(16,21,26,.14)", color: "var(--ink)" }} onClick={onModifica}>
++          Modifica
++        </button>
++        <button type="button" className="opp-cta" onClick={onInvia}>
++          Invia comunque
++        </button>
++      </div>
++    </div>
++  );
++}
+diff --git a/src/content/informativa.ts b/src/content/informativa.ts
+index e60d910..4736c26 100644
+--- a/src/content/informativa.ts
++++ b/src/content/informativa.ts
+@@ -79,6 +79,7 @@ export const INFORMATIVA = {
+         "Se rifiuta la tua candidatura, del tuo profilo gli resta solo il tuo nome, oltre alla valutazione che aveva già fatto. Tu vedi il motivo del rifiuto, non la sua valutazione completa.",
+         "Se ritiri una candidatura mentre è ancora in attesa, il proprietario non la vede più: non legge né il tuo profilo né le recensioni su di te, e riceve solo una notifica con il titolo dell'annuncio. La candidatura resta nel tuo elenco e non puoi candidarti di nuovo allo stesso annuncio.",
+         "I messaggi li leggono solo le due persone, dopo che la candidatura è stata accettata.",
++        "Nella chat, l'app evidenzia i messaggi che parlano di pagamenti sospetti (per esempio un IBAN, una caparra o un anticipo) e ti avvisa prima di inviarne uno così, per aiutarti a riconoscere una truffa. È un controllo automatico che fa parte della visualizzazione della chat: non salviamo il risultato e non lo comunichiamo a nessuno, e non impedisce mai di inviare un messaggio.",
+         "Le recensioni su un inquilino le leggono la persona recensita, chi le ha scritte e i proprietari a cui ha inviato una candidatura.",
+         "Gli annunci pubblicati e verificati li vedono tutti gli utenti connessi. L'indirizzo esatto degli immobili non lo raccogliamo.",
+         "Il documento d'identità, la prova del reddito, la prova di proprietà e i contratti li vedono solo chi li ha caricati e il team di MatchAmI che li controlla. Un proprietario non vede mai i documenti di un inquilino: vede solo se il reddito è verificato, sì o no. L'altra parte di un affitto non vede il contratto.",
+diff --git a/src/lib/truffe.ts b/src/lib/truffe.ts
+new file mode 100644
+index 0000000..716590a
+--- /dev/null
++++ b/src/lib/truffe.ts
+@@ -0,0 +1,216 @@
++/**
++ * Riconosce, in un messaggio della chat, i discorsi tipici della truffa
++ * dell'affitto: una richiesta di soldi prima di aver visto la casa, fatta con
++ * un mezzo difficile da annullare.
++ *
++ * È un CONSIGLIO, non un divieto: non blocca niente, non decide cosa è una
++ * truffa, e può sbagliare nei due sensi. Un proprietario onesto può chiedere
++ * una caparra dopo la firma; un truffatore può scrivere in modo che nessuna
++ * regola lo riconosca. Per questo i livelli sono due e il segnale più debole
++ * ha parole misurate: se si avvisa troppo spesso, la gente smette di leggere.
++ *
++ * Logica pura, senza database: si prova con `npm test`.
++ */
++
++export type LivelloRischio = "nessuno" | "attenzione" | "alto";
++
++/**
++ * I motivi si leggono dopo «parla di»: «Questo messaggio parla di un IBAN…».
++ * Per questo NON cominciano con un articolo determinativo (la, il, lo, le, i, gli, l'),
++ * che con «di» si fonderebbe («della», «del»…): «parla di la richiesta» è sbagliato.
++ */
++export type Rischio = {
++  livello: LivelloRischio;
++  /** I motivi, in italiano, nell'ordine in cui si controllano (prima i più gravi). */
++  segnali: string[];
++};
++
++const NESSUNO: Rischio = { livello: "nessuno", segnali: [] };
++
++/** Oltre questa lunghezza si guardano solo l'inizio e la fine del messaggio. */
++export const LIMITE_ANALISI = 200_000;
++
++// ------------------------------------------------------------
++// Normalizzazione
++// ------------------------------------------------------------
++
++/** Minuscole, senza accenti, spazi ridotti. */
++function normalizza(testo: string): string {
++  return testo
++    .normalize("NFD")
++    .replace(/[\u0300-\u036f]/g, "")
++    .toLowerCase()
++    .replace(/[’‘`´]/g, "'")
++    .replace(/\s+/g, " ")
++    .trim();
++}
++
++const LEET: Record<string, string> = { "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "@": "a", $: "s" };
++
++/**
++ * Chi vuole sfuggire ai filtri scrive «b0nifico», «c4parra» o «b o n i f i c o».
++ * Si riconducono queste forme alla parola normale, SOLO dentro le parole (i
++ * numeri veri, come gli importi, restano numeri).
++ */
++function deOfusca(normalizzato: string): string {
++  // «b o n i f i c o» → «bonifico»: almeno cinque lettere singole separate
++  let t = normalizzato.replace(/\b(?:[a-z][ .\-_*]){4,}[a-z]\b/g, (m) => m.replace(/[ .\-_*]/g, ""));
++  // «b0nifico» → «bonifico»: solo in parole che hanno già almeno tre lettere
++  t = t
++    .split(" ")
++    .map((parola) => {
++      const lettere = (parola.match(/[a-z]/g) ?? []).length;
++      return lettere >= 3 && /[0-9@$]/.test(parola) && /[a-z]/.test(parola)
++        ? parola.replace(/[0-9@$]/g, (c) => LEET[c] ?? c)
++        : parola;
++    })
++    .join(" ");
++  return t;
++}
++
++// ------------------------------------------------------------
++// IBAN
++// ------------------------------------------------------------
++
++/** La somma di controllo di un IBAN: sposta le prime 4 cifre in fondo, lettere in numeri, resto 1 su 97. */
++function ibanValido(candidato: string): boolean {
++  const s = candidato.replace(/\s+/g, "").toUpperCase();
++  if (!/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(s)) return false;
++  const riordinato = s.slice(4) + s.slice(0, 4);
++  const cifre = riordinato.replace(/[A-Z]/g, (c) => String(c.charCodeAt(0) - 55));
++  let resto = 0;
++  for (const c of cifre) resto = (resto * 10 + Number(c)) % 97;
++  return resto === 1;
++}
++
++/**
++ * Un IBAN scritto di seguito o a gruppi di quattro. Conta se la somma di
++ * controllo torna, oppure se comincia come un IBAN italiano (chi lo
++ * ricopia male resta comunque un IBAN). Un codice fiscale non lo è: le sue
++ * prime sei sono lettere.
++ */
++function contieneIban(testo: string): boolean {
++  const maiuscolo = testo.toUpperCase().replace(/[^A-Z0-9 ]/g, " ");
++  const candidati = maiuscolo.match(/\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){3,7}(?: ?[A-Z0-9]{1,4})?\b/g) ?? [];
++  return candidati.some((c) => ibanValido(c) || /^IT\d{2}/.test(c.replace(/\s+/g, "")));
++}
++
++// ------------------------------------------------------------
++// I segnali
++// ------------------------------------------------------------
++
++type Segnale = {
++  livello: Exclude<LivelloRischio, "nessuno">;
++  motivo: string;
++  /** Si applica al testo normalizzato e de-offuscato. */
++  vale: (t: string) => boolean;
++};
++
++/** L'IBAN si cerca sul testo ORIGINALE (le maiuscole e i gruppi contano), non su quello normalizzato. */
++const MOTIVO_IBAN = "un IBAN o un numero di conto";
++
++/** Parole che dicono che si parla di soldi veri: serve a non scambiare «anticipo la visita» per una richiesta di denaro. */
++const CONTESTO_SOLDI = /(\beuro\b|€|\bsoldi\b|\bdenaro\b|\bpagar|\bpagament|\bversar|\bversament|\binvia(re|ti)? .{0,15}\d{2,}|\bbonific|\d{3,})/;
++
++const SEGNALI: Segnale[] = [
++  {
++    livello: "alto",
++    motivo: "un mezzo di pagamento difficile da annullare (Western Union, Postepay, ricariche, criptovalute, buoni regalo)",
++    vale: (t) =>
++      /\bwestern[ -]?union\b|\bmoney ?gram\b|\bpost[ -]?e[ -]?pay\b|\bposte ?pay\b|\bbitcoin\b|\bcripto(valut|\b)|\bcrypto\b|\bgift ?card\b|\bcarta regalo\b|\bbuoni? (amazon|regalo)\b|\bvaglia\b|\bricaric\w* (la |una |sulla |su )?(carta|postepay|prepagata)\b|\bcarta prepagata\b|\bpaypal\b.{0,30}\b(amici|familiari)\b|\b(amici|familiari)\b.{0,30}\bpaypal\b/.test(
++        t
++      ),
++  },
++  {
++    livello: "alto",
++    motivo: "un pagamento chiesto prima di vedere la casa",
++    vale: (t) =>
++      /\b(prima di|senza) (vedere|visitare|aver visto|visionare)\b.{0,60}\b(pagar|pagament|caparra|anticipo|acconto|versar|bonific)/.test(t) ||
++      /\b(pagar|pagament|caparra|anticipo|acconto|versar|bonific)\w*\b.{0,60}\b(prima di|senza) (vedere|visitare|aver visto|visionare)\b/.test(t) ||
++      /\bnon (serve|occorre|e necessario) (vedere|visitare|vedere la casa)\b.{0,60}\b(caparra|anticipo|acconto|pagar)/.test(t),
++  },
++  {
++    livello: "alto",
++    motivo: "chiavi da spedire per posta da chi è all'estero",
++    // Ciò che distingue la truffa è la storia delle CHIAVI da spedire: «sono all'estero» da solo,
++    // o «ti spedisco i documenti», sono frasi qualunque.
++    vale: (t) =>
++      /\b(sono|mi trovo|vivo|lavoro|risiedo|sto) (attualmente |momentaneamente )?(all'estero|fuori italia|fuori dall'italia|in (inghilterra|germania|spagna|francia|svizzera|america|olanda))\b.{0,150}\bchiavi\b/.test(
++        t
++      ) || /\b(spedisc\w*|invier\w*|mand\w*|spedir\w*) (le |la |ti le |ti la )?chiavi\b.{0,60}\b(corriere|posta|pacco|spedizione)\b/.test(t),
++  },
++  {
++    livello: "attenzione",
++    motivo: "una caparra o un anticipo da versare",
++    vale: (t) =>
++      /\bcaparra\b/.test(t) ||
++      (/\b(anticipo|acconto)\b/.test(t) && CONTESTO_SOLDI.test(t)) ||
++      /\b(bonific\w+)\b.{0,80}\b(caparra|anticipo|acconto|bloccare|prenotar\w+|riservar\w+)\b/.test(t) ||
++      /\b(caparra|anticipo|acconto|bloccare|prenotare|riservare)\b.{0,80}\bbonific/.test(t),
++  },
++];
++
++/**
++ * Cosa c'è di rischioso in un messaggio. `nessuno` è la risposta normale:
++ * parlare di un canone, di una visita o di un importo non è un rischio.
++ */
++export function rilevaRischioPagamento(testo: string | null | undefined): Rischio {
++  if (typeof testo !== "string" || testo.trim() === "") return NESSUNO;
++  // Si analizza tutto il messaggio. Oltre un limite enorme (che nessuna conversazione vera raggiunge)
++  // si guardano l'inizio e la FINE: non l'inizio soltanto, altrimenti basterebbe far precedere un IBAN
++  // da pagine di testo per non farlo vedere. Misurato: un milione di caratteri costa meno di 300 ms.
++  if (testo.length > LIMITE_ANALISI) {
++    testo = testo.slice(0, LIMITE_ANALISI / 2) + "\n" + testo.slice(-LIMITE_ANALISI / 2);
++  }
++
++  const t = deOfusca(normalizza(testo));
++  const segnali: { livello: Segnale["livello"]; motivo: string }[] = [];
++
++  if (contieneIban(testo)) segnali.push({ livello: "alto", motivo: MOTIVO_IBAN });
++  for (const sg of SEGNALI) {
++    if (sg.vale(t)) segnali.push({ livello: sg.livello, motivo: sg.motivo });
++  }
++
++  if (segnali.length === 0) return NESSUNO;
++  const livello: LivelloRischio = segnali.some((s) => s.livello === "alto") ? "alto" : "attenzione";
++  return { livello, segnali: segnali.map((s) => s.motivo) };
++}
++
++// ------------------------------------------------------------
++// Cosa si dice
++// ------------------------------------------------------------
++
++/** Il consiglio breve, sempre visibile in cima a ogni chat. */
++export const AVVISO_FISSO =
++  "Non pagare mai caparre, anticipi o affitti prima di aver visto la casa e firmato un contratto.";
++
++/** Come si riconosce una truffa: il testo dell'elenco che si apre dall'avviso fisso. */
++export const SEGNI_DI_TRUFFA: readonly string[] = [
++  "Ti chiedono soldi prima di farti vedere la casa.",
++  "Parlano di caparra o anticipo da mandare con Postepay, ricarica, Western Union, criptovalute o buoni regalo.",
++  "Dicono di essere all'estero e di spedirti le chiavi con un corriere.",
++  "Il prezzo è molto più basso di quello di case simili nella stessa zona.",
++  "Non vogliono parlare al telefono né incontrarti.",
++];
++
++export const CONSIGLIO_FINALE = "Se hai un dubbio, non pagare.";
++
++function elenca(segnali: string[]): string {
++  if (segnali.length <= 1) return segnali[0] ?? "";
++  return segnali.slice(0, -1).join(", ") + " e " + segnali[segnali.length - 1];
++}
++
++/** Sotto un messaggio ricevuto che parla di soldi. */
++export function testoAvvisoMessaggio(r: Rischio): string {
++  if (r.livello === "nessuno") return "";
++  const cosa = elenca(r.segnali);
++  return r.livello === "alto"
++    ? `Questo messaggio parla di ${cosa}. Non mandare soldi prima di aver visto la casa e firmato il contratto.`
++    : `Questo messaggio parla di ${cosa}. Ricorda: niente pagamenti prima di aver visto la casa e firmato il contratto.`;
++}
++
++/** Prima di inviare un messaggio che parla di soldi. Non accusa: ricorda la regola. */
++export function testoConfermaInvio(r: Rischio): string {
++  if (r.livello === "nessuno") return "";
++  return `Il messaggio che stai per inviare parla di ${elenca(r.segnali)}. Ricorda che nessun pagamento va fatto prima di aver visto la casa e firmato il contratto: chi lo chiede prima, di solito, sta tentando una truffa.`;
++}
+-- 
+2.43.0
+

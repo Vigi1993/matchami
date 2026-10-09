@@ -1,0 +1,1108 @@
+From 5613c35f1638c65b507e4245a07801095f9454d9 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 8 Oct 2026 08:23:19 +0000
+Subject: [PATCH] feat(messaggi): elenco delle conversazioni e messaggi non
+ letti
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RICHIEDE LA MIGRAZIONE 0021 PRIMA DEL PUSH.
+
+Fin qui una chat si raggiungeva solo dal dettaglio di una candidatura e non
+c'era modo di sapere se l'altra persona aveva scritto.
+
+Database (0021):
+- elenco_conversazioni(): una sola chiamata per tutta la pagina (nome
+  dell'altra persona, annuncio, anteprima dell'ultimo messaggio di al più 140
+  caratteri, non letti). Solo le candidature ACCETTATE di cui chi chiama è
+  parte; non chiamabile da chi non ha un account; al più 100
+- segna_messaggi_letti(): solo i messaggi DELL'ALTRA persona, solo nelle
+  proprie conversazioni
+- chiusa una falla: chi inviava un messaggio poteva inserirlo già 'letto' ed
+  eludere il conteggio (la policy non guardava quella colonna); un trigger
+  azzera 'letto' a ogni inserimento. Nessuno modifica né cancella messaggi
+- i messaggi già scritti (che nessuno poteva mai segnare come letti) si
+  segnano letti UNA volta sola, alla prima esecuzione: altrimenti il primo
+  giorno ogni messaggio del passato risulterebbe non letto. Rilanciata, non
+  cancella i non letti veri. Provato in una transazione sola
+
+App:
+- pagina /messaggi e voce nella barra, con il numero dei non letti (99+ oltre
+  99), per inquilini (5 voci) e proprietari (6); si aggiorna in tempo reale
+  quando l'altra persona scrive, con un solo ricaricamento anche se arrivano
+  più messaggi di seguito
+- la chat segna come letti i messaggi all'apertura e quando ne arriva uno
+  mentre è aperta. Le chiamate rpc di Supabase sono PIGRE: partono solo se
+  attese; senza .then non partirebbe niente e senza errori. Un test lo verifica
+  con un mock fedele
+- anteprime accorciate sui caratteri veri (un'emoji non si taglia a metà) e su
+  una parola intera
+
+PRIVACY: l'app ricorda quali messaggi sono letti, solo per il conteggio, e non
+lo mostra all'altra persona (informativa, versione 2026-10-provvisoria-5: chi
+aveva accettato la precedente deve riaccettare). Verificato che chi ha scritto
+può però LEGGERE quello stato con strumenti tecnici: annotato come esposizione
+aperta di effetto limitato; un test impedisce all'interfaccia di mostrarlo.
+
+Test: 360. Verificato su PostgreSQL costruito da zero (circa 55 controlli);
+pagine e barra contro un finto Supabase; 22 prove di interazione. Difetti
+reintrodotti di proposito: tutti presi.
+---
+ package.json                                  |   2 +-
+ scripts/test-conversazioni.mjs                | 224 ++++++++++++++++++
+ scripts/test-informativa.mjs                  |  25 ++
+ scripts/test-truffe.mjs                       |   9 +-
+ src/app/(app)/layout.tsx                      |  11 +-
+ src/app/(app)/messaggi/ConversazioniLista.tsx | 110 +++++++++
+ src/app/(app)/messaggi/page.tsx               |  33 +++
+ src/app/chat/[id]/ChatClient.tsx              |  22 +-
+ src/app/globals.css                           |  85 +++++++
+ src/components/Navigation.tsx                 |  18 +-
+ src/components/icons.tsx                      |   9 +
+ src/content/informativa.ts                    |   4 +-
+ src/lib/conversazioni.ts                      | 100 ++++++++
+ src/lib/verifica.ts                           |   1 +
+ supabase/migrations/0021_conversazioni.sql    | 177 ++++++++++++++
+ 15 files changed, 818 insertions(+), 12 deletions(-)
+ create mode 100644 scripts/test-conversazioni.mjs
+ create mode 100644 src/app/(app)/messaggi/ConversazioniLista.tsx
+ create mode 100644 src/app/(app)/messaggi/page.tsx
+ create mode 100644 src/lib/conversazioni.ts
+ create mode 100644 supabase/migrations/0021_conversazioni.sql
+
+diff --git a/package.json b/package.json
+index 4ddf02c..298acb4 100644
+--- a/package.json
++++ b/package.json
+@@ -7,7 +7,7 @@
+     "build": "next build",
+     "start": "next start",
+     "lint": "eslint",
+-    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-conversazioni.mjs b/scripts/test-conversazioni.mjs
+new file mode 100644
+index 0000000..d97de90
+--- /dev/null
++++ b/scripts/test-conversazioni.mjs
+@@ -0,0 +1,224 @@
++/**
++ * Test dell'elenco delle conversazioni (src/lib/conversazioni.ts). Si lancia con:   npm test
++ *
++ * Oltre ai testi, tengono allineati l'app e la migrazione 0021: le colonne che
++ * la funzione restituisce, la lunghezza dell'anteprima, e le regole sullo stato
++ * «letto».
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const c = caricaTs(path.join(radice, "src", "lib", "conversazioni.ts"));
++const v = caricaTs(path.join(radice, "src", "lib", "verifica.ts"));
++const sql = fs.readFileSync(path.join(radice, "supabase", "migrations", "0021_conversazioni.sql"), "utf8");
++
++const conv = (o = {}) => ({ candidatura_id: "c1", titolo: "Bilocale Isola", altro_nome: "Olga Bianchi", ultimo_testo: "Ciao", ultimo_at: "2026-10-07T10:00:00Z", ultimo_mio: false, non_letti: 0, ...o });
++
++// ------------------------------------------------------------
++// L'anteprima
++// ------------------------------------------------------------
++
++test("anteprima: un messaggio breve resta com'è", () => {
++  assert.equal(c.anteprimaMessaggio({ ultimo_testo: "Domani alle 10 va bene?", ultimo_mio: false }), "Domani alle 10 va bene?");
++});
++
++test("anteprima: se l'ho scritto io c'è «Tu: » davanti", () => {
++  assert.equal(c.anteprimaMessaggio({ ultimo_testo: "Perfetto, grazie", ultimo_mio: true }), "Tu: Perfetto, grazie");
++});
++
++test("anteprima: a capo e spazi multipli diventano uno spazio solo", () => {
++  assert.equal(c.anteprimaMessaggio({ ultimo_testo: "  Ciao\n\n  come   stai?\t ", ultimo_mio: false }), "Ciao come stai?");
++});
++
++test("anteprima: nessun messaggio, testo vuoto o strano: lo dice, senza «null» né «undefined»", () => {
++  for (const t of [null, undefined, "", "   ", "\n\t", 42, {}, []]) {
++    assert.equal(c.anteprimaMessaggio({ ultimo_testo: t, ultimo_mio: null }), "Nessun messaggio ancora", String(t));
++  }
++});
++
++test("anteprima: un messaggio lungo si accorcia su una parola intera, con i puntini", () => {
++  const lungo = "Buongiorno, volevo sapere se la casa è ancora disponibile e se è possibile organizzare una visita per sabato mattina";
++  const a = c.anteprimaMessaggio({ ultimo_testo: lungo, ultimo_mio: false });
++  assert.ok(a.endsWith("…"), a);
++  assert.ok(Array.from(a).length <= c.LUNGHEZZA_ANTEPRIMA + 1, `troppo lunga: ${Array.from(a).length}`);
++  assert.ok(lungo.startsWith(a.slice(0, -1)), "non è un prefisso del testo originale");
++  assert.ok(!/\s…$/.test(a), "spazio prima dei puntini");
++  // taglia su uno spazio: l'ultima parola mostrata è intera
++  const ultimaParola = a.slice(0, -1).split(" ").pop();
++  assert.ok(lungo.split(" ").includes(ultimaParola), `parola tagliata: «${ultimaParola}»`);
++});
++
++test("anteprima: se il limite cade DENTRO una parola, la parola si toglie intera (non si mostra a metà)", () => {
++  // parole di 11 lettere + spazio = 12 caratteri: il limite di 90 cade sempre a metà della parola numero 8
++  const testo = "parolalunga ".repeat(20).trim();
++  assert.notEqual(testo[c.LUNGHEZZA_ANTEPRIMA], " ", "il caso di prova non cade dentro una parola");
++  const a = c.anteprimaMessaggio({ ultimo_testo: testo, ultimo_mio: false });
++  assert.ok(a.endsWith("…"));
++  for (const parola of a.slice(0, -1).split(" ")) assert.equal(parola, "parolalunga", `parola tagliata: «${parola}»`);
++  assert.equal(a, ("parolalunga ".repeat(7).trim()) + "…");
++});
++
++test("anteprima: con «Tu: » il testo mostrato è più corto di quanto serve per restare nel limite", () => {
++  const a = c.anteprimaMessaggio({ ultimo_testo: "parola ".repeat(40), ultimo_mio: true });
++  assert.ok(a.startsWith("Tu: ") && a.endsWith("…"));
++  assert.ok(Array.from(a).length <= c.LUNGHEZZA_ANTEPRIMA + 1, `lunghezza ${Array.from(a).length}`);
++});
++
++test("anteprima: una parola lunghissima senza spazi si taglia comunque", () => {
++  const a = c.anteprimaMessaggio({ ultimo_testo: "x".repeat(500), ultimo_mio: false });
++  assert.equal(Array.from(a).length, c.LUNGHEZZA_ANTEPRIMA + 1);
++  assert.ok(a.endsWith("…"));
++});
++
++test("anteprima: esattamente al limite resta intera, un carattere in più si accorcia", () => {
++  const preciso = "a".repeat(c.LUNGHEZZA_ANTEPRIMA);
++  assert.equal(c.anteprimaMessaggio({ ultimo_testo: preciso, ultimo_mio: false }), preciso);
++  assert.ok(c.anteprimaMessaggio({ ultimo_testo: preciso + "b", ultimo_mio: false }).endsWith("…"));
++});
++
++test("anteprima: un'emoji sul confine non si taglia a metà", () => {
++  // 88 caratteri, poi un'emoji (due unità di testo) a cavallo del limite
++  const testo = "a".repeat(c.LUNGHEZZA_ANTEPRIMA - 1) + "👍👍👍 fine";
++  const a = c.anteprimaMessaggio({ ultimo_testo: testo, ultimo_mio: false });
++  assert.ok(!/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/.test(a), "carattere spezzato nell'anteprima");
++  assert.ok(!a.includes("\ufffd"));
++  // e un'emoji intera si mostra
++  assert.equal(c.anteprimaMessaggio({ ultimo_testo: "Perfetto 👍", ultimo_mio: false }), "Perfetto 👍");
++});
++
++test("anteprima: una frase di soli emoji non rompe niente", () => {
++  const e = "😀".repeat(200);
++  const a = c.anteprimaMessaggio({ ultimo_testo: e, ultimo_mio: false });
++  assert.ok(Array.from(a).length <= c.LUNGHEZZA_ANTEPRIMA + 1);
++});
++
++test("anteprima: un testo già accorciato dal database (140) mostra i puntini anche se dopo la pulizia sembra corto", () => {
++  // 140 caratteri di cui molti spazi: puliti stanno nel limite, ma il database ha tagliato qui
++  const grezzo = ("ok" + " ".repeat(8)).repeat(14);
++  assert.equal(Array.from(grezzo).length, c.LUNGHEZZA_DATABASE);
++  assert.ok(c.anteprimaMessaggio({ ultimo_testo: grezzo, ultimo_mio: false }).endsWith("…"));
++});
++
++test("anteprima: la lunghezza del database è quella della migrazione", () => {
++  assert.match(sql, new RegExp(`left\\(ult\\.testo, ${c.LUNGHEZZA_DATABASE}\\)`));
++});
++
++test("anteprima: un titolo con codice dentro resta testo", () => {
++  const t = '<img src=x onerror="alert(1)">';
++  assert.ok(c.anteprimaMessaggio({ ultimo_testo: t, ultimo_mio: false }).includes("<img"));
++});
++
++// ------------------------------------------------------------
++// Iniziali, conteggi, testi
++// ------------------------------------------------------------
++
++test("iniziali: nome e cognome, solo nome, nessun nome", () => {
++  assert.equal(c.iniziali("Olga Bianchi"), "OB");
++  assert.equal(c.iniziali("Teo"), "T");
++  assert.equal(c.iniziali("Utente"), "U");
++  assert.equal(c.iniziali("maria rosa bianchi"), "MB");
++  assert.equal(c.iniziali("  olga   bianchi "), "OB");
++  assert.equal(c.iniziali("Èlena Östberg"), "ÈÖ");
++  for (const x of ["", "   ", null, undefined, "123", "---", 5]) assert.equal(c.iniziali(x), "?", String(x));
++});
++
++test("conteggio: somma i non letti e ignora valori strani", () => {
++  assert.equal(c.totaleNonLetti([{ non_letti: 2 }, { non_letti: 0 }, { non_letti: 3 }]), 5);
++  assert.equal(c.totaleNonLetti([]), 0);
++  assert.equal(c.totaleNonLetti([{ non_letti: -4 }, { non_letti: NaN }, { non_letti: Infinity }, { non_letti: "3" }, { non_letti: 2.9 }]), 2);
++});
++
++test("segnalino: niente per zero, il numero fino a 99, poi 99+", () => {
++  assert.equal(c.etichettaNonLetti(0), "");
++  assert.equal(c.etichettaNonLetti(1), "1");
++  assert.equal(c.etichettaNonLetti(99), "99");
++  assert.equal(c.etichettaNonLetti(100), "99+");
++});
++
++test("sottotitolo: nessuna, una, più, tutte lette, singolare e plurale", () => {
++  assert.equal(c.sottotitoloMessaggi([]), "Le tue conversazioni arrivano qui.");
++  assert.equal(c.sottotitoloMessaggi([{ non_letti: 0 }]), "1 conversazione, tutte lette.");
++  assert.equal(c.sottotitoloMessaggi([{ non_letti: 0 }, { non_letti: 0 }]), "2 conversazioni, tutte lette.");
++  assert.equal(c.sottotitoloMessaggi([{ non_letti: 1 }]), "1 conversazione · 1 messaggio da leggere.");
++  assert.equal(c.sottotitoloMessaggi([{ non_letti: 3 }, { non_letti: 0 }, { non_letti: 2 }]), "3 conversazioni · 5 messaggi da leggere.");
++});
++
++test("stato vuoto: parla a ciascun ruolo, e un ruolo sconosciuto non rompe niente", () => {
++  assert.match(c.testoNessunaConversazione("proprietario"), /quando accetti la candidatura di un inquilino/);
++  assert.match(c.testoNessunaConversazione("inquilino"), /quando un proprietario accetta la tua candidatura/);
++  assert.match(c.testoNessunaConversazione("boh"), /quando un proprietario accetta la tua candidatura/);
++});
++
++test("lettore di schermo: nomina la persona, l'annuncio e i non letti", () => {
++  assert.equal(c.descrizioneConversazione(conv()), "Conversazione con Olga Bianchi su Bilocale Isola");
++  assert.match(c.descrizioneConversazione(conv({ non_letti: 1 })), /, 1 messaggio non letto$/);
++  assert.match(c.descrizioneConversazione(conv({ non_letti: 4 })), /, 4 messaggi non letti$/);
++});
++
++test("testi: non presumono il genere di nessuno", () => {
++  const tutto = [c.sottotitoloMessaggi([{ non_letti: 2 }]), c.testoNessunaConversazione("proprietario"), c.testoNessunaConversazione("inquilino"), c.anteprimaMessaggio({ ultimo_testo: null, ultimo_mio: null })].join(" ");
++  assert.ok(!/\b(lui|lei|iscritto|iscritta)\b/i.test(tutto), tutto);
++});
++
++// ------------------------------------------------------------
++// La migrazione
++// ------------------------------------------------------------
++
++test("migrazione: le colonne che la funzione restituisce sono quelle che l'app si aspetta", () => {
++  const m = sql.match(/returns table \(([\s\S]*?)\)\s*language sql/);
++  assert.ok(m, "non trovo le colonne restituite");
++  const colonne = [...m[1].matchAll(/^\s*(\w+)\s/gm)].map((x) => x[1]);
++  assert.deepEqual(colonne, ["candidatura_id", "titolo", "altro_nome", "ultimo_testo", "ultimo_at", "ultimo_mio", "non_letti"]);
++  // le stesse chiavi del tipo dell'app
++  const esempio = Object.keys(conv()).sort();
++  assert.deepEqual([...colonne].sort(), esempio);
++});
++
++test("migrazione: solo le candidature accettate, solo di chi chiama", () => {
++  assert.match(sql, /c\.status = 'accettata'/);
++  assert.match(sql, /\(c\.tenant_id = auth\.uid\(\) or l\.owner_id = auth\.uid\(\)\)/);
++  assert.match(sql, /where auth\.uid\(\) is not null/);
++  assert.match(sql, /revoke all on function public\.elenco_conversazioni\(\) from public, anon;/);
++});
++
++test("migrazione: i non letti non contano i propri messaggi", () => {
++  assert.match(sql, /m\.mittente_id <> auth\.uid\(\)\s+and not m\.letto/);
++});
++
++test("migrazione: «segna come letti» tocca solo i messaggi dell'altra persona", () => {
++  assert.match(sql, /mittente_id <> auth\.uid\(\)\s+and not letto/);
++  assert.match(sql, /raise exception 'CONVERSAZIONE_NON_TUA'/);
++});
++
++test("migrazione: chi scrive non decide lo stato «letto», e nessuno modifica i messaggi", () => {
++  assert.match(sql, /new\.letto := false;/);
++  assert.match(sql, /before insert on messaggi/);
++  assert.match(sql, /revoke update, delete on messaggi from authenticated, anon;/);
++});
++
++test("migrazione: i messaggi vecchi si segnano letti SOLO alla prima esecuzione", () => {
++  const blocco = sql.slice(sql.indexOf("-- 1. I messaggi già scritti"), sql.indexOf("-- 2. Lo stato"));
++  assert.match(blocco, /if not exists \(select 1 from pg_proc where proname = 'segna_messaggi_letti'\)/);
++  assert.match(blocco, /update messaggi set letto = true where letto = false/);
++  // e la funzione che fa da segnale si crea DOPO, non prima
++  assert.ok(sql.indexOf("create or replace function public.segna_messaggi_letti") > sql.indexOf("-- 1. I messaggi già scritti"));
++});
++
++// ------------------------------------------------------------
++// Gli errori
++// ------------------------------------------------------------
++
++const GENERICO = v.messaggioErroreVerifica("qualcosa di sconosciuto");
++
++test("errori: ogni codice che la migrazione può sollevare ha una frase sua", () => {
++  const codici = [...new Set([...sql.matchAll(/raise exception '([A-Z_]+)'/g)].map((m) => m[1]))];
++  assert.ok(codici.length >= 2);
++  for (const cod of codici) {
++    const frase = v.messaggioErroreVerifica(`ERROR: ${cod} (P0001)`);
++    assert.notEqual(frase, GENERICO, `il codice ${cod} non ha un messaggio`);
++    assert.ok(!frase.includes(cod), cod);
++  }
++});
+diff --git a/scripts/test-informativa.mjs b/scripts/test-informativa.mjs
+index 616d176..a45ccc9 100644
+--- a/scripts/test-informativa.mjs
++++ b/scripts/test-informativa.mjs
+@@ -352,3 +352,28 @@ test("chat: il testo dichiara che l'app legge i messaggi per avvisare, e che non
+   // il testo NON deve dire che il controllo avviene solo sul dispositivo: la prima versione della pagina si costruisce sul server
+   assert.ok(!/sul tuo dispositivo|solo sul tuo telefono|resta sul tuo/i.test(tutto), "non è vero che il controllo avviene solo sul dispositivo");
+ });
++
++// ------------------------------------------------------------
++// Ciò che il testo dice dei messaggi letti è vero
++// ------------------------------------------------------------
++
++test("messaggi letti: il testo dichiara che l'app li ricorda e che non lo mostra all'altra persona", () => {
++  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
++  assert.match(tutto, /L'app ricorda quali messaggi hai già letto, solo per mostrarti quanti ne restano da leggere/);
++  assert.match(tutto, /non lo mostra all'altra persona/);
++});
++
++test("messaggi letti: nessuna schermata mostra a chi ha scritto se il messaggio è stato letto", () => {
++  // il testo promette «non lo mostra all'altra persona»: l'interfaccia non deve farlo
++  const file = [
++    ["src", "app", "chat", "[id]", "ChatClient.tsx"], ["src", "app", "chat", "[id]", "page.tsx"],
++    ["src", "app", "(app)", "messaggi", "ConversazioniLista.tsx"], ["src", "components", "AvvisiChat.tsx"],
++  ];
++  for (const parti of file) {
++    const codice = fs.readFileSync(path.join(radice, ...parti), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
++    assert.ok(!/\.letto\b|["']letto["']|\bvisto\b|\bletto il\b|spunta/i.test(codice), `${parti.join("/")} mostra o legge lo stato «letto»`);
++  }
++  // e la chat non chiede la colonna «letto» al database
++  const pagina = fs.readFileSync(path.join(radice, "src", "app", "chat", "[id]", "page.tsx"), "utf8");
++  assert.match(pagina, /\.select\("id, mittente_id, testo, created_at"\)/);
++});
+diff --git a/scripts/test-truffe.mjs b/scripts/test-truffe.mjs
+index 4778a6e..7cbbb21 100644
+--- a/scripts/test-truffe.mjs
++++ b/scripts/test-truffe.mjs
+@@ -333,8 +333,13 @@ test("privacy: la chat non manda il risultato da nessuna parte: nell'invio ci so
+   assert.equal(inserimenti.length, 1, "dovrebbe esserci un solo inserimento");
+   const campi = [...inserimenti[0][1].matchAll(/(\w+):/g)].map((m) => m[1]).sort();
+   assert.deepEqual(campi, ["candidatura_id", "mittente_id", "testo"]);
+-  // e il rischio non viene usato in nessun'altra chiamata verso il database
+-  assert.equal((chat.match(/createClient\(\)/g) ?? []).length, 2, "attese solo le due chiamate esistenti (canale e invio)");
++  // E il rischio non viene usato in nessun'altra chiamata verso il database. Le chiamate sono tre:
++  // il canale in tempo reale, l'invio (qui sopra) e «segna come letti» (messaggi non letti).
++  assert.equal((chat.match(/createClient\(\)/g) ?? []).length, 3, "attese solo le tre chiamate note (canale, segna come letti, invio)");
++  const rpc = [...chat.matchAll(/\.rpc\(\s*"([a-z_]+)"\s*,\s*\{([^}]*)\}/g)];
++  assert.equal(rpc.length, 1, "attesa una sola chiamata rpc");
++  assert.equal(rpc[0][1], "segna_messaggi_letti");
++  assert.equal(rpc[0][2].trim(), "p_candidatura: candidaturaId", "la chiamata deve portare solo l'id della conversazione, mai il testo o il rischio");
+ });
+ 
+ test("privacy: i componenti degli avvisi non fanno chiamate di rete", () => {
+diff --git a/src/app/(app)/layout.tsx b/src/app/(app)/layout.tsx
+index 64f5374..409c52b 100644
+--- a/src/app/(app)/layout.tsx
++++ b/src/app/(app)/layout.tsx
+@@ -35,6 +35,15 @@ export default async function AppLayout({
+     .select("id", { count: "exact", head: true })
+     .is("letta_at", null);
+ 
++  // I messaggi dell'altra persona non ancora letti. La sicurezza del database
++  // limita il conteggio alle proprie conversazioni. Come sopra: se non riesce,
++  // zero, non una pagina che non si apre.
++  const { count: messaggiNonLetti } = await supabase
++    .from("messaggi")
++    .select("id", { count: "exact", head: true })
++    .eq("letto", false)
++    .neq("mittente_id", user!.id);
++
+   /*
+     Come nel prototipo: un unico "telaio" da 480px centrato, alto quanto
+     la viewport e senza scroll di pagina. Dentro, l'area delle schermate
+@@ -43,7 +52,7 @@ export default async function AppLayout({
+   return (
+     <div className="app-shell">
+       <div className="screens">{children}</div>
+-      <Navigation ruolo={ruolo} nome={profile?.nome} nonLette={count ?? 0} />
++      <Navigation ruolo={ruolo} nome={profile?.nome} nonLette={count ?? 0} messaggiNonLetti={messaggiNonLetti ?? 0} />
+     </div>
+   );
+ }
+diff --git a/src/app/(app)/messaggi/ConversazioniLista.tsx b/src/app/(app)/messaggi/ConversazioniLista.tsx
+new file mode 100644
+index 0000000..df061e5
+--- /dev/null
++++ b/src/app/(app)/messaggi/ConversazioniLista.tsx
+@@ -0,0 +1,110 @@
++"use client";
++
++import { useEffect } from "react";
++import Link from "next/link";
++import { useRouter } from "next/navigation";
++import { createClient } from "@/lib/supabase/client";
++import {
++  anteprimaMessaggio,
++  descrizioneConversazione,
++  etichettaNonLetti,
++  iniziali,
++  testoNessunaConversazione,
++  type Conversazione,
++} from "@/lib/conversazioni";
++import { trascorso } from "@/lib/notifiche";
++
++/**
++ * L'elenco delle conversazioni. L'elenco lo compone il database
++ * (`elenco_conversazioni`); qui si disegna e si tiene aggiornato quando
++ * arriva un messaggio.
++ */
++export function ConversazioniLista({
++  conversazioni,
++  userId,
++  ruolo,
++  errore,
++}: {
++  conversazioni: Conversazione[];
++  userId: string;
++  ruolo: string;
++  /** Il caricamento è fallito: non si finge che non ci siano conversazioni. */
++  errore: boolean;
++}) {
++  const router = useRouter();
++
++  // Quando l'altra persona scrive, l'elenco si ricarica. Un solo ricaricamento
++  // anche se arrivano più messaggi di seguito. Ciò che scrivo io lo vedo
++  // tornando qui dalla chat.
++  useEffect(() => {
++    const supabase = createClient();
++    let timer: ReturnType<typeof setTimeout> | null = null;
++    const canale = supabase
++      .channel("conversazioni")
++      .on(
++        "postgres_changes",
++        { event: "INSERT", schema: "public", table: "messaggi" },
++        (payload) => {
++          const nuovo = payload.new as { mittente_id?: string };
++          if (nuovo.mittente_id === userId) return;
++          if (timer) clearTimeout(timer);
++          timer = setTimeout(() => router.refresh(), 400);
++        }
++      )
++      .subscribe();
++    return () => {
++      if (timer) clearTimeout(timer);
++      supabase.removeChannel(canale);
++    };
++  }, [userId, router]);
++
++  if (errore) {
++    return (
++      <div className="note-box is-no" style={{ marginTop: 0 }} role="alert">
++        <b>Non è stato possibile caricare le conversazioni.</b> Riprova tra poco.
++      </div>
++    );
++  }
++
++  if (conversazioni.length === 0) {
++    return (
++      <div className="note-box" style={{ marginTop: 0 }}>
++        <b>Nessuna conversazione.</b> {testoNessunaConversazione(ruolo)}
++      </div>
++    );
++  }
++
++  return (
++    <ul className="conversazioni-lista">
++      {conversazioni.map((c) => {
++        const segnalino = etichettaNonLetti(c.non_letti);
++        return (
++          <li key={c.candidatura_id}>
++            <Link
++              href={`/chat/${c.candidatura_id}`}
++              className={`conversazione ${c.non_letti > 0 ? "nuova" : ""}`}
++              aria-label={descrizioneConversazione(c)}
++            >
++              <span className="mc-avatar" aria-hidden>
++                {iniziali(c.altro_nome)}
++              </span>
++              <span className="conversazione-corpo">
++                <span className="conversazione-nome">{c.altro_nome}</span>
++                <span className="conversazione-annuncio">{c.titolo}</span>
++                <span className="conversazione-anteprima">{anteprimaMessaggio(c)}</span>
++              </span>
++              <span className="conversazione-lato">
++                {c.ultimo_at && <span className="conversazione-tempo">{trascorso(c.ultimo_at)}</span>}
++                {segnalino && (
++                  <span className="conversazione-conto" aria-hidden>
++                    {segnalino}
++                  </span>
++                )}
++              </span>
++            </Link>
++          </li>
++        );
++      })}
++    </ul>
++  );
++}
+diff --git a/src/app/(app)/messaggi/page.tsx b/src/app/(app)/messaggi/page.tsx
+new file mode 100644
+index 0000000..b7a90fc
+--- /dev/null
++++ b/src/app/(app)/messaggi/page.tsx
+@@ -0,0 +1,33 @@
++import { createClient } from "@/lib/supabase/server";
++import { PageContainer } from "@/components/ui/PageContainer";
++import { sottotitoloMessaggi, type Conversazione } from "@/lib/conversazioni";
++import { ConversazioniLista } from "./ConversazioniLista";
++
++export default async function MessaggiPage() {
++  const supabase = await createClient();
++  const {
++    data: { user },
++  } = await supabase.auth.getUser();
++
++  const [{ data: profilo }, { data, error }] = await Promise.all([
++    supabase.from("profiles").select("ruolo").eq("id", user!.id).single(),
++    // Le conversazioni di chi chiama (le sole candidature accettate di cui è parte),
++    // già con l'anteprima dell'ultimo messaggio e i non letti: una chiamata sola.
++    supabase.rpc("elenco_conversazioni"),
++  ]);
++
++  const conversazioni = (error ? [] : data ?? []) as Conversazione[];
++
++  return (
++    <PageContainer>
++      <h1 className="screen-title">Messaggi</h1>
++      <p className="screen-sub">{error ? "Non sono riuscito a caricarle." : sottotitoloMessaggi(conversazioni)}</p>
++      <ConversazioniLista
++        conversazioni={conversazioni}
++        userId={user!.id}
++        ruolo={profilo?.ruolo ?? "inquilino"}
++        errore={Boolean(error)}
++      />
++    </PageContainer>
++  );
++}
+diff --git a/src/app/chat/[id]/ChatClient.tsx b/src/app/chat/[id]/ChatClient.tsx
+index 263227f..a256e4f 100644
+--- a/src/app/chat/[id]/ChatClient.tsx
++++ b/src/app/chat/[id]/ChatClient.tsx
+@@ -1,6 +1,6 @@
+ "use client";
+ 
+-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
++import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+ import { useRouter } from "next/navigation";
+ import { createClient } from "@/lib/supabase/client";
+ import type { Messaggio } from "@/lib/types";
+@@ -29,6 +29,22 @@ export function ChatClient({
+   const [daConfermare, setDaConfermare] = useState<Rischio | null>(null);
+   const bottomRef = useRef<HTMLDivElement>(null);
+ 
++  // Si segnano come letti i messaggi dell'altra persona: quando si apre la chat e ogni
++  // volta che ne arriva uno mentre è aperta. La chiamata è «pigra»: parte solo
++  // quando qualcuno ne attende il risultato, e `.then` è ciò che la fa partire.
++  const segnaLetti = useCallback(() => {
++    createClient()
++      .rpc("segna_messaggi_letti", { p_candidatura: candidaturaId })
++      .then(
++        () => undefined,
++        () => undefined
++      );
++  }, [candidaturaId]);
++
++  useEffect(() => {
++    segnaLetti();
++  }, [segnaLetti]);
++
+   useEffect(() => {
+     const supabase = createClient();
+     const channel = supabase
+@@ -46,6 +62,8 @@ export function ChatClient({
+           setMessaggi((prev) =>
+             prev.some((m) => m.id === nuovo.id) ? prev : [...prev, nuovo]
+           );
++          // se arriva dall'altra persona mentre la chat è aperta, è già letto
++          if (nuovo.mittente_id !== userId) segnaLetti();
+         }
+       )
+       .subscribe();
+@@ -53,7 +71,7 @@ export function ChatClient({
+     return () => {
+       supabase.removeChannel(channel);
+     };
+-  }, [candidaturaId]);
++  }, [candidaturaId, userId, segnaLetti]);
+ 
+   useEffect(() => {
+     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+diff --git a/src/app/globals.css b/src/app/globals.css
+index e7c0688..227fe97 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -2761,3 +2761,88 @@ mark.segnaposto {
+ .chat-conferma p {
+   margin: 0 0 8px;
+ }
++
++/* ============================================================
++   Messaggi: l'elenco delle conversazioni
++   ============================================================ */
++
++.conversazioni-lista {
++  list-style: none;
++  margin: 0;
++  padding: 0;
++  display: flex;
++  flex-direction: column;
++  gap: 8px;
++}
++.conversazione {
++  display: flex;
++  align-items: center;
++  gap: 12px;
++  padding: 12px 14px;
++  text-decoration: none;
++  color: var(--ink);
++  background: #fff;
++  border: 1px solid rgba(16, 21, 26, 0.1);
++  border-radius: 14px;
++}
++.conversazione.nuova {
++  border-color: var(--clay);
++  background: rgba(201, 105, 78, 0.07);
++}
++.conversazione-corpo {
++  flex: 1;
++  min-width: 0;
++  display: flex;
++  flex-direction: column;
++  gap: 2px;
++}
++.conversazione-nome {
++  font-size: 14px;
++  font-weight: 600;
++}
++.conversazione.nuova .conversazione-nome {
++  font-weight: 700;
++}
++.conversazione-annuncio {
++  font-size: 11px;
++  color: var(--muted);
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++.conversazione-anteprima {
++  font-size: 13px;
++  line-height: 1.4;
++  color: var(--ink-soft);
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++.conversazione.nuova .conversazione-anteprima {
++  color: var(--ink);
++  font-weight: 600;
++}
++.conversazione-lato {
++  flex-shrink: 0;
++  display: flex;
++  flex-direction: column;
++  align-items: flex-end;
++  gap: 6px;
++}
++.conversazione-tempo {
++  font-size: 11px;
++  color: var(--muted);
++}
++.conversazione-conto {
++  min-width: 20px;
++  height: 20px;
++  padding: 0 6px;
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  font-size: 11px;
++  font-weight: 700;
++  color: #fff;
++  background: var(--clay);
++  border-radius: 999px;
++}
+diff --git a/src/components/Navigation.tsx b/src/components/Navigation.tsx
+index 6fccc95..a212a5b 100644
+--- a/src/components/Navigation.tsx
++++ b/src/components/Navigation.tsx
+@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
+ import { etichettaConteggio } from "@/lib/notifiche";
+ import {
+   IconCasa,
++  IconBusta,
+   IconChat,
+   IconDocumento,
+   IconPalazzo,
+@@ -21,6 +22,7 @@ type Tab = {
+ const TENANT_TABS: Tab[] = [
+   { href: "/", label: "Home", Icon: IconCasa },
+   { href: "/candidature", label: "Candidature", Icon: IconChat },
++  { href: "/messaggi", label: "Messaggi", Icon: IconBusta },
+   { href: "/gestione", label: "Gestione affitto", Icon: IconDocumento },
+   { href: "/profilo", label: "Profilo", Icon: IconPersona },
+ ];
+@@ -29,6 +31,7 @@ const OWNER_TABS: Tab[] = [
+   { href: "/", label: "Home", Icon: IconCasa },
+   { href: "/database", label: "Database", Icon: IconPersone },
+   { href: "/immobili", label: "Immobili", Icon: IconPalazzo },
++  { href: "/messaggi", label: "Messaggi", Icon: IconBusta },
+   { href: "/gestione-affitti", label: "Gestione affitti", Icon: IconDocumento },
+   { href: "/profilo", label: "Profilo", Icon: IconPersona },
+ ];
+@@ -36,16 +39,23 @@ const OWNER_TABS: Tab[] = [
+ export function Navigation({
+   ruolo,
+   nonLette = 0,
++  messaggiNonLetti = 0,
+ }: {
+   ruolo: string;
+   /** Le novità non ancora lette: se ce ne sono, un numero sulla voce Profilo. */
+   nonLette?: number;
++  /** I messaggi della chat non ancora letti: se ce ne sono, un numero sulla voce Messaggi. */
++  messaggiNonLetti?: number;
+   /** Non più mostrato in barra: il nome resta nella schermata Profilo. */
+   nome?: string | null;
+ }) {
+   const pathname = usePathname();
+   const tabs = ruolo === "proprietario" ? OWNER_TABS : TENANT_TABS;
+-  const etichetta = etichettaConteggio(nonLette);
++  // Quale numero va su quale voce, e come lo legge chi usa un lettore di schermo.
++  const segnalini: Record<string, { etichetta: string; descrizione: string }> = {
++    "/profilo": { etichetta: etichettaConteggio(nonLette), descrizione: "novità da leggere" },
++    "/messaggi": { etichetta: etichettaConteggio(messaggiNonLetti), descrizione: "messaggi da leggere" },
++  };
+ 
+   return (
+     <nav className="tabbar">
+@@ -63,9 +73,9 @@ export function Navigation({
+           >
+             <span className="tab-icona">
+               <Icon />
+-              {href === "/profilo" && etichetta !== "" && (
+-                <span className="tab-badge" role="status" aria-label={`${etichetta} novità da leggere`}>
+-                  {etichetta}
++              {segnalini[href]?.etichetta && (
++                <span className="tab-badge" role="status" aria-label={`${segnalini[href].etichetta} ${segnalini[href].descrizione}`}>
++                  {segnalini[href].etichetta}
+                 </span>
+               )}
+             </span>
+diff --git a/src/components/icons.tsx b/src/components/icons.tsx
+index ce0205b..36e6905 100644
+--- a/src/components/icons.tsx
++++ b/src/components/icons.tsx
+@@ -180,3 +180,12 @@ export function IconCampana({ className }: IconProps) {
+     </svg>
+   );
+ }
++
++export function IconBusta({ className }: IconProps) {
++  return (
++    <svg viewBox="0 0 24 24" className={className} aria-hidden>
++      <rect x="3" y="5.5" width="18" height="13" rx="2.5" />
++      <path d="M3.5 7.5l8.5 6 8.5-6" />
++    </svg>
++  );
++}
+diff --git a/src/content/informativa.ts b/src/content/informativa.ts
+index 4736c26..013b0ef 100644
+--- a/src/content/informativa.ts
++++ b/src/content/informativa.ts
+@@ -28,7 +28,7 @@ export const INFORMATIVA = {
+    * controllo che fa il database (migrazione 0017): un test fallisce se
+    * questa stringa non lo supera.
+    */
+-  versione: "2026-10-provvisoria-4",
++  versione: "2026-10-provvisoria-5",
+   provvisoria: true,
+   titolo: "Informativa sulla privacy",
+   aggiornata: "ottobre 2026",
+@@ -78,7 +78,7 @@ export const INFORMATIVA = {
+         "Il proprietario di un annuncio a cui ti candidi vede il tuo nome e cognome, il lavoro, il reddito, garante e fideiussione, i protesti che hai dichiarato, se il tuo reddito è verificato, la presentazione, la foto, il punteggio di affidabilità e la compatibilità. Non vede il numero di figli, la composizione del nucleo né se hai animali: sa solo se hai compilato quei campi, per contare quanto è completo il tuo profilo. Non vede le tue preferenze di ricerca.",
+         "Se rifiuta la tua candidatura, del tuo profilo gli resta solo il tuo nome, oltre alla valutazione che aveva già fatto. Tu vedi il motivo del rifiuto, non la sua valutazione completa.",
+         "Se ritiri una candidatura mentre è ancora in attesa, il proprietario non la vede più: non legge né il tuo profilo né le recensioni su di te, e riceve solo una notifica con il titolo dell'annuncio. La candidatura resta nel tuo elenco e non puoi candidarti di nuovo allo stesso annuncio.",
+-        "I messaggi li leggono solo le due persone, dopo che la candidatura è stata accettata.",
++        "I messaggi li leggono solo le due persone, dopo che la candidatura è stata accettata. L'app ricorda quali messaggi hai già letto, solo per mostrarti quanti ne restano da leggere: non lo mostra all'altra persona.",
+         "Nella chat, l'app evidenzia i messaggi che parlano di pagamenti sospetti (per esempio un IBAN, una caparra o un anticipo) e ti avvisa prima di inviarne uno così, per aiutarti a riconoscere una truffa. È un controllo automatico che fa parte della visualizzazione della chat: non salviamo il risultato e non lo comunichiamo a nessuno, e non impedisce mai di inviare un messaggio.",
+         "Le recensioni su un inquilino le leggono la persona recensita, chi le ha scritte e i proprietari a cui ha inviato una candidatura.",
+         "Gli annunci pubblicati e verificati li vedono tutti gli utenti connessi. L'indirizzo esatto degli immobili non lo raccogliamo.",
+diff --git a/src/lib/conversazioni.ts b/src/lib/conversazioni.ts
+new file mode 100644
+index 0000000..ac65c8e
+--- /dev/null
++++ b/src/lib/conversazioni.ts
+@@ -0,0 +1,100 @@
++/**
++ * L'elenco delle conversazioni: cosa mostrare di ciascuna, come si abbrevia
++ * l'ultimo messaggio, quanti ne mancano da leggere. Logica pura, senza
++ * database: si prova con `npm test`.
++ *
++ * L'elenco lo compone la funzione `elenco_conversazioni` del database
++ * (migrazione 0021), che restituisce già l'anteprima di al più 140 caratteri.
++ */
++import { etichettaConteggio } from "./notifiche";
++
++export type Conversazione = {
++  candidatura_id: string;
++  titolo: string;
++  altro_nome: string;
++  ultimo_testo: string | null;
++  ultimo_at: string | null;
++  /** L'ultimo messaggio l'ho scritto io. Nullo se non ce ne sono. */
++  ultimo_mio: boolean | null;
++  non_letti: number;
++};
++
++/** Quanti caratteri dell'ultimo messaggio si mostrano nell'elenco. */
++export const LUNGHEZZA_ANTEPRIMA = 90;
++
++/** Quanti ne restituisce al massimo la funzione del database (anche il testo è accorciato lì). */
++export const LUNGHEZZA_DATABASE = 140;
++
++/**
++ * Una riga di anteprima: a capo e spazi ridotti a uno solo, «Tu: » davanti se
++ * l'ho scritto io, accorciata su un confine di parola con i puntini. Una
++ * conversazione senza messaggi lo dice.
++ */
++export function anteprimaMessaggio(
++  c: Pick<Conversazione, "ultimo_testo" | "ultimo_mio">
++): string {
++  const grezzo = typeof c.ultimo_testo === "string" ? c.ultimo_testo : "";
++  const testo = grezzo.replace(/\s+/g, " ").trim();
++  if (!testo) return "Nessun messaggio ancora";
++
++  const prefisso = c.ultimo_mio ? "Tu: " : "";
++  const spazio = LUNGHEZZA_ANTEPRIMA - prefisso.length;
++  // Si lavora sui caratteri veri, non sulle unità del testo: un'emoji vale uno e
++  // non si taglia a metà (altrimenti nell'elenco comparirebbe un carattere rotto).
++  const caratteri = Array.from(testo);
++  // il database accorcia a 140: se il testo è arrivato a quel limite, ce n'è forse altro
++  const troncatoAlDatabase = Array.from(grezzo).length >= LUNGHEZZA_DATABASE;
++
++  if (caratteri.length <= spazio && !troncatoAlDatabase) return prefisso + testo;
++
++  let corto = caratteri.slice(0, spazio).join("");
++  // si taglia su una parola intera, se ce n'è una ragionevolmente vicina
++  const ultimoSpazio = corto.lastIndexOf(" ");
++  if (caratteri.length > spazio && ultimoSpazio > Array.from(corto).length * 0.6) corto = corto.slice(0, ultimoSpazio);
++  return prefisso + corto.replace(/[\s.,;:!?-]+$/u, "") + "…";
++}
++
++/** Le iniziali per il cerchietto: al massimo due lettere, mai vuote. */
++export function iniziali(nome: string | null | undefined): string {
++  const parole = (typeof nome === "string" ? nome : "")
++    .trim()
++    .split(/\s+/)
++    .filter((p) => /\p{L}/u.test(p));
++  if (parole.length === 0) return "?";
++  const prime = parole.length === 1 ? parole[0].slice(0, 1) : parole[0].slice(0, 1) + parole[parole.length - 1].slice(0, 1);
++  return prime.toUpperCase();
++}
++
++/** Quanti messaggi mancano da leggere, in tutte le conversazioni. */
++export function totaleNonLetti(elenco: Pick<Conversazione, "non_letti">[]): number {
++  return elenco.reduce((somma, c) => somma + (Number.isFinite(c.non_letti) && c.non_letti > 0 ? Math.floor(c.non_letti) : 0), 0);
++}
++
++/** Il numero sul segnalino di una conversazione: niente per zero, «99+» oltre 99. */
++export function etichettaNonLetti(n: number): string {
++  return etichettaConteggio(n);
++}
++
++/** La riga sotto il titolo della pagina. */
++export function sottotitoloMessaggi(elenco: Pick<Conversazione, "non_letti">[]): string {
++  const n = elenco.length;
++  if (n === 0) return "Le tue conversazioni arrivano qui.";
++  const nonLetti = totaleNonLetti(elenco);
++  const base = n === 1 ? "1 conversazione" : `${n} conversazioni`;
++  if (nonLetti === 0) return `${base}, tutte lette.`;
++  return `${base} · ${nonLetti} ${nonLetti === 1 ? "messaggio" : "messaggi"} da leggere.`;
++}
++
++/** Cosa dire quando non ci sono conversazioni: dipende da chi è. */
++export function testoNessunaConversazione(ruolo: "inquilino" | "proprietario" | string): string {
++  return ruolo === "proprietario"
++    ? "Le chat si aprono quando accetti la candidatura di un inquilino."
++    : "Le chat si aprono quando un proprietario accetta la tua candidatura.";
++}
++
++/** La descrizione per chi usa un lettore di schermo. */
++export function descrizioneConversazione(c: Pick<Conversazione, "altro_nome" | "titolo" | "non_letti">): string {
++  const base = `Conversazione con ${c.altro_nome} su ${c.titolo}`;
++  if (c.non_letti <= 0) return base;
++  return `${base}, ${c.non_letti} ${c.non_letti === 1 ? "messaggio non letto" : "messaggi non letti"}`;
++}
+diff --git a/src/lib/verifica.ts b/src/lib/verifica.ts
+index dd9297c..190157f 100644
+--- a/src/lib/verifica.ts
++++ b/src/lib/verifica.ts
+@@ -192,6 +192,7 @@ const MESSAGGI: Record<string, string> = {
+   INQUILINO_INESISTENTE: "Inquilino non trovato.",
+   // decisioni sulle candidature
+   CANDIDATURA_NON_TUA: "Questa candidatura non risulta tua.",
++  CONVERSAZIONE_NON_TUA: "Questa conversazione non è tua.",
+   CANDIDATURA_RITIRATA: "La persona ha ritirato la candidatura: non c'è più nulla da valutare.",
+   CANDIDATURA_NON_RITIRABILE:
+     "Questa candidatura non si può più ritirare: il proprietario l'ha già valutata.",
+diff --git a/supabase/migrations/0021_conversazioni.sql b/supabase/migrations/0021_conversazioni.sql
+new file mode 100644
+index 0000000..6c2d7b4
+--- /dev/null
++++ b/supabase/migrations/0021_conversazioni.sql
+@@ -0,0 +1,177 @@
++-- ============================================================
++-- MatchAmI — elenco delle conversazioni e messaggi non letti
++--
++-- Fin qui una chat si raggiungeva solo dal dettaglio di una candidatura, e non
++-- c'era modo di sapere se l'altra persona aveva scritto. Ora c'è un elenco con
++-- l'ultimo messaggio e il numero dei non letti.
++--
++-- La colonna `letto` esisteva già, ma nessuno la aggiornava: non c'era una
++-- policy di modifica. E chi inviava un messaggio poteva inserirlo già «letto»
++-- (la policy di inserimento non guarda quella colonna), cioè sfuggire al
++-- conteggio. Si chiudono entrambe le cose:
++--   - un trigger azzera `letto` a ogni inserimento: lo stato non lo sceglie
++--     chi scrive;
++--   - si segna come letto con una funzione, che tocca solo i messaggi
++--     DELL'ALTRA persona, nelle proprie conversazioni.
++--
++-- ORDINE: esegui questa migrazione PRIMA del push del codice.
++-- ============================================================
++
++-- ------------------------------------------------------------
++-- 1. I messaggi già scritti
++--
++-- Finora nessuno poteva segnarli come letti, quindi oggi risultano tutti non
++-- letti: al primo giorno il conteggio mostrerebbe ogni messaggio mai scritto.
++-- Si segnano letti UNA VOLTA SOLA, alla prima esecuzione. Se la migrazione si
++-- rilancia, la funzione esiste già e i non letti veri non si toccano.
++-- ------------------------------------------------------------
++
++do $$
++begin
++  if not exists (select 1 from pg_proc where proname = 'segna_messaggi_letti') then
++    update messaggi set letto = true where letto = false;
++  end if;
++end;
++$$;
++
++-- ------------------------------------------------------------
++-- 2. Lo stato «letto» non lo decide chi scrive
++-- ------------------------------------------------------------
++
++create or replace function public.messaggi_forza_non_letto()
++returns trigger
++language plpgsql
++as $$
++begin
++  new.letto := false;
++  return new;
++end;
++$$;
++
++drop trigger if exists messaggi_forza_non_letto on messaggi;
++create trigger messaggi_forza_non_letto
++  before insert on messaggi
++  for each row execute function public.messaggi_forza_non_letto();
++
++revoke update, delete on messaggi from authenticated, anon;
++
++create index if not exists messaggi_conversazione_idx on messaggi (candidatura_id, created_at desc);
++create index if not exists messaggi_non_letti_idx on messaggi (candidatura_id) where letto = false;
++
++-- ------------------------------------------------------------
++-- 3. Segnare come letti
++--
++-- Solo i messaggi dell'altra persona: i propri non si «leggono». Solo in una
++-- conversazione di cui si è parte; per le altre la risposta è la stessa di un
++-- id inesistente.
++-- ------------------------------------------------------------
++
++create or replace function public.segna_messaggi_letti(p_candidatura uuid)
++returns integer
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_n integer;
++begin
++  if auth.uid() is null then
++    raise exception 'NON_AUTENTICATO';
++  end if;
++
++  if not exists (
++    select 1
++      from candidature c
++      join listings l on l.id = c.listing_id
++     where c.id = p_candidatura
++       and (c.tenant_id = auth.uid() or l.owner_id = auth.uid())
++  ) then
++    raise exception 'CONVERSAZIONE_NON_TUA';
++  end if;
++
++  update messaggi
++     set letto = true
++   where candidatura_id = p_candidatura
++     and mittente_id <> auth.uid()
++     and not letto;
++
++  get diagnostics v_n = row_count;
++  return v_n;
++end;
++$$;
++
++grant execute on function public.segna_messaggi_letti(uuid) to authenticated;
++
++-- ------------------------------------------------------------
++-- 4. L'elenco
++--
++-- Le conversazioni di chi chiama: le candidature ACCETTATE di cui è parte,
++-- dalla più recente. Per ciascuna: il titolo dell'annuncio, il nome dell'altra
++-- persona (la stessa cosa che si vede già dentro la chat), un'anteprima
++-- dell'ultimo messaggio e quanti ne mancano da leggere.
++--
++-- Una sola chiamata invece di una per conversazione. Chi non è autenticato non
++-- ottiene niente (e comunque non ha il permesso di chiamarla).
++-- ------------------------------------------------------------
++
++create or replace function public.elenco_conversazioni()
++returns table (
++  candidatura_id uuid,
++  titolo text,
++  altro_nome text,
++  ultimo_testo text,
++  ultimo_at timestamptz,
++  ultimo_mio boolean,
++  non_letti integer
++)
++language sql
++stable
++security definer
++set search_path = public
++as $$
++  select
++    c.id,
++    l.titolo,
++    coalesce(nullif(btrim(coalesce(p.nome, '') || ' ' || coalesce(p.cognome, '')), ''), 'Utente'),
++    left(ult.testo, 140),
++    ult.created_at,
++    (ult.mittente_id = auth.uid()),
++    (select count(*)::integer
++       from messaggi m
++      where m.candidatura_id = c.id
++        and m.mittente_id <> auth.uid()
++        and not m.letto)
++  from candidature c
++  join listings l on l.id = c.listing_id
++  join profiles p on p.id = case when c.tenant_id = auth.uid() then l.owner_id else c.tenant_id end
++  left join lateral (
++    select m.testo, m.created_at, m.mittente_id
++      from messaggi m
++     where m.candidatura_id = c.id
++     order by m.created_at desc
++     limit 1
++  ) ult on true
++  where auth.uid() is not null
++    and c.status = 'accettata'
++    and (c.tenant_id = auth.uid() or l.owner_id = auth.uid())
++  order by coalesce(ult.created_at, c.updated_at) desc
++  limit 100;
++$$;
++
++revoke all on function public.elenco_conversazioni() from public, anon;
++grant execute on function public.elenco_conversazioni() to authenticated;
++
++-- ------------------------------------------------------------
++-- Verifica
++-- ------------------------------------------------------------
++
++select routine_name from information_schema.routines
++where routine_name in ('segna_messaggi_letti', 'elenco_conversazioni', 'messaggi_forza_non_letto')
++order by 1;   -- 3 righe
++
++select count(*) as trigger_letto from pg_trigger
++where tgname = 'messaggi_forza_non_letto' and not tgisinternal;   -- 1
++
++-- deve risultare 0: nessun messaggio resta non letto per via della migrazione
++-- (solo alla prima esecuzione: dopo, i non letti sono quelli veri)
++select count(*) as non_letti_ora from messaggi where not letto;
+-- 
+2.43.0
+

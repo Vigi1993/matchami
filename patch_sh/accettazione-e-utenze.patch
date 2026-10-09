@@ -1,0 +1,1049 @@
+From cb3579d877900678c044ffb4069beeeb99d40084 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 9 Oct 2026 09:34:11 +0000
+Subject: [PATCH 1/2] fix(informativa): l'accettazione non si chiede di nuovo a
+ ogni cambio di testo
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+SEGNALATO: l'app sembrava chiedere di accettare l'informativa a ogni accesso.
+
+Verificato su un database costruito come Supabase (permessi di default dati
+prima delle migrazioni, nessuna concessione finale, per non nascondere un
+permesso revocato): l'accettazione SI SALVA e SI RILEGGE. Il problema era una
+regola applicata con troppo zelo: a ogni modifica del testo avevo cambiato
+anche la versione (dalla 3 alla 8 in pochi giorni), e il sistema chiede di
+riaccettare quando la versione cambia. Per chi applica le patch di seguito,
+'ogni volta'.
+
+- INFORMATIVA.equivalenti: le versioni precedenti che chi le ha accettate NON
+  deve riaccettare. Finché il testo è PROVVISORIO (dati di prova, nessun valore
+  legale) un cambio di testo non ferma nessuno. La versione resta comunque
+  registrata a ogni accettazione, per la traccia
+- quando arriverà il testo del legale: la versione cambia e l'elenco si SVUOTA,
+  tutti riaccettano una volta. Un test fallisce se l'elenco non è vuoto su un
+  testo definitivo, e se si cambia la versione senza aggiungere la precedente
+  agli equivalenti
+
+INSIDIA evitata: la lettura usava maybeSingle(), che dà ERRORE se trova più di
+una riga, e l'errore vale 'non accettata'. Con più versioni equivalenti una
+persona ha più righe: la correzione ovvia l'avrebbe fermata proprio perché ha
+accettato più volte. Ora si legge con limit(1). Un finto Supabase che si
+comporta come PostgREST (maybeSingle con più righe = errore) lo prova, e una
+controprova mostra che la lettura vecchia fallirebbe.
+
+Verificato: richiesta reale vista dal server (versione=in.(…)&limit=1);
+database con una persona che ha accettato tre versioni (una riga restituita);
+la sicurezza a livello di riga impedisce di leggere le accettazioni altrui.
+
+Test: ogni controllo dell'accettazione deve passare l'elenco delle versioni
+valide (guardia sul testo); nessuno legge le accettazioni con maybeSingle.
+Difetti reintrodotti di proposito: tutti presi.
+---
+ package.json                         |   2 +-
+ scripts/test-accettazione.mjs        | 171 +++++++++++++++++++++++++++
+ scripts/test-informativa.mjs         |  34 ++++++
+ src/app/(app)/layout.tsx             |   4 +-
+ src/app/chat/[id]/page.tsx           |   4 +-
+ src/app/informativa/accetta/page.tsx |   4 +-
+ src/app/invito/[token]/page.tsx      |   4 +-
+ src/app/rapporto/[token]/page.tsx    |   4 +-
+ src/components/PrivacySheet.tsx      |   9 +-
+ src/content/informativa.ts           |  22 ++++
+ src/lib/informativa.ts               |  36 ++++--
+ 11 files changed, 270 insertions(+), 24 deletions(-)
+ create mode 100644 scripts/test-accettazione.mjs
+
+diff --git a/package.json b/package.json
+index f633d77..f60da8e 100644
+--- a/package.json
++++ b/package.json
+@@ -7,7 +7,7 @@
+     "build": "next build",
+     "start": "next start",
+     "lint": "eslint",
+-    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-accettazione.mjs b/scripts/test-accettazione.mjs
+new file mode 100644
+index 0000000..c0fc2ab
+--- /dev/null
++++ b/scripts/test-accettazione.mjs
+@@ -0,0 +1,171 @@
++/**
++ * Test dell'accettazione dell'informativa (src/lib/informativa.ts). Si lancia con:   npm test
++ *
++ * La domanda che questi test difendono: «una volta accettata, l'informativa resta
++ * accettata?». Un'accettazione che non si ricorda, o che viene chiesta a ogni
++ * accesso, è un difetto, anche se ogni singola parte «funziona».
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const lib = caricaTs(path.join(radice, "src", "lib", "informativa.ts"));
++const { INFORMATIVA } = caricaTs(path.join(radice, "src", "content", "informativa.ts"));
++const leggi = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8");
++
++const U1 = "11111111-1111-1111-1111-111111111111", U2 = "22222222-2222-2222-2222-222222222222";
++const riga = (user_id, versione, accettata_at = "2026-10-01T10:00:00Z") => ({ user_id, versione, accettata_at });
++
++/**
++ * Un finto Supabase che si comporta come PostgREST: filtri `eq` e `in`, ordine, limite, e soprattutto
++ * `maybeSingle()` che dà ERRORE quando le righe sono più di una (è ciò che fa il vero).
++ */
++function finto(righe, { errore = null } = {}) {
++  const richieste = [];
++  function costruttore(tabella) {
++    const filtri = []; let ordine = null, limite = null;
++    const calcola = () => {
++      let r = righe.filter((x) => filtri.every((f) => f(x)));
++      if (ordine) r = [...r].sort((a, b) => (a[ordine.col] < b[ordine.col] ? 1 : -1) * (ordine.asc ? -1 : 1));
++      return limite === null ? r : r.slice(0, limite);
++    };
++    const b = {
++      select(c) { richieste.push(["select", tabella, c]); return b; },
++      eq(col, val) { filtri.push((r) => r[col] === val); richieste.push(["eq", col, val]); return b; },
++      in(col, lista) { filtri.push((r) => lista.includes(r[col])); richieste.push(["in", col, lista]); return b; },
++      order(col, o) { ordine = { col, asc: o?.ascending !== false }; richieste.push(["order", col]); return b; },
++      limit(n) { limite = n; richieste.push(["limit", n]); return b; },
++      maybeSingle() { richieste.push(["maybeSingle"]); if (errore) return Promise.resolve({ data: null, error: { message: errore } }); const r = calcola(); if (r.length > 1) return Promise.resolve({ data: null, error: { message: "JSON object requested, multiple (or no) rows returned" } }); return Promise.resolve({ data: r[0] ?? null, error: null }); },
++      then(ok, ko) { const esito = errore ? { data: null, error: { message: errore } } : { data: calcola(), error: null }; return Promise.resolve(esito).then(ok, ko); },
++    };
++    return b;
++  }
++  return { from: costruttore, richieste };
++}
++
++const AMMESSE = lib.versioniAccettabili(INFORMATIVA);
++
++// ------------------------------------------------------------
++// Le versioni che valgono
++// ------------------------------------------------------------
++
++test("versioni accettabili: quella in vigore e le equivalenti, senza doppioni", () => {
++  assert.equal(AMMESSE[0], INFORMATIVA.versione);
++  assert.equal(new Set(AMMESSE).size, AMMESSE.length);
++  assert.deepEqual(lib.versioniAccettabili({ versione: "a" }), ["a"]);
++  assert.deepEqual(lib.versioniAccettabili({ versione: "a", equivalenti: ["b", "a", "b", "c"] }), ["a", "b", "c"]);
++});
++
++// ------------------------------------------------------------
++// «Una volta accettata, resta accettata»
++// ------------------------------------------------------------
++
++test("mai accettata: non risulta accettata", async () => {
++  assert.equal(await lib.haAccettatoInformativa(finto([]), U1, AMMESSE), false);
++});
++
++test("accettata la versione in vigore: risulta accettata, a ogni controllo successivo", async () => {
++  const db = finto([riga(U1, INFORMATIVA.versione)]);
++  for (let i = 0; i < 5; i++) assert.equal(await lib.haAccettatoInformativa(db, U1, AMMESSE), true, `controllo ${i + 1}`);
++});
++
++test("accettata una versione EQUIVALENTE (un testo provvisorio precedente): non si chiede di nuovo", async () => {
++  for (const v of INFORMATIVA.equivalenti) assert.equal(await lib.haAccettatoInformativa(finto([riga(U1, v)]), U1, AMMESSE), true, v);
++});
++
++test("accettata una versione che NON è equivalente: va riaccettata", async () => {
++  assert.equal(await lib.haAccettatoInformativa(finto([riga(U1, "2026-09-vecchia-1")]), U1, AMMESSE), false);
++  assert.equal(await lib.haAccettatoInformativa(finto([riga(U1, "2026-10-provvisoria-99")]), U1, AMMESSE), false, "una versione futura non vale");
++});
++
++test("L'INSIDIA: chi ha accettato PIÙ versioni (quindi ha più righe) passa lo stesso", async () => {
++  // con `maybeSingle()` il vero Supabase dà errore con più righe, e l'errore vale «non accettata»: la
++  // persona verrebbe fermata proprio perché ha accettato più volte
++  const db = finto([riga(U1, "2026-10-provvisoria-3"), riga(U1, "2026-10-provvisoria-5"), riga(U1, INFORMATIVA.versione)]);
++  assert.equal(await lib.haAccettatoInformativa(db, U1, AMMESSE), true);
++  assert.ok(!db.richieste.some((r) => r[0] === "maybeSingle"), "la lettura usa maybeSingle");
++  assert.ok(db.richieste.some((r) => r[0] === "limit" && r[1] === 1), "la lettura non è limitata a una riga");
++});
++
++test("la controprova: una lettura con maybeSingle su più righe darebbe «non accettata» (il finto lo riproduce)", async () => {
++  const db = finto([riga(U1, "2026-10-provvisoria-3"), riga(U1, INFORMATIVA.versione)]);
++  const { data, error } = await db.from("accettazioni_informativa").select("versione").eq("user_id", U1).in("versione", AMMESSE).maybeSingle();
++  assert.equal(data, null); assert.match(error.message, /multiple/);
++});
++
++test("le accettazioni di un'altra persona non contano", async () => {
++  assert.equal(await lib.haAccettatoInformativa(finto([riga(U2, INFORMATIVA.versione)]), U1, AMMESSE), false, "U1 non ha accettato niente: le righe sono di U2");
++  assert.equal(await lib.haAccettatoInformativa(finto([riga(U2, INFORMATIVA.versione)]), U2, AMMESSE), true);
++});
++
++test("la lettura filtra per persona e per le sole versioni valide", async () => {
++  const db = finto([riga(U1, INFORMATIVA.versione)]); await lib.haAccettatoInformativa(db, U1, AMMESSE);
++  assert.ok(db.richieste.some((r) => r[0] === "eq" && r[1] === "user_id" && r[2] === U1), "manca il filtro sulla persona");
++  const lista = db.richieste.find((r) => r[0] === "in" && r[1] === "versione")[2]; assert.deepEqual(lista, AMMESSE);
++});
++
++test("se la lettura non riesce si risponde NO (si ferma, invece di lasciar passare) e non si lancia un errore", async () => {
++  const silenzio = console.error; console.error = () => {};
++  try { assert.equal(await lib.haAccettatoInformativa(finto([riga(U1, INFORMATIVA.versione)], { errore: "boom" }), U1, AMMESSE), false); }
++  finally { console.error = silenzio; }
++});
++
++test("si accetta anche una versione sola, come stringa", async () => {
++  assert.equal(await lib.haAccettatoInformativa(finto([riga(U1, "x-1")]), U1, "x-1"), true);
++  assert.equal(await lib.haAccettatoInformativa(finto([riga(U1, "x-1")]), U1, "x-2"), false);
++});
++
++test("la data: la più recente tra le accettazioni valide, e nulla se non c'è", async () => {
++  const db = finto([riga(U1, "2026-10-provvisoria-3", "2026-10-01T10:00:00Z"), riga(U1, INFORMATIVA.versione, "2026-10-05T10:00:00Z"), riga(U1, "2026-09-vecchia-1", "2026-12-01T10:00:00Z")]);
++  assert.equal(await lib.dataAccettazione(db, U1, AMMESSE), "2026-10-05T10:00:00Z", "la più recente tra le VALIDE, non tra tutte");
++  assert.equal(await lib.dataAccettazione(finto([]), U1, AMMESSE), null);
++  assert.equal(await lib.dataAccettazione(finto([riga(U2, INFORMATIVA.versione)]), U1, AMMESSE), null);
++});
++
++// ------------------------------------------------------------
++// Il codice usa la lettura giusta, dappertutto
++// ------------------------------------------------------------
++
++function filiDiCodice(dir = path.join(radice, "src")) {
++  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
++    if (e.name.startsWith("__")) return [];
++    const p = path.join(dir, e.name);
++    return e.isDirectory() ? filiDiCodice(p) : /\.(ts|tsx)$/.test(e.name) ? [p] : [];
++  });
++}
++
++test("guardia: ogni controllo dell'accettazione passa l'elenco delle versioni valide, mai la sola versione in vigore", () => {
++  let chiamate = 0;
++  for (const f of filiDiCodice()) {
++    if (f.endsWith(path.join("lib", "informativa.ts"))) continue;
++    const codice = fs.readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
++    for (const m of codice.matchAll(/haAccettatoInformativa\(([^;]*?)\)\)?\s*(?:\)|\{|;|&&|\|\|)/g)) {
++      chiamate++; assert.match(m[1], /versioniAccettabili\(INFORMATIVA/, `${path.relative(radice, f)}: ${m[1].trim()}`);
++    }
++  }
++  assert.ok(chiamate >= 5, `trovate solo ${chiamate} chiamate: il controllo non guarda niente`);
++});
++
++test("guardia: nessuno legge le accettazioni con maybeSingle, né le confronta con la sola versione in vigore", () => {
++  for (const f of filiDiCodice()) {
++    const codice = fs.readFileSync(f, "utf8");
++    if (/accettazioni_informativa/.test(codice)) {
++      const dopo = codice.slice(codice.indexOf("accettazioni_informativa"), codice.indexOf("accettazioni_informativa") + 400);
++      assert.ok(!/maybeSingle|\.single\(\)/.test(dopo), `${path.relative(radice, f)} legge le accettazioni con maybeSingle/single`);
++      assert.ok(!/\.eq\("versione",\s*INFORMATIVA\.versione\)/.test(codice), `${path.relative(radice, f)} confronta con la sola versione in vigore`);
++    }
++  }
++});
++
++test("guardia: l'accettazione registra la versione in vigore (per la traccia), non una equivalente", () => {
++  const a = leggi("src", "app", "informativa", "accetta", "actions.ts");
++  assert.match(a, /p_versione: INFORMATIVA\.versione/);
++});
++
++test("la guardia sa riconoscere un controllo sbagliato", () => {
++  const sbagliato = "if (!(await haAccettatoInformativa(supabase, user.id, INFORMATIVA.versione))) {";
++  const m = sbagliato.match(/haAccettatoInformativa\(([^;]*?)\)\)?\s*(?:\)|\{|;|&&|\|\|)/);
++  assert.ok(m && !/versioniAccettabili\(INFORMATIVA/.test(m[1]));
++});
+diff --git a/scripts/test-informativa.mjs b/scripts/test-informativa.mjs
+index 2eaa3ad..9f8e40a 100644
+--- a/scripts/test-informativa.mjs
++++ b/scripts/test-informativa.mjs
+@@ -482,3 +482,37 @@ test("mappe: la guardia sa riconoscere un fornitore vero registrato con il testo
+   assert.ok(finto.filter((f) => f.origine === "fornitore").length > 0);
+   assert.ok(/senza inviare l'indirizzo a nessun servizio esterno/.test(tutto), "il testo attuale è quello provvisorio: con un fornitore vero la guardia fallirebbe");
+ });
++
++// ------------------------------------------------------------
++// Le versioni equivalenti: un cambio di testo provvisorio non deve fermare nessuno, uno definitivo sì
++// ------------------------------------------------------------
++
++test("equivalenti: ben formate, senza doppioni, e diverse dalla versione in vigore", () => {
++  const eq = INFORMATIVA.equivalenti;
++  assert.ok(Array.isArray(eq), "manca l'elenco");
++  assert.equal(new Set(eq).size, eq.length, "doppioni");
++  assert.ok(!eq.includes(INFORMATIVA.versione), "la versione in vigore è nell'elenco delle equivalenti");
++  const regola = /^[0-9]{4}-[0-9]{2}(-[a-z0-9]+)+$/;
++  for (const v of eq) assert.ok(regola.test(v) && v.length <= 60, `versione non valida: ${v}`);
++});
++
++test("equivalenti: se il testo è PROVVISORIO, chi ha accettato una versione provvisoria precedente non viene fermato", () => {
++  // La versione è «<prefisso>-N»: devono esserci tutte le precedenti, da 1 a N-1. Se si cambia la
++  // versione senza aggiungere la vecchia all'elenco, chi l'aveva accettata verrebbe fermato di nuovo.
++  const m = INFORMATIVA.versione.match(/^(.*-provvisoria)-(\d+)$/);
++  assert.ok(m, `la versione provvisoria non ha la forma «…-provvisoria-N»: ${INFORMATIVA.versione}`);
++  const attese = Array.from({ length: Number(m[2]) - 1 }, (_, i) => `${m[1]}-${i + 1}`);
++  assert.deepEqual([...INFORMATIVA.equivalenti].sort(), attese.sort(), "mancano versioni precedenti tra le equivalenti (o ce ne sono di non previste)");
++});
++
++test("equivalenti: su un testo DEFINITIVO l'elenco deve essere vuoto (un cambio di dati trattati richiede una nuova accettazione)", () => {
++  // Quando arriverà il testo del legale `provvisoria` diventa false: da quel momento ogni cambio di
++  // versione ferma tutti, e questo test lo impone.
++  if (!INFORMATIVA.provvisoria) assert.deepEqual([...INFORMATIVA.equivalenti], [], "testo definitivo con versioni equivalenti: chi non ha accettato questo testo passerebbe lo stesso");
++  else assert.ok(INFORMATIVA.provvisoria === true);
++});
++
++test("equivalenti: la guardia sa riconoscere un testo definitivo con equivalenti", () => {
++  const finto = { provvisoria: false, equivalenti: ["2026-10-provvisoria-1"] };
++  assert.ok(!finto.provvisoria && finto.equivalenti.length > 0, "il caso che la guardia deve fermare");
++});
+diff --git a/src/app/(app)/layout.tsx b/src/app/(app)/layout.tsx
+index 409c52b..824e563 100644
+--- a/src/app/(app)/layout.tsx
++++ b/src/app/(app)/layout.tsx
+@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
+ import { redirect } from "next/navigation";
+ import { Navigation } from "@/components/Navigation";
+ import { INFORMATIVA } from "@/content/informativa";
+-import { haAccettatoInformativa } from "@/lib/informativa";
++import { haAccettatoInformativa, versioniAccettabili } from "@/lib/informativa";
+ 
+ export default async function AppLayout({
+   children,
+@@ -16,7 +16,7 @@ export default async function AppLayout({
+ 
+   // Chi non ha accettato la versione in vigore dell'informativa non entra:
+   // quando il testo cambia, cambia la versione e tutti devono riaccettare.
+-  if (!(await haAccettatoInformativa(supabase, user!.id, INFORMATIVA.versione))) {
++  if (!(await haAccettatoInformativa(supabase, user!.id, versioniAccettabili(INFORMATIVA)))) {
+     redirect("/informativa/accetta");
+   }
+ 
+diff --git a/src/app/chat/[id]/page.tsx b/src/app/chat/[id]/page.tsx
+index a174cd4..40f9e80 100644
+--- a/src/app/chat/[id]/page.tsx
++++ b/src/app/chat/[id]/page.tsx
+@@ -1,7 +1,7 @@
+ import { redirect } from "next/navigation";
+ import { createClient } from "@/lib/supabase/server";
+ import { INFORMATIVA } from "@/content/informativa";
+-import { haAccettatoInformativa } from "@/lib/informativa";
++import { haAccettatoInformativa, versioniAccettabili } from "@/lib/informativa";
+ import { ChatClient } from "./ChatClient";
+ import type { Messaggio } from "@/lib/types";
+ import type { PostoLibero, VisitaCandidatura } from "@/lib/visite";
+@@ -19,7 +19,7 @@ export default async function ChatPage({
+   } = await supabase.auth.getUser();
+ 
+   // La chat sta fuori dal gruppo (app), quindi il blocco va ripetuto qui.
+-  if (!(await haAccettatoInformativa(supabase, user!.id, INFORMATIVA.versione))) {
++  if (!(await haAccettatoInformativa(supabase, user!.id, versioniAccettabili(INFORMATIVA)))) {
+     redirect(`/informativa/accetta?next=${encodeURIComponent(`/chat/${id}`)}`);
+   }
+ 
+diff --git a/src/app/informativa/accetta/page.tsx b/src/app/informativa/accetta/page.tsx
+index 0c17c94..18a556b 100644
+--- a/src/app/informativa/accetta/page.tsx
++++ b/src/app/informativa/accetta/page.tsx
+@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
+ import { createClient } from "@/lib/supabase/server";
+ import { CorniceScura } from "@/components/CorniceScura";
+ import { INFORMATIVA } from "@/content/informativa";
+-import { haAccettatoInformativa } from "@/lib/informativa";
++import { haAccettatoInformativa, versioniAccettabili } from "@/lib/informativa";
+ import { percorsoInterno } from "@/lib/percorso";
+ import { AccettaForm } from "./AccettaForm";
+ 
+@@ -28,7 +28,7 @@ export default async function AccettaPage({
+   }
+ 
+   // già accettata: non c'è niente da fare qui
+-  if (await haAccettatoInformativa(supabase, user.id, INFORMATIVA.versione)) {
++  if (await haAccettatoInformativa(supabase, user.id, versioniAccettabili(INFORMATIVA))) {
+     redirect(destinazione);
+   }
+ 
+diff --git a/src/app/invito/[token]/page.tsx b/src/app/invito/[token]/page.tsx
+index 53e6287..f5f09c7 100644
+--- a/src/app/invito/[token]/page.tsx
++++ b/src/app/invito/[token]/page.tsx
+@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
+ import { InvitoClient } from "./InvitoClient";
+ import { redirect } from "next/navigation";
+ import { INFORMATIVA } from "@/content/informativa";
+-import { haAccettatoInformativa } from "@/lib/informativa";
++import { haAccettatoInformativa, versioniAccettabili } from "@/lib/informativa";
+ import { descriviRequisiti } from "@/lib/invito";
+ import type { RequisitiFeedback } from "@/lib/invito";
+ 
+@@ -68,7 +68,7 @@ export default async function InvitoPage({
+   } = await supabase.auth.getUser();
+ 
+   // Chi agisce da loggato deve aver accettato l'informativa in vigore.
+-  if (user && !(await haAccettatoInformativa(supabase, user.id, INFORMATIVA.versione))) {
++  if (user && !(await haAccettatoInformativa(supabase, user.id, versioniAccettabili(INFORMATIVA)))) {
+     redirect(`/informativa/accetta?next=${encodeURIComponent(`/invito/${token}`)}`);
+   }
+ 
+diff --git a/src/app/rapporto/[token]/page.tsx b/src/app/rapporto/[token]/page.tsx
+index 4eed26a..3ece9a7 100644
+--- a/src/app/rapporto/[token]/page.tsx
++++ b/src/app/rapporto/[token]/page.tsx
+@@ -7,7 +7,7 @@ import type { RuoloRapporto } from "@/lib/rapporti";
+ import { èTokenRapporto } from "@/lib/uuid";
+ import { redirect } from "next/navigation";
+ import { INFORMATIVA } from "@/content/informativa";
+-import { haAccettatoInformativa } from "@/lib/informativa";
++import { haAccettatoInformativa, versioniAccettabili } from "@/lib/informativa";
+ 
+ type RichiestaPubblica = {
+   nome_creatore: string;
+@@ -111,7 +111,7 @@ export default async function RapportoPage({ params }: { params: Promise<{ token
+   }
+ 
+   // Chi agisce da loggato deve aver accettato l'informativa in vigore.
+-  if (!(await haAccettatoInformativa(supabase, user.id, INFORMATIVA.versione))) {
++  if (!(await haAccettatoInformativa(supabase, user.id, versioniAccettabili(INFORMATIVA)))) {
+     redirect(`/informativa/accetta?next=${encodeURIComponent(`/rapporto/${token}`)}`);
+   }
+ 
+diff --git a/src/components/PrivacySheet.tsx b/src/components/PrivacySheet.tsx
+index 12972fc..4aa507e 100644
+--- a/src/components/PrivacySheet.tsx
++++ b/src/components/PrivacySheet.tsx
+@@ -4,6 +4,7 @@ import Link from "next/link";
+ import { useActionState, useEffect, useState } from "react";
+ import { createClient } from "@/lib/supabase/client";
+ import { INFORMATIVA } from "@/content/informativa";
++import { versioniAccettabili } from "@/lib/informativa";
+ import { Sheet } from "@/components/Sheet";
+ import { Chip } from "@/components/ui/Chip";
+ import { Field } from "@/components/ui/Field";
+@@ -36,12 +37,14 @@ export function PrivacySheet({
+   const [accettataAl, setAccettataAl] = useState<string | null | undefined>(undefined);
+   useEffect(() => {
+     if (!open) return;
++    // più righe possibili (versioni equivalenti): si prende la più recente, con limit(1) e non con maybeSingle
+     createClient()
+       .from("accettazioni_informativa")
+       .select("accettata_at")
+-      .eq("versione", INFORMATIVA.versione)
+-      .maybeSingle()
+-      .then(({ data }) => setAccettataAl((data?.accettata_at as string | undefined) ?? null));
++      .in("versione", versioniAccettabili(INFORMATIVA))
++      .order("accettata_at", { ascending: false })
++      .limit(1)
++      .then(({ data }) => setAccettataAl((Array.isArray(data) && (data[0]?.accettata_at as string | undefined)) || null));
+   }, [open]);
+ 
+   useEffect(() => {
+diff --git a/src/content/informativa.ts b/src/content/informativa.ts
+index 9f95258..fcb117e 100644
+--- a/src/content/informativa.ts
++++ b/src/content/informativa.ts
+@@ -29,6 +29,28 @@ export const INFORMATIVA = {
+    * questa stringa non lo supera.
+    */
+   versione: "2026-10-provvisoria-8",
++  /**
++   * Versioni precedenti che chi le ha accettate NON deve riaccettare.
++   *
++   * Finché il testo è PROVVISORIO (dati di prova, nessun valore legale) un cambio
++   * di testo non ferma nessuno: riaccettare a ogni modifica sarebbe solo un
++   * fastidio. La versione resta comunque registrata a ogni accettazione, per la
++   * traccia.
++   *
++   * Quando arriverà il testo del legale: la versione cambia, QUESTO ELENCO SI
++   * SVUOTA e tutti riaccettano una volta. Un test fallisce se l'elenco non è
++   * vuoto su un testo definitivo: lì un cambio di dati trattati richiede davvero
++   * una nuova accettazione.
++   */
++  equivalenti: [
++    "2026-10-provvisoria-1",
++    "2026-10-provvisoria-2",
++    "2026-10-provvisoria-3",
++    "2026-10-provvisoria-4",
++    "2026-10-provvisoria-5",
++    "2026-10-provvisoria-6",
++    "2026-10-provvisoria-7",
++  ] as readonly string[],
+   provvisoria: true,
+   titolo: "Informativa sulla privacy",
+   aggiornata: "ottobre 2026",
+diff --git a/src/lib/informativa.ts b/src/lib/informativa.ts
+index a9c097f..c931776 100644
+--- a/src/lib/informativa.ts
++++ b/src/lib/informativa.ts
+@@ -13,43 +13,59 @@ export function versioneValida(versione: string): boolean {
+ 
+ type Supabase = Awaited<ReturnType<typeof createClient>>;
+ 
++/** Le versioni che valgono come «accettata»: quella in vigore e quelle equivalenti. */
++export function versioniAccettabili(informativa: {
++  versione: string;
++  equivalenti?: readonly string[];
++}): string[] {
++  return [...new Set([informativa.versione, ...(informativa.equivalenti ?? [])])];
++}
++
+ /**
+- * Questa persona ha accettato la versione in vigore?
++ * Questa persona ha accettato la versione in vigore, o una equivalente?
+  *
+  * Se la domanda al database non riesce si risponde NO: la schermata di
+  * accettazione compare invece di lasciar passare. Meglio fermare qualcuno
+  * per un errore che lasciar usare l'app a chi non ha accettato.
++ *
++ * ATTENZIONE: si legge con `limit(1)`, NON con `maybeSingle()`. Chi ha accettato
++ * più versioni equivalenti ha più righe, e `maybeSingle()` dà errore quando ne
++ * trova più di una: l'errore vale «non accettata», e la persona verrebbe
++ * fermata proprio perché ha accettato più volte.
+  */
+ export async function haAccettatoInformativa(
+   supabase: Supabase,
+   userId: string,
+-  versione: string
++  versioni: string | readonly string[]
+ ): Promise<boolean> {
++  const lista = typeof versioni === "string" ? [versioni] : [...versioni];
+   const { data, error } = await supabase
+     .from("accettazioni_informativa")
+     .select("versione")
+     .eq("user_id", userId)
+-    .eq("versione", versione)
+-    .maybeSingle();
++    .in("versione", lista)
++    .limit(1);
+ 
+   if (error) {
+     console.error("haAccettatoInformativa: la lettura non è riuscita:", error.message);
+     return false;
+   }
+-  return data !== null;
++  return Array.isArray(data) && data.length > 0;
+ }
+ 
+-/** Quando ha accettato la versione in vigore, se l'ha fatto. */
++/** Quando ha accettato (la versione in vigore o una equivalente: la più recente), se l'ha fatto. */
+ export async function dataAccettazione(
+   supabase: Supabase,
+   userId: string,
+-  versione: string
++  versioni: string | readonly string[]
+ ): Promise<string | null> {
++  const lista = typeof versioni === "string" ? [versioni] : [...versioni];
+   const { data } = await supabase
+     .from("accettazioni_informativa")
+     .select("accettata_at")
+     .eq("user_id", userId)
+-    .eq("versione", versione)
+-    .maybeSingle();
+-  return (data?.accettata_at as string | undefined) ?? null;
++    .in("versione", lista)
++    .order("accettata_at", { ascending: false })
++    .limit(1);
++  return (Array.isArray(data) && (data[0]?.accettata_at as string | undefined)) || null;
+ }
+-- 
+2.43.0
+
+
+From 7ced303804bb22a2f053e7565195cdc087730501 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 9 Oct 2026 09:34:11 +0000
+Subject: [PATCH 2/2] feat(utenze): link d'esempio ai fornitori di luce, gas e
+ internet
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+La schermata 'Bollette e utenze' prometteva cose che non esistono (stato
+attivazioni, importi, scadenze) e aveva un pulsante che non faceva niente. Ora
+mostra i collegamenti ai fornitori e dice solo ciò che c'è.
+
+- catalogo di link DI ESEMPIO su domini riservati agli esempi (example.com,
+  RFC 2606): nessun fornitore vero, nessun nome reale, nessun rapporto
+  commerciale. Un avviso in alto lo dice
+- stesso metodo degli altri fornitori: per metterne di veri si sostituiscono le
+  voci del catalogo con esempio:false. I test impongono: https, niente
+  credenziali né parametri di tracciamento (utm_, ref, aff..., gclid, fbclid),
+  un link con un rapporto commerciale è dichiarato 'Sponsorizzato' (e
+  l'informativa deve dirlo), e finché sono esempi solo domini di esempio
+- SEMPLICI COLLEGAMENTI: l'app non registra su quale si clicca (nessun
+  codice che intercetti il clic) e non passa al fornitore nessun dato né
+  da dove arrivi (noopener noreferrer, referrerPolicy no-referrer). Registrare
+  i clic sarebbe un dato nuovo da decidere, dichiarare e far vedere a un legale
+- un link con un indirizzo non accettabile si scarta, non si mostra
+- informativa (versione 2026-10-provvisoria-9, la 8 tra le equivalenti: nessuno
+  deve riaccettare)
+
+Test: 549 in tutto; 10 prove di interazione (compreso che cliccare un link non
+chiama nessuna funzione). Difetti reintrodotti di proposito: tutti presi.
+---
+ package.json                              |   2 +-
+ scripts/test-utenze.mjs                   | 127 ++++++++++++++++++++++
+ src/app/(app)/gestione/GestioneClient.tsx |  21 +---
+ src/app/globals.css                       |  43 ++++++++
+ src/components/LinkUtenze.tsx             |  57 ++++++++++
+ src/content/informativa.ts                |   4 +-
+ src/lib/utenze.ts                         | 121 +++++++++++++++++++++
+ 7 files changed, 358 insertions(+), 17 deletions(-)
+ create mode 100644 scripts/test-utenze.mjs
+ create mode 100644 src/components/LinkUtenze.tsx
+ create mode 100644 src/lib/utenze.ts
+
+diff --git a/package.json b/package.json
+index f60da8e..16ff35e 100644
+--- a/package.json
++++ b/package.json
+@@ -7,7 +7,7 @@
+     "build": "next build",
+     "start": "next start",
+     "lint": "eslint",
+-    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-utenze.mjs b/scripts/test-utenze.mjs
+new file mode 100644
+index 0000000..d1c4a1b
+--- /dev/null
++++ b/scripts/test-utenze.mjs
+@@ -0,0 +1,127 @@
++/**
++ * Test dei collegamenti ai fornitori di utenze (src/lib/utenze.ts). Si lancia con:   npm test
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const u = caricaTs(path.join(radice, "src", "lib", "utenze.ts"));
++const { INFORMATIVA } = caricaTs(path.join(radice, "src", "content", "informativa.ts"));
++const leggi = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8");
++const link = (o = {}) => ({ id: "x", categoria: "luce", nome: "Fornitore", descrizione: "d", url: "https://example.com/x", esempio: true, sponsorizzato: false, ...o });
++
++// ------------------------------------------------------------
++// Il catalogo
++// ------------------------------------------------------------
++
++test("catalogo: ogni categoria ha almeno un link, e gli identificativi sono unici", () => {
++  const ids = u.CATALOGO_UTENZE.map((l) => l.id);
++  assert.equal(new Set(ids).size, ids.length, "identificativi doppi");
++  for (const c of u.CATEGORIE_UTENZE) assert.ok(u.CATALOGO_UTENZE.some((l) => l.categoria === c.id), `nessun link per ${c.id}`);
++  for (const l of u.CATALOGO_UTENZE) assert.ok(u.CATEGORIE_UTENZE.some((c) => c.id === l.categoria), `categoria sconosciuta: ${l.categoria}`);
++});
++
++test("catalogo: ogni voce ha nome e descrizione, e nessuna è vuota", () => {
++  for (const l of u.CATALOGO_UTENZE) { assert.ok(l.nome.trim().length > 2, l.id); assert.ok(l.descrizione.trim().length > 5, l.id); }
++});
++
++test("catalogo: ogni indirizzo è accettabile (https, senza credenziali né tracciamento)", () => {
++  for (const l of u.CATALOGO_UTENZE) assert.deepEqual(u.controllaUrl(l.url), { ok: true }, `${l.id}: ${l.url}`);
++});
++
++test("catalogo: finché i link sono DI ESEMPIO stanno su domini riservati agli esempi, mai su un sito vero", () => {
++  for (const l of u.CATALOGO_UTENZE) if (l.esempio) assert.ok(u.eDominioEsempio(l.url), `${l.id} è «di esempio» ma punta a ${l.url}`);
++});
++
++test("catalogo: un link con un rapporto commerciale è dichiarato sponsorizzato; e un fornitore vero non è un «esempio»", () => {
++  for (const l of u.CATALOGO_UTENZE) {
++    if (!l.esempio) assert.ok(!u.eDominioEsempio(l.url), `${l.id} non è un esempio ma sta su un dominio di esempio`);
++    assert.equal(typeof l.sponsorizzato, "boolean", l.id);
++  }
++});
++
++test("catalogo: oggi nessun link è sponsorizzato (non c'è nessun rapporto commerciale)", () => {
++  assert.equal(u.haSponsorizzati(u.CATALOGO_UTENZE), false);
++  assert.equal(u.haEsempi(u.CATALOGO_UTENZE), true);
++});
++
++// ------------------------------------------------------------
++// Gli indirizzi
++// ------------------------------------------------------------
++
++test("indirizzi: solo https, senza credenziali, senza parametri di tracciamento", () => {
++  assert.deepEqual(u.controllaUrl("https://example.com/a"), { ok: true });
++  assert.deepEqual(u.controllaUrl("https://example.com/a?piano=12"), { ok: true }, "un parametro qualunque va bene");
++  for (const [url, parte] of [["http://example.com/a", /https/], ["ftp://example.com/a", /https/], ["javascript:alert(1)", /https/], ["https://u:p@example.com/a", /credenziali/], ["https://example.com/a?utm_source=app", /tracciamento/], ["https://example.com/a?ref=matchami", /tracciamento/], ["https://example.com/a?affiliate_id=7", /tracciamento/], ["https://example.com/a?gclid=x", /tracciamento/], ["https://example.com/a?fbclid=x", /tracciamento/], ["https://example.com/a?clickid=1", /tracciamento/], ["https://example.com/a?partner=matchami", /tracciamento/], ["https://example.com/a?piano=1&UTM_MEDIUM=x", /tracciamento/]]) {
++    const r = u.controllaUrl(url); assert.equal(r.ok, false, url); assert.match(r.motivo, parte, url);
++  }
++});
++
++test("indirizzi: valori che non sono indirizzi", () => {
++  for (const x of [null, undefined, 42, {}, [], "", "   ", "non un indirizzo", "//example.com/a", "example.com/a"]) assert.equal(u.controllaUrl(x).ok, false, JSON.stringify(x));
++});
++
++test("dominio di esempio: il dominio e i suoi sottodomini, ma non un dominio che gli somiglia", () => {
++  for (const x of ["https://example.com/a", "https://www.example.com/a", "https://a.b.example.org/x", "https://EXAMPLE.NET/x"]) assert.equal(u.eDominioEsempio(x), true, x);
++  for (const x of ["https://notexample.com/a", "https://example.com.evil.it/a", "https://example-com.it/a", "https://miosito.it/example.com", "boh", ""]) assert.equal(u.eDominioEsempio(x), false, x);
++});
++
++// ------------------------------------------------------------
++// Mostrare
++// ------------------------------------------------------------
++
++test("mostrabili: un link con un indirizzo non accettabile si scarta, invece di mostrarlo", () => {
++  const e = [link({ id: "ok" }), link({ id: "http", url: "http://example.com/x" }), link({ id: "trk", url: "https://example.com/x?utm_source=a" }), link({ id: "senzanome", nome: "  " })];
++  assert.deepEqual(u.linkMostrabili(e).map((l) => l.id), ["ok"]);
++});
++
++test("per categoria: nell'ordine delle categorie, e senza categorie vuote", () => {
++  const e = [link({ id: "i", categoria: "internet" }), link({ id: "l1", categoria: "luce" }), link({ id: "l2", categoria: "luce" })];
++  const g = u.raggruppaPerCategoria(e);
++  assert.deepEqual(g.map((x) => x.id), ["luce", "internet"], "il gas non ha link: non compare");
++  assert.deepEqual(g[0].link.map((l) => l.id), ["l1", "l2"]);
++  assert.deepEqual(u.raggruppaPerCategoria([]), []);
++  assert.equal(g[0].etichetta, "Luce");
++});
++
++test("per categoria: i link scartati non compaiono nemmeno nei gruppi, e un gruppo che resta vuoto sparisce", () => {
++  const g = u.raggruppaPerCategoria([link({ id: "a", categoria: "gas", url: "http://example.com/x" })]);
++  assert.deepEqual(g, []);
++});
++
++test("esempi e sponsorizzati: si riconoscono, e un link scartato non conta", () => {
++  assert.equal(u.haEsempi([link({ esempio: false })]), false);
++  assert.equal(u.haSponsorizzati([link({ sponsorizzato: true })]), true);
++  assert.equal(u.haSponsorizzati([link({ sponsorizzato: true, url: "http://x.it" })]), false);
++});
++
++// ------------------------------------------------------------
++// Testi e coerenza con l'informativa
++// ------------------------------------------------------------
++
++test("testi: non promettono ciò che non c'è (attivazioni, importi, scadenze) e non presumono il genere", () => {
++  const tutto = [u.SOTTOTITOLO_UTENZE, u.AVVISO_ESEMPIO, u.ETICHETTA_SPONSORIZZATO, u.NOTA_LINK_ESTERNI].join(" ");
++  assert.ok(!/stato attivazion|importi|scadenz|seguire le bollette/i.test(tutto), tutto);
++  assert.ok(!/\b(lui|lei)\b/i.test(tutto), tutto);
++  assert.match(u.NOTA_LINK_ESTERNI, /non registra su cosa clicchi/);
++});
++
++test("informativa: dice che i link portano fuori dall'app e che non si registra su cosa si clicca; e se c'è un link sponsorizzato lo dice", () => {
++  const tutto = JSON.stringify(INFORMATIVA);
++  assert.match(tutto, /link ai siti di alcuni fornitori/);
++  assert.match(tutto, /non registriamo su quali clicchi/);
++  if (u.haSponsorizzati(u.CATALOGO_UTENZE)) assert.match(tutto, /sponsorizzat/i, "ci sono link sponsorizzati ma l'informativa non lo dice");
++});
++
++test("la schermata non registra i clic: i link sono semplici collegamenti, senza codice che li intercetti", () => {
++  const c = leggi("src", "components", "LinkUtenze.tsx").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
++  for (const vietato of [/onClick/, /onMouseDown/, /fetch\(/, /sendBeacon/, /supabase/i, /\.rpc\(/, /localStorage/, /ping=/]) assert.ok(!vietato.test(c), `LinkUtenze usa ${vietato}`);
++  assert.match(c, /rel="noopener noreferrer"/); assert.match(c, /referrerPolicy="no-referrer"/); assert.match(c, /target="_blank"/);
++});
++
++test("privacy: la logica dei link non ha accesso alla rete né al browser", () => {
++  const c = leggi("src", "lib", "utenze.ts").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
++  for (const vietato of [/\bimport\s+(?!type)/, /\bfetch\(/, /XMLHttpRequest/, /localStorage/, /supabase/i, /console\./]) assert.ok(!vietato.test(c), `${vietato}`);
++});
+diff --git a/src/app/(app)/gestione/GestioneClient.tsx b/src/app/(app)/gestione/GestioneClient.tsx
+index 3ac5201..877ae40 100644
+--- a/src/app/(app)/gestione/GestioneClient.tsx
++++ b/src/app/(app)/gestione/GestioneClient.tsx
+@@ -3,6 +3,8 @@
+ import { useState } from "react";
+ import { Sheet } from "@/components/Sheet";
+ import type { ContrattoConAnnuncio } from "@/lib/types";
++import { LinkUtenze } from "@/components/LinkUtenze";
++import { SOTTOTITOLO_UTENZE } from "@/lib/utenze";
+ import {
+   NESSUN_CONTRATTO_IN_CORSO,
+   badgeStato,
+@@ -104,8 +106,8 @@ export function GestioneClient({
+           <div className="pv-label-row">
+             <b>Luce, gas e internet</b>
+           </div>
+-          <p>Stato attivazioni e prossime scadenze.</p>
+-          <span className="pv-readmore">Vedi le bollette</span>
++          <p>{SOTTOTITOLO_UTENZE}</p>
++          <span className="pv-readmore">Vedi i fornitori</span>
+         </div>
+       </button>
+ 
+@@ -158,19 +160,8 @@ export function GestioneClient({
+         onClose={() => setBolletteAperto(false)}
+         title="Bollette e utenze"
+       >
+-        <p className="sheet-sub">
+-          Luce, gas e internet della casa in affitto: qui vedrai stato
+-          attivazioni, importi e scadenze.
+-        </p>
+-        <div className="empty-inline" style={{ padding: "30px 10px" }}>
+-          <IconDocumento className="icon-empty" />
+-          <h3>Nessuna utenza attiva ancora</h3>
+-          <p>
+-            Attiva luce, gas e internet nella tua nuova casa e da qui potrai
+-            seguire importi e scadenze delle bollette.
+-          </p>
+-        </div>
+-        <button className="opp-cta">Attiva luce, gas e internet</button>
++        <p className="sheet-sub">{SOTTOTITOLO_UTENZE}</p>
++        <LinkUtenze />
+       </Sheet>
+     </PageContainer>
+   );
+diff --git a/src/app/globals.css b/src/app/globals.css
+index fb86098..87702a3 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -3084,3 +3084,46 @@ mark.segnaposto {
+ .chat-indirizzo {
+   background: rgba(16, 21, 26, 0.06);
+ }
++
++/* ============================================================
++   Bollette e utenze: i link ai fornitori
++   ============================================================ */
++
++.utenze-lista {
++  list-style: none;
++  margin: 6px 0 0;
++  padding: 0;
++  display: flex;
++  flex-direction: column;
++  gap: 8px;
++}
++.utenza-link {
++  display: flex;
++  flex-direction: column;
++  gap: 2px;
++  padding: 12px 14px;
++  text-decoration: none;
++  color: var(--ink);
++  background: #fff;
++  border: 1px solid rgba(16, 21, 26, 0.1);
++  border-radius: 12px;
++}
++.utenza-nome {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++  font-size: 14px;
++  font-weight: 600;
++}
++.utenza-desc {
++  font-size: 12.5px;
++  color: var(--ink-soft);
++}
++.utenza-sponsor {
++  padding: 1px 8px;
++  font-size: 10.5px;
++  font-weight: 600;
++  color: var(--ink);
++  background: rgba(201, 161, 90, 0.3);
++  border-radius: 999px;
++}
+diff --git a/src/components/LinkUtenze.tsx b/src/components/LinkUtenze.tsx
+new file mode 100644
+index 0000000..a84f2ce
+--- /dev/null
++++ b/src/components/LinkUtenze.tsx
+@@ -0,0 +1,57 @@
++import {
++  AVVISO_ESEMPIO,
++  CATALOGO_UTENZE,
++  ETICHETTA_SPONSORIZZATO,
++  NOTA_LINK_ESTERNI,
++  haEsempi,
++  raggruppaPerCategoria,
++  type LinkUtenza,
++} from "@/lib/utenze";
++
++/**
++ * I collegamenti ai fornitori di luce, gas e internet. Sono semplici link: niente
++ * codice che registri i clic, e il sito del fornitore non riceve da dove arrivi
++ * (`noreferrer`). Finché sono link di esempio lo dice, in alto.
++ */
++export function LinkUtenze({ catalogo = CATALOGO_UTENZE }: { catalogo?: readonly LinkUtenza[] }) {
++  const gruppi = raggruppaPerCategoria(catalogo);
++
++  if (gruppi.length === 0) {
++    return <p className="field-note">Nessun fornitore disponibile al momento.</p>;
++  }
++
++  return (
++    <div className="utenze-link">
++      {haEsempi(catalogo) && (
++        <div className="note-box" style={{ marginTop: 0 }}>
++          {AVVISO_ESEMPIO}
++        </div>
++      )}
++
++      {gruppi.map((g) => (
++        <section key={g.id} aria-label={g.etichetta}>
++          <div className="pref-label" style={{ marginTop: 16 }}>
++            <span>{g.etichetta}</span>
++          </div>
++          <ul className="utenze-lista">
++            {g.link.map((l) => (
++              <li key={l.id}>
++                <a href={l.url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" className="utenza-link">
++                  <span className="utenza-nome">
++                    {l.nome}
++                    {l.sponsorizzato && <span className="utenza-sponsor">{ETICHETTA_SPONSORIZZATO}</span>}
++                  </span>
++                  <span className="utenza-desc">{l.descrizione}</span>
++                </a>
++              </li>
++            ))}
++          </ul>
++        </section>
++      ))}
++
++      <p className="field-note" style={{ marginTop: 14 }}>
++        {NOTA_LINK_ESTERNI}
++      </p>
++    </div>
++  );
++}
+diff --git a/src/content/informativa.ts b/src/content/informativa.ts
+index fcb117e..eaaaaa9 100644
+--- a/src/content/informativa.ts
++++ b/src/content/informativa.ts
+@@ -28,7 +28,7 @@ export const INFORMATIVA = {
+    * controllo che fa il database (migrazione 0017): un test fallisce se
+    * questa stringa non lo supera.
+    */
+-  versione: "2026-10-provvisoria-8",
++  versione: "2026-10-provvisoria-9",
+   /**
+    * Versioni precedenti che chi le ha accettate NON deve riaccettare.
+    *
+@@ -50,6 +50,7 @@ export const INFORMATIVA = {
+     "2026-10-provvisoria-5",
+     "2026-10-provvisoria-6",
+     "2026-10-provvisoria-7",
++    "2026-10-provvisoria-8",
+   ] as readonly string[],
+   provvisoria: true,
+   titolo: "Informativa sulla privacy",
+@@ -135,6 +136,7 @@ export const INFORMATIVA = {
+       paragrafi: [
+         "Usiamo Supabase (database, accessi, file e le email di accesso) e Vercel (per ospitare l'app, che può conservare registri tecnici delle richieste). La regione dei dati è [da indicare].",
+         "Per ora la posizione di un immobile sulla mappa è calcolata dall'app, senza inviare l'indirizzo a nessun servizio esterno.",
++        "Nella sezione bollette ci sono link ai siti di alcuni fornitori: aprirli ti porta fuori dall'app, e non registriamo su quali clicchi né passiamo ai fornitori nessun dato su di te.",
+         "Nell'app non ci sono strumenti di analisi né pubblicità. Usiamo solo cookie tecnici, necessari a mantenerti connesso.",
+       ],
+     },
+diff --git a/src/lib/utenze.ts b/src/lib/utenze.ts
+new file mode 100644
+index 0000000..8eda50b
+--- /dev/null
++++ b/src/lib/utenze.ts
+@@ -0,0 +1,121 @@
++/**
++ * Bollette e utenze: i collegamenti ai fornitori. Per ora sono link DI ESEMPIO,
++ * su domini riservati agli esempi (example.com, definito apposta per questo):
++ * nessun fornitore vero, nessun nome reale, nessun rapporto commerciale.
++ *
++ * PER METTERE I FORNITORI VERI: si sostituiscono le voci di `CATALOGO_UTENZE`
++ * con `esempio: false` e l'indirizzo vero. I test impongono:
++ *  - indirizzi https, senza parametri di tracciamento né credenziali;
++ *  - un link con un rapporto commerciale ha `sponsorizzato: true` e viene
++ *    mostrato come tale, e l'informativa deve dirlo;
++ *  - finché sono link di esempio, solo domini riservati agli esempi.
++ *
++ * I link sono semplici collegamenti: l'app NON registra su quale si clicca e non
++ * passa al sito del fornitore nessun dato (niente parametri, niente referrer).
++ * Registrare i clic sarebbe un dato nuovo: da decidere, dichiarare e far vedere a
++ * un legale prima.
++ *
++ * Logica pura, senza database: si prova con `npm test`.
++ */
++
++export type CategoriaUtenza = "luce" | "gas" | "internet";
++
++export const CATEGORIE_UTENZE: readonly { id: CategoriaUtenza; etichetta: string }[] = [
++  { id: "luce", etichetta: "Luce" },
++  { id: "gas", etichetta: "Gas" },
++  { id: "internet", etichetta: "Internet" },
++];
++
++export type LinkUtenza = {
++  id: string;
++  categoria: CategoriaUtenza;
++  nome: string;
++  descrizione: string;
++  url: string;
++  /** un link di prova, non un fornitore vero */
++  esempio: boolean;
++  /** c'è un rapporto commerciale con chi lo offre: va detto a chi guarda */
++  sponsorizzato: boolean;
++};
++
++export const CATALOGO_UTENZE: readonly LinkUtenza[] = [
++  { id: "luce-a", categoria: "luce", nome: "Fornitore luce A", descrizione: "Offerta a prezzo fisso per 12 mesi.", url: "https://example.com/utenze/luce-a", esempio: true, sponsorizzato: false },
++  { id: "luce-b", categoria: "luce", nome: "Fornitore luce B", descrizione: "Offerta a prezzo variabile, senza vincoli.", url: "https://example.com/utenze/luce-b", esempio: true, sponsorizzato: false },
++  { id: "gas-a", categoria: "gas", nome: "Fornitore gas A", descrizione: "Offerta a prezzo fisso per 12 mesi.", url: "https://example.com/utenze/gas-a", esempio: true, sponsorizzato: false },
++  { id: "gas-b", categoria: "gas", nome: "Fornitore gas B", descrizione: "Offerta a prezzo variabile, senza vincoli.", url: "https://example.com/utenze/gas-b", esempio: true, sponsorizzato: false },
++  { id: "internet-a", categoria: "internet", nome: "Fibra A", descrizione: "Fibra fino a 1 Giga, attivazione in pochi giorni.", url: "https://example.com/utenze/internet-a", esempio: true, sponsorizzato: false },
++  { id: "internet-b", categoria: "internet", nome: "Fibra B", descrizione: "Fibra e telefono, con router incluso.", url: "https://example.com/utenze/internet-b", esempio: true, sponsorizzato: false },
++];
++
++/** I domini riservati agli esempi (RFC 2606): non esistono servizi veri, e nessuno li può possedere. */
++export const DOMINI_ESEMPIO: readonly string[] = ["example.com", "example.org", "example.net"];
++
++/** Nomi di parametri che servono a seguire una persona o a pagare una commissione. */
++const PARAMETRI_DI_TRACCIAMENTO =
++  /^(utm_|ref$|referrer$|aff|partner|source$|campaign|clickid|click_id|cid$|gclid|fbclid|msclkid|mc_|sub_?id|tid$|tracking|pid$|affid)/i;
++
++export type EsitoUrl = { ok: true } | { ok: false; motivo: string };
++
++/** Un indirizzo è accettabile se è https, senza credenziali, e senza parametri di tracciamento. */
++export function controllaUrl(url: unknown): EsitoUrl {
++  if (typeof url !== "string" || !url.trim()) return { ok: false, motivo: "vuoto" };
++  let u: URL;
++  try {
++    u = new URL(url);
++  } catch {
++    return { ok: false, motivo: "non è un indirizzo" };
++  }
++  if (u.protocol !== "https:") return { ok: false, motivo: "non è https" };
++  if (u.username || u.password) return { ok: false, motivo: "contiene credenziali" };
++  for (const nome of u.searchParams.keys()) {
++    if (PARAMETRI_DI_TRACCIAMENTO.test(nome)) return { ok: false, motivo: `parametro di tracciamento «${nome}»` };
++  }
++  return { ok: true };
++}
++
++/** È un indirizzo di un dominio riservato agli esempi (compresi i sottodomini)? */
++export function eDominioEsempio(url: string): boolean {
++  try {
++    const host = new URL(url).hostname.toLowerCase();
++    return DOMINI_ESEMPIO.some((d) => host === d || host.endsWith(`.${d}`));
++  } catch {
++    return false;
++  }
++}
++
++/**
++ * I link che si possono mostrare: quelli con un indirizzo accettabile. Uno non
++ * valido si scarta, non si mostra rotto o pericoloso.
++ */
++export function linkMostrabili(catalogo: readonly LinkUtenza[]): LinkUtenza[] {
++  return catalogo.filter((l) => controllaUrl(l.url).ok && !!l.nome?.trim());
++}
++
++/** I link divisi per categoria, nell'ordine delle categorie; le categorie senza link non compaiono. */
++export function raggruppaPerCategoria(
++  catalogo: readonly LinkUtenza[]
++): { id: CategoriaUtenza; etichetta: string; link: LinkUtenza[] }[] {
++  const visibili = linkMostrabili(catalogo);
++  return CATEGORIE_UTENZE.map((c) => ({ ...c, link: visibili.filter((l) => l.categoria === c.id) })).filter((g) => g.link.length > 0);
++}
++
++export function haEsempi(catalogo: readonly LinkUtenza[]): boolean {
++  return linkMostrabili(catalogo).some((l) => l.esempio);
++}
++
++export function haSponsorizzati(catalogo: readonly LinkUtenza[]): boolean {
++  return linkMostrabili(catalogo).some((l) => l.sponsorizzato);
++}
++
++// ------------------------------------------------------------
++// Testi
++// ------------------------------------------------------------
++
++export const SOTTOTITOLO_UTENZE = "Attiva luce, gas e internet nella tua nuova casa.";
++
++export const AVVISO_ESEMPIO = "Sono link di esempio: i fornitori veri si sceglieranno più avanti.";
++
++export const ETICHETTA_SPONSORIZZATO = "Sponsorizzato";
++
++export const NOTA_LINK_ESTERNI =
++  "I link si aprono in una nuova scheda, sul sito del fornitore. MatchAmI non registra su cosa clicchi e non passa al fornitore nessun dato su di te.";
+-- 
+2.43.0
+

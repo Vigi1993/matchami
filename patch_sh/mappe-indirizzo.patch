@@ -1,0 +1,1661 @@
+From 45430a340f3037b8c0f56b9c3dad99eb01f7f890 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 9 Oct 2026 08:52:27 +0000
+Subject: [PATCH] feat(mappe): indirizzo degli immobili, visibile solo con un
+ match accettato
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RICHIEDE LA MIGRAZIONE 0024 PRIMA DEL PUSH.
+
+Nell'annuncio si vede solo la zona. L'indirizzo preciso si mostra dopo il
+match: lo diceva già la 0015, che aveva tolto la colonna perché leggibile da
+chiunque vedesse l'annuncio.
+
+Database (0024):
+- tabella separata, con la sicurezza a livello di riga attiva e NESSUNA
+  policy: nessuno la legge direttamente, nemmeno chi ha un match. Si passa
+  solo da funzioni che guardano chi chiama
+- lo leggono il proprietario e chi ha una candidatura ACCETTATA su quell'immobile;
+  per chiunque altro non c'è niente, nemmeno si capisce se esiste
+- imposta_indirizzo controlla proprietà dell'immobile, via (3-120), civico
+  (1-12), CAP (5 cifre), città (2-60), posizione dentro l'Italia, origine
+- insieme all'indirizzo si registra come è stata ottenuta la posizione:
+  'provvisoria' o 'fornitore', così le provvisorie si riconoscono e si
+  ricalcolano quando si sceglie il fornitore
+- codice errore distinto (INDIRIZZO_IMMOBILE_NON_VALIDO): INDIRIZZO_NON_VALIDO
+  era già usato dagli affitti dichiarati, con un'altra regola
+
+FORNITORE DI MAPPE PROVVISORIO, dietro un'interfaccia unica (src/lib/mappe):
+- tipi comuni, validazione dell'indirizzo, registro dei fornitori. Scegliere
+  un fornitore vero vuol dire scrivere un file che rispetta ProviderMappe e
+  registrarlo in index.ts: niente altro cambia
+- il provvisorio non cerca niente: calcola una posizione di prova, sempre la
+  stessa per lo stesso indirizzo, vicino al centro approssimato della zona.
+  La mappa è un segnaposto che lo dichiara; nessuna richiesta esterna
+- un nome di fornitore sbagliato è un ERRORE che dice quali ci sono, non un
+  ripiego silenzioso
+- I TEST DEL CONTRATTO girano su ogni fornitore registrato: un fornitore
+  sbagliato (riquadro http, posizione fuori dall'Italia, origine inventata)
+  li fa fallire. Un fornitore vero e corretto fa fallire solo il test
+  dell'informativa: a quel punto l'indirizzo esce dall'app verso un servizio
+  esterno e il testo va rivisto. Verificato simulandoli
+
+App: pannello 'Indirizzo' nella scheda dell'immobile (proprietario, con
+conferma in due tempi per toglierlo); pannello 'Indirizzo' nella chat per chi ha
+il match, con mappa e 'Copia l'indirizzo'. L'azione server controlla, calcola la
+posizione col fornitore e scrive; se il fornitore è configurato male lo dice,
+se la posizione è impossibile non scrive.
+
+Difetto trovato dal test e corretto: una zona chiamata '__proto__' pescava
+l'oggetto-prototipo di JavaScript e dava una posizione NaN; ora si guardano
+solo le proprietà proprie.
+
+PRIVACY: dato nuovo e delicato. Informativa versione 2026-10-provvisoria-8
+(va riaccettata). Un test lega ogni affermazione alla migrazione: nessuna
+policy sulla tabella, solo candidature accettate, nessuna colonna con
+l'indirizzo sugli annunci.
+
+Test: 512 in tutto. Migrazione provata su PostgreSQL da zero e in UNA
+transazione, anche rilanciata (circa 70 controlli, compresi tutti i bordi di
+validazione); 30 prove di interazione, tra cui l'azione server VERA eseguita
+con un client finto. Difetti reintrodotti di proposito: tutti presi.
+---
+ package.json                                |   2 +-
+ scripts/test-informativa.mjs                |  41 +++
+ scripts/test-mappe.mjs                      | 354 ++++++++++++++++++++
+ src/app/(app)/immobili/ImmobiliClient.tsx   |   6 +
+ src/app/(app)/immobili/indirizzo-actions.ts |  85 +++++
+ src/app/(app)/immobili/page.tsx             |  11 +-
+ src/app/chat/[id]/ChatClient.tsx            |   7 +
+ src/app/chat/[id]/page.tsx                  |   8 +-
+ src/app/globals.css                         |  74 ++++
+ src/components/IndirizzoChat.tsx            |  64 ++++
+ src/components/IndirizzoImmobile.tsx        | 134 ++++++++
+ src/components/MappaImmobile.tsx            |  36 ++
+ src/content/informativa.ts                  |   6 +-
+ src/lib/mappe/index.ts                      |  60 ++++
+ src/lib/mappe/indirizzo.ts                  |  68 ++++
+ src/lib/mappe/provvisorio.ts                |  76 +++++
+ src/lib/mappe/tipi.ts                       |  60 ++++
+ src/lib/verifica.ts                         |   4 +
+ supabase/migrations/0024_indirizzi.sql      | 214 ++++++++++++
+ 19 files changed, 1304 insertions(+), 6 deletions(-)
+ create mode 100644 scripts/test-mappe.mjs
+ create mode 100644 src/app/(app)/immobili/indirizzo-actions.ts
+ create mode 100644 src/components/IndirizzoChat.tsx
+ create mode 100644 src/components/IndirizzoImmobile.tsx
+ create mode 100644 src/components/MappaImmobile.tsx
+ create mode 100644 src/lib/mappe/index.ts
+ create mode 100644 src/lib/mappe/indirizzo.ts
+ create mode 100644 src/lib/mappe/provvisorio.ts
+ create mode 100644 src/lib/mappe/tipi.ts
+ create mode 100644 supabase/migrations/0024_indirizzi.sql
+
+diff --git a/package.json b/package.json
+index 8a9d01e..f633d77 100644
+--- a/package.json
++++ b/package.json
+@@ -7,7 +7,7 @@
+     "build": "next build",
+     "start": "next start",
+     "lint": "eslint",
+-    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-informativa.mjs b/scripts/test-informativa.mjs
+index 2958ce5..2eaa3ad 100644
+--- a/scripts/test-informativa.mjs
++++ b/scripts/test-informativa.mjs
+@@ -441,3 +441,44 @@ test("preferiti e scarti: nessun codice dell'app legge la tabella direttamente,
+   const altre = fs.readdirSync(migrazioni).filter((x) => /^\d{4}_.*\.sql$/.test(x) && x !== "0023_preferiti.sql");
+   for (const f of altre) assert.ok(!/scelte_annunci/.test(fs.readFileSync(path.join(migrazioni, f), "utf8")), `${f} nomina la tabella delle scelte`);
+ });
++
++// ------------------------------------------------------------
++// Ciò che il testo dice dell'indirizzo e delle mappe è vero
++// ------------------------------------------------------------
++
++test("indirizzo: il testo lo dichiara, dice chi lo vede, e la migrazione lo fa davvero", () => {
++  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
++  assert.match(tutto, /l'indirizzo preciso, se lo indichi, e la posizione sulla mappa che se ne ricava/);
++  assert.match(tutto, /L'indirizzo preciso di un immobile lo vedono solo il proprietario e le persone con cui ha un match accettato su quell'immobile: agli altri si mostra soltanto la zona/);
++
++  const sql24 = fs.readFileSync(path.join(migrazioni, "0024_indirizzi.sql"), "utf8");
++  // nessuna lettura diretta: la tabella non ha policy e nessun permesso per gli utenti
++  assert.match(sql24, /revoke all on indirizzi_immobili from anon, authenticated;/);
++  assert.ok(!/create policy[^;]*indirizzi_immobili/.test(sql24), "c'è una policy sulla tabella degli indirizzi");
++  // l'inquilino lo legge solo con una candidatura ACCETTATA sua
++  assert.match(sql24, /c\.status = 'accettata'\s+and \(c\.tenant_id = auth\.uid\(\) or l\.owner_id = auth\.uid\(\)\)/);
++  // e agli annunci non è tornata una colonna con l'indirizzo, leggibile da chiunque (la 0015 l'aveva tolta)
++  for (const f of fs.readdirSync(migrazioni).filter((x) => /^\d{4}_.*\.sql$/.test(x) && x > "0015")) {
++    assert.ok(!/alter table listings\s+add column[^;]*indirizzo/i.test(fs.readFileSync(path.join(migrazioni, f), "utf8")), `${f} rimette un indirizzo sulla tabella degli annunci`);
++  }
++});
++
++test("mappe: finché i fornitori sono provvisori il testo dice che l'indirizzo non esce dall'app; con un fornitore vero il testo va rivisto", () => {
++  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
++  const fornitori = caricaTs(path.join(radice, "src", "lib", "mappe", "index.ts")).FORNITORI;
++  const veri = Object.values(fornitori).filter((f) => f.origine === "fornitore");
++  if (veri.length === 0) {
++    assert.match(tutto, /Per ora la posizione di un immobile sulla mappa è calcolata dall'app, senza inviare l'indirizzo a nessun servizio esterno/);
++  } else {
++    // si è registrato un fornitore vero: l'indirizzo viene mandato a un servizio esterno, e il testo deve dirlo
++    assert.ok(!/senza inviare l'indirizzo a nessun servizio esterno/.test(tutto), `il testo dice che l'indirizzo non esce dall'app, ma c'è un fornitore vero (${veri.map((f) => f.id).join(", ")})`);
++    assert.match(tutto, /servizio di mappe/, "il testo non nomina il servizio di mappe");
++  }
++});
++
++test("mappe: la guardia sa riconoscere un fornitore vero registrato con il testo ancora provvisorio", () => {
++  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
++  const finto = [{ id: "x", origine: "fornitore" }];
++  assert.ok(finto.filter((f) => f.origine === "fornitore").length > 0);
++  assert.ok(/senza inviare l'indirizzo a nessun servizio esterno/.test(tutto), "il testo attuale è quello provvisorio: con un fornitore vero la guardia fallirebbe");
++});
+diff --git a/scripts/test-mappe.mjs b/scripts/test-mappe.mjs
+new file mode 100644
+index 0000000..9279738
+--- /dev/null
++++ b/scripts/test-mappe.mjs
+@@ -0,0 +1,354 @@
++/**
++ * Test delle mappe e dell'indirizzo degli immobili (src/lib/mappe). Si lancia con:   npm test
++ *
++ * Contengono il CONTRATTO di ogni fornitore di mappe: girano su tutti quelli
++ * registrati in `FORNITORI`, quindi chi ne aggiunge uno vero li ritrova già
++ * pronti, e se il suo fornitore non li rispetta falliscono.
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const ind = caricaTs(path.join(radice, "src", "lib", "mappe", "indirizzo.ts"));
++const prov = caricaTs(path.join(radice, "src", "lib", "mappe", "provvisorio.ts"));
++const reg = caricaTs(path.join(radice, "src", "lib", "mappe", "index.ts"));
++const v = caricaTs(path.join(radice, "src", "lib", "verifica.ts"));
++const sql = fs.readFileSync(path.join(radice, "supabase", "migrations", "0024_indirizzi.sql"), "utf8");
++const leggi = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8");
++
++const OK = { via: "Via Garibaldi", civico: "12", cap: "20121", citta: "Milano" };
++
++// ------------------------------------------------------------
++// Pulire e controllare ciò che si scrive
++// ------------------------------------------------------------
++
++test("pulisci: spazi ridotti, ai lati niente, a capo e caratteri invisibili tolti", () => {
++  assert.equal(ind.pulisci("  Via    Garibaldi \n"), "Via Garibaldi");
++  assert.equal(ind.pulisci("Via\tGaribaldi\r\n12"), "Via Garibaldi 12");
++  assert.equal(ind.pulisci("Via\u200bGaribaldi"), "Via Garibaldi", "spazio di larghezza zero");
++  assert.equal(ind.pulisci("a\u0000b\u0007c"), "a b c");
++  assert.equal(ind.pulisci("Via D’Azeglio"), "Via D’Azeglio", "l'apostrofo tipografico resta");
++  for (const x of [null, undefined, 42, {}, [], true]) assert.equal(ind.pulisci(x), "", String(x));
++});
++
++test("indirizzo valido: viene pulito e restituito", () => {
++  const r = ind.validaIndirizzo({ via: "  Via   Garibaldi ", civico: " 12 ", cap: " 20121 ", citta: "  Milano " });
++  assert.deepEqual(r, { ok: true, indirizzo: OK });
++});
++
++test("la città si propone da sola (Milano), ma se c'è si rispetta", () => {
++  assert.equal(ind.validaIndirizzo({ via: "Via Roma", civico: "1", cap: "20100" }).indirizzo.citta, "Milano");
++  assert.equal(ind.validaIndirizzo({ via: "Via Roma", civico: "1", cap: "20100", citta: "   " }).indirizzo.citta, "Milano");
++  assert.equal(ind.validaIndirizzo({ via: "Via Roma", civico: "1", cap: "10100", citta: "Torino" }).indirizzo.citta, "Torino");
++});
++
++test("via: da 3 a 120 caratteri, il messaggio dice cosa fare", () => {
++  const e = (via) => ind.validaIndirizzo({ ...OK, via });
++  assert.equal(e("Vi").ok, false); assert.match(e("Vi").errore, /Scrivi la via/);
++  assert.equal(e("Via").ok, true);
++  assert.equal(e("a".repeat(120)).ok, true);
++  assert.equal(e("a".repeat(121)).ok, false); assert.match(e("a".repeat(121)).errore, /troppo lunga \(al massimo 120/);
++  for (const x of ["", "     ", null, undefined, 5]) assert.equal(e(x).ok, false, String(x));
++});
++
++test("civico: da 1 a 12 caratteri", () => {
++  const e = (civico) => ind.validaIndirizzo({ ...OK, civico });
++  assert.equal(e("").ok, false); assert.match(e("").errore, /numero civico/);
++  assert.equal(e("1").ok, true); assert.equal(e("12/A bis ABC").ok, true);
++  assert.equal(e("1234567890123").ok, false); assert.match(e("1234567890123").errore, /al massimo 12/);
++});
++
++test("CAP: esattamente cinque cifre", () => {
++  const e = (cap) => ind.validaIndirizzo({ ...OK, cap });
++  assert.equal(e("20121").ok, true);
++  for (const x of ["2012", "201210", "2O121", "20 121", "2012a", "", null, "٢٠١٢١", "20121\n20122"]) { assert.equal(e(x).ok, false, JSON.stringify(x)); }
++  assert.match(e("2012").errore, /cinque cifre/);
++});
++
++test("città: da 2 a 60 caratteri", () => {
++  const e = (citta) => ind.validaIndirizzo({ ...OK, citta });
++  assert.equal(e("M").ok, false); assert.equal(e("Mi").ok, true); assert.equal(e("a".repeat(60)).ok, true); assert.equal(e("a".repeat(61)).ok, false);
++});
++
++test("un testo con codice dentro resta testo, e un testo enorme non rallenta", () => {
++  const r = ind.validaIndirizzo({ ...OK, via: '<img src=x onerror="alert(1)"> Roma' });
++  assert.equal(r.ok, true); assert.ok(r.indirizzo.via.includes("<img"));
++  const inizio = Date.now(); ind.validaIndirizzo({ ...OK, via: "àb ".repeat(1_000_000) }); assert.ok(Date.now() - inizio < 1000, `troppo lento: ${Date.now() - inizio} ms`);
++});
++
++test("il primo errore trovato è quello mostrato, nell'ordine in cui la persona compila", () => {
++  assert.match(ind.validaIndirizzo({ via: "", civico: "", cap: "", citta: "" }).errore, /la via/);
++  assert.match(ind.validaIndirizzo({ via: "Via Roma", civico: "", cap: "", citta: "" }).errore, /civico/);
++  assert.match(ind.validaIndirizzo({ via: "Via Roma", civico: "1", cap: "", citta: "" }).errore, /CAP/);
++});
++
++test("posizione: dentro l'Italia, numeri finiti, e nient'altro", () => {
++  assert.equal(ind.posizioneValida({ latitudine: 45.46, longitudine: 9.19 }), true);
++  for (const p of [{ latitudine: 34.99, longitudine: 9 }, { latitudine: 48.01, longitudine: 9 }, { latitudine: 45, longitudine: 5.99 }, { latitudine: 45, longitudine: 19.01 }, { latitudine: NaN, longitudine: 9 }, { latitudine: Infinity, longitudine: 9 }, { latitudine: "45", longitudine: 9 }, { latitudine: 45 }, {}, null, undefined, "boh"]) {
++    assert.equal(ind.posizioneValida(p), false, JSON.stringify(p));
++  }
++  assert.equal(ind.posizioneValida({ latitudine: 35, longitudine: 6 }), true, "i bordi sono dentro, come per il database (between)");
++  assert.equal(ind.posizioneValida({ latitudine: 48, longitudine: 19 }), true);
++});
++
++test("testo dell'indirizzo", () => {
++  assert.equal(ind.formattaIndirizzo(OK), "Via Garibaldi 12, 20121 Milano");
++});
++
++test("chiave: lo stesso indirizzo scritto in modi diversi dà la stessa chiave", () => {
++  assert.equal(ind.chiaveIndirizzo(OK), ind.chiaveIndirizzo({ via: "  VIA   GARIBALDI", civico: "12", cap: "20121", citta: "milano " }));
++  assert.equal(ind.chiaveIndirizzo({ ...OK, via: "Via Càvour" }), ind.chiaveIndirizzo({ ...OK, via: "via cavour" }));
++  assert.notEqual(ind.chiaveIndirizzo(OK), ind.chiaveIndirizzo({ ...OK, civico: "13" }));
++});
++
++// ------------------------------------------------------------
++// Le regole sono quelle del database
++// ------------------------------------------------------------
++
++test("regole rispecchiate: i limiti dell'app sono quelli della migrazione", () => {
++  assert.match(sql, /char_length\(via\) between 3 and 120/); assert.deepEqual(ind.LIMITI_INDIRIZZO.via, { min: 3, max: 120 });
++  assert.match(sql, /char_length\(civico\) between 1 and 12/); assert.deepEqual(ind.LIMITI_INDIRIZZO.civico, { min: 1, max: 12 });
++  assert.match(sql, /char_length\(citta\) between 2 and 60/); assert.deepEqual(ind.LIMITI_INDIRIZZO.citta, { min: 2, max: 60 });
++  assert.match(sql, /cap ~ '\^\[0-9\]\{5\}\$'/);
++  assert.match(sql, /latitudine between 35 and 48/); assert.match(sql, /longitudine between 6 and 19/);
++  assert.deepEqual({ ...ind.LIMITI_POSIZIONE }, { latMin: 35, latMax: 48, lngMin: 6, lngMax: 19 });
++  assert.match(sql, /origine_posizione in \('provvisoria', 'fornitore'\)/);
++});
++
++const GENERICO = v.messaggioErroreVerifica("qualcosa di sconosciuto");
++
++test("errori: ogni codice che la migrazione può sollevare ha una frase sua", () => {
++  const codici = [...new Set([...sql.matchAll(/raise exception '([A-Z_]+)'/g)].map((m) => m[1]))];
++  assert.equal(codici.length, 5, `i codici sono cambiati: ${codici.join(", ")}`);
++  for (const c of codici) { const f = v.messaggioErroreVerifica(`ERROR: ${c} (P0001)`); assert.notEqual(f, GENERICO, `il codice ${c} non ha un messaggio`); assert.ok(!f.includes(c), c); }
++});
++
++test("migrazione: nessuna lettura diretta (nessuna policy, nessun permesso), e solo con un match accettato", () => {
++  assert.match(sql, /alter table indirizzi_immobili enable row level security;/);
++  assert.match(sql, /revoke all on indirizzi_immobili from anon, authenticated;/);
++  assert.ok(!/create policy[^;]*indirizzi_immobili/.test(sql), "c'è una policy sulla tabella degli indirizzi");
++  assert.match(sql, /and c\.status = 'accettata'\s+and \(c\.tenant_id = auth\.uid\(\) or l\.owner_id = auth\.uid\(\)\)/);
++});
++
++function filiDiCodice(dir = path.join(radice, "src")) {
++  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
++    if (e.name.startsWith("__")) return [];
++    const p = path.join(dir, e.name);
++    return e.isDirectory() ? filiDiCodice(p) : /\.(ts|tsx)$/.test(e.name) ? [p] : [];
++  });
++}
++
++test("chiamate: ogni chiamata a una funzione degli indirizzi porta esattamente i parametri della migrazione", () => {
++  const funzioni = new Map();
++  for (const m of sql.matchAll(/create or replace function public\.(\w+)\(([^)]*)\)/g)) funzioni.set(m[1], [...m[2].matchAll(/\b(p_\w+)\s/g)].map((x) => x[1]).sort());
++  const nomi = ["imposta_indirizzo", "rimuovi_indirizzo", "indirizzi_dei_miei_immobili", "indirizzo_per_candidatura"];
++  for (const n of nomi) assert.ok(funzioni.has(n), `la migrazione non definisce ${n}`);
++  const trovate = new Map(nomi.map((n) => [n, 0]));
++  for (const file of filiDiCodice()) {
++    const codice = fs.readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
++    for (const nome of nomi) {
++      for (const m of codice.matchAll(new RegExp(`"${nome}"\\s*(?:,\\s*\\{([^}]*)\\}|\\))`, "g"))) {
++        const usati = m[1] === undefined ? [] : [...m[1].matchAll(/\b(p_\w+)\s*:/g)].map((x) => x[1]).sort();
++        assert.deepEqual(usati, funzioni.get(nome), `${path.relative(radice, file)} chiama ${nome} con ${JSON.stringify(usati)}, la migrazione vuole ${JSON.stringify(funzioni.get(nome))}`);
++        trovate.set(nome, trovate.get(nome) + 1);
++      }
++    }
++  }
++  for (const [nome, n] of trovate) assert.ok(n >= 1, `nessuna chiamata a ${nome} nel codice`);
++});
++
++test("privacy: nessun codice dell'app legge la tabella degli indirizzi direttamente", () => {
++  for (const f of filiDiCodice()) assert.ok(!/indirizzi_immobili/.test(fs.readFileSync(f, "utf8")), `${path.relative(radice, f)} nomina la tabella degli indirizzi`);
++  for (const f of fs.readdirSync(path.join(radice, "supabase", "migrations")).filter((x) => /^\d{4}_.*\.sql$/.test(x) && x !== "0024_indirizzi.sql")) {
++    assert.ok(!/indirizzi_immobili/.test(fs.readFileSync(path.join(radice, "supabase", "migrations", f), "utf8")), `${f} nomina la tabella degli indirizzi`);
++  }
++});
++
++// ------------------------------------------------------------
++// Il fornitore provvisorio
++// ------------------------------------------------------------
++
++test("provvisorio: lo stesso indirizzo dà sempre la stessa posizione, anche scritto in modi diversi", async () => {
++  const a = await prov.fornitoreProvvisorio.geocodifica(OK, { zona: "Isola, Milano" });
++  const b = await prov.fornitoreProvvisorio.geocodifica({ via: "  VIA  garibaldi", civico: "12", cap: "20121", citta: "MILANO" }, { zona: "Isola, Milano" });
++  assert.deepEqual(a, b);
++  assert.deepEqual(a, await prov.fornitoreProvvisorio.geocodifica(OK, { zona: "Isola, Milano" }));
++});
++
++test("provvisorio: due indirizzi diversi nella stessa zona non cadono nello stesso punto", async () => {
++  const visti = new Set();
++  for (let i = 1; i <= 400; i++) { const p = await prov.fornitoreProvvisorio.geocodifica({ ...OK, civico: String(i) }, { zona: "Navigli, Milano" }); visti.add(`${p.latitudine},${p.longitudine}`); }
++  assert.ok(visti.size >= 395, `solo ${visti.size} posizioni diverse su 400`);
++});
++
++test("provvisorio: la posizione resta vicina al centro della zona, entro lo spostamento massimo, ed è valida", async () => {
++  for (const zona of Object.keys(prov.CENTRI_ZONE)) {
++    const c = prov.CENTRI_ZONE[zona];
++    for (let i = 0; i < 40; i++) {
++      const p = await prov.fornitoreProvvisorio.geocodifica({ via: "Via " + "abcdefghij"[i % 10] + i, civico: String(i + 1), cap: "20121", citta: "Milano" }, { zona: `${zona}, Milano` });
++      assert.ok(ind.posizioneValida(p), zona);
++      assert.ok(Math.abs(p.latitudine - c.latitudine) <= prov.SPOSTAMENTO_MASSIMO.latitudine + 1e-6, `${zona}: latitudine lontana`);
++      assert.ok(Math.abs(p.longitudine - c.longitudine) <= prov.SPOSTAMENTO_MASSIMO.longitudine + 1e-6, `${zona}: longitudine lontana`);
++    }
++  }
++});
++
++test("provvisorio: ogni zona dell'app ha un centro, tutti dentro Milano", () => {
++  const zone = [...leggi("src", "lib", "constants.ts").match(/ZONE_MILANO = \[([\s\S]*?)\] as const/)[1].matchAll(/"([^"]+), Milano"/g)].map((m) => m[1]);
++  assert.ok(zone.length >= 13, `zone trovate: ${zone.length}`);
++  for (const z of zone) assert.ok(prov.CENTRI_ZONE[z], `la zona «${z}» non ha un centro`);
++  for (const [z, c] of Object.entries(prov.CENTRI_ZONE)) { assert.ok(c.latitudine > 45.4 && c.latitudine < 45.56 && c.longitudine > 9.05 && c.longitudine < 9.31, `${z} fuori da Milano`); assert.ok(zone.includes(z), `il centro «${z}» non è una zona dell'app`); }
++});
++
++test("provvisorio: una zona sconosciuta, vuota o strana usa il centro di Milano, mai un errore", async () => {
++  for (const zona of ["Brera, Milano", "", null, undefined, "  ", 42, "__proto__", "constructor"]) {
++    const p = await prov.fornitoreProvvisorio.geocodifica(OK, { zona });
++    assert.ok(ind.posizioneValida(p), String(zona));
++    assert.ok(Math.abs(p.latitudine - prov.CENTRO_MILANO.latitudine) <= prov.SPOSTAMENTO_MASSIMO.latitudine + 1e-6, String(zona));
++  }
++  assert.ok(ind.posizioneValida(await prov.fornitoreProvvisorio.geocodifica(OK)), "senza contesto");
++});
++
++test("provvisorio: un indirizzo vuoto non ha posizione; 5000 indirizzi si calcolano in un battito", async () => {
++  assert.equal(await prov.fornitoreProvvisorio.geocodifica({ via: "", civico: "", cap: "", citta: "" }), null);
++  const inizio = Date.now();
++  for (let i = 0; i < 5000; i++) await prov.fornitoreProvvisorio.geocodifica({ ...OK, civico: String(i) }, { zona: "Loreto, Milano" });
++  assert.ok(Date.now() - inizio < 500, `troppo lento: ${Date.now() - inizio} ms`);
++});
++
++test("provvisorio: la mappa è un segnaposto che lo dice, senza richieste esterne", () => {
++  const vista = prov.fornitoreProvvisorio.vistaMappa({ latitudine: 45.46, longitudine: 9.19 }, OK);
++  assert.equal(vista.tipo, "provvisoria");
++  assert.match(vista.etichetta, /provvisoria/);
++  assert.ok(!("url" in vista), "un segnaposto non ha un indirizzo web");
++});
++
++// ------------------------------------------------------------
++// La scelta del fornitore
++// ------------------------------------------------------------
++
++test("registro: senza configurazione si usa il provvisorio", () => {
++  const prima = process.env.MAPPE_PROVIDER; delete process.env.MAPPE_PROVIDER;
++  try { assert.equal(reg.fornitoreMappe().id, "provvisorio"); assert.equal(reg.fornitoreMappe("").id, "provvisorio"); assert.equal(reg.fornitoreMappe("  provvisorio  ").id, "provvisorio"); }
++  finally { if (prima !== undefined) process.env.MAPPE_PROVIDER = prima; }
++});
++
++test("registro: la configurazione dell'ambiente si rispetta", () => {
++  const prima = process.env.MAPPE_PROVIDER; process.env.MAPPE_PROVIDER = "provvisorio";
++  try { assert.equal(reg.fornitoreMappe().id, "provvisorio"); process.env.MAPPE_PROVIDER = "inesistente"; assert.throws(() => reg.fornitoreMappe(), /Fornitore di mappe sconosciuto/); }
++  finally { if (prima === undefined) delete process.env.MAPPE_PROVIDER; else process.env.MAPPE_PROVIDER = prima; }
++});
++
++test("registro: un nome sbagliato è un errore che dice quali ci sono, non un ripiego silenzioso", () => {
++  assert.throws(() => reg.fornitoreMappe("google"), (e) => /«google»/.test(e.message) && /provvisorio/.test(e.message));
++});
++
++test("registro: i nomi che esistono in ogni oggetto JavaScript non passano per fornitori", () => {
++  for (const n of ["__proto__", "constructor", "toString", "hasOwnProperty", "prototype", "valueOf"]) assert.throws(() => reg.fornitoreMappe(n), /sconosciuto/, n);
++});
++
++// ------------------------------------------------------------
++// IL CONTRATTO: gira su ogni fornitore registrato
++// ------------------------------------------------------------
++
++const INDIRIZZI_PROVA = [OK, { via: "Corso di Porta Ticinese", civico: "100/B", cap: "20123", citta: "Milano" }, { via: "Via d'Azeglio", civico: "1", cap: "20121", citta: "Milano" }, { via: "Viale Monza", civico: "300", cap: "20126", citta: "Milano" }];
++
++for (const [nome, f] of Object.entries(reg.FORNITORI)) {
++  test(`contratto [${nome}]: ha un identificativo uguale al nome con cui è registrato, e un'origine ammessa`, () => {
++    assert.equal(f.id, nome);
++    assert.ok(["provvisoria", "fornitore"].includes(f.origine), f.origine);
++    assert.match(f.id, /^[a-z][a-z0-9_-]*$/, "l'identificativo si usa in una variabile d'ambiente");
++  });
++
++  test(`contratto [${nome}]: la geocodifica dà una posizione valida o nulla, mai un errore, e non si inventa fuori dall'Italia`, async () => {
++    for (const i of INDIRIZZI_PROVA) {
++      const p = await f.geocodifica(i, { zona: "Isola, Milano" });
++      assert.ok(p === null || ind.posizioneValida(p), `${nome} ha restituito ${JSON.stringify(p)}`);
++    }
++  });
++
++  test(`contratto [${nome}]: regge indirizzi strani e contesti mancanti senza lanciare errori`, async () => {
++    const strani = [{ via: "", civico: "", cap: "", citta: "" }, { via: "💥".repeat(50), civico: "x", cap: "00000", citta: "?" }, { via: "a".repeat(5000), civico: "1", cap: "20121", citta: "Milano" }];
++    for (const i of strani) { await assert.doesNotReject(async () => { const p = await f.geocodifica(i); assert.ok(p === null || ind.posizioneValida(p)); }); }
++    await assert.doesNotReject(async () => f.geocodifica(OK, undefined));
++    await assert.doesNotReject(async () => f.geocodifica(OK, { zona: null }));
++  });
++
++  test(`contratto [${nome}]: la vista della mappa è di un tipo noto e, se ha un indirizzo web, è sicuro`, () => {
++    for (const i of INDIRIZZI_PROVA) {
++      const vista = f.vistaMappa({ latitudine: 45.46, longitudine: 9.19 }, i);
++      assert.ok(["provvisoria", "incorporata", "immagine"].includes(vista.tipo), vista.tipo);
++      if (vista.tipo === "incorporata") { assert.match(vista.url, /^https:\/\//, "un riquadro incorporato deve essere https"); assert.ok(vista.titolo && vista.titolo.length > 0, "il riquadro deve avere un titolo (lettori di schermo)"); }
++      if (vista.tipo === "immagine") { assert.match(vista.url, /^https:\/\//, "un'immagine deve essere https"); assert.ok(vista.alt && vista.alt.length > 0, "l'immagine deve avere un testo alternativo"); }
++      if (vista.tipo === "provvisoria") assert.ok(vista.etichetta && vista.etichetta.length > 0);
++    }
++  });
++
++  test(`contratto [${nome}]: la vista non dipende da niente di esterno e non cambia da una chiamata all'altra`, () => {
++    const p = { latitudine: 45.46, longitudine: 9.19 };
++    assert.deepEqual(f.vistaMappa(p, OK), f.vistaMappa(p, OK));
++  });
++
++  test(`contratto [${nome}]: un fornitore vero (origine «fornitore») impone di rivedere l'informativa`, () => {
++    // quando si registra un fornitore vero, l'indirizzo esce dall'app verso un servizio esterno:
++    // il testo dell'informativa lo deve dire. Il test in test-informativa.mjs lo controlla.
++    assert.ok(f.origine === "provvisoria" || f.origine === "fornitore");
++  });
++}
++
++test("il contratto è davvero eseguito: ci sono fornitori registrati, e il test sa riconoscerne uno che lo viola", async () => {
++  assert.ok(Object.keys(reg.FORNITORI).length >= 1);
++  const cattivo = { id: "x", origine: "fornitore", async geocodifica() { return { latitudine: 12, longitudine: 80 }; }, vistaMappa() { return { tipo: "incorporata", url: "http://non-sicuro", titolo: "" }; } };
++  assert.ok(!ind.posizioneValida(await cattivo.geocodifica(OK)), "un fornitore che restituisce una posizione fuori dall'Italia non passa");
++  assert.ok(!/^https:\/\//.test(cattivo.vistaMappa().url), "un riquadro http non passa");
++});
++
++// ------------------------------------------------------------
++// Privacy
++// ------------------------------------------------------------
++
++test("privacy: la cartella delle mappe non ha accesso alla rete né al browser (finché il fornitore è provvisorio)", () => {
++  for (const f of ["tipi.ts", "indirizzo.ts", "provvisorio.ts"]) {
++    const c = leggi("src", "lib", "mappe", f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
++    for (const vietato of [/\bfetch\(/, /XMLHttpRequest/, /WebSocket/, /sendBeacon/, /localStorage/, /sessionStorage/, /supabase/i, /console\./, /\bimport\s+(?!type)(?![^;]*from\s+"\.\/)/]) assert.ok(!vietato.test(c), `${f} usa ${vietato}`);
++  }
++});
++
++test("errori: il codice dell'indirizzo degli immobili non si scambia con quello degli affitti dichiarati", () => {
++  const immobile = v.messaggioErroreVerifica("INDIRIZZO_IMMOBILE_NON_VALIDO");
++  const affitto = v.messaggioErroreVerifica("INDIRIZZO_NON_VALIDO");
++  assert.notEqual(immobile, affitto);
++  assert.match(immobile, /CAP/);
++  assert.ok(!/CAP/.test(affitto), "il messaggio degli affitti parla del CAP");
++  assert.notEqual(immobile, GENERICO);
++});
++
++// ------------------------------------------------------------
++// Da una riga del database a un indirizzo con la mappa pronta
++// ------------------------------------------------------------
++
++const RIGA = { via: "Via Garibaldi", civico: "12", cap: "20121", citta: "Milano", latitudine: 45.472, longitudine: 9.188, origine_posizione: "provvisoria" };
++
++test("conVista: l'indirizzo, l'origine e la vista del fornitore", () => {
++  const r = reg.conVista(RIGA);
++  assert.deepEqual(r.indirizzo, OK); assert.equal(r.origine, "provvisoria"); assert.equal(r.vista.tipo, "provvisoria");
++  assert.ok(!("latitudine" in r.indirizzo), "la posizione non finisce nell'indirizzo");
++});
++
++test("conVista: l'origine «fornitore» si riconosce; un valore sconosciuto vale «provvisoria»", () => {
++  assert.equal(reg.conVista({ ...RIGA, origine_posizione: "fornitore" }).origine, "fornitore");
++  for (const x of ["", "boh", null, undefined, "FORNITORE", 5]) assert.equal(reg.conVista({ ...RIGA, origine_posizione: x }).origine, "provvisoria", String(x));
++});
++
++test("conVista: con il fornitore configurato male l'indirizzo si vede lo stesso, senza mappa", () => {
++  const prima = process.env.MAPPE_PROVIDER; process.env.MAPPE_PROVIDER = "inesistente";
++  try { const r = reg.conVista(RIGA); assert.deepEqual(r.indirizzo, OK); assert.equal(r.vista, null); }
++  finally { if (prima === undefined) delete process.env.MAPPE_PROVIDER; else process.env.MAPPE_PROVIDER = prima; }
++});
++
++test("conVista: restituisce solo i campi dell'indirizzo, non altri della riga", () => {
++  const r = reg.conVista({ ...RIGA, listing_id: "L1", segreto: "x" });
++  assert.deepEqual(Object.keys(r.indirizzo).sort(), ["cap", "citta", "civico", "via"]); assert.deepEqual(Object.keys(r).sort(), ["indirizzo", "origine", "vista"]);
++});
+diff --git a/src/app/(app)/immobili/ImmobiliClient.tsx b/src/app/(app)/immobili/ImmobiliClient.tsx
+index 79bab1b..37e71ea 100644
+--- a/src/app/(app)/immobili/ImmobiliClient.tsx
++++ b/src/app/(app)/immobili/ImmobiliClient.tsx
+@@ -20,6 +20,8 @@ import { Stepper } from "@/components/ui/Stepper";
+ import { createClient } from "@/lib/supabase/client";
+ import { IconPalazzo } from "@/components/icons";
+ import { VisiteImmobile } from "@/components/VisiteImmobile";
++import { IndirizzoImmobile } from "@/components/IndirizzoImmobile";
++import type { IndirizzoConVista } from "@/lib/mappe/tipi";
+ import type { VisitaProprietario } from "@/lib/visite";
+ import {
+   creaImmobile,
+@@ -31,10 +33,13 @@ import {
+ export function ImmobiliClient({
+   immobili,
+   visite = [],
++  indirizzi = {},
+ }: {
+   immobili: ImmobileDettaglio[];
+   /** i posti liberi e le prenotazioni di tutti i miei immobili */
+   visite?: VisitaProprietario[];
++  /** gli indirizzi dei miei immobili, per identificativo */
++  indirizzi?: Record<string, IndirizzoConVista>;
+ }) {
+   const [nuovoAperto, setNuovoAperto] = useState(false);
+   const [selezionato, setSelezionato] = useState<ImmobileDettaglio | null>(
+@@ -131,6 +136,7 @@ export function ImmobiliClient({
+       >
+         {selezionato && (
+           <>
++            <IndirizzoImmobile key={selezionato.id} immobileId={selezionato.id} salvato={indirizzi[selezionato.id] ?? null} />
+             <VisiteImmobile immobileId={selezionato.id} visite={visite} />
+             <ImmobileForm
+               action={aggiornaImmobile}
+diff --git a/src/app/(app)/immobili/indirizzo-actions.ts b/src/app/(app)/immobili/indirizzo-actions.ts
+new file mode 100644
+index 0000000..88345c7
+--- /dev/null
++++ b/src/app/(app)/immobili/indirizzo-actions.ts
+@@ -0,0 +1,85 @@
++"use server";
++
++import { revalidatePath } from "next/cache";
++import { createClient } from "@/lib/supabase/server";
++import { fornitoreMappe } from "@/lib/mappe";
++import { posizioneValida, validaIndirizzo } from "@/lib/mappe/indirizzo";
++import type { Posizione } from "@/lib/mappe/tipi";
++import { messaggioErroreVerifica } from "@/lib/verifica";
++
++export type EsitoIndirizzo = { ok: true } | { error: string };
++
++/**
++ * Salva l'indirizzo di un immobile: lo controlla, ne calcola la posizione con il
++ * fornitore di mappe scelto (quello provvisorio, per ora) e lo scrive con la
++ * funzione del database, che ricontrolla tutto e verifica che l'immobile sia di
++ * chi chiama. L'indirizzo lo vedranno solo le persone con un match accettato.
++ */
++export async function salvaIndirizzo(
++  listingId: string,
++  input: { via: string; civico: string; cap: string; citta: string }
++): Promise<EsitoIndirizzo> {
++  const supabase = await createClient();
++  const {
++    data: { user },
++  } = await supabase.auth.getUser();
++  if (!user) return { error: "Non autenticato." };
++
++  const esito = validaIndirizzo(input);
++  if (!esito.ok) return { error: esito.errore };
++
++  // la zona serve al fornitore provvisorio; l'immobile deve essere di chi chiama
++  const { data: annuncio } = await supabase
++    .from("listings")
++    .select("zona")
++    .eq("id", listingId)
++    .eq("owner_id", user.id)
++    .maybeSingle();
++  if (!annuncio) return { error: messaggioErroreVerifica("IMMOBILE_NON_TUO") };
++
++  let fornitore;
++  try {
++    fornitore = fornitoreMappe();
++  } catch {
++    return { error: "La mappa non è configurata correttamente. Avvisa chi gestisce l'app." };
++  }
++
++  let posizione: Posizione | null;
++  try {
++    posizione = await fornitore.geocodifica(esito.indirizzo, { zona: annuncio.zona });
++  } catch {
++    return { error: "Il servizio delle mappe non risponde. Riprova tra poco." };
++  }
++  if (!posizioneValida(posizione)) {
++    return { error: "Non trovo questo indirizzo sulla mappa. Controlla via, civico e CAP." };
++  }
++
++  const { error } = await supabase.rpc("imposta_indirizzo", {
++    p_listing: listingId,
++    p_via: esito.indirizzo.via,
++    p_civico: esito.indirizzo.civico,
++    p_cap: esito.indirizzo.cap,
++    p_citta: esito.indirizzo.citta,
++    p_latitudine: posizione.latitudine,
++    p_longitudine: posizione.longitudine,
++    p_origine: fornitore.origine,
++  });
++  if (error) return { error: messaggioErroreVerifica(error.message) };
++
++  revalidatePath("/immobili");
++  return { ok: true };
++}
++
++export async function rimuoviIndirizzo(listingId: string): Promise<EsitoIndirizzo> {
++  const supabase = await createClient();
++  const {
++    data: { user },
++  } = await supabase.auth.getUser();
++  if (!user) return { error: "Non autenticato." };
++
++  const { error } = await supabase.rpc("rimuovi_indirizzo", { p_listing: listingId });
++  if (error) return { error: messaggioErroreVerifica(error.message) };
++
++  revalidatePath("/immobili");
++  return { ok: true };
++}
+diff --git a/src/app/(app)/immobili/page.tsx b/src/app/(app)/immobili/page.tsx
+index 370d2dc..f9bf7ba 100644
+--- a/src/app/(app)/immobili/page.tsx
++++ b/src/app/(app)/immobili/page.tsx
+@@ -2,6 +2,8 @@ import { createClient } from "@/lib/supabase/server";
+ import { ImmobiliClient } from "./ImmobiliClient";
+ import type { ImmobileDettaglio } from "@/lib/types";
+ import type { VisitaProprietario } from "@/lib/visite";
++import { conVista } from "@/lib/mappe";
++import type { IndirizzoConVista } from "@/lib/mappe/tipi";
+ import { criteriDaRighe } from "@/lib/match";
+ import type { RigaCriterioDb } from "@/lib/match";
+ 
+@@ -11,7 +13,7 @@ export default async function ImmobiliPage() {
+     data: { user },
+   } = await supabase.auth.getUser();
+ 
+-  const [{ data: listings }, { data: candidature }, { data: visite }] = await Promise.all([
++  const [{ data: listings }, { data: candidature }, { data: visite }, { data: indirizziRighe }] = await Promise.all([
+     supabase
+       .from("listings")
+       .select(
+@@ -25,8 +27,13 @@ export default async function ImmobiliPage() {
+       .eq("listings.owner_id", user!.id),
+     // i posti liberi e le prenotazioni di tutti i miei immobili, in una chiamata sola
+     supabase.rpc("visite_del_proprietario"),
++    // gli indirizzi dei miei immobili, con la posizione sulla mappa
++    supabase.rpc("indirizzi_dei_miei_immobili"),
+   ]);
+ 
++  const indirizzi: Record<string, IndirizzoConVista> = {};
++  for (const r of indirizziRighe ?? []) indirizzi[r.listing_id as string] = conVista(r);
++
+   const nCandidaturePerListing = new Map<string, number>();
+   for (const c of candidature ?? []) {
+     const id = c.listing_id as string;
+@@ -52,5 +59,5 @@ export default async function ImmobiliPage() {
+     nCandidature: nCandidaturePerListing.get(l.id) ?? 0,
+   }));
+ 
+-  return <ImmobiliClient immobili={immobili} visite={(visite ?? []) as VisitaProprietario[]} />;
++  return <ImmobiliClient immobili={immobili} visite={(visite ?? []) as VisitaProprietario[]} indirizzi={indirizzi} />;
+ }
+diff --git a/src/app/chat/[id]/ChatClient.tsx b/src/app/chat/[id]/ChatClient.tsx
+index ae88188..2fd3f62 100644
+--- a/src/app/chat/[id]/ChatClient.tsx
++++ b/src/app/chat/[id]/ChatClient.tsx
+@@ -7,6 +7,8 @@ import type { Messaggio } from "@/lib/types";
+ import { IconIndietro, IconInvia } from "@/components/icons";
+ import { AvvisoMessaggio, AvvisoTruffe, ConfermaInvioRischioso } from "@/components/AvvisiChat";
+ import { VisitaChat } from "@/components/VisitaChat";
++import { IndirizzoChat } from "@/components/IndirizzoChat";
++import type { IndirizzoConVista } from "@/lib/mappe/tipi";
+ import type { PostoLibero, VisitaCandidatura } from "@/lib/visite";
+ import { rilevaRischioPagamento, type Rischio } from "@/lib/truffe";
+ 
+@@ -19,6 +21,7 @@ export function ChatClient({
+   ruolo = "inquilino",
+   visite = [],
+   posti = [],
++  indirizzo = null,
+ }: {
+   candidaturaId: string;
+   userId: string;
+@@ -29,6 +32,8 @@ export function ChatClient({
+   ruolo?: string;
+   visite?: VisitaCandidatura[];
+   posti?: PostoLibero[];
++  /** l'indirizzo dell'immobile: solo per chi ha un match accettato */
++  indirizzo?: IndirizzoConVista | null;
+ }) {
+   const router = useRouter();
+   const [messaggi, setMessaggi] = useState<Messaggio[]>(messaggiIniziali);
+@@ -144,6 +149,8 @@ export function ChatClient({
+ 
+       <VisitaChat candidaturaId={candidaturaId} ruolo={ruolo} visite={visite} posti={posti} />
+ 
++      <IndirizzoChat indirizzo={indirizzo} ruolo={ruolo} />
++
+       <div className="chat-scroll">
+         {messaggi.length === 0 && (
+           <p className="chat-empty">
+diff --git a/src/app/chat/[id]/page.tsx b/src/app/chat/[id]/page.tsx
+index 613c3f3..a174cd4 100644
+--- a/src/app/chat/[id]/page.tsx
++++ b/src/app/chat/[id]/page.tsx
+@@ -5,6 +5,7 @@ import { haAccettatoInformativa } from "@/lib/informativa";
+ import { ChatClient } from "./ChatClient";
+ import type { Messaggio } from "@/lib/types";
+ import type { PostoLibero, VisitaCandidatura } from "@/lib/visite";
++import { conVista } from "@/lib/mappe";
+ 
+ export default async function ChatPage({
+   params,
+@@ -63,12 +64,16 @@ export default async function ChatPage({
+ 
+   // Le visite di questo match, e per l'inquilino i posti tra cui scegliere. Se una lettura
+   // non riesce, la chat si apre lo stesso: il pannello dirà che non ci sono posti.
+-  const [{ data: visite }, { data: posti }] = await Promise.all([
++  const [{ data: visite }, { data: posti }, { data: indirizzi }] = await Promise.all([
+     supabase.rpc("visite_della_candidatura", { p_candidatura: id }),
+     isTenant
+       ? supabase.rpc("posti_liberi_per_candidatura", { p_candidatura: id })
+       : Promise.resolve({ data: [] as PostoLibero[] }),
++    // L'indirizzo preciso dell'immobile: lo dà il database solo al proprietario e a chi ha un
++    // match ACCETTATO su quell'immobile. Per chiunque altro non c'è niente.
++    supabase.rpc("indirizzo_per_candidatura", { p_candidatura: id }),
+   ]);
++  const primoIndirizzo = Array.isArray(indirizzi) && indirizzi.length > 0 ? indirizzi[0] : null;
+ 
+   const altroNome =
+     `${altroProfilo?.nome ?? ""} ${altroProfilo?.cognome ?? ""}`.trim() ||
+@@ -83,6 +88,7 @@ export default async function ChatPage({
+       ruolo={isTenant ? "inquilino" : "proprietario"}
+       visite={(visite ?? []) as VisitaCandidatura[]}
+       posti={(posti ?? []) as PostoLibero[]}
++      indirizzo={primoIndirizzo ? conVista(primoIndirizzo) : null}
+       messaggiIniziali={(messaggi ?? []) as Messaggio[]}
+     />
+   );
+diff --git a/src/app/globals.css b/src/app/globals.css
+index a278148..fb86098 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -3010,3 +3010,77 @@ mark.segnaposto {
+   gap: 12px;
+   margin-top: 10px;
+ }
++
++/* ============================================================
++   Indirizzo e mappa
++   ============================================================ */
++
++.indirizzo-panel {
++  margin-bottom: 22px;
++  padding-bottom: 18px;
++  border-bottom: 1px solid rgba(16, 21, 26, 0.1);
++}
++.indirizzo-campi {
++  display: flex;
++  flex-direction: column;
++  gap: 8px;
++}
++.indirizzo-riga {
++  display: grid;
++  grid-template-columns: 1fr 1fr;
++  gap: 8px;
++}
++.indirizzo-azioni {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 12px;
++  margin-top: 10px;
++}
++.mappa-riquadro {
++  display: block;
++  width: 100%;
++  height: 180px;
++  border: 0;
++  border-radius: 12px;
++  object-fit: cover;
++}
++.mappa-provvisoria {
++  position: relative;
++  width: 100%;
++  border-radius: 12px;
++  overflow: hidden;
++  background: rgba(16, 21, 26, 0.05);
++}
++.mappa-provvisoria svg {
++  display: block;
++  width: 100%;
++  height: auto;
++}
++.mappa-provvisoria rect {
++  fill: #e9e4d6;
++}
++.mappa-provvisoria path {
++  fill: none;
++  stroke: rgba(16, 21, 26, 0.18);
++  stroke-width: 2;
++}
++.mappa-provvisoria circle:first-of-type {
++  fill: rgba(201, 105, 78, 0.25);
++}
++.mappa-provvisoria circle:last-of-type {
++  fill: var(--clay);
++}
++.mappa-provvisoria span {
++  position: absolute;
++  left: 8px;
++  bottom: 6px;
++  padding: 2px 8px;
++  font-size: 10.5px;
++  color: var(--ink);
++  background: rgba(247, 244, 236, 0.9);
++  border-radius: 999px;
++}
++.chat-indirizzo {
++  background: rgba(16, 21, 26, 0.06);
++}
+diff --git a/src/components/IndirizzoChat.tsx b/src/components/IndirizzoChat.tsx
+new file mode 100644
+index 0000000..4525986
+--- /dev/null
++++ b/src/components/IndirizzoChat.tsx
+@@ -0,0 +1,64 @@
++"use client";
++
++import { useState } from "react";
++import { formattaIndirizzo } from "@/lib/mappe/indirizzo";
++import type { IndirizzoConVista } from "@/lib/mappe/tipi";
++import { MappaImmobile } from "@/components/MappaImmobile";
++
++/**
++ * L'indirizzo dell'immobile di un match, dentro la chat: lo vedono il
++ * proprietario e la persona con cui ha un match accettato, nessun altro. Se
++ * non è stato ancora indicato lo si dice, invece di non mostrare niente.
++ */
++export function IndirizzoChat({
++  indirizzo,
++  ruolo,
++}: {
++  indirizzo: IndirizzoConVista | null;
++  ruolo: "inquilino" | "proprietario" | string;
++}) {
++  const [copiato, setCopiato] = useState(false);
++
++  async function copia() {
++    if (!indirizzo) return;
++    try {
++      await navigator.clipboard.writeText(formattaIndirizzo(indirizzo.indirizzo));
++      setCopiato(true);
++      setTimeout(() => setCopiato(false), 2000);
++    } catch {
++      // gli appunti non sono sempre disponibili: l'indirizzo resta leggibile a schermo
++    }
++  }
++
++  const proprietario = ruolo === "proprietario";
++
++  return (
++    <details className="chat-visita chat-indirizzo">
++      <summary>{indirizzo ? `Indirizzo: ${formattaIndirizzo(indirizzo.indirizzo)}` : "Indirizzo"}</summary>
++      <div className="chat-visita-corpo">
++        {indirizzo ? (
++          <>
++            <p>
++              <b>{formattaIndirizzo(indirizzo.indirizzo)}</b>
++            </p>
++            {indirizzo.vista && <MappaImmobile vista={indirizzo.vista} />}
++            {indirizzo.origine === "provvisoria" && (
++              <p className="field-note" style={{ marginTop: 8 }}>
++                La posizione sulla mappa è provvisoria: fa fede l&apos;indirizzo scritto.
++              </p>
++            )}
++            <button type="button" className="redo-link" style={{ marginTop: 8 }} onClick={copia}>
++              {copiato ? "Copiato" : "Copia l'indirizzo"}
++            </button>
++          </>
++        ) : (
++          <p className="field-note" style={{ marginTop: 0 }}>
++            {proprietario
++              ? "Non hai ancora indicato l'indirizzo dell'immobile: puoi farlo dalla scheda dell'immobile."
++              : "Il proprietario non ha ancora indicato l'indirizzo. Puoi chiederglielo qui in chat."}
++          </p>
++        )}
++      </div>
++    </details>
++  );
++}
+diff --git a/src/components/IndirizzoImmobile.tsx b/src/components/IndirizzoImmobile.tsx
+new file mode 100644
+index 0000000..8079999
+--- /dev/null
++++ b/src/components/IndirizzoImmobile.tsx
+@@ -0,0 +1,134 @@
++"use client";
++
++import { useState } from "react";
++import { useRouter } from "next/navigation";
++import { validaIndirizzo, formattaIndirizzo, CITTA_PREDEFINITA } from "@/lib/mappe/indirizzo";
++import type { IndirizzoConVista } from "@/lib/mappe/tipi";
++import { MappaImmobile } from "@/components/MappaImmobile";
++import { rimuoviIndirizzo, salvaIndirizzo } from "@/app/(app)/immobili/indirizzo-actions";
++
++/**
++ * L'indirizzo di un immobile, per il proprietario. Lo vedono solo le persone con
++ * cui ha un match accettato: agli altri si mostra la zona. Il calcolo della
++ * posizione sulla mappa lo fa il fornitore di mappe scelto, lato server.
++ */
++export function IndirizzoImmobile({
++  immobileId,
++  salvato,
++}: {
++  immobileId: string;
++  salvato: IndirizzoConVista | null;
++}) {
++  const router = useRouter();
++  const [via, setVia] = useState(salvato?.indirizzo.via ?? "");
++  const [civico, setCivico] = useState(salvato?.indirizzo.civico ?? "");
++  const [cap, setCap] = useState(salvato?.indirizzo.cap ?? "");
++  const [citta, setCitta] = useState(salvato?.indirizzo.citta ?? CITTA_PREDEFINITA);
++  const [inCorso, setInCorso] = useState<"salva" | "togli" | null>(null);
++  const [messaggio, setMessaggio] = useState<{ errore: boolean; testo: string } | null>(null);
++  const [confermaTogli, setConfermaTogli] = useState(false);
++
++  async function salva() {
++    const esito = validaIndirizzo({ via, civico, cap, citta });
++    if (!esito.ok) {
++      setMessaggio({ errore: true, testo: esito.errore });
++      return;
++    }
++    setMessaggio(null);
++    setInCorso("salva");
++    try {
++      const res = await salvaIndirizzo(immobileId, esito.indirizzo);
++      if ("error" in res) {
++        setMessaggio({ errore: true, testo: res.error });
++        return;
++      }
++      setMessaggio({ errore: false, testo: "Indirizzo salvato." });
++      router.refresh();
++    } finally {
++      setInCorso(null);
++    }
++  }
++
++  async function togli() {
++    setMessaggio(null);
++    setInCorso("togli");
++    try {
++      const res = await rimuoviIndirizzo(immobileId);
++      if ("error" in res) {
++        setMessaggio({ errore: true, testo: res.error });
++        return;
++      }
++      setVia("");
++      setCivico("");
++      setCap("");
++      setCitta(CITTA_PREDEFINITA);
++      setConfermaTogli(false);
++      router.refresh();
++    } finally {
++      setInCorso(null);
++    }
++  }
++
++  const cambia = (imposta: (v: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
++    imposta(e.target.value);
++    setMessaggio(null);
++  };
++
++  return (
++    <div className="indirizzo-panel">
++      <div className="pref-label" style={{ margin: "0 0 4px 0" }}>
++        <span>Indirizzo</span>
++      </div>
++      <p className="field-note" style={{ margin: "0 0 10px 0" }}>
++        L&apos;indirizzo preciso lo vedono solo le persone con cui hai un match accettato. Agli altri si mostra soltanto la zona.
++      </p>
++
++      <div className="indirizzo-campi">
++        <input className="ricerca-input" aria-label="Via" placeholder="Via" value={via} maxLength={120} autoComplete="off" onChange={cambia(setVia)} />
++        <div className="indirizzo-riga">
++          <input className="ricerca-input" aria-label="Numero civico" placeholder="Civico" value={civico} maxLength={12} autoComplete="off" onChange={cambia(setCivico)} />
++          <input className="ricerca-input" aria-label="CAP" placeholder="CAP" value={cap} maxLength={5} inputMode="numeric" autoComplete="off" onChange={cambia(setCap)} />
++        </div>
++        <input className="ricerca-input" aria-label="Città" placeholder="Città" value={citta} maxLength={60} autoComplete="off" onChange={cambia(setCitta)} />
++      </div>
++
++      {messaggio && (
++        <p className={messaggio.errore ? "note-error" : "field-note"} style={{ marginTop: 8 }} role={messaggio.errore ? "alert" : "status"}>
++          {messaggio.testo}
++        </p>
++      )}
++
++      <div className="indirizzo-azioni">
++        {salvato &&
++          (confermaTogli ? (
++            <span className="visite-conferma">
++              <span>Chi ha un match non lo vedrà più.</span>
++              <button type="button" className="redo-link" onClick={() => setConfermaTogli(false)}>
++                Indietro
++              </button>
++              <button type="button" className="redo-link" disabled={inCorso !== null} onClick={togli}>
++                {inCorso === "togli" ? "Tolgo..." : "Sì, toglilo"}
++              </button>
++            </span>
++          ) : (
++            <button type="button" className="redo-link" onClick={() => setConfermaTogli(true)}>
++              Togli l&apos;indirizzo
++            </button>
++          ))}
++        <button type="button" className="opp-cta" disabled={inCorso !== null} onClick={salva}>
++          {inCorso === "salva" ? "Salvo..." : salvato ? "Aggiorna l'indirizzo" : "Salva l'indirizzo"}
++        </button>
++      </div>
++
++      {salvato && (
++        <div className="indirizzo-salvato">
++          <p className="field-note" style={{ margin: "12px 0 8px 0" }}>
++            Salvato: <b>{formattaIndirizzo(salvato.indirizzo)}</b>
++            {salvato.origine === "provvisoria" && " · posizione sulla mappa provvisoria"}
++          </p>
++          {salvato.vista && <MappaImmobile vista={salvato.vista} />}
++        </div>
++      )}
++    </div>
++  );
++}
+diff --git a/src/components/MappaImmobile.tsx b/src/components/MappaImmobile.tsx
+new file mode 100644
+index 0000000..801b95e
+--- /dev/null
++++ b/src/components/MappaImmobile.tsx
+@@ -0,0 +1,36 @@
++import type { VistaMappa } from "@/lib/mappe/tipi";
++
++/**
++ * La mappa di un immobile, nel modo che il fornitore ha scelto (`vista`): un
++ * riquadro incorporato, un'immagine, o — finché il fornitore è provvisorio — un
++ * disegno segnaposto che dice di esserlo. Non sceglie niente da sola.
++ */
++export function MappaImmobile({ vista }: { vista: VistaMappa }) {
++  if (vista.tipo === "incorporata") {
++    return (
++      <iframe
++        className="mappa-riquadro"
++        title={vista.titolo}
++        src={vista.url}
++        loading="lazy"
++        referrerPolicy="no-referrer"
++        sandbox="allow-scripts allow-same-origin"
++      />
++    );
++  }
++  if (vista.tipo === "immagine") {
++    // eslint-disable-next-line @next/next/no-img-element
++    return <img className="mappa-riquadro" src={vista.url} alt={vista.alt} loading="lazy" referrerPolicy="no-referrer" />;
++  }
++  return (
++    <div className="mappa-provvisoria" role="img" aria-label={vista.etichetta}>
++      <svg viewBox="0 0 200 110" aria-hidden>
++        <rect width="200" height="110" rx="10" />
++        <path d="M0 70 Q50 55 100 70 T200 60M30 0 L55 110M120 0 L105 110M0 30 L200 40" />
++        <circle cx="100" cy="52" r="9" />
++        <circle cx="100" cy="52" r="3.5" />
++      </svg>
++      <span>{vista.etichetta}</span>
++    </div>
++  );
++}
+diff --git a/src/content/informativa.ts b/src/content/informativa.ts
+index e19d274..9f95258 100644
+--- a/src/content/informativa.ts
++++ b/src/content/informativa.ts
+@@ -28,7 +28,7 @@ export const INFORMATIVA = {
+    * controllo che fa il database (migrazione 0017): un test fallisce se
+    * questa stringa non lo supera.
+    */
+-  versione: "2026-10-provvisoria-7",
++  versione: "2026-10-provvisoria-8",
+   provvisoria: true,
+   titolo: "Informativa sulla privacy",
+   aggiornata: "ottobre 2026",
+@@ -52,7 +52,7 @@ export const INFORMATIVA = {
+       elenco: [
+         "Account: email, password (conservata come impronta, non in chiaro), nome, cognome e ruolo, inquilino o proprietario.",
+         "Se sei inquilino: lavoro, reddito tuo e del tuo nucleo, garante, fideiussione, protesti (li dichiari tu e non vengono verificati), animali, composizione del nucleo, numero di figli, presentazione, foto del profilo, le tue preferenze di ricerca (budget, zone, locali, metri, caratteristiche) e gli annunci che salvi tra i preferiti o che scarti.",
+-        "Se sei proprietario: tipo di proprietario, numero di immobili, obiettivo; gli annunci con titolo, descrizione, zona, prezzo, caratteristiche e foto; i criteri che chiedi ai candidati.",
++        "Se sei proprietario: tipo di proprietario, numero di immobili, obiettivo; gli annunci con titolo, descrizione, zona, prezzo, caratteristiche e foto; l'indirizzo preciso, se lo indichi, e la posizione sulla mappa che se ne ricava; i criteri che chiedi ai candidati.",
+         "Per le verifiche: il documento d'identità e la prova di proprietà dell'immobile (proprietari); se sei inquilino e chiedi di verificare il reddito, un documento d'identità e una prova del reddito (una busta paga, la CU o la dichiarazione dei redditi); e i contratti di affitto caricati per dichiarare un affitto. Non chiediamo lo stato di famiglia.",
+         "Mentre usi l'app: candidature, messaggi, visite (giorno e ora, e chi le ha prenotate), contratti, recensioni, richieste di conferma di un affitto e inviti. Inoltre le notifiche sulle novità del tuo account (per esempio l'esito di una verifica o la risposta a una candidatura): contengono il tipo di evento e, al massimo, il titolo di un annuncio e, per le visite, il giorno e l'ora; mai nomi di persone.",
+         "Dati di un'altra persona: se inviti il tuo proprietario, scrivi il suo nome e, se vuoi, la sua email.",
+@@ -79,6 +79,7 @@ export const INFORMATIVA = {
+         "Se rifiuta la tua candidatura, del tuo profilo gli resta solo il tuo nome, oltre alla valutazione che aveva già fatto. Tu vedi il motivo del rifiuto, non la sua valutazione completa.",
+         "Se ritiri una candidatura mentre è ancora in attesa, il proprietario non la vede più: non legge né il tuo profilo né le recensioni su di te, e riceve solo una notifica con il titolo dell'annuncio. La candidatura resta nel tuo elenco e non puoi candidarti di nuovo allo stesso annuncio.",
+         "I messaggi li leggono solo le due persone, dopo che la candidatura è stata accettata. L'app ricorda quali messaggi hai già letto, solo per mostrarti quanti ne restano da leggere: non lo mostra all'altra persona.",
++        "L'indirizzo preciso di un immobile lo vedono solo il proprietario e le persone con cui ha un match accettato su quell'immobile: agli altri si mostra soltanto la zona.",
+         "I preferiti e gli annunci che scarti li vede solo chi li sceglie: il proprietario non sa quali annunci hai salvato o scartato.",
+         "Le visite: il proprietario indica i giorni e gli orari in cui è disponibile per un suo immobile. Li vedono solo le persone che hanno un match accettato su quell'immobile; chi non lo ha non vede nemmeno quali orari ci sono. Chi prenota vede la propria visita, e il proprietario vede nome e cognome di chi ha prenotato, per le visite degli ultimi 30 giorni.",
+         "Nella chat, l'app evidenzia i messaggi che parlano di pagamenti sospetti (per esempio un IBAN, una caparra o un anticipo) e ti avvisa prima di inviarne uno così, per aiutarti a riconoscere una truffa. È un controllo automatico che fa parte della visualizzazione della chat: non salviamo il risultato e non lo comunichiamo a nessuno, e non impedisce mai di inviare un messaggio.",
+@@ -111,6 +112,7 @@ export const INFORMATIVA = {
+       titolo: "Fornitori e cookie",
+       paragrafi: [
+         "Usiamo Supabase (database, accessi, file e le email di accesso) e Vercel (per ospitare l'app, che può conservare registri tecnici delle richieste). La regione dei dati è [da indicare].",
++        "Per ora la posizione di un immobile sulla mappa è calcolata dall'app, senza inviare l'indirizzo a nessun servizio esterno.",
+         "Nell'app non ci sono strumenti di analisi né pubblicità. Usiamo solo cookie tecnici, necessari a mantenerti connesso.",
+       ],
+     },
+diff --git a/src/lib/mappe/index.ts b/src/lib/mappe/index.ts
+new file mode 100644
+index 0000000..840d38f
+--- /dev/null
++++ b/src/lib/mappe/index.ts
+@@ -0,0 +1,60 @@
++/**
++ * Il solo punto in cui si decide QUALE fornitore di mappe si usa.
++ *
++ * PER SCEGLIERE UN FORNITORE VERO
++ *   1. si scrive un file in questa cartella che rispetta `ProviderMappe` (vedi
++ *      tipi.ts) e restituisce `origine: "fornitore"`;
++ *   2. lo si registra qui sotto in `FORNITORI`;
++ *   3. si imposta MAPPE_PROVIDER con il suo `id`;
++ *   4. si ricalcolano le posizioni provvisorie già salvate (si riconoscono dal
++ *      campo che dice come è stata ottenuta la posizione: `provvisoria`);
++ *   5. si aggiorna l'informativa: l'indirizzo viene mandato a un servizio
++ *      esterno (un test lo ricorda a chiunque registri un fornitore vero).
++ * I test del contratto (scripts/test-mappe.mjs) girano su ogni fornitore
++ * registrato: se il nuovo non rispetta il contratto, falliscono.
++ */
++import { fornitoreProvvisorio } from "./provvisorio";
++import type { ProviderMappe } from "./tipi";
++
++export const FORNITORI: Readonly<Record<string, ProviderMappe>> = {
++  [fornitoreProvvisorio.id]: fornitoreProvvisorio,
++};
++
++export const FORNITORE_PREDEFINITO = fornitoreProvvisorio.id;
++
++/**
++ * Il fornitore da usare. Senza configurazione, quello provvisorio. Un nome che
++ * non esiste è un errore di configurazione e si dice, invece di ripiegare in
++ * silenzio su un altro: sarebbe peggio.
++ */
++export function fornitoreMappe(nome?: string | null): ProviderMappe {
++  const scelto = (nome ?? process.env.MAPPE_PROVIDER ?? "").trim() || FORNITORE_PREDEFINITO;
++  const f = Object.prototype.hasOwnProperty.call(FORNITORI, scelto) ? FORNITORI[scelto] : undefined;
++  if (!f) throw new Error(`Fornitore di mappe sconosciuto: «${scelto}». Quelli disponibili: ${Object.keys(FORNITORI).join(", ")}.`);
++  return f;
++}
++
++export type { Indirizzo, IndirizzoConVista, Posizione, OrigineePosizione, ProviderMappe, VistaMappa } from "./tipi";
++
++/**
++ * Da una riga del database a un indirizzo con la mappa pronta. Se il fornitore
++ * non è configurato bene, l'indirizzo si mostra lo stesso, senza mappa: una
++ * configurazione sbagliata non deve impedire di vedere dove sta la casa.
++ */
++export function conVista(riga: {
++  via: string;
++  civico: string;
++  cap: string;
++  citta: string;
++  latitudine: number;
++  longitudine: number;
++  origine_posizione: string;
++}): import("./tipi").IndirizzoConVista {
++  const indirizzo = { via: riga.via, civico: riga.civico, cap: riga.cap, citta: riga.citta };
++  const origine = riga.origine_posizione === "fornitore" ? "fornitore" : "provvisoria";
++  try {
++    return { indirizzo, origine, vista: fornitoreMappe().vistaMappa({ latitudine: riga.latitudine, longitudine: riga.longitudine }, indirizzo) };
++  } catch {
++    return { indirizzo, origine, vista: null };
++  }
++}
+diff --git a/src/lib/mappe/indirizzo.ts b/src/lib/mappe/indirizzo.ts
+new file mode 100644
+index 0000000..3c21572
+--- /dev/null
++++ b/src/lib/mappe/indirizzo.ts
+@@ -0,0 +1,68 @@
++/**
++ * L'indirizzo di un immobile: pulizia, controllo e testo. Le regole sono quelle
++ * della funzione `imposta_indirizzo` del database (migrazione 0024): un test le
++ * tiene allineate. Logica pura, senza database.
++ */
++import type { Indirizzo, Posizione } from "./tipi";
++
++export const LIMITI_INDIRIZZO = {
++  via: { min: 3, max: 120 },
++  civico: { min: 1, max: 12 },
++  citta: { min: 2, max: 60 },
++} as const;
++
++/** L'Italia, in gradi: un indirizzo fuori da qui è quasi sempre un errore. Gli stessi limiti del database. */
++export const LIMITI_POSIZIONE = { latMin: 35, latMax: 48, lngMin: 6, lngMax: 19 } as const;
++
++export const CITTA_PREDEFINITA = "Milano";
++
++/** Spazi ridotti a uno, ai lati niente, e nessun carattere di controllo (a capo, tabulazioni, invisibili). */
++export function pulisci(testo: unknown): string {
++  if (typeof testo !== "string") return "";
++  return testo.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029\ufeff]/g, " ").replace(/\s+/g, " ").trim();
++}
++
++export type EsitoIndirizzo = { ok: true; indirizzo: Indirizzo } | { ok: false; errore: string };
++
++/** Pulisce e controlla ciò che la persona ha scritto. Il messaggio di errore dice cosa correggere. */
++export function validaIndirizzo(input: { via?: unknown; civico?: unknown; cap?: unknown; citta?: unknown }): EsitoIndirizzo {
++  const via = pulisci(input.via);
++  const civico = pulisci(input.civico);
++  const cap = pulisci(input.cap);
++  const citta = pulisci(input.citta) || CITTA_PREDEFINITA;
++
++  if (via.length < LIMITI_INDIRIZZO.via.min) return { ok: false, errore: "Scrivi la via, per esempio «Via Garibaldi»." };
++  if (via.length > LIMITI_INDIRIZZO.via.max) return { ok: false, errore: `La via è troppo lunga (al massimo ${LIMITI_INDIRIZZO.via.max} caratteri).` };
++  if (civico.length < LIMITI_INDIRIZZO.civico.min) return { ok: false, errore: "Scrivi il numero civico." };
++  if (civico.length > LIMITI_INDIRIZZO.civico.max) return { ok: false, errore: `Il civico è troppo lungo (al massimo ${LIMITI_INDIRIZZO.civico.max} caratteri).` };
++  if (!/^[0-9]{5}$/.test(cap)) return { ok: false, errore: "Il CAP è di cinque cifre, per esempio 20121." };
++  if (citta.length < LIMITI_INDIRIZZO.citta.min) return { ok: false, errore: "Scrivi la città." };
++  if (citta.length > LIMITI_INDIRIZZO.citta.max) return { ok: false, errore: `La città è troppo lunga (al massimo ${LIMITI_INDIRIZZO.citta.max} caratteri).` };
++
++  return { ok: true, indirizzo: { via, civico, cap, citta } };
++}
++
++/** Una posizione è un numero finito dentro l'Italia, come vuole il database. */
++export function posizioneValida(p: Partial<Posizione> | null | undefined): p is Posizione {
++  return (
++    !!p &&
++    typeof p.latitudine === "number" &&
++    typeof p.longitudine === "number" &&
++    Number.isFinite(p.latitudine) &&
++    Number.isFinite(p.longitudine) &&
++    p.latitudine >= LIMITI_POSIZIONE.latMin &&
++    p.latitudine <= LIMITI_POSIZIONE.latMax &&
++    p.longitudine >= LIMITI_POSIZIONE.lngMin &&
++    p.longitudine <= LIMITI_POSIZIONE.lngMax
++  );
++}
++
++/** «Via Garibaldi 12, 20121 Milano» */
++export function formattaIndirizzo(i: Indirizzo): string {
++  return `${i.via} ${i.civico}, ${i.cap} ${i.citta}`;
++}
++
++/** Il testo da cui si calcola una posizione di prova: stesso indirizzo scritto in modi diversi, stesso testo. */
++export function chiaveIndirizzo(i: Indirizzo): string {
++  return `${i.via} ${i.civico} ${i.cap} ${i.citta}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
++}
+diff --git a/src/lib/mappe/provvisorio.ts b/src/lib/mappe/provvisorio.ts
+new file mode 100644
+index 0000000..5665aec
+--- /dev/null
++++ b/src/lib/mappe/provvisorio.ts
+@@ -0,0 +1,76 @@
++/**
++ * Il fornitore di mappe PROVVISORIO. Non cerca niente: calcola una posizione di
++ * prova, sempre la stessa per lo stesso indirizzo, vicino al centro della zona
++ * dell'annuncio. Serve a costruire e provare tutto il percorso (salvare un
++ * indirizzo, mostrarlo a chi ha un match) prima di scegliere un fornitore vero.
++ *
++ * I centri delle zone sono APPROSSIMATI A MANO e non vanno usati per niente
++ * altro: la posizione che ne esce non è dove sta la casa.
++ */
++import { chiaveIndirizzo, posizioneValida } from "./indirizzo";
++import type { Indirizzo, Posizione, ProviderMappe, VistaMappa } from "./tipi";
++
++/** Il centro di Milano, per una zona che non si conosce. */
++export const CENTRO_MILANO: Posizione = { latitudine: 45.4642, longitudine: 9.19 };
++
++/** Centri approssimati delle zone di `ZONE_MILANO` (senza «, Milano»). */
++export const CENTRI_ZONE: Readonly<Record<string, Posizione>> = {
++  Navigli: { latitudine: 45.45, longitudine: 9.174 },
++  Isola: { latitudine: 45.488, longitudine: 9.188 },
++  "Porta Romana": { latitudine: 45.452, longitudine: 9.204 },
++  "Città Studi": { latitudine: 45.478, longitudine: 9.23 },
++  Bicocca: { latitudine: 45.519, longitudine: 9.211 },
++  "Porta Nuova": { latitudine: 45.484, longitudine: 9.19 },
++  "Porta Venezia": { latitudine: 45.473, longitudine: 9.205 },
++  Sempione: { latitudine: 45.48, longitudine: 9.165 },
++  Ticinese: { latitudine: 45.452, longitudine: 9.18 },
++  Loreto: { latitudine: 45.485, longitudine: 9.215 },
++  NoLo: { latitudine: 45.495, longitudine: 9.218 },
++  Certosa: { latitudine: 45.5, longitudine: 9.145 },
++  Lambrate: { latitudine: 45.485, longitudine: 9.24 },
++};
++
++/** Di quanto, al massimo, si sposta la posizione dal centro della zona (gradi: circa 400 m e 500 m). */
++export const SPOSTAMENTO_MASSIMO = { latitudine: 0.0035, longitudine: 0.0065 } as const;
++
++/** FNV-1a a 32 bit: veloce, senza dipendenze, e sempre uguale per lo stesso testo. */
++function impronta(testo: string): number {
++  let h = 0x811c9dc5;
++  for (let i = 0; i < testo.length; i++) {
++    h ^= testo.charCodeAt(i);
++    h = Math.imul(h, 0x01000193) >>> 0;
++  }
++  return h >>> 0;
++}
++
++/** Il centro della zona («Isola, Milano» → Isola), o quello di Milano. */
++export function centroDellaZona(zona: string | null | undefined): Posizione {
++  const nome = (typeof zona === "string" ? zona : "").replace(/,\s*Milano\s*$/i, "").trim();
++  // proprietà PROPRIA: un nome come «__proto__» o «constructor» esiste in ogni oggetto e non è una zona
++  return Object.prototype.hasOwnProperty.call(CENTRI_ZONE, nome) ? CENTRI_ZONE[nome] : CENTRO_MILANO;
++}
++
++/** Un numero tra -1 e 1, sempre lo stesso per lo stesso testo e lo stesso «sale». */
++function frazione(testo: string, sale: string): number {
++  return (impronta(`${sale}:${testo}`) / 0xffffffff) * 2 - 1;
++}
++
++export const fornitoreProvvisorio: ProviderMappe = {
++  id: "provvisorio",
++  origine: "provvisoria",
++
++  async geocodifica(indirizzo: Indirizzo, contesto?: { zona?: string | null }): Promise<Posizione | null> {
++    const chiave = chiaveIndirizzo(indirizzo);
++    if (!chiave) return null;
++    const centro = centroDellaZona(contesto?.zona);
++    const p: Posizione = {
++      latitudine: Math.round((centro.latitudine + frazione(chiave, "lat") * SPOSTAMENTO_MASSIMO.latitudine) * 1e6) / 1e6,
++      longitudine: Math.round((centro.longitudine + frazione(chiave, "lng") * SPOSTAMENTO_MASSIMO.longitudine) * 1e6) / 1e6,
++    };
++    return posizioneValida(p) ? p : null;
++  },
++
++  vistaMappa(): VistaMappa {
++    return { tipo: "provvisoria", etichetta: "Mappa provvisoria: la posizione è approssimativa" };
++  },
++};
+diff --git a/src/lib/mappe/tipi.ts b/src/lib/mappe/tipi.ts
+new file mode 100644
+index 0000000..9c22c5a
+--- /dev/null
++++ b/src/lib/mappe/tipi.ts
+@@ -0,0 +1,60 @@
++/**
++ * Le mappe: i tipi comuni a ogni fornitore. Il resto dell'app parla SOLO con
++ * questi tipi; chi sia il fornitore (uno vero, o quello provvisorio) lo sa
++ * soltanto `index.ts`. Scegliere un fornitore vuol dire scrivere un file che
++ * rispetta `ProviderMappe` e registrarlo là: niente altro cambia.
++ */
++
++export type Indirizzo = {
++  via: string;
++  civico: string;
++  cap: string;
++  citta: string;
++};
++
++export type Posizione = {
++  latitudine: number;
++  longitudine: number;
++};
++
++/**
++ * Come è stata ottenuta una posizione. `provvisoria` è un calcolo di prova, non
++ * un indirizzo vero trovato su una mappa: quando si sceglierà un fornitore, le
++ * posizioni provvisorie si riconoscono (e si ricalcolano) da questo campo.
++ */
++export type OrigineePosizione = "provvisoria" | "fornitore";
++
++/** Come si mostra la mappa. Il fornitore sceglie il modo; chi la disegna lo segue. */
++export type VistaMappa =
++  /** un disegno segnaposto: nessuna richiesta a servizi esterni */
++  | { tipo: "provvisoria"; etichetta: string }
++  /** una mappa dentro un riquadro (iframe) */
++  | { tipo: "incorporata"; url: string; titolo: string }
++  /** un'immagine statica della mappa */
++  | { tipo: "immagine"; url: string; alt: string };
++
++export interface ProviderMappe {
++  /** il nome con cui si sceglie nella configurazione (MAPPE_PROVIDER) */
++  readonly id: string;
++  /** l'origine che si scrive nel database insieme alla posizione */
++  readonly origine: OrigineePosizione;
++  /**
++   * La posizione di un indirizzo, o `null` se non si trova. `contesto.zona` è la
++   * zona dell'annuncio (per esempio «Isola, Milano»): un fornitore vero può
++   * ignorarla, quello provvisorio la usa.
++   */
++  geocodifica(indirizzo: Indirizzo, contesto?: { zona?: string | null }): Promise<Posizione | null>;
++  /** Come mostrare la mappa di una posizione. Funzione pura: nessuna richiesta. */
++  vistaMappa(posizione: Posizione, indirizzo: Indirizzo): VistaMappa;
++}
++
++/**
++ * Un indirizzo con la mappa già pronta. La vista la sceglie il SERVER (conosce il
++ * fornitore); i componenti la ricevono già fatta e la disegnano. `vista` è nulla
++ * se il fornitore non è configurato bene: si mostra comunque l'indirizzo in testo.
++ */
++export type IndirizzoConVista = {
++  indirizzo: Indirizzo;
++  origine: OrigineePosizione;
++  vista: VistaMappa | null;
++};
+diff --git a/src/lib/verifica.ts b/src/lib/verifica.ts
+index b078132..45523db 100644
+--- a/src/lib/verifica.ts
++++ b/src/lib/verifica.ts
+@@ -192,6 +192,10 @@ const MESSAGGI: Record<string, string> = {
+   INQUILINO_INESISTENTE: "Inquilino non trovato.",
+   // decisioni sulle candidature
+   CANDIDATURA_NON_TUA: "Questa candidatura non risulta tua.",
++  // indirizzo degli immobili
++  INDIRIZZO_IMMOBILE_NON_VALIDO: "Controlla l'indirizzo: servono la via, il numero civico e il CAP di cinque cifre.",
++  POSIZIONE_NON_VALIDA: "Non è stato possibile calcolare la posizione sulla mappa. Controlla l'indirizzo.",
++  ORIGINE_NON_VALIDA: "Non è stato possibile salvare la posizione sulla mappa.",
+   // preferiti e scarti
+   SOLO_INQUILINI: "Solo chi cerca casa può salvare o scartare gli annunci.",
+   ANNUNCIO_NON_DISPONIBILE: "Questo annuncio non è più disponibile.",
+diff --git a/supabase/migrations/0024_indirizzi.sql b/supabase/migrations/0024_indirizzi.sql
+new file mode 100644
+index 0000000..7a23e38
+--- /dev/null
++++ b/supabase/migrations/0024_indirizzi.sql
+@@ -0,0 +1,214 @@
++-- ============================================================
++-- MatchAmI — indirizzo e posizione degli immobili
++--
++-- Nell'annuncio si vede solo la ZONA. L'indirizzo preciso si mostra dopo il
++-- match: è ciò che dice la 0015, che aveva tolto la colonna `listings.indirizzo`
++-- perché era leggibile da chiunque vedesse l'annuncio.
++--
++-- COME FUNZIONA
++--   - l'indirizzo sta in una tabella SEPARATA, con la sicurezza a livello di
++--     riga attiva e NESSUNA regola di lettura: nessuno la legge direttamente.
++--     Si passa solo da funzioni che guardano chi chiama;
++--   - lo vedono il proprietario dell'immobile e chi ha una candidatura
++--     ACCETTATA su quell'immobile (il match). Chi non ha un match non ne
++--     vede nemmeno l'esistenza;
++--   - insieme all'indirizzo si registra la POSIZIONE sulla mappa e come è stata
++--     ottenuta: `provvisoria` (un calcolo di prova) o `fornitore` (un servizio
++--     di mappe vero). Quando si sceglierà il fornitore, le posizioni
++--     provvisorie si riconoscono e si ricalcolano.
++--
++-- ORDINE: esegui questa migrazione PRIMA del push del codice.
++-- ============================================================
++
++-- ------------------------------------------------------------
++-- 1. La tabella
++-- ------------------------------------------------------------
++
++create table if not exists indirizzi_immobili (
++  listing_id        uuid primary key references listings(id) on delete cascade,
++  via               text not null check (char_length(via) between 3 and 120),
++  civico            text not null check (char_length(civico) between 1 and 12),
++  cap               text not null check (cap ~ '^[0-9]{5}$'),
++  citta             text not null default 'Milano' check (char_length(citta) between 2 and 60),
++  latitudine        double precision not null check (latitudine between 35 and 48),
++  longitudine       double precision not null check (longitudine between 6 and 19),
++  origine_posizione text not null check (origine_posizione in ('provvisoria', 'fornitore')),
++  created_at        timestamptz not null default now(),
++  updated_at        timestamptz not null default now()
++);
++
++-- Sicurezza a livello di riga attiva e NESSUNA policy: niente lettura diretta.
++alter table indirizzi_immobili enable row level security;
++revoke all on indirizzi_immobili from anon, authenticated;
++
++-- ------------------------------------------------------------
++-- 2. Il proprietario imposta e toglie l'indirizzo di un suo immobile
++-- ------------------------------------------------------------
++
++create or replace function public.imposta_indirizzo(
++  p_listing uuid,
++  p_via text,
++  p_civico text,
++  p_cap text,
++  p_citta text,
++  p_latitudine double precision,
++  p_longitudine double precision,
++  p_origine text
++)
++returns void
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_via text := btrim(regexp_replace(coalesce(p_via, ''), '\s+', ' ', 'g'));
++  v_civico text := btrim(regexp_replace(coalesce(p_civico, ''), '\s+', ' ', 'g'));
++  v_cap text := btrim(coalesce(p_cap, ''));
++  v_citta text := btrim(regexp_replace(coalesce(p_citta, ''), '\s+', ' ', 'g'));
++begin
++  if auth.uid() is null then
++    raise exception 'NON_AUTENTICATO';
++  end if;
++
++  if not exists (select 1 from listings where id = p_listing and owner_id = auth.uid()) then
++    raise exception 'IMMOBILE_NON_TUO';
++  end if;
++
++  if char_length(v_via) not between 3 and 120
++     or char_length(v_civico) not between 1 and 12
++     or v_cap !~ '^[0-9]{5}$'
++     or char_length(v_citta) not between 2 and 60 then
++    raise exception 'INDIRIZZO_IMMOBILE_NON_VALIDO';
++  end if;
++
++  if p_latitudine is null or p_longitudine is null
++     or p_latitudine not between 35 and 48
++     or p_longitudine not between 6 and 19 then
++    raise exception 'POSIZIONE_NON_VALIDA';
++  end if;
++
++  if p_origine is null or p_origine not in ('provvisoria', 'fornitore') then
++    raise exception 'ORIGINE_NON_VALIDA';
++  end if;
++
++  insert into indirizzi_immobili
++    (listing_id, via, civico, cap, citta, latitudine, longitudine, origine_posizione)
++  values
++    (p_listing, v_via, v_civico, v_cap, v_citta, p_latitudine, p_longitudine, p_origine)
++  on conflict (listing_id) do update set
++    via = excluded.via,
++    civico = excluded.civico,
++    cap = excluded.cap,
++    citta = excluded.citta,
++    latitudine = excluded.latitudine,
++    longitudine = excluded.longitudine,
++    origine_posizione = excluded.origine_posizione,
++    updated_at = now();
++end;
++$$;
++
++create or replace function public.rimuovi_indirizzo(p_listing uuid)
++returns void
++language plpgsql
++security definer
++set search_path = public
++as $$
++begin
++  if auth.uid() is null then
++    raise exception 'NON_AUTENTICATO';
++  end if;
++  if not exists (select 1 from listings where id = p_listing and owner_id = auth.uid()) then
++    raise exception 'IMMOBILE_NON_TUO';
++  end if;
++  delete from indirizzi_immobili where listing_id = p_listing;
++end;
++$$;
++
++-- ------------------------------------------------------------
++-- 3. Cosa si legge
++-- ------------------------------------------------------------
++
++-- Gli indirizzi dei MIEI immobili, per il proprietario.
++create or replace function public.indirizzi_dei_miei_immobili()
++returns table (
++  listing_id uuid,
++  via text,
++  civico text,
++  cap text,
++  citta text,
++  latitudine double precision,
++  longitudine double precision,
++  origine_posizione text
++)
++language sql
++stable
++security definer
++set search_path = public
++as $$
++  select a.listing_id, a.via, a.civico, a.cap, a.citta, a.latitudine, a.longitudine, a.origine_posizione
++    from indirizzi_immobili a
++    join listings l on l.id = a.listing_id
++   where auth.uid() is not null
++     and l.owner_id = auth.uid();
++$$;
++
++-- L'indirizzo dell'immobile di UNA candidatura: lo legge il proprietario
++-- dell'immobile, o l'inquilino SOLO se la candidatura è stata accettata. Per
++-- chiunque altro, e per una candidatura non accettata, non c'è niente: nemmeno
++-- si capisce se l'indirizzo esiste.
++create or replace function public.indirizzo_per_candidatura(p_candidatura uuid)
++returns table (
++  via text,
++  civico text,
++  cap text,
++  citta text,
++  latitudine double precision,
++  longitudine double precision,
++  origine_posizione text
++)
++language sql
++stable
++security definer
++set search_path = public
++as $$
++  select a.via, a.civico, a.cap, a.citta, a.latitudine, a.longitudine, a.origine_posizione
++    from candidature c
++    join listings l on l.id = c.listing_id
++    join indirizzi_immobili a on a.listing_id = c.listing_id
++   where auth.uid() is not null
++     and c.id = p_candidatura
++     and c.status = 'accettata'
++     and (c.tenant_id = auth.uid() or l.owner_id = auth.uid());
++$$;
++
++-- ------------------------------------------------------------
++-- Permessi
++-- ------------------------------------------------------------
++
++revoke all on function
++  public.imposta_indirizzo(uuid, text, text, text, text, double precision, double precision, text),
++  public.rimuovi_indirizzo(uuid),
++  public.indirizzi_dei_miei_immobili(),
++  public.indirizzo_per_candidatura(uuid)
++from public, anon;
++
++grant execute on function
++  public.imposta_indirizzo(uuid, text, text, text, text, double precision, double precision, text),
++  public.rimuovi_indirizzo(uuid),
++  public.indirizzi_dei_miei_immobili(),
++  public.indirizzo_per_candidatura(uuid)
++to authenticated;
++
++-- ------------------------------------------------------------
++-- Verifica
++-- ------------------------------------------------------------
++
++select routine_name from information_schema.routines
++where routine_name in ('imposta_indirizzo', 'rimuovi_indirizzo', 'indirizzi_dei_miei_immobili', 'indirizzo_per_candidatura')
++order by 1;   -- 4 righe
++
++-- devono risultare 0: nessuna policy e nessun permesso diretto sulla tabella
++select count(*) as policy_sulla_tabella from pg_policies where tablename = 'indirizzi_immobili';
++select count(*) as permessi_diretti_per_gli_utenti
++from information_schema.role_table_grants
++where table_name = 'indirizzi_immobili' and grantee in ('authenticated', 'anon');
+-- 
+2.43.0
+

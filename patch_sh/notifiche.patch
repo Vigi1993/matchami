@@ -1,0 +1,1373 @@
+From b2f2f778100705863d6ba4c89c1f82a1e0658277 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 7 Oct 2026 21:19:50 +0000
+Subject: [PATCH] feat(notifiche): notifiche dentro l'app, create dal database
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RICHIEDE LA MIGRAZIONE 0019 PRIMA DEL PUSH.
+
+Fin qui nessuno veniva avvisato di niente: l'esito di una verifica, una
+candidatura ricevuta, la risposta a una candidatura. Bisognava tornare a
+controllare.
+
+Database (0019):
+- tabella notifiche: la legge solo il destinatario; nessun utente può
+  crearle, modificarle o cancellarle (nessuna policy di scrittura e
+  revoke esplicito); le segna come lette con segna_notifiche_lette, che
+  ignora gli id altrui
+- nascono con 7 trigger, non dal codice dell'app: gli eventi passano da
+  punti diversi (decisione dello staff, candidatura, conferma di un affitto
+  da un link) e un trigger non si può dimenticare. 12 tipi: candidatura
+  ricevuta/accettata/rifiutata; immobile verificato/respinto; reddito
+  verificato/respinto; affitto verificato/respinto; rapporto
+  confermato/rifiutato; feedback ricevuto
+- una notifica che non riesce a nascere NON fa fallire l'azione principale
+  (l'errore va nel registro del database): provato con la tabella rotta
+- contengono il tipo e, al massimo, il titolo di un annuncio: mai nomi di
+  persone. Il link è un percorso interno, controllato dal vincolo
+- se la verifica del reddito decade perché la persona cambia i propri dati
+  non si notifica: lo sa già
+- crea_notifica, le funzioni dei trigger e pulisci_notifiche non sono
+  chiamabili da nessun utente
+- pulisci_notifiche (60 giorni se lette, 180 se no) esiste ma nessun lavoro
+  periodico la esegue ancora: l'informativa lo dice, e un test fa fallire
+  se il testo e la realtà divergono
+
+App:
+- pagina /notifiche e un numero sulla voce Profilo della barra (99+ oltre
+  99); riga 'Novità' in cima al Profilo di inquilini e proprietari. Un link
+  ostile non porta fuori dal sito; se segnare come letta fallisce si va
+  comunque dove porta; dopo un errore su 'Segna tutte' non si finge che sia
+  andata bene; il conteggio che fallisce non rompe la pagina
+- informativa provvisoria aggiornata (versione 2026-10-provvisoria-3: chi
+  aveva accettato la precedente deve riaccettare)
+
+Test: 210 (21 nuovi sulle notifiche, 3 sull'informativa). Un test legge i
+tipi e i link che i trigger scrivono e verifica che esistano nell'app. Circa
+100 controlli su PostgreSQL costruito da zero; 16 prove di interazione;
+pagine contro un finto Supabase. Verificati con difetti reintrodotti di
+proposito: tutti presi.
+---
+ package.json                                 |   2 +-
+ scripts/test-informativa.mjs                 |  36 ++
+ scripts/test-notifiche.mjs                   | 208 +++++++++++
+ scripts/test-rapporti.mjs                    |   1 +
+ src/app/(app)/layout.tsx                     |   9 +-
+ src/app/(app)/notifiche/NotificheLista.tsx   | 106 ++++++
+ src/app/(app)/notifiche/page.tsx             |  24 ++
+ src/app/(app)/profilo/OwnerProfiloClient.tsx |   5 +
+ src/app/(app)/profilo/ProfiloClient.tsx      |   5 +
+ src/app/(app)/profilo/page.tsx               |   9 +
+ src/app/globals.css                          |  71 ++++
+ src/components/Navigation.tsx                |  14 +-
+ src/components/RigaNovita.tsx                |  24 ++
+ src/components/icons.tsx                     |   9 +
+ src/content/informativa.ts                   |   6 +-
+ src/lib/notifiche.ts                         | 162 +++++++++
+ supabase/migrations/0019_notifiche.sql       | 358 +++++++++++++++++++
+ 17 files changed, 1043 insertions(+), 6 deletions(-)
+ create mode 100644 scripts/test-notifiche.mjs
+ create mode 100644 src/app/(app)/notifiche/NotificheLista.tsx
+ create mode 100644 src/app/(app)/notifiche/page.tsx
+ create mode 100644 src/components/RigaNovita.tsx
+ create mode 100644 src/lib/notifiche.ts
+ create mode 100644 supabase/migrations/0019_notifiche.sql
+
+diff --git a/package.json b/package.json
+index b8ddb01..76a5a9d 100644
+--- a/package.json
++++ b/package.json
+@@ -7,7 +7,7 @@
+     "build": "next build",
+     "start": "next start",
+     "lint": "eslint",
+-    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-informativa.mjs b/scripts/test-informativa.mjs
+index 09b566d..3a3f1b9 100644
+--- a/scripts/test-informativa.mjs
++++ b/scripts/test-informativa.mjs
+@@ -262,3 +262,39 @@ test("documenti: il testo dice che la verifica del reddito non è automatica e c
+   assert.match(tutto, /non è automatica/);
+   assert.match(tutto, /la verifica decade e va rifatta/);
+ });
++
++// ------------------------------------------------------------
++// Ciò che il testo dice della pulizia delle notifiche è vero
++// ------------------------------------------------------------
++
++/** Tutti i file di codice dell'app (non le migrazioni, non i test). */
++function tuttoIlCodice(dir = path.join(radice, "src")) {
++  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
++    const p = path.join(dir, e.name);
++    return e.isDirectory() ? tuttoIlCodice(p) : /\.(ts|tsx)$/.test(e.name) ? [p] : [];
++  });
++}
++
++test("notifiche: il testo dice che la pulizia non è attiva solo finché nessuno la esegue", () => {
++  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
++  const dice_non_attiva = /pulizia non è ancora attiva/.test(tutto);
++  const qualcunoLaChiama = tuttoIlCodice().some((f) => fs.readFileSync(f, "utf8").includes("pulisci_notifiche"));
++  assert.equal(dice_non_attiva, !qualcunoLaChiama,
++    dice_non_attiva
++      ? "il testo dice che la pulizia non è attiva, ma un codice la chiama: aggiorna il testo"
++      : "il testo non dice che la pulizia non è attiva, ma nessun codice la esegue: o la si attiva, o lo si dice");
++});
++
++test("notifiche: i tempi scritti nel testo sono quelli della funzione del database", () => {
++  const sqlN = fs.readFileSync(path.join(migrazioni, "0019_notifiche.sql"), "utf8");
++  assert.match(sqlN, /letta_at < now\(\) - interval '60 days'/);
++  assert.match(sqlN, /created_at < now\(\) - interval '180 days'/);
++  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
++  assert.match(tutto, /60 giorni se lette e dopo 180 se non lette/);
++});
++
++test("notifiche: il testo le nomina e dice che non contengono nomi di persone", () => {
++  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
++  assert.match(tutto, /notifiche sulle novità del tuo account/);
++  assert.match(tutto, /mai nomi di persone/);
++});
+diff --git a/scripts/test-notifiche.mjs b/scripts/test-notifiche.mjs
+new file mode 100644
+index 0000000..234f473
+--- /dev/null
++++ b/scripts/test-notifiche.mjs
+@@ -0,0 +1,208 @@
++/**
++ * Test delle notifiche (src/lib/notifiche.ts). Si lancia con:   npm test
++ *
++ * Oltre ai testi, tengono allineati l'app e la migrazione 0019: i tipi,
++ * i link che i trigger scrivono, e che ogni tipo abbia chi lo produce.
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const n = caricaTs(path.join(radice, "src", "lib", "notifiche.ts"));
++const sql = fs.readFileSync(path.join(radice, "supabase", "migrations", "0019_notifiche.sql"), "utf8");
++
++/** I tipi che il vincolo sulla tabella ammette. */
++function tipiDelDatabase() {
++  const m = sql.match(/tipo text not null check \(tipo in \(([\s\S]*?)\)\),/);
++  assert.ok(m, "non trovo il vincolo sui tipi");
++  return [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
++}
++
++/** Il corpo di tutte le funzioni dei trigger (tutto ciò che sta dopo la sezione 4). */
++const trigger = sql.slice(sql.indexOf("-- 4. I trigger"), sql.indexOf("-- 5. Pulizia"));
++
++// ------------------------------------------------------------
++// I tipi
++// ------------------------------------------------------------
++
++test("tipi: quelli dell'app sono quelli del database", () => {
++  assert.deepEqual([...n.TIPI_NOTIFICA].sort(), tipiDelDatabase().sort());
++});
++
++test("tipi: ogni tipo ha un trigger che lo produce", () => {
++  for (const t of tipiDelDatabase()) {
++    assert.ok(trigger.includes(`'${t}'`), `nessun trigger produce «${t}»`);
++  }
++});
++
++test("tipi: i trigger non producono tipi che il database rifiuterebbe", () => {
++  const ammessi = new Set(tipiDelDatabase());
++  const usati = new Set([
++    ...[...trigger.matchAll(/crea_notifica\([^,]+,\s*'([a-z_]+)'/g)].map((m) => m[1]),
++    ...[...trigger.matchAll(/v_tipo := '([a-z_]+)'/g)].map((m) => m[1]),
++  ]);
++  assert.ok(usati.size >= 10, `trovati solo ${usati.size} tipi nei trigger`);
++  for (const t of usati) assert.ok(ammessi.has(t), `un trigger scrive «${t}», che il vincolo non ammette`);
++});
++
++// ------------------------------------------------------------
++// I link
++// ------------------------------------------------------------
++
++/** Dove porta ogni percorso, e il file che lo serve. */
++const ROTTE = {
++  "/": ["src", "app", "(app)", "page.tsx"],
++  "/database": ["src", "app", "(app)", "database", "page.tsx"],
++  "/candidature": ["src", "app", "(app)", "candidature", "page.tsx"],
++  "/profilo": ["src", "app", "(app)", "profilo", "page.tsx"],
++  "/gestione-affitti": ["src", "app", "(app)", "gestione-affitti", "page.tsx"],
++  "/chat/": ["src", "app", "chat", "[id]", "page.tsx"],
++};
++
++test("link: ogni percorso che i trigger scrivono esiste nell'app", () => {
++  const letterali = new Set([
++    ...[...trigger.matchAll(/'(\/[A-Za-z0-9\-/]*)'/g)].map((m) => m[1]),
++    ...[...trigger.matchAll(/'(\/chat\/)' \|\|/g)].map((m) => m[1]),
++  ]);
++  assert.ok(letterali.size >= 5, `trovati solo ${[...letterali]}`);
++  for (const l of letterali) {
++    const file = ROTTE[l];
++    assert.ok(file, `il trigger porta a «${l}», che non è nella mappa delle rotte: aggiorna il test e controlla che esista`);
++    assert.ok(fs.existsSync(path.join(radice, ...file)), `la rotta «${l}» non esiste: ${file.join("/")}`);
++  }
++});
++
++test("link: sono tutti percorsi interni che il filtro lascia passare", () => {
++  for (const l of ["/", "/database", "/candidature", "/profilo", "/gestione-affitti", "/chat/c1111111-1111-1111-1111-111111111111"]) {
++    assert.equal(n.linkNotifica({ link: l }), l);
++  }
++});
++
++test("link: un link ostile non porta fuori dal sito", () => {
++  for (const l of ["https://evil.com", "//evil.com", "@evil.com", "/\\evil.com", "javascript:alert(1)", "", "evil", "/a\nb"]) {
++    assert.equal(n.linkNotifica({ link: l }), "/", JSON.stringify(l));
++  }
++});
++
++// ------------------------------------------------------------
++// I testi
++// ------------------------------------------------------------
++
++test("testi: ogni tipo ha un titolo e un testo suoi, mai la formula generica", () => {
++  const generico = n.descriviNotifica("tipo_inesistente", {});
++  const visti = new Set();
++  for (const t of n.TIPI_NOTIFICA) {
++    const d = n.descriviNotifica(t, { titolo: "Casa" });
++    assert.ok(d.titolo.trim() && d.testo.trim(), t);
++    assert.notEqual(d.titolo, generico.titolo, `«${t}» usa il titolo generico`);
++    assert.ok(!/undefined|null|\[object/.test(d.titolo + d.testo), `${t}: ${d.testo}`);
++    assert.ok(!visti.has(d.titolo), `due tipi con lo stesso titolo: ${d.titolo}`);
++    visti.add(d.titolo);
++  }
++});
++
++test("testi: un tipo sconosciuto non rompe niente", () => {
++  const d = n.descriviNotifica("nuovo_tipo_di_domani", { x: 1 });
++  assert.equal(d.titolo, "Novità");
++  assert.ok(d.testo.length > 0);
++});
++
++test("testi: il titolo dell'annuncio compare tra virgolette, o c'è una formula neutra", () => {
++  assert.match(n.descriviNotifica("candidatura_ricevuta", { titolo: "Bilocale Isola" }).testo, /«Bilocale Isola»/);
++  assert.match(n.descriviNotifica("candidatura_ricevuta", {}).testo, /un tuo annuncio/);
++  assert.match(n.descriviNotifica("candidatura_ricevuta", null).testo, /un tuo annuncio/);
++  assert.match(n.descriviNotifica("candidatura_ricevuta", { titolo: "   " }).testo, /un tuo annuncio/);
++  assert.match(n.descriviNotifica("candidatura_ricevuta", { titolo: 42 }).testo, /un tuo annuncio/);
++  assert.match(n.descriviNotifica("immobile_verificato", { titolo: " Casa " }).testo, /«Casa»/);
++});
++
++test("testi: un titolo con codice dentro resta testo, non viene interpretato", () => {
++  const t = '<img src=x onerror="alert(1)">';
++  assert.ok(n.descriviNotifica("candidatura_ricevuta", { titolo: t }).testo.includes(t));
++});
++
++test("testi: chi decide una candidatura non presume il genere di nessuno", () => {
++  for (const tipo of n.TIPI_NOTIFICA) {
++    const d = n.descriviNotifica(tipo, { titolo: "Casa" });
++    const testo = d.testo + " " + d.titolo;
++    assert.ok(!/\b(lui|lei|candidato|iscritto|iscritta)\b/i.test(testo), `${tipo}: ${d.testo}`);
++    // «candidata» va bene solo come accordo con «persona» (Una persona si è candidata): mai da sola
++    for (const m of testo.matchAll(/\bcandidata\b/gi)) {
++      assert.match(testo.slice(Math.max(0, m.index - 20), m.index), /persona si è $/, `${tipo}: ${d.testo}`);
++    }
++  }
++});
++
++test("testi: il controllo sul genere sa fermare un testo che lo presume", () => {
++  const sbagliati = ["Lui si è candidato.", "Il candidato ha risposto.", "Lei ha accettato.", "Sei stato iscritto.", "Una candidata ha scritto."];
++  for (const t of sbagliati) {
++    const ferma = /\b(lui|lei|candidato|iscritto|iscritta)\b/i.test(t) || /(?<!persona si è )\bcandidata\b/i.test(t);
++    assert.ok(ferma, `non ha fermato: ${t}`);
++  }
++  assert.ok(!(/\b(lui|lei|candidato|iscritto|iscritta)\b/i.test("Una persona si è candidata a «Casa».") || /(?<!persona si è )\bcandidata\b/i.test("Una persona si è candidata a «Casa».")));
++});
++
++test("testi: la notifica di rifiuto e di feedback non rivela il contenuto", () => {
++  // il motivo e il voto si leggono nell'app, dove si vede chi è la persona
++  const rif = n.descriviNotifica("candidatura_rifiutata", { titolo: "Casa", motivo: "reddito_basso" }).testo;
++  assert.ok(!/reddito_basso|reddito/.test(rif), rif);
++  const fb = n.descriviNotifica("feedback_ricevuto", { voto: 1, tag: ["x"] }).testo;
++  assert.ok(!/\b1\b|voto/.test(fb), fb);
++});
++
++// ------------------------------------------------------------
++// Tempo e conteggi
++// ------------------------------------------------------------
++
++const ORA = Date.parse("2026-10-07T12:00:00Z");
++const fa = (ms) => new Date(ORA - ms).toISOString();
++const MIN = 60000, H = 3600000, G = 86400000;
++
++test("tempo: adesso, minuti, ore, ieri, giorni, data", () => {
++  assert.equal(n.trascorso(fa(0), ORA), "adesso");
++  assert.equal(n.trascorso(fa(59 * 1000), ORA), "adesso");
++  assert.equal(n.trascorso(fa(1 * MIN), ORA), "1 min fa");
++  assert.equal(n.trascorso(fa(59 * MIN), ORA), "59 min fa");
++  assert.equal(n.trascorso(fa(60 * MIN), ORA), "1 ora fa");
++  assert.equal(n.trascorso(fa(5 * H), ORA), "5 ore fa");
++  assert.equal(n.trascorso(fa(23 * H + 59 * MIN), ORA), "23 ore fa");
++  assert.equal(n.trascorso(fa(24 * H), ORA), "ieri");
++  assert.equal(n.trascorso(fa(47 * H), ORA), "ieri");
++  assert.equal(n.trascorso(fa(3 * G), ORA), "3 giorni fa");
++  assert.equal(n.trascorso(fa(6 * G), ORA), "6 giorni fa");
++  assert.match(n.trascorso(fa(7 * G), ORA), /^\d{1,2} \p{L}+$/u);
++  assert.equal(n.trascorso("2026-09-29T12:00:00Z", ORA), "29 settembre");
++});
++
++test("tempo: una data nel futuro o illeggibile non produce frasi strane", () => {
++  assert.equal(n.trascorso(fa(-10 * MIN), ORA), "adesso");
++  assert.equal(n.trascorso("boh", ORA), "");
++  assert.equal(n.trascorso("", ORA), "");
++});
++
++test("conteggio: niente per zero, il numero fino a 99, poi 99+", () => {
++  assert.equal(n.etichettaConteggio(0), "");
++  assert.equal(n.etichettaConteggio(-3), "");
++  assert.equal(n.etichettaConteggio(NaN), "");
++  assert.equal(n.etichettaConteggio(Infinity), "");
++  assert.equal(n.etichettaConteggio(1), "1");
++  assert.equal(n.etichettaConteggio(99), "99");
++  assert.equal(n.etichettaConteggio(100), "99+");
++  assert.equal(n.etichettaConteggio(5000), "99+");
++  assert.equal(n.etichettaConteggio(3.7), "3");
++});
++
++test("conteggio: le non lette si contano dalla data di lettura", () => {
++  const e = [{ letta_at: null }, { letta_at: "2026-10-07T10:00:00Z" }, { letta_at: null }];
++  assert.equal(n.contaNonLette(e), 2);
++  assert.equal(n.contaNonLette([]), 0);
++});
++
++test("riga del profilo: singolare, plurale e nessuna", () => {
++  assert.equal(n.sottotitoloNovita(0), "Nessuna novità da leggere.");
++  assert.equal(n.sottotitoloNovita(-1), "Nessuna novità da leggere.");
++  assert.equal(n.sottotitoloNovita(1), "Hai 1 novità da leggere.");
++  assert.equal(n.sottotitoloNovita(7), "Hai 7 novità da leggere.");
++});
+diff --git a/scripts/test-rapporti.mjs b/scripts/test-rapporti.mjs
+index 905f578..c098160 100644
+--- a/scripts/test-rapporti.mjs
++++ b/scripts/test-rapporti.mjs
+@@ -214,6 +214,7 @@ test("i testi dei rapporti non presumono il genere di nessuno", () => {
+     "src/app/invito/[token]/InvitoClient.tsx",
+     "src/components/VerificaRedditoPanel.tsx", "src/components/SelettoreFile.tsx",
+     "src/lib/verifica-inquilino.ts", "src/content/informativa.ts",
++    "src/lib/notifiche.ts", "src/components/RigaNovita.tsx", "src/app/(app)/notifiche/NotificheLista.tsx",
+     "src/app/staff/inquilini/[id]/page.tsx", "src/app/staff/inquilini/[id]/EsitoInquilinoForm.tsx",
+   ].map((f) => path.join(radice, f));
+   // tutte le pagine e i moduli delle cartelle nuove, compresi i sottolivelli
+diff --git a/src/app/(app)/layout.tsx b/src/app/(app)/layout.tsx
+index d990009..64f5374 100644
+--- a/src/app/(app)/layout.tsx
++++ b/src/app/(app)/layout.tsx
+@@ -28,6 +28,13 @@ export default async function AppLayout({
+ 
+   const ruolo = profile?.ruolo ?? "inquilino";
+ 
++  // Quante novità non sono state lette. Se la domanda non riesce, si mostra
++  // zero: un numero che manca è meglio di una pagina che non si apre.
++  const { count } = await supabase
++    .from("notifiche")
++    .select("id", { count: "exact", head: true })
++    .is("letta_at", null);
++
+   /*
+     Come nel prototipo: un unico "telaio" da 480px centrato, alto quanto
+     la viewport e senza scroll di pagina. Dentro, l'area delle schermate
+@@ -36,7 +43,7 @@ export default async function AppLayout({
+   return (
+     <div className="app-shell">
+       <div className="screens">{children}</div>
+-      <Navigation ruolo={ruolo} nome={profile?.nome} />
++      <Navigation ruolo={ruolo} nome={profile?.nome} nonLette={count ?? 0} />
+     </div>
+   );
+ }
+diff --git a/src/app/(app)/notifiche/NotificheLista.tsx b/src/app/(app)/notifiche/NotificheLista.tsx
+new file mode 100644
+index 0000000..8ec158a
+--- /dev/null
++++ b/src/app/(app)/notifiche/NotificheLista.tsx
+@@ -0,0 +1,106 @@
++"use client";
++
++import { useState } from "react";
++import { useRouter } from "next/navigation";
++import { createClient } from "@/lib/supabase/client";
++import {
++  contaNonLette,
++  descriviNotifica,
++  linkNotifica,
++  trascorso,
++  type Notifica,
++} from "@/lib/notifiche";
++
++/**
++ * L'elenco delle novità. Le notifiche le crea il database; qui si leggono,
++ * si segnano come lette e si segue il link.
++ */
++export function NotificheLista({ notifiche }: { notifiche: Notifica[] }) {
++  const router = useRouter();
++  const [elenco, setElenco] = useState(notifiche);
++  const [errore, setErrore] = useState<string | null>(null);
++  const [inCorso, setInCorso] = useState(false);
++
++  const nonLette = contaNonLette(elenco);
++
++  function segnaLocalmente(ids: string[] | null) {
++    const adesso = new Date().toISOString();
++    setElenco((prec) =>
++      prec.map((n) => (!n.letta_at && (ids === null || ids.includes(n.id)) ? { ...n, letta_at: adesso } : n))
++    );
++  }
++
++  async function apri(n: Notifica) {
++    setErrore(null);
++    if (!n.letta_at) {
++      // Se segnare come letta non riesce, si va comunque dove porta: la
++      // novità è più importante del suo stato.
++      await createClient().rpc("segna_notifiche_lette", { p_ids: [n.id] });
++      segnaLocalmente([n.id]);
++      // il numero sulla barra lo calcola il server: va ricaricato
++      router.refresh();
++    }
++    router.push(linkNotifica(n));
++  }
++
++  async function segnaTutte() {
++    setErrore(null);
++    setInCorso(true);
++    try {
++      const { error } = await createClient().rpc("segna_notifiche_lette", { p_ids: null });
++      if (error) {
++        setErrore("Non è stato possibile aggiornare le novità. Riprova.");
++        return;
++      }
++      segnaLocalmente(null);
++      router.refresh();
++    } finally {
++      setInCorso(false);
++    }
++  }
++
++  return (
++    <div>
++      {nonLette > 0 && (
++        <button type="button" className="redo-link" disabled={inCorso} onClick={segnaTutte} style={{ marginBottom: 12 }}>
++          {inCorso ? "Aggiorno..." : "Segna tutte come lette"}
++        </button>
++      )}
++
++      {errore && <p className="note-error">{errore}</p>}
++
++      {elenco.length === 0 ? (
++        <div className="note-box" style={{ marginTop: 0 }}>
++          <b>Nessuna novità.</b> Qui trovi gli esiti delle verifiche, le risposte alle candidature e
++          gli altri avvisi sul tuo account.
++        </div>
++      ) : (
++        <ul className="notifiche-lista">
++          {elenco.map((n) => {
++            const d = descriviNotifica(n.tipo, n.dati);
++            const nuova = !n.letta_at;
++            return (
++              <li key={n.id}>
++                <button
++                  type="button"
++                  className={`notifica ${nuova ? "nuova" : ""}`}
++                  onClick={() => apri(n)}
++                >
++                  {nuova && <span className="pallino" aria-hidden />}
++                  <span className="notifica-corpo">
++                    <span className="notifica-titolo">
++                      {nuova && <span className="sr-only">Nuova. </span>}
++                      {d.titolo}
++                    </span>
++                    <span className="notifica-testo">{d.testo}</span>
++                    <span className="notifica-tempo">{trascorso(n.created_at)}</span>
++                  </span>
++                </button>
++              </li>
++            );
++          })}
++        </ul>
++      )}
++    </div>
++  );
++}
+diff --git a/src/app/(app)/notifiche/page.tsx b/src/app/(app)/notifiche/page.tsx
+new file mode 100644
+index 0000000..d13e1de
+--- /dev/null
++++ b/src/app/(app)/notifiche/page.tsx
+@@ -0,0 +1,24 @@
++import { createClient } from "@/lib/supabase/server";
++import { PageContainer } from "@/components/ui/PageContainer";
++import type { Notifica } from "@/lib/notifiche";
++import { NotificheLista } from "./NotificheLista";
++
++export default async function NotifichePage() {
++  const supabase = await createClient();
++
++  // Le ultime 50: la pulizia periodica toglie quelle vecchie, e non serve
++  // scorrere all'infinito. La sicurezza del database fa vedere solo le proprie.
++  const { data } = await supabase
++    .from("notifiche")
++    .select("id, tipo, dati, link, letta_at, created_at")
++    .order("created_at", { ascending: false })
++    .limit(50);
++
++  return (
++    <PageContainer>
++      <h1 className="screen-title">Novità</h1>
++      <p className="screen-sub">Gli esiti delle verifiche e le risposte che ti riguardano.</p>
++      <NotificheLista notifiche={(data ?? []) as Notifica[]} />
++    </PageContainer>
++  );
++}
+diff --git a/src/app/(app)/profilo/OwnerProfiloClient.tsx b/src/app/(app)/profilo/OwnerProfiloClient.tsx
+index c188b58..0c258c7 100644
+--- a/src/app/(app)/profilo/OwnerProfiloClient.tsx
++++ b/src/app/(app)/profilo/OwnerProfiloClient.tsx
+@@ -1,5 +1,6 @@
+ "use client";
+ 
++import { RigaNovita } from "@/components/RigaNovita";
+ import { useActionState, useEffect, useState } from "react";
+ import { Sheet } from "@/components/Sheet";
+ import type { OwnerProfile } from "@/lib/types";
+@@ -31,6 +32,7 @@ const OBIETTIVO_VOCAB = [
+ ];
+ 
+ export function OwnerProfiloClient({
++  nonLette,
+   nome,
+   cognome,
+   email,
+@@ -38,6 +40,8 @@ export function OwnerProfiloClient({
+   consensoMarketingIniziale,
+   consensoTerziIniziale,
+ }: {
++  /** le novità non ancora lette */
++  nonLette: number;
+   nome: string | null;
+   cognome: string | null;
+   email: string | null;
+@@ -62,6 +66,7 @@ export function OwnerProfiloClient({
+       </div>
+ 
+       <div className="card-grid">
++        <RigaNovita nonLette={nonLette} />
+         <Row
+           color="var(--ink)"
+           icon={<IconPersona className="fill-none stroke-white stroke-2" />}
+diff --git a/src/app/(app)/profilo/ProfiloClient.tsx b/src/app/(app)/profilo/ProfiloClient.tsx
+index e6b5b7d..ca8539c 100644
+--- a/src/app/(app)/profilo/ProfiloClient.tsx
++++ b/src/app/(app)/profilo/ProfiloClient.tsx
+@@ -1,5 +1,6 @@
+ "use client";
+ 
++import { RigaNovita } from "@/components/RigaNovita";
+ import { rigaProfilo } from "@/lib/verifica-inquilino";
+ import { useActionState, useState } from "react";
+ import { Sheet } from "@/components/Sheet";
+@@ -32,6 +33,8 @@ import {
+ } from "@/components/icons";
+ 
+ type Props = {
++  /** le novità non ancora lette */
++  nonLette: number;
+   /** gli affitti dichiarati e confermati, costruiti dal server */
+   affittiPanel: React.ReactNode;
+   /** il pannello per verificare il reddito con i documenti, costruito dal server */
+@@ -50,6 +53,7 @@ type Props = {
+ };
+ 
+ export function ProfiloClient({
++  nonLette,
+   nome,
+   cognome,
+   email,
+@@ -145,6 +149,7 @@ export function ProfiloClient({
+       </div>
+ 
+       <div className="card-grid">
++        <RigaNovita nonLette={nonLette} />
+         {/* I tuoi dati */}
+         <Row
+           color="var(--ink)"
+diff --git a/src/app/(app)/profilo/page.tsx b/src/app/(app)/profilo/page.tsx
+index 26b2857..20c88bc 100644
+--- a/src/app/(app)/profilo/page.tsx
++++ b/src/app/(app)/profilo/page.tsx
+@@ -13,6 +13,13 @@ export default async function ProfiloPage() {
+     data: { user },
+   } = await supabase.auth.getUser();
+ 
++  // le novità non lette, per la riga «Novità» in cima al profilo
++  const { count: nonLetteCount } = await supabase
++    .from("notifiche")
++    .select("id", { count: "exact", head: true })
++    .is("letta_at", null);
++  const nonLette = nonLetteCount ?? 0;
++
+   const { data: profile } = await supabase
+     .from("profiles")
+     .select("nome, cognome, ruolo, consenso_marketing, consenso_terzi")
+@@ -28,6 +35,7 @@ export default async function ProfiloPage() {
+ 
+     return (
+       <OwnerProfiloClient
++        nonLette={nonLette}
+         nome={profile?.nome ?? null}
+         cognome={profile?.cognome ?? null}
+         email={user!.email ?? null}
+@@ -79,6 +87,7 @@ export default async function ProfiloPage() {
+ 
+   return (
+     <ProfiloClient
++      nonLette={nonLette}
+       nome={profile?.nome ?? null}
+       cognome={profile?.cognome ?? null}
+       email={user!.email ?? null}
+diff --git a/src/app/globals.css b/src/app/globals.css
+index e4562c0..3cd85ba 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -2613,3 +2613,74 @@ mark.segnaposto {
+   background: rgba(201, 105, 78, 0.12);
+   color: var(--ink);
+ }
++
++/* ============================================================
++   Notifiche
++   ============================================================ */
++
++.tab-icona {
++  position: relative;
++  display: inline-flex;
++}
++.tab-icona .tab-badge {
++  top: -7px;
++  right: -12px;
++}
++
++.notifiche-lista {
++  list-style: none;
++  margin: 0;
++  padding: 0;
++  display: flex;
++  flex-direction: column;
++  gap: 8px;
++}
++.notifica {
++  -webkit-appearance: none;
++  appearance: none;
++  width: 100%;
++  display: flex;
++  align-items: flex-start;
++  gap: 10px;
++  text-align: left;
++  cursor: pointer;
++  background: #fff;
++  border: 1px solid rgba(16, 21, 26, 0.1);
++  border-radius: 14px;
++  padding: 12px 14px;
++  color: var(--ink);
++}
++.notifica.nuova {
++  border-color: var(--clay);
++  background: rgba(201, 105, 78, 0.07);
++}
++.notifica .pallino {
++  flex-shrink: 0;
++  width: 9px;
++  height: 9px;
++  margin-top: 5px;
++  border-radius: 999px;
++  background: var(--clay);
++}
++.notifica-corpo {
++  display: flex;
++  flex-direction: column;
++  gap: 3px;
++  min-width: 0;
++}
++.notifica-titolo {
++  font-size: 14px;
++  font-weight: 600;
++}
++.notifica:not(.nuova) .notifica-titolo {
++  font-weight: 500;
++}
++.notifica-testo {
++  font-size: 13px;
++  line-height: 1.45;
++  color: var(--ink-soft);
++}
++.notifica-tempo {
++  font-size: 11px;
++  color: var(--muted);
++}
+diff --git a/src/components/Navigation.tsx b/src/components/Navigation.tsx
+index e32066a..6fccc95 100644
+--- a/src/components/Navigation.tsx
++++ b/src/components/Navigation.tsx
+@@ -2,6 +2,7 @@
+ 
+ import Link from "next/link";
+ import { usePathname } from "next/navigation";
++import { etichettaConteggio } from "@/lib/notifiche";
+ import {
+   IconCasa,
+   IconChat,
+@@ -34,13 +35,17 @@ const OWNER_TABS: Tab[] = [
+ 
+ export function Navigation({
+   ruolo,
++  nonLette = 0,
+ }: {
+   ruolo: string;
++  /** Le novità non ancora lette: se ce ne sono, un numero sulla voce Profilo. */
++  nonLette?: number;
+   /** Non più mostrato in barra: il nome resta nella schermata Profilo. */
+   nome?: string | null;
+ }) {
+   const pathname = usePathname();
+   const tabs = ruolo === "proprietario" ? OWNER_TABS : TENANT_TABS;
++  const etichetta = etichettaConteggio(nonLette);
+ 
+   return (
+     <nav className="tabbar">
+@@ -56,7 +61,14 @@ export function Navigation({
+             href={href}
+             className={`tab-btn ${active ? "active" : ""}`}
+           >
+-            <Icon />
++            <span className="tab-icona">
++              <Icon />
++              {href === "/profilo" && etichetta !== "" && (
++                <span className="tab-badge" role="status" aria-label={`${etichetta} novità da leggere`}>
++                  {etichetta}
++                </span>
++              )}
++            </span>
+             <span className="tab-label">{label}</span>
+           </Link>
+         );
+diff --git a/src/components/RigaNovita.tsx b/src/components/RigaNovita.tsx
+new file mode 100644
+index 0000000..b7216ac
+--- /dev/null
++++ b/src/components/RigaNovita.tsx
+@@ -0,0 +1,24 @@
++"use client";
++
++import { useRouter } from "next/navigation";
++import { Row } from "@/components/ui/Row";
++import { IconCampana } from "@/components/icons";
++import { sottotitoloNovita } from "@/lib/notifiche";
++
++/**
++ * La riga «Novità» in cima al Profilo, per inquilini e proprietari: apre
++ * la pagina con l'elenco delle notifiche.
++ */
++export function RigaNovita({ nonLette }: { nonLette: number }) {
++  const router = useRouter();
++  return (
++    <Row
++      color={nonLette > 0 ? "var(--clay)" : "var(--ink-soft)"}
++      icon={<IconCampana className="fill-none stroke-white stroke-2" />}
++      title="Novità"
++      subtitle={sottotitoloNovita(nonLette)}
++      cta="Vedi le novità"
++      onClick={() => router.push("/notifiche")}
++    />
++  );
++}
+diff --git a/src/components/icons.tsx b/src/components/icons.tsx
+index c13ad22..ce0205b 100644
+--- a/src/components/icons.tsx
++++ b/src/components/icons.tsx
+@@ -171,3 +171,12 @@ export function IconCheck({ className }: IconProps) {
+     </svg>
+   );
+ }
++
++export function IconCampana({ className }: IconProps) {
++  return (
++    <svg viewBox="0 0 24 24" className={className} aria-hidden>
++      <path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z" />
++      <path d="M10 20.5a2 2 0 0 0 4 0" />
++    </svg>
++  );
++}
+diff --git a/src/content/informativa.ts b/src/content/informativa.ts
+index 00dee56..bfcf0cd 100644
+--- a/src/content/informativa.ts
++++ b/src/content/informativa.ts
+@@ -28,7 +28,7 @@ export const INFORMATIVA = {
+    * controllo che fa il database (migrazione 0017): un test fallisce se
+    * questa stringa non lo supera.
+    */
+-  versione: "2026-10-provvisoria-2",
++  versione: "2026-10-provvisoria-3",
+   provvisoria: true,
+   titolo: "Informativa sulla privacy",
+   aggiornata: "ottobre 2026",
+@@ -54,7 +54,7 @@ export const INFORMATIVA = {
+         "Se sei inquilino: lavoro, reddito tuo e del tuo nucleo, garante, fideiussione, protesti (li dichiari tu e non vengono verificati), animali, composizione del nucleo, numero di figli, presentazione, foto del profilo e le tue preferenze di ricerca (budget, zone, locali, metri, caratteristiche).",
+         "Se sei proprietario: tipo di proprietario, numero di immobili, obiettivo; gli annunci con titolo, descrizione, zona, prezzo, caratteristiche e foto; i criteri che chiedi ai candidati.",
+         "Per le verifiche: il documento d'identità e la prova di proprietà dell'immobile (proprietari); se sei inquilino e chiedi di verificare il reddito, un documento d'identità e una prova del reddito (una busta paga, la CU o la dichiarazione dei redditi); e i contratti di affitto caricati per dichiarare un affitto. Non chiediamo lo stato di famiglia.",
+-        "Mentre usi l'app: candidature, messaggi, contratti, recensioni, richieste di conferma di un affitto e inviti.",
++        "Mentre usi l'app: candidature, messaggi, contratti, recensioni, richieste di conferma di un affitto e inviti. Inoltre le notifiche sulle novità del tuo account (per esempio l'esito di una verifica o la risposta a una candidatura): contengono il tipo di evento e, al massimo, il titolo di un annuncio, mai nomi di persone.",
+         "Dati di un'altra persona: se inviti il tuo proprietario, scrivi il suo nome e, se vuoi, la sua email.",
+       ],
+     },
+@@ -93,7 +93,7 @@ export const INFORMATIVA = {
+     {
+       titolo: "Per quanto tempo conserviamo i dati",
+       paragrafi: [
+-        "Al momento non c'è una scadenza automatica: una candidatura, un messaggio, un invito o un documento restano finché non cancelli l'account. Un documento caricato per la verifica del reddito puoi toglierlo tu, ma solo finché non hai inviato la richiesta. I tempi di conservazione saranno definiti nel testo definitivo.",
++        "Al momento non c'è una scadenza automatica: una candidatura, un messaggio, un invito o un documento restano finché non cancelli l'account. Un documento caricato per la verifica del reddito puoi toglierlo tu, ma solo finché non hai inviato la richiesta. Le notifiche sono pensate per sparire dopo 60 giorni se lette e dopo 180 se non lette, ma questa pulizia non è ancora attiva. I tempi di conservazione saranno definiti nel testo definitivo.",
+       ],
+     },
+     {
+diff --git a/src/lib/notifiche.ts b/src/lib/notifiche.ts
+new file mode 100644
+index 0000000..3f8bf25
+--- /dev/null
++++ b/src/lib/notifiche.ts
+@@ -0,0 +1,162 @@
++/**
++ * Le notifiche dentro l'app: che testo mostrare per ogni evento, dove porta,
++ * da quanto tempo è arrivata. Logica pura, senza database: si prova con
++ * `npm test`.
++ *
++ * Le notifiche NASCONO nel database (trigger della migrazione 0019). Il database
++ * salva solo il tipo e, al massimo, il titolo di un annuncio; il testo si
++ * compone qui, così le parole si possono cambiare senza toccare i dati.
++ */
++import { percorsoInterno } from "./percorso";
++
++/** Gli stessi tipi del vincolo sulla tabella `notifiche`: un test li tiene allineati. */
++export const TIPI_NOTIFICA = [
++  "candidatura_ricevuta",
++  "candidatura_accettata",
++  "candidatura_rifiutata",
++  "immobile_verificato",
++  "immobile_respinto",
++  "reddito_verificato",
++  "reddito_respinto",
++  "affitto_verificato",
++  "affitto_respinto",
++  "rapporto_confermato",
++  "rapporto_rifiutato",
++  "feedback_ricevuto",
++] as const;
++
++export type TipoNotifica = (typeof TIPI_NOTIFICA)[number];
++
++export type Notifica = {
++  id: string;
++  tipo: string;
++  dati: Record<string, unknown> | null;
++  link: string;
++  letta_at: string | null;
++  created_at: string;
++};
++
++export type TestoNotifica = { titolo: string; testo: string };
++
++/** Il titolo di un annuncio tra virgolette, o una formula neutra se manca. */
++function annuncio(dati: Record<string, unknown> | null, senza: string): string {
++  const t = dati && typeof dati.titolo === "string" ? dati.titolo.trim() : "";
++  return t ? `«${t}»` : senza;
++}
++
++/**
++ * Cosa dire per un tipo di notifica. Un tipo sconosciuto (per esempio uno
++ * aggiunto dal database prima che il codice lo conosca) non rompe la pagina:
++ * si mostra una formula generica.
++ */
++export function descriviNotifica(
++  tipo: string,
++  dati: Record<string, unknown> | null
++): TestoNotifica {
++  switch (tipo) {
++    case "candidatura_ricevuta":
++      return {
++        titolo: "Nuova candidatura",
++        testo: `Una persona si è candidata a ${annuncio(dati, "un tuo annuncio")}.`,
++      };
++    case "candidatura_accettata":
++      return {
++        titolo: "Candidatura accettata",
++        testo: `Il proprietario di ${annuncio(dati, "un annuncio")} ha accettato la tua candidatura: ora puoi scrivere in chat.`,
++      };
++    case "candidatura_rifiutata":
++      return {
++        titolo: "Candidatura non accettata",
++        testo: `La tua candidatura per ${annuncio(dati, "un annuncio")} non è stata accettata. Nella scheda trovi il motivo.`,
++      };
++    case "immobile_verificato":
++      return {
++        titolo: "Immobile verificato",
++        testo: `${annuncio(dati, "Il tuo immobile")} è verificato: ora è visibile agli inquilini e può ricevere candidature.`,
++      };
++    case "immobile_respinto":
++      return {
++        titolo: "Verifica dell'immobile non riuscita",
++        testo: `La verifica di ${annuncio(dati, "un tuo immobile")} non è andata a buon fine. Leggi la nota e invia di nuovo.`,
++      };
++    case "reddito_verificato":
++      return {
++        titolo: "Reddito verificato",
++        testo: "I proprietari ora vedono «Reddito verificato» accanto al tuo nome.",
++      };
++    case "reddito_respinto":
++      return {
++        titolo: "Verifica del reddito non riuscita",
++        testo: "Leggi la nota nel Profilo, correggi i documenti e invia di nuovo.",
++      };
++    case "affitto_verificato":
++      return {
++        titolo: "Affitto verificato",
++        testo: "Abbiamo verificato l'affitto dichiarato: il proprietario può ora lasciare un feedback.",
++      };
++    case "affitto_respinto":
++      return {
++        titolo: "Affitto non verificato",
++        testo: "Non è stato possibile verificare l'affitto dichiarato. Trovi la nota nella sezione degli affitti.",
++      };
++    case "rapporto_confermato":
++      return {
++        titolo: "Affitto confermato",
++        testo: "L'altra persona ha confermato l'affitto che hai dichiarato: ora lo controlliamo.",
++      };
++    case "rapporto_rifiutato":
++      return {
++        titolo: "Affitto non confermato",
++        testo: "L'altra persona non ha confermato l'affitto che hai dichiarato.",
++      };
++    case "feedback_ricevuto":
++      return {
++        titolo: "Nuovo feedback",
++        testo: "Un proprietario ha lasciato un feedback su di te.",
++      };
++    default:
++      return { titolo: "Novità", testo: "C'è una novità nel tuo account." };
++  }
++}
++
++/** Dove porta una notifica. Mai fuori dal sito, qualunque cosa ci sia nei dati. */
++export function linkNotifica(n: Pick<Notifica, "link">): string {
++  return percorsoInterno(n.link, "/");
++}
++
++/**
++ * Da quanto tempo è arrivata, in italiano. `ora` si può passare per provarla.
++ * Una data illeggibile dà una stringa vuota, non «NaN giorni fa».
++ */
++export function trascorso(iso: string, ora: number = Date.now()): string {
++  const t = Date.parse(iso);
++  if (Number.isNaN(t)) return "";
++  const minuti = Math.floor((ora - t) / 60000);
++  if (minuti < 1) return "adesso"; // anche una data nel futuro (orologi non allineati)
++  if (minuti < 60) return `${minuti} min fa`;
++  const ore = Math.floor(minuti / 60);
++  if (ore < 24) return ore === 1 ? "1 ora fa" : `${ore} ore fa`;
++  const giorni = Math.floor(ore / 24);
++  if (giorni === 1) return "ieri";
++  if (giorni < 7) return `${giorni} giorni fa`;
++  return new Date(t).toLocaleDateString("it-IT", { day: "numeric", month: "long" });
++}
++
++/** Il numero da mostrare sul segnalino: niente per zero, «99+» oltre 99. */
++export function etichettaConteggio(n: number): string {
++  if (!Number.isFinite(n) || n <= 0) return "";
++  const intero = Math.floor(n);
++  return intero > 99 ? "99+" : String(intero);
++}
++
++/** Quante notifiche non sono ancora state lette. */
++export function contaNonLette(elenco: Pick<Notifica, "letta_at">[]): number {
++  return elenco.filter((n) => !n.letta_at).length;
++}
++
++/** Il sottotitolo della riga «Novità» nel Profilo. */
++export function sottotitoloNovita(nonLette: number): string {
++  if (nonLette <= 0) return "Nessuna novità da leggere.";
++  if (nonLette === 1) return "Hai 1 novità da leggere.";
++  return `Hai ${nonLette} novità da leggere.`;
++}
+diff --git a/supabase/migrations/0019_notifiche.sql b/supabase/migrations/0019_notifiche.sql
+new file mode 100644
+index 0000000..22fcc92
+--- /dev/null
++++ b/supabase/migrations/0019_notifiche.sql
+@@ -0,0 +1,358 @@
++-- ============================================================
++-- MatchAmI — notifiche dentro l'app
++--
++-- Fin qui nessuno veniva avvisato di niente: l'esito di una verifica, una
++-- candidatura ricevuta, la risposta a una candidatura. Bisognava tornare a
++-- controllare. Ora ogni evento che interessa a una persona crea una
++-- notifica, che si legge nella pagina «Novità» e si segnala con un numero.
++--
++-- COME NASCONO. Con trigger sul database, non con il codice dell'app: gli
++-- eventi passano da punti diversi (una decisione dello staff, una candidatura,
++-- la conferma di un affitto da un link) e un trigger non si può dimenticare.
++-- Una notifica che non riesce a nascere NON deve far fallire l'azione
++-- principale: l'errore viene registrato e basta.
++--
++-- COSA CONTIENE. Il tipo e, al massimo, il titolo di un annuncio. Mai nomi
++-- di persone: non si duplicano dati personali in una tabella in più.
++--
++-- CHI LE VEDE. Solo il destinatario. Nessun utente può crearne, modificarne
++-- o cancellarne: le segna come lette con una funzione.
++--
++-- Le email (stesso evento, altro canale) sono un passo successivo.
++--
++-- ORDINE: esegui questa migrazione PRIMA del push del codice.
++-- ============================================================
++
++-- ------------------------------------------------------------
++-- 1. La tabella
++-- ------------------------------------------------------------
++
++create table if not exists notifiche (
++  id uuid primary key default gen_random_uuid(),
++  user_id uuid not null references profiles(id) on delete cascade,
++  tipo text not null check (tipo in (
++    'candidatura_ricevuta', 'candidatura_accettata', 'candidatura_rifiutata',
++    'immobile_verificato', 'immobile_respinto',
++    'reddito_verificato', 'reddito_respinto',
++    'affitto_verificato', 'affitto_respinto',
++    'rapporto_confermato', 'rapporto_rifiutato',
++    'feedback_ricevuto'
++  )),
++  dati jsonb not null default '{}'::jsonb check (pg_column_size(dati) < 2000),
++  -- un percorso INTERNO dell'app: mai un indirizzo esterno
++  link text not null check (link ~ '^/[A-Za-z0-9/_-]*$' and length(link) <= 120),
++  letta_at timestamptz,
++  created_at timestamptz not null default now()
++);
++
++create index if not exists notifiche_utente_idx on notifiche (user_id, created_at desc);
++create index if not exists notifiche_non_lette_idx on notifiche (user_id) where letta_at is null;
++
++alter table notifiche enable row level security;
++
++-- Le legge solo il destinatario. Nessuna policy di scrittura.
++drop policy if exists "notifiche: le legge il destinatario" on notifiche;
++create policy "notifiche: le legge il destinatario" on notifiche
++  for select using (user_id = auth.uid());
++
++revoke insert, update, delete on notifiche from authenticated, anon;
++
++-- ------------------------------------------------------------
++-- 2. Creare una notifica (solo dai trigger qui sotto)
++--
++-- Non è chiamabile da nessun utente: altrimenti chiunque potrebbe
++-- riempire di messaggi un'altra persona. Se non riesce, avvisa nel registro
++-- del database e lascia andare avanti l'azione principale.
++-- ------------------------------------------------------------
++
++create or replace function public.crea_notifica(
++  p_user uuid,
++  p_tipo text,
++  p_dati jsonb,
++  p_link text
++)
++returns void
++language plpgsql
++security definer
++set search_path = public
++as $$
++begin
++  if p_user is null then
++    return;
++  end if;
++
++  begin
++    insert into notifiche (user_id, tipo, dati, link)
++    values (p_user, p_tipo, coalesce(p_dati, '{}'::jsonb), p_link);
++  exception when others then
++    raise warning 'notifica non creata (%): %', p_tipo, sqlerrm;
++  end;
++end;
++$$;
++
++revoke all on function public.crea_notifica(uuid, text, jsonb, text) from public, anon, authenticated;
++
++-- ------------------------------------------------------------
++-- 3. Segnare come lette
++-- ------------------------------------------------------------
++
++create or replace function public.segna_notifiche_lette(p_ids uuid[] default null)
++returns integer
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_n integer;
++begin
++  if auth.uid() is null then
++    raise exception 'NON_AUTENTICATO';
++  end if;
++
++  -- p_ids nullo = tutte le proprie non lette. Gli id di altri non fanno
++  -- niente: la condizione su user_id le esclude.
++  update notifiche
++     set letta_at = now()
++   where user_id = auth.uid()
++     and letta_at is null
++     and (p_ids is null or id = any(p_ids));
++
++  get diagnostics v_n = row_count;
++  return v_n;
++end;
++$$;
++
++grant execute on function public.segna_notifiche_lette(uuid[]) to authenticated;
++
++-- ------------------------------------------------------------
++-- 4. I trigger: un evento, una notifica
++-- ------------------------------------------------------------
++
++-- 4.1 Una candidatura arriva al proprietario dell'annuncio
++create or replace function public.notifica_candidatura_ricevuta()
++returns trigger
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  l listings;
++begin
++  select * into l from listings where id = new.listing_id;
++  perform public.crea_notifica(l.owner_id, 'candidatura_ricevuta',
++    jsonb_build_object('titolo', left(l.titolo, 80)), '/database');
++  return new;
++end;
++$$;
++
++drop trigger if exists notifica_candidatura_ricevuta on candidature;
++create trigger notifica_candidatura_ricevuta
++  after insert on candidature
++  for each row execute function public.notifica_candidatura_ricevuta();
++
++-- 4.2 Il proprietario decide: lo sa l'inquilino
++create or replace function public.notifica_candidatura_decisa()
++returns trigger
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  l listings;
++begin
++  select * into l from listings where id = new.listing_id;
++  if new.status = 'accettata' then
++    perform public.crea_notifica(new.tenant_id, 'candidatura_accettata',
++      jsonb_build_object('titolo', left(l.titolo, 80)), '/chat/' || new.id::text);
++  elsif new.status = 'rifiutata' then
++    perform public.crea_notifica(new.tenant_id, 'candidatura_rifiutata',
++      jsonb_build_object('titolo', left(l.titolo, 80)), '/candidature');
++  end if;
++  return new;
++end;
++$$;
++
++drop trigger if exists notifica_candidatura_decisa on candidature;
++create trigger notifica_candidatura_decisa
++  after update of status on candidature
++  for each row
++  when (old.status is distinct from new.status)
++  execute function public.notifica_candidatura_decisa();
++
++-- 4.3 Lo staff decide su un immobile
++create or replace function public.notifica_immobile_esito()
++returns trigger
++language plpgsql
++security definer
++set search_path = public
++as $$
++begin
++  if old.verifica_stato = 'in_verifica' and new.verifica_stato = 'verificato' then
++    perform public.crea_notifica(new.owner_id, 'immobile_verificato',
++      jsonb_build_object('titolo', left(new.titolo, 80)), '/');
++  elsif old.verifica_stato = 'in_verifica' and new.verifica_stato = 'non_avviata' then
++    perform public.crea_notifica(new.owner_id, 'immobile_respinto',
++      jsonb_build_object('titolo', left(new.titolo, 80)), '/');
++  end if;
++  return new;
++end;
++$$;
++
++drop trigger if exists notifica_immobile_esito on listings;
++create trigger notifica_immobile_esito
++  after update of verifica_stato on listings
++  for each row
++  when (old.verifica_stato is distinct from new.verifica_stato)
++  execute function public.notifica_immobile_esito();
++
++-- 4.4 Lo staff decide sul reddito di un inquilino.
++-- Solo da «in verifica»: se la verifica decade perché la persona ha
++-- cambiato i propri dati, lo sa già, non serve avvisarla.
++create or replace function public.notifica_reddito_esito()
++returns trigger
++language plpgsql
++security definer
++set search_path = public
++as $$
++begin
++  if old.verifica_stato = 'in_verifica' and new.verifica_stato = 'verificato' then
++    perform public.crea_notifica(new.profile_id, 'reddito_verificato', '{}'::jsonb, '/profilo');
++  elsif old.verifica_stato = 'in_verifica' and new.verifica_stato = 'non_avviata' then
++    perform public.crea_notifica(new.profile_id, 'reddito_respinto', '{}'::jsonb, '/profilo');
++  end if;
++  return new;
++end;
++$$;
++
++drop trigger if exists notifica_reddito_esito on tenant_profiles;
++create trigger notifica_reddito_esito
++  after update of verifica_stato on tenant_profiles
++  for each row
++  when (old.verifica_stato is distinct from new.verifica_stato)
++  execute function public.notifica_reddito_esito();
++
++-- 4.5 Lo staff decide su un affitto: lo sanno entrambe le parti
++create or replace function public.notifica_affitto_esito()
++returns trigger
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_tipo text;
++begin
++  if old.stato = 'da_verificare' and new.stato = 'verificato' then
++    v_tipo := 'affitto_verificato';
++  elsif old.stato = 'da_verificare' and new.stato = 'respinto' then
++    v_tipo := 'affitto_respinto';
++  else
++    return new;
++  end if;
++
++  perform public.crea_notifica(new.owner_id, v_tipo, '{}'::jsonb, '/gestione-affitti');
++  perform public.crea_notifica(new.tenant_id, v_tipo, '{}'::jsonb, '/profilo');
++  return new;
++end;
++$$;
++
++drop trigger if exists notifica_affitto_esito on rapporti_locazione;
++create trigger notifica_affitto_esito
++  after update of stato on rapporti_locazione
++  for each row
++  when (old.stato is distinct from new.stato)
++  execute function public.notifica_affitto_esito();
++
++-- 4.6 L'altra persona risponde a un affitto dichiarato: lo sa chi l'ha dichiarato
++create or replace function public.notifica_rapporto_risposta()
++returns trigger
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_link text;
++begin
++  v_link := case when new.ruolo_creatore = 'proprietario' then '/gestione-affitti' else '/profilo' end;
++  if old.stato = 'in_attesa' and new.stato = 'confermata' then
++    perform public.crea_notifica(new.creato_da, 'rapporto_confermato', '{}'::jsonb, v_link);
++  elsif old.stato = 'in_attesa' and new.stato = 'rifiutata' then
++    perform public.crea_notifica(new.creato_da, 'rapporto_rifiutato', '{}'::jsonb, v_link);
++  end if;
++  return new;
++end;
++$$;
++
++drop trigger if exists notifica_rapporto_risposta on richieste_rapporto;
++create trigger notifica_rapporto_risposta
++  after update of stato on richieste_rapporto
++  for each row
++  when (old.stato is distinct from new.stato)
++  execute function public.notifica_rapporto_risposta();
++
++-- 4.7 Un proprietario lascia un feedback: lo sa l'inquilino
++create or replace function public.notifica_feedback_ricevuto()
++returns trigger
++language plpgsql
++security definer
++set search_path = public
++as $$
++begin
++  perform public.crea_notifica(new.tenant_id, 'feedback_ricevuto', '{}'::jsonb, '/profilo');
++  return new;
++end;
++$$;
++
++drop trigger if exists notifica_feedback_ricevuto on recensioni;
++create trigger notifica_feedback_ricevuto
++  after insert on recensioni
++  for each row execute function public.notifica_feedback_ricevuto();
++
++-- Le funzioni dei trigger non servono a nessun utente
++revoke all on function
++  public.notifica_candidatura_ricevuta(), public.notifica_candidatura_decisa(),
++  public.notifica_immobile_esito(), public.notifica_reddito_esito(),
++  public.notifica_affitto_esito(), public.notifica_rapporto_risposta(),
++  public.notifica_feedback_ricevuto()
++from public, anon, authenticated;
++
++-- ------------------------------------------------------------
++-- 5. Pulizia
++--
++-- Le notifiche non si accumulano per sempre: quelle già lette dopo 60 giorni
++-- e qualunque dopo 180. Non la può chiamare nessun utente: serve a chi
++-- gestisce il sistema (un lavoro periodico, in un passo successivo).
++-- ------------------------------------------------------------
++
++create or replace function public.pulisci_notifiche()
++returns integer
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_n integer;
++begin
++  delete from notifiche
++   where (letta_at is not null and letta_at < now() - interval '60 days')
++      or created_at < now() - interval '180 days';
++  get diagnostics v_n = row_count;
++  return v_n;
++end;
++$$;
++
++revoke all on function public.pulisci_notifiche() from public, anon, authenticated;
++
++-- ------------------------------------------------------------
++-- Verifica
++-- ------------------------------------------------------------
++
++select count(*) as trigger_di_notifica
++from pg_trigger where tgname like 'notifica\_%' and not tgisinternal;   -- 7
++
++select routine_name from information_schema.routines
++where routine_name in ('crea_notifica', 'segna_notifiche_lette', 'pulisci_notifiche')
++order by 1;   -- 3 righe
++
++-- deve risultare 0: nessuna policy di scrittura sulle notifiche
++select count(*) as policy_di_scrittura_rimaste
++from pg_policy where polrelid = 'notifiche'::regclass and polcmd in ('a', 'w', 'd');
+-- 
+2.43.0
+

@@ -1,0 +1,569 @@
+From a3a0e63ba150d9e1ccc4792179cd59cdf62d1b0e Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 8 Oct 2026 08:47:13 +0000
+Subject: [PATCH] feat(contratti): storico nell'elenco dei contratti
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Fin qui le due schermate (Gestione affitto, per l'inquilino; Gestione
+affitti, per il proprietario) mostravano un elenco unico, con lo stato
+scritto su ogni scheda: un contratto concluso restava mescolato per sempre a
+quelli in corso. E ogni schermata aveva la sua copia identica delle
+etichette degli stati.
+
+- due gruppi: 'In corso' (bozza, in firma, firmato) e 'Storico' (concluso),
+  con il conteggio; le schede dello storico sono attenuate, come le
+  candidature chiuse. Dentro ogni gruppo l'ordine non cambia (dal più
+  recente). Se ci sono solo contratti nello storico, la schermata dice
+  'Nessun contratto in corso.'
+- lib/contratti.ts: stati, etichette e separazione in un posto solo, usati da
+  tutte e due le schermate (tolta la duplicazione)
+- scelte: nello storico c'è un contratto solo se è stato segnato come
+  concluso: non si sposta da solo un 'firmato' la cui durata è finita, perché
+  molti contratti si rinnovano da soli e deciderlo al posto di chi lo gestisce
+  sarebbe peggio di un elenco un po' più lungo. Uno stato che il codice non
+  conosce resta 'in corso': una scheda non deve sparire
+- nessuna migrazione, nessun dato nuovo
+
+Test: 371 in tutto. Gli stati dell'app sono controllati contro l'enumerato
+del database; una guardia fa fallire chi rimettesse una copia locale delle
+etichette o smettesse di separare i contratti in una delle due schermate.
+26 prove di interazione sulle due schermate; la pagina dell'inquilino
+verificata sul server. Difetti reintrodotti di proposito: tutti presi.
+---
+ package.json                                  |   2 +-
+ scripts/test-contratti.mjs                    | 113 ++++++++++++++++++
+ .../GestioneAffittiClient.tsx                 | 113 +++++++++++-------
+ src/app/(app)/gestione/GestioneClient.tsx     | 106 +++++++++-------
+ src/lib/contratti.ts                          |  65 ++++++++++
+ 5 files changed, 313 insertions(+), 86 deletions(-)
+ create mode 100644 scripts/test-contratti.mjs
+ create mode 100644 src/lib/contratti.ts
+
+diff --git a/package.json b/package.json
+index 298acb4..a3e488d 100644
+--- a/package.json
++++ b/package.json
+@@ -7,7 +7,7 @@
+     "build": "next build",
+     "start": "next start",
+     "lint": "eslint",
+-    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-contratti.mjs b/scripts/test-contratti.mjs
+new file mode 100644
+index 0000000..cd7d39b
+--- /dev/null
++++ b/scripts/test-contratti.mjs
+@@ -0,0 +1,113 @@
++/**
++ * Test della separazione tra contratti in corso e storico (src/lib/contratti.ts).
++ * Si lancia con:   npm test
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const c = caricaTs(path.join(radice, "src", "lib", "contratti.ts"));
++const migrazioni = path.join(radice, "supabase", "migrations");
++const leggi = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8");
++
++const k = (id, stato) => ({ id, stato });
++
++// ------------------------------------------------------------
++// Gli stati
++// ------------------------------------------------------------
++
++function statiDelDatabase() {
++  const m = leggi("supabase", "migrations", "0001_init.sql").match(/create type stato_contratto as enum \(([^)]*)\)/);
++  assert.ok(m, "non trovo l'enumerato nella 0001");
++  const stati = [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
++  for (const f of fs.readdirSync(migrazioni).filter((x) => /^\d{4}_.*\.sql$/.test(x)).sort()) {
++    for (const a of fs.readFileSync(path.join(migrazioni, f), "utf8").matchAll(/alter type stato_contratto add value (?:if not exists )?'([^']+)'/g)) stati.push(a[1]);
++  }
++  return stati;
++}
++
++test("stati: quelli dell'app sono quelli del database, nello stesso ordine", () => {
++  assert.deepEqual([...c.STATI_CONTRATTO], statiDelDatabase());
++  const tipo = leggi("src", "lib", "types.ts").match(/export type StatoContratto = ([^;]+);/);
++  assert.ok(tipo, "non trovo il tipo nell'app");
++  assert.deepEqual([...tipo[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]), statiDelDatabase());
++});
++
++test("stati: ognuno ha un'etichetta e un aspetto, e le etichette sono diverse", () => {
++  assert.deepEqual(Object.keys(c.STATO_LABEL), [...c.STATI_CONTRATTO]);
++  assert.deepEqual(Object.keys(c.STATO_BADGE), [...c.STATI_CONTRATTO]);
++  const e = Object.values(c.STATO_LABEL);
++  assert.equal(new Set(e).size, e.length, "due stati con la stessa etichetta");
++  assert.equal(c.STATO_LABEL.concluso, "Concluso");
++});
++
++test("stati: uno sconosciuto non produce «undefined»", () => {
++  assert.equal(c.etichettaStato("sospeso"), "sospeso");
++  assert.equal(c.badgeStato("sospeso"), "is-off");
++  assert.equal(c.etichettaStato("firmato"), "Firmato");
++  assert.equal(c.badgeStato("in_firma"), "is-wait");
++});
++
++// ------------------------------------------------------------
++// Storico
++// ------------------------------------------------------------
++
++test("storico: solo un contratto concluso, nessun altro stato", () => {
++  assert.equal(c.inStorico("concluso"), true);
++  for (const s of ["bozza", "in_firma", "firmato", "", "CONCLUSO", "sospeso", null, undefined, 0]) assert.equal(c.inStorico(s), false, String(s));
++});
++
++test("gruppi: ogni contratto sta in uno e un solo gruppo, e l'ordine di arrivo si mantiene", () => {
++  const e = [k(1, "bozza"), k(2, "concluso"), k(3, "firmato"), k(4, "concluso"), k(5, "in_firma"), k(6, "firmato")];
++  const g = c.raggruppaContratti(e);
++  assert.deepEqual(g.inCorso.map((x) => x.id), [1, 3, 5, 6]);
++  assert.deepEqual(g.storico.map((x) => x.id), [2, 4]);
++  assert.equal(g.inCorso.length + g.storico.length, e.length);
++});
++
++test("gruppi: elenco vuoto, solo in corso, solo storico", () => {
++  assert.deepEqual(c.raggruppaContratti([]), { inCorso: [], storico: [] });
++  assert.equal(c.raggruppaContratti([k(1, "firmato")]).storico.length, 0);
++  assert.equal(c.raggruppaContratti([k(1, "concluso")]).inCorso.length, 0);
++});
++
++test("gruppi: uno stato mai visto resta tra quelli in corso, la scheda non sparisce", () => {
++  const g = c.raggruppaContratti([k(1, "stato_di_domani"), k(2, "concluso")]);
++  assert.deepEqual(g.inCorso.map((x) => x.id), [1]);
++  assert.deepEqual(g.storico.map((x) => x.id), [2]);
++});
++
++test("gruppi: l'elenco di partenza non viene modificato, e i campi restano quelli", () => {
++  const e = [{ id: 1, stato: "concluso", canone: 900, nome: "Olga" }, { id: 2, stato: "bozza", canone: null, nome: null }];
++  const copia = JSON.parse(JSON.stringify(e));
++  const g = c.raggruppaContratti(e);
++  assert.deepEqual(e, copia);
++  assert.equal(g.storico[0], e[0], "restituisce gli stessi oggetti, non copie alterate");
++});
++
++test("gruppi: quattrocento contratti si dividono senza perderne nessuno", () => {
++  const e = Array.from({ length: 400 }, (_, i) => k(i, c.STATI_CONTRATTO[i % 4]));
++  const g = c.raggruppaContratti(e);
++  assert.equal(g.inCorso.length, 300); assert.equal(g.storico.length, 100);
++});
++
++test("testo: nessun contratto in corso", () => {
++  assert.equal(c.NESSUN_CONTRATTO_IN_CORSO, "Nessun contratto in corso.");
++  assert.ok(!/\b(lui|lei)\b/i.test(c.NESSUN_CONTRATTO_IN_CORSO));
++});
++
++// ------------------------------------------------------------
++// Le due schermate usano la stessa logica (non più una copia ciascuna)
++// ------------------------------------------------------------
++
++test("le due schermate importano gli stati da lib/contratti e non ne hanno una copia propria", () => {
++  for (const f of [["src", "app", "(app)", "gestione", "GestioneClient.tsx"], ["src", "app", "(app)", "gestione-affitti", "GestioneAffittiClient.tsx"]]) {
++    const codice = leggi(...f);
++    assert.match(codice, /from "@\/lib\/contratti"/, `${f.at(-1)} non usa lib/contratti`);
++    assert.ok(!/const STATO_LABEL\b|const STATO_BADGE\b|const STATI\b/.test(codice), `${f.at(-1)} ha ancora una copia propria degli stati`);
++    assert.match(codice, /\braggruppaContratti\(/, `${f.at(-1)} non separa i contratti: manca la chiamata`);
++    assert.match(codice, /Storico — \{storico\.length\}/, `${f.at(-1)} non mostra il gruppo Storico`);
++  }
++});
+diff --git a/src/app/(app)/gestione-affitti/GestioneAffittiClient.tsx b/src/app/(app)/gestione-affitti/GestioneAffittiClient.tsx
+index 1a4bb9c..b732576 100644
+--- a/src/app/(app)/gestione-affitti/GestioneAffittiClient.tsx
++++ b/src/app/(app)/gestione-affitti/GestioneAffittiClient.tsx
+@@ -7,28 +7,20 @@ import type {
+   ContrattoProprietario,
+   StatoContratto,
+ } from "@/lib/types";
++import {
++  NESSUN_CONTRATTO_IN_CORSO,
++  STATI_CONTRATTO,
++  STATO_LABEL,
++  badgeStato,
++  etichettaStato,
++  raggruppaContratti,
++} from "@/lib/contratti";
+ import { creaContratto, aggiornaContratto, type SaveState } from "./actions";
+ import { PageContainer } from "@/components/ui/PageContainer";
+ import { Chip } from "@/components/ui/Chip";
+ import { Field } from "@/components/ui/Field";
+ import { IconDocumento } from "@/components/icons";
+ 
+-const STATO_LABEL: Record<StatoContratto, string> = {
+-  bozza: "Bozza",
+-  in_firma: "In firma",
+-  firmato: "Firmato",
+-  concluso: "Concluso",
+-};
+-
+-const STATO_BADGE: Record<StatoContratto, string> = {
+-  bozza: "is-off",
+-  in_firma: "is-wait",
+-  firmato: "is-match",
+-  concluso: "is-off",
+-};
+-
+-const STATI: StatoContratto[] = ["bozza", "in_firma", "firmato", "concluso"];
+-
+ export function GestioneAffittiClient({
+   candidatureSenzaContratto,
+   contratti,
+@@ -46,6 +38,9 @@ export function GestioneAffittiClient({
+     null
+   );
+ 
++  // I contratti conclusi vanno nello storico: non restano mescolati a quelli in corso.
++  const { inCorso, storico } = raggruppaContratti(contratti);
++
+   return (
+     <PageContainer wide>
+       <h1 className="screen-title">Gestione affitti</h1>
+@@ -89,9 +84,7 @@ export function GestioneAffittiClient({
+       )}
+ 
+       <div className="pref-label" style={{ marginTop: 20 }}>
+-        <span>
+-          I tuoi contratti {contratti.length > 0 && `· ${contratti.length}`}
+-        </span>
++        <span>I tuoi contratti</span>
+       </div>
+ 
+       {contratti.length === 0 && candidatureSenzaContratto.length === 0 ? (
+@@ -104,32 +97,39 @@ export function GestioneAffittiClient({
+           </p>
+         </div>
+       ) : (
+-        <div className="card-grid">
+-          {contratti.map((c) => (
+-            <button
+-              key={c.id}
+-              onClick={() => setSelezionato(c)}
+-              className="match-card"
+-            >
+-              <div className="mc-avatar">
+-                {`${c.nome?.[0] ?? ""}${c.cognome?.[0] ?? ""}`.toUpperCase() ||
+-                  "IN"}
++        <>
++          {inCorso.length > 0 ? (
++            <>
++              <div className="pref-label" style={{ marginTop: 12 }}>
++                <span>In corso — {inCorso.length}</span>
+               </div>
+-              <div className="mc-body">
+-                <div className="mc-zona">{c.candidature?.listings?.titolo}</div>
+-                <div className="mc-title">
+-                  {c.nome} {c.cognome}
+-                </div>
+-                <div className="mc-meta">
+-                  {c.canone ? `€${c.canone.toLocaleString("it-IT")}/mese` : "—"}
+-                </div>
++              <div className="card-grid">
++                {inCorso.map((c) => (
++                  <SchedaContratto key={c.id} c={c} onSelect={setSelezionato} />
++                ))}
+               </div>
+-              <div className={`mc-pct ${STATO_BADGE[c.stato]}`}>
+-                {STATO_LABEL[c.stato]}
++            </>
++          ) : (
++            contratti.length > 0 && (
++              <div className="note-box" style={{ marginTop: 12 }}>
++                {NESSUN_CONTRATTO_IN_CORSO}
+               </div>
+-            </button>
+-          ))}
+-        </div>
++            )
++          )}
++
++          {storico.length > 0 && (
++            <>
++              <div className="pref-label" style={{ marginTop: 20 }}>
++                <span>Storico — {storico.length}</span>
++              </div>
++              <div className="card-grid">
++                {storico.map((c) => (
++                  <SchedaContratto key={c.id} c={c} onSelect={setSelezionato} passato />
++                ))}
++              </div>
++            </>
++          )}
++        </>
+       )}
+ 
+       {/* ---- Sheet: crea contratto da candidatura accettata ---- */}
+@@ -213,7 +213,7 @@ function ContrattoForm({
+ 
+       <Field label="Stato">
+         <div className="flex flex-wrap gap-2">
+-          {STATI.map((s) => (
++          {STATI_CONTRATTO.map((s) => (
+             <Chip
+               key={s}
+               label={STATO_LABEL[s]}
+@@ -287,3 +287,30 @@ function ContrattoForm({
+     </form>
+   );
+ }
++
++/** La scheda di un contratto nell'elenco. Quelle dello storico sono attenuate, come le candidature chiuse. */
++function SchedaContratto({
++  c,
++  onSelect,
++  passato = false,
++}: {
++  c: ContrattoProprietario;
++  onSelect: (c: ContrattoProprietario) => void;
++  passato?: boolean;
++}) {
++  return (
++    <button onClick={() => onSelect(c)} className="match-card" style={passato ? { opacity: 0.55 } : undefined}>
++      <div className="mc-avatar">
++        {`${c.nome?.[0] ?? ""}${c.cognome?.[0] ?? ""}`.toUpperCase() || "IN"}
++      </div>
++      <div className="mc-body">
++        <div className="mc-zona">{c.candidature?.listings?.titolo}</div>
++        <div className="mc-title">
++          {c.nome} {c.cognome}
++        </div>
++        <div className="mc-meta">{c.canone ? `€${c.canone.toLocaleString("it-IT")}/mese` : "—"}</div>
++      </div>
++      <div className={`mc-pct ${badgeStato(c.stato)}`}>{etichettaStato(c.stato)}</div>
++    </button>
++  );
++}
+diff --git a/src/app/(app)/gestione/GestioneClient.tsx b/src/app/(app)/gestione/GestioneClient.tsx
+index b7b500c..3ac5201 100644
+--- a/src/app/(app)/gestione/GestioneClient.tsx
++++ b/src/app/(app)/gestione/GestioneClient.tsx
+@@ -2,24 +2,16 @@
+ 
+ import { useState } from "react";
+ import { Sheet } from "@/components/Sheet";
+-import type { ContrattoConAnnuncio, StatoContratto } from "@/lib/types";
++import type { ContrattoConAnnuncio } from "@/lib/types";
++import {
++  NESSUN_CONTRATTO_IN_CORSO,
++  badgeStato,
++  etichettaStato,
++  raggruppaContratti,
++} from "@/lib/contratti";
+ import { PageContainer } from "@/components/ui/PageContainer";
+ import { IconDocumento } from "@/components/icons";
+ 
+-const STATO_LABEL: Record<StatoContratto, string> = {
+-  bozza: "Bozza",
+-  in_firma: "In firma",
+-  firmato: "Firmato",
+-  concluso: "Concluso",
+-};
+-
+-const STATO_BADGE: Record<StatoContratto, string> = {
+-  bozza: "is-off",
+-  in_firma: "is-wait",
+-  firmato: "is-match",
+-  concluso: "is-off",
+-};
+-
+ function formatData(d: string | null): string {
+   if (!d) return "—";
+   return new Date(d).toLocaleDateString("it-IT", {
+@@ -39,6 +31,9 @@ export function GestioneClient({
+   );
+   const [bolletteAperto, setBolletteAperto] = useState(false);
+ 
++  // I contratti conclusi vanno nello storico: non restano mescolati a quelli in corso.
++  const { inCorso, storico } = raggruppaContratti(contratti);
++
+   return (
+     <PageContainer wide>
+       <h1 className="screen-title">Gestione affitto</h1>
+@@ -48,9 +43,7 @@ export function GestioneClient({
+ 
+       {/* ---- I tuoi contratti ---- */}
+       <div className="pref-label">
+-        <span>
+-          I tuoi contratti {contratti.length > 0 && `· ${contratti.length}`}
+-        </span>
++        <span>I tuoi contratti</span>
+       </div>
+ 
+       {contratti.length === 0 ? (
+@@ -63,31 +56,37 @@ export function GestioneClient({
+           </p>
+         </div>
+       ) : (
+-        <div className="card-grid">
+-          {contratti.map((c) => (
+-            <button
+-              key={c.id}
+-              onClick={() => setSelezionato(c)}
+-              className="match-card"
+-            >
+-              <div className="mc-avatar">
+-                {(c.candidature?.listings?.titolo ?? "IM").slice(0, 2).toUpperCase()}
++        <>
++          {inCorso.length > 0 ? (
++            <>
++              <div className="pref-label" style={{ marginTop: 12 }}>
++                <span>In corso — {inCorso.length}</span>
+               </div>
+-              <div className="mc-body">
+-                <div className="mc-zona">{c.candidature?.listings?.zona ?? ""}</div>
+-                <div className="mc-title">
+-                  {c.candidature?.listings?.titolo ?? "Immobile"}
+-                </div>
+-                <div className="mc-meta">
+-                  {c.canone ? `€${c.canone.toLocaleString("it-IT")}/mese` : "—"}
+-                </div>
++              <div className="card-grid">
++                {inCorso.map((c) => (
++                  <SchedaContratto key={c.id} c={c} onSelect={setSelezionato} />
++                ))}
+               </div>
+-              <div className={`mc-pct ${STATO_BADGE[c.stato]}`}>
+-                {STATO_LABEL[c.stato]}
++            </>
++          ) : (
++            <div className="note-box" style={{ marginTop: 12 }}>
++              {NESSUN_CONTRATTO_IN_CORSO}
++            </div>
++          )}
++
++          {storico.length > 0 && (
++            <>
++              <div className="pref-label" style={{ marginTop: 20 }}>
++                <span>Storico — {storico.length}</span>
+               </div>
+-            </button>
+-          ))}
+-        </div>
++              <div className="card-grid">
++                {storico.map((c) => (
++                  <SchedaContratto key={c.id} c={c} onSelect={setSelezionato} passato />
++                ))}
++              </div>
++            </>
++          )}
++        </>
+       )}
+ 
+       {/* ---- Bollette e utenze ---- */}
+@@ -119,8 +118,8 @@ export function GestioneClient({
+         {selezionato && (
+           <>
+             <div className="mb-4">
+-              <span className={`mc-pct ${STATO_BADGE[selezionato.stato]}`}>
+-                {STATO_LABEL[selezionato.stato]}
++              <span className={`mc-pct ${badgeStato(selezionato.stato)}`}>
++                {etichettaStato(selezionato.stato)}
+               </span>
+             </div>
+             <DettaglioRow
+@@ -185,3 +184,26 @@ function DettaglioRow({ label, value }: { label: string; value: string }) {
+     </div>
+   );
+ }
++
++/** La scheda di un contratto nell'elenco. Quelle dello storico sono attenuate, come le candidature chiuse. */
++function SchedaContratto({
++  c,
++  onSelect,
++  passato = false,
++}: {
++  c: ContrattoConAnnuncio;
++  onSelect: (c: ContrattoConAnnuncio) => void;
++  passato?: boolean;
++}) {
++  return (
++    <button onClick={() => onSelect(c)} className="match-card" style={passato ? { opacity: 0.55 } : undefined}>
++      <div className="mc-avatar">{(c.candidature?.listings?.titolo ?? "IM").slice(0, 2).toUpperCase()}</div>
++      <div className="mc-body">
++        <div className="mc-zona">{c.candidature?.listings?.zona ?? ""}</div>
++        <div className="mc-title">{c.candidature?.listings?.titolo ?? "Immobile"}</div>
++        <div className="mc-meta">{c.canone ? `€${c.canone.toLocaleString("it-IT")}/mese` : "—"}</div>
++      </div>
++      <div className={`mc-pct ${badgeStato(c.stato)}`}>{etichettaStato(c.stato)}</div>
++    </button>
++  );
++}
+diff --git a/src/lib/contratti.ts b/src/lib/contratti.ts
+new file mode 100644
+index 0000000..1874c74
+--- /dev/null
++++ b/src/lib/contratti.ts
+@@ -0,0 +1,65 @@
++/**
++ * I contratti nelle schermate «Gestione affitto» (inquilino) e «Gestione
++ * affitti» (proprietario): come si chiamano gli stati e come si separa ciò che
++ * è in corso da ciò che è passato. Logica pura, senza database: si prova con
++ * `npm test`.
++ *
++ * Prima ogni schermata aveva la sua copia delle etichette e un elenco unico,
++ * dove un contratto concluso restava mescolato per sempre a quelli in corso.
++ */
++import type { StatoContratto } from "./types";
++
++/** Gli stati, nell'ordine della vita di un contratto. Sono quelli dell'enumerato del database. */
++export const STATI_CONTRATTO: readonly StatoContratto[] = ["bozza", "in_firma", "firmato", "concluso"];
++
++export const STATO_LABEL: Record<StatoContratto, string> = {
++  bozza: "Bozza",
++  in_firma: "In firma",
++  firmato: "Firmato",
++  concluso: "Concluso",
++};
++
++export const STATO_BADGE: Record<StatoContratto, string> = {
++  bozza: "is-off",
++  in_firma: "is-wait",
++  firmato: "is-match",
++  concluso: "is-off",
++};
++
++/**
++ * Nello storico c'è un contratto solo se il proprietario lo ha segnato come
++ * concluso. Non si sposta da solo un contratto «firmato» la cui durata è
++ * finita: molti contratti si rinnovano da soli, e deciderlo al posto di chi lo
++ * gestisce sarebbe un errore peggiore di un elenco un po' più lungo.
++ */
++export function inStorico(stato: string): boolean {
++  return stato === "concluso";
++}
++
++/**
++ * Divide i contratti in «in corso» e «storico», mantenendo l'ordine di
++ * arrivo (dal più recente) dentro ciascun gruppo. Uno stato che non si
++ * conosce (aggiunto dal database prima del codice) resta tra quelli in
++ * corso: una scheda non deve sparire.
++ */
++export function raggruppaContratti<T extends { stato: string }>(
++  elenco: T[]
++): { inCorso: T[]; storico: T[] } {
++  return {
++    inCorso: elenco.filter((c) => !inStorico(c.stato)),
++    storico: elenco.filter((c) => inStorico(c.stato)),
++  };
++}
++
++/** L'etichetta di uno stato; per uno sconosciuto, il testo com'è (mai «undefined»). */
++export function etichettaStato(stato: string): string {
++  return (STATO_LABEL as Record<string, string>)[stato] ?? stato;
++}
++
++/** L'aspetto della sigla di uno stato; per uno sconosciuto, quello neutro. */
++export function badgeStato(stato: string): string {
++  return (STATO_BADGE as Record<string, string>)[stato] ?? "is-off";
++}
++
++/** Cosa si dice quando ci sono solo contratti nello storico. */
++export const NESSUN_CONTRATTO_IN_CORSO = "Nessun contratto in corso.";
+-- 
+2.43.0
+

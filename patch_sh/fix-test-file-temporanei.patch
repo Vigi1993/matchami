@@ -1,0 +1,77 @@
+From 4fe7b7bce769c08da002cc33d7a933c753d6498e Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 7 Oct 2026 21:28:19 +0000
+Subject: [PATCH] fix(test): un test dell'informativa falliva a caso con i test
+ in parallelo
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Il test sulla pulizia delle notifiche scorre tutta la cartella src per cercare
+chi chiama pulisci_notifiche. test-candidati scrive in src/lib una copia
+temporanea (__candidati_test.ts) e la cancella pochi millisecondi dopo: i file
+di test girano in parallelo, quindi il test poteva vedere il file nell'elenco
+e non trovarlo più al momento di leggerlo (ENOENT). Segnalato da una
+esecuzione reale su Windows: 209 test su 210.
+
+Riprodotto prima di correggere: con un file che nasce e sparisce di continuo,
+2 esecuzioni su 25 fallivano con lo stesso errore.
+
+- i file che cominciano con '__' (copie temporanee dei test) non sono codice
+  dell'app e si saltano
+- se un file sparisce mentre lo si legge, vale come 'non contiene il testo
+  cercato'; ogni altro errore continua a far fallire il test
+
+Dopo: 0 su 25 con e senza il prefisso '__', 12 su 12 sulla suite completa, e il
+test continua a fermare un codice che chiama davvero la pulizia. Il codice
+dell'app non cambia.
+---
+ scripts/test-informativa.mjs | 22 ++++++++++++++++++++--
+ 1 file changed, 20 insertions(+), 2 deletions(-)
+
+diff --git a/scripts/test-informativa.mjs b/scripts/test-informativa.mjs
+index 3a3f1b9..84e4c09 100644
+--- a/scripts/test-informativa.mjs
++++ b/scripts/test-informativa.mjs
+@@ -267,18 +267,36 @@ test("documenti: il testo dice che la verifica del reddito non è automatica e c
+ // Ciò che il testo dice della pulizia delle notifiche è vero
+ // ------------------------------------------------------------
+ 
+-/** Tutti i file di codice dell'app (non le migrazioni, non i test). */
++/**
++ * Tutti i file di codice dell'app (non le migrazioni, non i test).
++ *
++ * I file che cominciano con «__» sono copie temporanee che altri test creano
++ * e cancellano nel giro di pochi millisecondi (test-candidati ne scrive una in
++ * src/lib): i test girano in parallelo, quindi si possono incontrare a metà.
++ * Non sono codice dell'app e si saltano.
++ */
+ function tuttoIlCodice(dir = path.join(radice, "src")) {
+   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
++    if (e.name.startsWith("__")) return [];
+     const p = path.join(dir, e.name);
+     return e.isDirectory() ? tuttoIlCodice(p) : /\.(ts|tsx)$/.test(e.name) ? [p] : [];
+   });
+ }
+ 
++/** Il contenuto di un file, o una stringa vuota se nel frattempo è sparito. */
++function leggiSePresente(file) {
++  try {
++    return fs.readFileSync(file, "utf8");
++  } catch (e) {
++    if (e && e.code === "ENOENT") return "";
++    throw e;
++  }
++}
++
+ test("notifiche: il testo dice che la pulizia non è attiva solo finché nessuno la esegue", () => {
+   const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
+   const dice_non_attiva = /pulizia non è ancora attiva/.test(tutto);
+-  const qualcunoLaChiama = tuttoIlCodice().some((f) => fs.readFileSync(f, "utf8").includes("pulisci_notifiche"));
++  const qualcunoLaChiama = tuttoIlCodice().some((f) => leggiSePresente(f).includes("pulisci_notifiche"));
+   assert.equal(dice_non_attiva, !qualcunoLaChiama,
+     dice_non_attiva
+       ? "il testo dice che la pulizia non è attiva, ma un codice la chiama: aggiorna il testo"
+-- 
+2.43.0
+

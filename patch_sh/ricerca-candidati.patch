@@ -1,0 +1,810 @@
+From 42bbe69bbd2a61c615d35a5abcd6251739a7dbb2 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 8 Oct 2026 09:02:14 +0000
+Subject: [PATCH] feat(candidati): ricerca e filtri nel Database inquilini
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Oggi il Database inquilini non permetteva di cercare né filtrare: con molte
+candidature bisognava scorrere tutto.
+
+- campo di ricerca su nome, cognome, lavoro, titolo e zona dell'annuncio:
+  tutte le parole devono comparire, senza distinguere maiuscole e accenti
+  (Àlessia si trova con 'alessia'), basta una parte di parola
+- filtri: stato (da valutare / già valutate), reddito verificato, senza
+  blocchi sui criteri obbligatori, compatibilità minima (50% / 70%, le soglie
+  con cui la schermata colora già le percentuali), annuncio. Si sommano; un
+  riepilogo dice 'N candidature su M' e 'Azzera filtri' riporta tutto. Le
+  sezioni degli annunci senza risultati spariscono; senza nessun risultato lo
+  dice invece di mostrare una pagina vuota
+- NESSUN filtro su caratteristiche personali (nucleo, figli, animali, età,
+  origine, genere): coerente con la scelta di non averne nei criteri. Un test
+  fa fallire chi ne aggiungesse uno
+- PRIVACY: la ricerca lavora sui dati già in pagina e non salva, non invia e
+  non legge niente di nuovo, nemmeno ciò che si cerca. Un test lo difende
+  (nessun accesso alla rete né al browser) e una prova verifica che cercare
+  non chiami nessuna azione del server
+
+Casi sottili gestiti:
+- compatibilità minima: se nessun candidato ha una percentuale (il
+  proprietario non ha impostato criteri) il filtro non si offre, perché
+  accenderlo nasconderebbe tutti; chi non ha una percentuale non raggiunge una
+  soglia
+- l'elenco si ricarica quando si decide: i filtri che non hanno più senso (un
+  annuncio sparito, una soglia senza percentuali) si ripuliscono, altrimenti
+  la schermata resterebbe vuota senza che si capisca perché
+- si decide con un filtro acceso: il candidato accettato esce da 'Da valutare'
+  subito, usando lo stato effettivo e non quello di arrivo
+- un testo incollato enorme non rallenta niente
+
+Nessuna migrazione, nessun dato nuovo.
+
+Test: 406 in tutto. 35 sulla logica (compresi i valori esatti delle soglie e
+il corpus dei filtri), 23 prove di interazione sulla schermata vera con dati
+costruiti dal motore di match, e 400 candidati filtrati in un battito.
+Difetti reintrodotti di proposito: 21 su 21 presi.
+---
+ package.json                              |   2 +-
+ scripts/test-ricerca-candidati.mjs        | 292 ++++++++++++++++++++++
+ src/app/(app)/database/DatabaseClient.tsx |  44 +++-
+ src/app/globals.css                       |  35 +++
+ src/components/RicercaCandidati.tsx       | 124 +++++++++
+ src/lib/ricerca-candidati.ts              | 182 ++++++++++++++
+ 6 files changed, 676 insertions(+), 3 deletions(-)
+ create mode 100644 scripts/test-ricerca-candidati.mjs
+ create mode 100644 src/components/RicercaCandidati.tsx
+ create mode 100644 src/lib/ricerca-candidati.ts
+
+diff --git a/package.json b/package.json
+index a3e488d..e47a992 100644
+--- a/package.json
++++ b/package.json
+@@ -7,7 +7,7 @@
+     "build": "next build",
+     "start": "next start",
+     "lint": "eslint",
+-    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-ricerca-candidati.mjs b/scripts/test-ricerca-candidati.mjs
+new file mode 100644
+index 0000000..7ead583
+--- /dev/null
++++ b/scripts/test-ricerca-candidati.mjs
+@@ -0,0 +1,292 @@
++/**
++ * Test della ricerca e dei filtri nel Database inquilini
++ * (src/lib/ricerca-candidati.ts). Si lancia con:   npm test
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const r = caricaTs(path.join(radice, "src", "lib", "ricerca-candidati.ts"));
++const leggi = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8");
++
++let n = 0;
++/** Una candidatura con i soli campi che la ricerca guarda. */
++const cand = (o = {}) => ({
++  id: "c" + ++n, status: "in_attesa", listing_id: "L1", tenant_id: "t" + n,
++  listings: { titolo: "Bilocale Isola", zona: "Isola, Milano", prezzo: 1500 },
++  tenant_profiles: { professione: "Infermiera", verificato: false },
++  nome: "Olga", cognome: "Bianchi",
++  valutazione: { match: { bloccato: false, punteggio: 80 }, affidabilita: 70 },
++  ...o,
++});
++const stato = (c) => c.status;
++const f = (o = {}) => ({ ...r.FILTRI_VUOTI, ...o });
++const trova = (elenco, filtri, st = stato) => r.filtraCandidature(elenco, filtri, st).map((c) => c.nome + " " + c.cognome);
++
++// ------------------------------------------------------------
++// Normalizzare ciò che si cerca
++// ------------------------------------------------------------
++
++test("normalizza: minuscole, accenti tolti, spazi ridotti", () => {
++  assert.equal(r.normalizzaRicerca("  ÀLESSIA   D'Àmico \n"), "alessia d'amico");
++  assert.equal(r.normalizzaRicerca("Città"), "citta");
++  assert.equal(r.normalizzaRicerca("D’Amico"), "d'amico", "l'apostrofo tipografico vale quello normale");
++});
++
++test("normalizza: un valore che non è testo vale testo vuoto, mai un errore", () => {
++  for (const x of [null, undefined, 42, {}, [], NaN, true]) assert.equal(r.normalizzaRicerca(x), "", String(x));
++});
++
++test("normalizza: si accorcia, e un testo enorme non rallenta niente", () => {
++  assert.equal(r.normalizzaRicerca("a".repeat(500)).length, r.LUNGHEZZA_MASSIMA_RICERCA);
++  const inizio = Date.now();
++  r.normalizzaRicerca("àb ".repeat(1_000_000));
++  assert.ok(Date.now() - inizio < 200, `troppo lento: ${Date.now() - inizio} ms`);
++});
++
++test("parole: separate da spazi, vuote se non c'è niente", () => {
++  assert.deepEqual(r.paroleRicerca("  Olga   Bianchi "), ["olga", "bianchi"]);
++  assert.deepEqual(r.paroleRicerca(""), []);
++  assert.deepEqual(r.paroleRicerca("   "), []);
++  assert.deepEqual(r.paroleRicerca(null), []);
++});
++
++// ------------------------------------------------------------
++// La ricerca di testo
++// ------------------------------------------------------------
++
++const ELENCO = [
++  cand({ nome: "Olga", cognome: "Bianchi" }),
++  cand({ nome: "Teo", cognome: "Rossini", tenant_profiles: { professione: "Ingegnere", verificato: true } }),
++  cand({ nome: "Àlessia", cognome: "D'Amico", listing_id: "L2", listings: { titolo: "Studio Navigli", zona: "Navigli, Milano", prezzo: 900 } }),
++  cand({ nome: "Ugo", cognome: "Verdi", tenant_profiles: null }),
++];
++
++test("testo: per nome, per cognome, o per entrambi in qualunque ordine", () => {
++  assert.deepEqual(trova(ELENCO, f({ testo: "olga" })), ["Olga Bianchi"]);
++  assert.deepEqual(trova(ELENCO, f({ testo: "BIANCHI" })), ["Olga Bianchi"]);
++  assert.deepEqual(trova(ELENCO, f({ testo: "olga bianchi" })), ["Olga Bianchi"]);
++  assert.deepEqual(trova(ELENCO, f({ testo: "bianchi olga" })), ["Olga Bianchi"]);
++});
++
++test("testo: una parte di parola basta, e non conta l'accento", () => {
++  assert.deepEqual(trova(ELENCO, f({ testo: "ross" })), ["Teo Rossini"]);
++  assert.deepEqual(trova(ELENCO, f({ testo: "alessia" })), ["Àlessia D'Amico"]);
++  assert.deepEqual(trova(ELENCO, f({ testo: "ÀLESSIA" })), ["Àlessia D'Amico"]);
++  assert.deepEqual(trova(ELENCO, f({ testo: "d'amico" })), ["Àlessia D'Amico"]);
++});
++
++test("testo: cerca anche nel lavoro, nel titolo e nella zona dell'annuncio", () => {
++  assert.deepEqual(trova(ELENCO, f({ testo: "ingegnere" })), ["Teo Rossini"]);
++  assert.deepEqual(trova(ELENCO, f({ testo: "navigli" })), ["Àlessia D'Amico"]);
++  assert.deepEqual(trova(ELENCO, f({ testo: "studio" })), ["Àlessia D'Amico"]);
++  assert.equal(trova(ELENCO, f({ testo: "isola" })).length, 3);
++});
++
++test("testo: tutte le parole devono comparire (non basta una)", () => {
++  assert.deepEqual(trova(ELENCO, f({ testo: "olga ingegnere" })), []);
++  assert.deepEqual(trova(ELENCO, f({ testo: "teo ingegnere isola" })), ["Teo Rossini"]);
++});
++
++test("testo: niente che corrisponda, vuoto, solo spazi", () => {
++  assert.deepEqual(trova(ELENCO, f({ testo: "zzzz" })), []);
++  assert.equal(trova(ELENCO, f({ testo: "" })).length, 4);
++  assert.equal(trova(ELENCO, f({ testo: "    " })).length, 4);
++});
++
++test("testo: un profilo mascherato dopo un rifiuto (nessun lavoro) si trova ancora per nome, non per lavoro", () => {
++  assert.deepEqual(trova(ELENCO, f({ testo: "ugo" })), ["Ugo Verdi"]);
++  assert.deepEqual(trova(ELENCO, f({ testo: "infermiera" })).includes("Ugo Verdi"), false);
++});
++
++test("testo: dati mancanti o strani non rompono niente", () => {
++  const strane = [cand({ nome: null, cognome: null }), cand({ listings: null }), cand({ tenant_profiles: null, valutazione: undefined })];
++  assert.doesNotThrow(() => r.filtraCandidature(strane, f({ testo: "olga" }), stato));
++  assert.equal(r.filtraCandidature(strane, f(), stato).length, 3);
++});
++
++test("testo: un titolo o un nome con codice dentro si cerca come testo", () => {
++  const x = cand({ nome: '<img src=x onerror="alert(1)">' });
++  assert.equal(r.filtraCandidature([x], f({ testo: "<img" }), stato).length, 1);
++});
++
++// ------------------------------------------------------------
++// I filtri, uno alla volta
++// ------------------------------------------------------------
++
++test("stato: da valutare, già valutate, tutte", () => {
++  const e = [cand({ nome: "A", status: "in_attesa" }), cand({ nome: "B", status: "accettata" }), cand({ nome: "C", status: "rifiutata" })];
++  assert.deepEqual(trova(e, f({ stato: "da_valutare" })), ["A Bianchi"]);
++  assert.deepEqual(trova(e, f({ stato: "valutate" })), ["B Bianchi", "C Bianchi"]);
++  assert.equal(trova(e, f({ stato: "tutte" })).length, 3);
++});
++
++test("stato: conta quello EFFETTIVO, anche se la decisione non è ancora stata ricaricata dal server", () => {
++  const e = [cand({ nome: "A", status: "in_attesa" }), cand({ nome: "B", status: "in_attesa" })];
++  const effettivo = (c) => (c.nome === "A" ? "accettata" : c.status); // A appena accettata
++  assert.deepEqual(trova(e, f({ stato: "da_valutare" }), effettivo), ["B Bianchi"]);
++  assert.deepEqual(trova(e, f({ stato: "valutate" }), effettivo), ["A Bianchi"]);
++});
++
++test("reddito verificato: solo chi lo è; senza profilo non lo è", () => {
++  assert.deepEqual(trova(ELENCO, f({ soloVerificati: true })), ["Teo Rossini"]);
++  assert.equal(r.filtraCandidature([cand({ tenant_profiles: { verificato: "true" } })], f({ soloVerificati: true }), stato).length, 0, "solo il vero valore vero");
++});
++
++test("senza blocchi: toglie chi non soddisfa un criterio obbligatorio, tiene chi non ha una valutazione", () => {
++  const e = [
++    cand({ nome: "Libero", valutazione: { match: { bloccato: false, punteggio: 60 }, affidabilita: 50 } }),
++    cand({ nome: "Bloccato", valutazione: { match: { bloccato: true, punteggio: 90 }, affidabilita: 50 } }),
++    cand({ nome: "Senza", valutazione: undefined }),
++  ];
++  assert.deepEqual(trova(e, f({ senzaBlocchi: true })), ["Libero Bianchi", "Senza Bianchi"]);
++});
++
++test("compatibilità minima: la soglia esatta passa, un punto sotto no", () => {
++  const e = [69, 70, 71, 100, 0].map((p) => cand({ nome: String(p), valutazione: { match: { bloccato: false, punteggio: p }, affidabilita: 50 } }));
++  assert.deepEqual(trova(e, f({ minimo: 70 })).map((x) => x.split(" ")[0]), ["70", "71", "100"]);
++  assert.deepEqual(trova(e, f({ minimo: 50 })).map((x) => x.split(" ")[0]), ["69", "70", "71", "100"]);
++  assert.equal(trova(e, f({ minimo: 0 })).length, 5, "senza soglia passano tutti, anche lo zero");
++});
++
++test("compatibilità minima: chi non ha una percentuale non la raggiunge, ma senza soglia resta", () => {
++  const e = [cand({ nome: "Nulla", valutazione: { match: { bloccato: false, punteggio: null }, affidabilita: 50 } }), cand({ nome: "Nessuna", valutazione: undefined })];
++  assert.deepEqual(trova(e, f({ minimo: 50 })), []);
++  assert.equal(trova(e, f({ minimo: 0 })).length, 2);
++});
++
++test("annuncio: solo i candidati di quell'annuncio", () => {
++  assert.deepEqual(trova(ELENCO, f({ annuncioId: "L2" })), ["Àlessia D'Amico"]);
++  assert.equal(trova(ELENCO, f({ annuncioId: "L1" })).length, 3);
++  assert.deepEqual(trova(ELENCO, f({ annuncioId: "inesistente" })), []);
++});
++
++// ------------------------------------------------------------
++// Insieme
++// ------------------------------------------------------------
++
++test("i filtri si sommano: devono valere tutti", () => {
++  assert.deepEqual(trova(ELENCO, f({ soloVerificati: true, stato: "da_valutare", annuncioId: "L1", minimo: 70, testo: "teo" })), ["Teo Rossini"]);
++  assert.deepEqual(trova(ELENCO, f({ soloVerificati: true, testo: "olga" })), []);
++});
++
++test("senza filtri passano tutte, nello stesso ordine e con gli stessi oggetti", () => {
++  const risultato = r.filtraCandidature(ELENCO, r.FILTRI_VUOTI, stato);
++  assert.equal(risultato.length, ELENCO.length);
++  risultato.forEach((c, i) => assert.equal(c, ELENCO[i]));
++});
++
++test("filtrare non modifica l'elenco di partenza e mantiene l'ordine di arrivo", () => {
++  const copia = JSON.parse(JSON.stringify(ELENCO));
++  const e = r.filtraCandidature(ELENCO, f({ annuncioId: "L1" }), stato);
++  assert.deepEqual(ELENCO, copia);
++  assert.deepEqual(e.map((c) => c.nome), ["Olga", "Teo", "Ugo"]);
++});
++
++test("i filtri vuoti non si possono alterare per sbaglio da una schermata", () => {
++  assert.ok(Object.isFrozen(r.FILTRI_VUOTI), "FILTRI_VUOTI dovrebbe essere congelato");
++});
++
++test("quattromila candidature si filtrano in un battito", () => {
++  const tante = Array.from({ length: 4000 }, (_, i) => cand({ nome: "Nome" + i, cognome: "Cognome" + (i % 50) }));
++  const inizio = Date.now();
++  r.filtraCandidature(tante, f({ testo: "cognome7 nome12", soloVerificati: false, minimo: 50, senzaBlocchi: true }), stato);
++  assert.ok(Date.now() - inizio < 300, `troppo lento: ${Date.now() - inizio} ms`);
++});
++
++// ------------------------------------------------------------
++// Conteggi, opzioni, testi
++// ------------------------------------------------------------
++
++test("filtri attivi: ognuno conta uno, una ricerca di soli spazi no", () => {
++  assert.equal(r.numeroFiltriAttivi(r.FILTRI_VUOTI), 0);
++  assert.equal(r.numeroFiltriAttivi(f({ testo: "   " })), 0);
++  assert.equal(r.numeroFiltriAttivi(f({ testo: "olga" })), 1);
++  assert.equal(r.numeroFiltriAttivi(f({ stato: "valutate", soloVerificati: true, senzaBlocchi: true, minimo: 50, annuncioId: "L1", testo: "x" })), 6);
++});
++
++test("percentuali: si offre il filtro solo se almeno un candidato ne ha una", () => {
++  assert.equal(r.haPunteggi([cand({ valutazione: { match: { bloccato: false, punteggio: null }, affidabilita: 1 } }), cand({ valutazione: undefined })]), false);
++  assert.equal(r.haPunteggi([cand({ valutazione: { match: { bloccato: false, punteggio: null }, affidabilita: 1 } }), cand()]), true);
++  assert.equal(r.haPunteggi([]), false);
++  assert.equal(r.haPunteggi([cand({ valutazione: { match: { bloccato: false, punteggio: 0 }, affidabilita: 1 } })]), true, "lo zero è una percentuale");
++});
++
++test("annunci: senza doppioni, in ordine alfabetico, con un nome anche se manca", () => {
++  const e = [cand({ listing_id: "B", listings: { titolo: "Zeta" } }), cand({ listing_id: "A", listings: { titolo: "Èra" } }), cand({ listing_id: "B", listings: { titolo: "Zeta" } }), cand({ listing_id: "C", listings: null })];
++  assert.deepEqual(r.opzioniAnnunci(e), [{ id: "C", titolo: "Annuncio" }, { id: "A", titolo: "Èra" }, { id: "B", titolo: "Zeta" }].sort((a, b) => a.titolo.localeCompare(b.titolo, "it")));
++  assert.equal(r.opzioniAnnunci([]).length, 0);
++});
++
++test("filtri non più validi: un annuncio sparito, una soglia senza percentuali", () => {
++  const e = [cand({ listing_id: "L1" }), cand({ listing_id: "L2" })];
++  assert.equal(r.filtriValidi(f({ annuncioId: "L9" }), e).annuncioId, null, "annuncio che non c'è più");
++  assert.equal(r.filtriValidi(f({ annuncioId: "L2" }), e).annuncioId, "L2", "annuncio che c'è");
++  const senza = [cand({ valutazione: { match: { bloccato: false, punteggio: null }, affidabilita: 1 } })];
++  assert.equal(r.filtriValidi(f({ minimo: 70 }), senza).minimo, 0, "nessuno ha più una percentuale");
++  assert.equal(r.filtriValidi(f({ minimo: 70 }), e).minimo, 70, "ce ne sono");
++  // il resto dei filtri non cambia
++  const x = r.filtriValidi(f({ testo: "olga", stato: "valutate", soloVerificati: true, senzaBlocchi: true }), e);
++  assert.deepEqual([x.testo, x.stato, x.soloVerificati, x.senzaBlocchi], ["olga", "valutate", true, true]);
++  // e non altera l'oggetto di partenza
++  const orig = f({ annuncioId: "L9", minimo: 50 }); r.filtriValidi(orig, senza); assert.equal(orig.annuncioId, "L9"); assert.equal(orig.minimo, 50);
++});
++
++test("filtri non più validi: così l'elenco non resta vuoto per un filtro dimenticato", () => {
++  const e = [cand({ listing_id: "L1", nome: "Olga" })];
++  const dimenticato = f({ annuncioId: "L9" });
++  assert.equal(r.filtraCandidature(e, dimenticato, stato).length, 0, "senza la pulizia sparirebbe tutto");
++  assert.equal(r.filtraCandidature(e, r.filtriValidi(dimenticato, e), stato).length, 1, "con la pulizia no");
++});
++
++test("riepilogo: nessuna, una, più", () => {
++  assert.equal(r.riepilogoRicerca(0, 12), "Nessuna candidatura su 12");
++  assert.equal(r.riepilogoRicerca(1, 12), "1 candidatura su 12");
++  assert.equal(r.riepilogoRicerca(3, 12), "3 candidature su 12");
++});
++
++test("testi: etichette dei filtri e della soglia", () => {
++  assert.deepEqual(Object.keys(r.ETICHETTE_STATO), ["tutte", "da_valutare", "valutate"]);
++  assert.equal(r.etichettaMinimo(0), "Qualsiasi compatibilità");
++  assert.equal(r.etichettaMinimo(70), "Almeno 70%");
++  assert.deepEqual([...r.SOGLIE_COMPATIBILITA], [0, 50, 70]);
++  const tutto = [r.TESTO_NESSUN_RISULTATO, ...Object.values(r.ETICHETTE_STATO), r.etichettaMinimo(50), r.riepilogoRicerca(1, 2)].join(" ");
++  assert.ok(!/\b(lui|lei)\b/i.test(tutto), tutto);
++});
++
++// ------------------------------------------------------------
++// Coerenza e principi
++// ------------------------------------------------------------
++
++test("le soglie sono quelle con cui la schermata colora le percentuali (70 e 50)", () => {
++  const schermata = leggi("src", "app", "(app)", "database", "DatabaseClient.tsx");
++  assert.match(schermata, /pct >= 70/);
++  assert.match(schermata, /pct >= 50/);
++  assert.deepEqual([...r.SOGLIE_COMPATIBILITA].filter((x) => x > 0), [50, 70]);
++});
++
++/** Il codice senza i commenti: le guardie guardano ciò che fa, non ciò che dice. */
++const codice = () => leggi("src", "lib", "ricerca-candidati.ts").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
++
++test("principio: nessun filtro né ricerca su caratteristiche personali (nucleo, figli, animali, età, origine, genere)", () => {
++  const c = codice();
++  for (const vietato of [/\bfigli\b/i, /\bnucleo\b/i, /\banimali\b/i, /nazional/i, /\betà\b|\beta\b/i, /\breligi/i, /\bgenere\b|\bsesso\b/i, /\bcittadinan/i]) {
++    assert.ok(!vietato.test(c), `la ricerca usa ${vietato}`);
++  }
++  // e i campi su cui cerca sono solo questi
++  assert.match(c, /\[c\.nome, c\.cognome, c\.tenant_profiles\?\.professione, c\.listings\?\.titolo, c\.listings\?\.zona\]/);
++});
++
++test("privacy: la ricerca non ha accesso alla rete, e ciò che si cerca non si salva", () => {
++  const c = codice();
++  for (const vietato of [/\bimport\s+(?!type)/, /\bfetch\(/, /XMLHttpRequest/, /WebSocket/, /sendBeacon/, /localStorage/, /sessionStorage/, /indexedDB/, /document\.cookie/, /supabase/i, /console\./]) {
++    assert.ok(!vietato.test(c), `la ricerca usa ${vietato}`);
++  }
++});
++
++test("principio: i controlli sanno fermare un filtro per nucleo o una chiamata alla rete", () => {
++  assert.ok(/\bnucleo\b/i.test("if (c.tenant_profiles?.nucleo === 'coppia') return false;"));
++  assert.ok(/\bfetch\(/.test('fetch("/api/ricerche", { body: f.testo })'));
++});
+diff --git a/src/app/(app)/database/DatabaseClient.tsx b/src/app/(app)/database/DatabaseClient.tsx
+index 275fd79..2459998 100644
+--- a/src/app/(app)/database/DatabaseClient.tsx
++++ b/src/app/(app)/database/DatabaseClient.tsx
+@@ -11,6 +11,16 @@ import { Chip } from "@/components/ui/Chip";
+ import { MOTIVI_RIFIUTO } from "@/lib/motivi-rifiuto";
+ import type { ChiaveMotivoRifiuto } from "@/lib/motivi-rifiuto";
+ import { IconPersone } from "@/components/icons";
++import { RicercaCandidati } from "@/components/RicercaCandidati";
++import {
++  FILTRI_VUOTI,
++  TESTO_NESSUN_RISULTATO,
++  filtraCandidature,
++  filtriValidi,
++  haPunteggi,
++  opzioniAnnunci,
++  type Filtri,
++} from "@/lib/ricerca-candidati";
+ 
+ const BADGE: Record<string, string> = {
+   in_attesa: "is-wait",
+@@ -55,6 +65,8 @@ export function DatabaseClient({
+   const [aggiornate, setAggiornate] = useState<
+     Record<string, "accettata" | "rifiutata">
+   >({});
++  // La ricerca e i filtri restano in questa pagina: non si salvano né si inviano.
++  const [filtriScelti, setFiltriScelti] = useState<Filtri>(FILTRI_VUOTI);
+ 
+   function stato(c: CandidaturaRicevuta): string {
+     return aggiornate[c.id] ?? c.status;
+@@ -91,9 +103,16 @@ export function DatabaseClient({
+     });
+   }
+ 
+-  // ---- raggruppo per annuncio ----
++  // ---- ricerca e filtri ----
++  // L'elenco si ricarica quando si decide: i filtri che non hanno più senso
++  // (un annuncio sparito, una soglia senza percentuali) si ripuliscono, altrimenti
++  // la schermata resterebbe vuota senza che si capisca perché.
++  const filtri = filtriValidi(filtriScelti, candidature);
++  const visibili = filtraCandidature(candidature, filtri, stato);
++
++  // ---- raggruppo per annuncio (solo ciò che passa i filtri) ----
+   const perAnnuncio = new Map<string, Annuncio>();
+-  for (const c of candidature) {
++  for (const c of visibili) {
+     const gruppo = perAnnuncio.get(c.listing_id) ?? {
+       id: c.listing_id,
+       titolo: c.listings?.titolo ?? "Annuncio",
+@@ -134,6 +153,27 @@ export function DatabaseClient({
+         </div>
+       )}
+ 
++      {candidature.length > 0 && (
++        <RicercaCandidati
++          filtri={filtri}
++          onCambia={setFiltriScelti}
++          annunci={opzioniAnnunci(candidature)}
++          conPunteggi={haPunteggi(candidature)}
++          visibili={visibili.length}
++          totale={candidature.length}
++        />
++      )}
++
++      {candidature.length > 0 && visibili.length === 0 && (
++        <div className="empty-inline">
++          <IconPersone className="icon-empty" />
++          <h3>{TESTO_NESSUN_RISULTATO}</h3>
++          <button type="button" className="redo-link" onClick={() => setFiltriScelti(FILTRI_VUOTI)}>
++            Azzera filtri
++          </button>
++        </div>
++      )}
++
+       {annunci.map((a) => (
+         <SezioneAnnuncio
+           key={a.id}
+diff --git a/src/app/globals.css b/src/app/globals.css
+index 227fe97..10118b2 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -2846,3 +2846,38 @@ mark.segnaposto {
+   background: var(--clay);
+   border-radius: 999px;
+ }
++
++/* ============================================================
++   Database inquilini: ricerca e filtri
++   ============================================================ */
++
++.ricerca-barra {
++  display: flex;
++  flex-direction: column;
++  gap: 10px;
++  margin: 4px 0 6px;
++}
++.ricerca-input,
++.ricerca-select {
++  width: 100%;
++  padding: 11px 14px;
++  font-size: 14px;
++  color: var(--ink);
++  background: #fff;
++  border: 1px solid rgba(16, 21, 26, 0.14);
++  border-radius: 12px;
++  outline: none;
++}
++.ricerca-input:focus,
++.ricerca-select:focus {
++  border-color: var(--ink);
++}
++.ricerca-riepilogo {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 12px;
++  min-height: 18px;
++  font-size: 12px;
++  color: var(--muted);
++}
+diff --git a/src/components/RicercaCandidati.tsx b/src/components/RicercaCandidati.tsx
+new file mode 100644
+index 0000000..bd9cd2e
+--- /dev/null
++++ b/src/components/RicercaCandidati.tsx
+@@ -0,0 +1,124 @@
++"use client";
++
++import {
++  ETICHETTE_STATO,
++  FILTRI_VUOTI,
++  LUNGHEZZA_MASSIMA_RICERCA,
++  SOGLIE_COMPATIBILITA,
++  etichettaMinimo,
++  numeroFiltriAttivi,
++  riepilogoRicerca,
++  type FiltroStato,
++  type Filtri,
++} from "@/lib/ricerca-candidati";
++
++/**
++ * La barra di ricerca e i filtri del Database inquilini. Non decide cosa
++ * mostrare (lo fa lib/ricerca-candidati): raccoglie le scelte del
++ * proprietario. Ciò che si cerca resta in questa pagina: non si salva e non
++ * si invia.
++ */
++export function RicercaCandidati({
++  filtri,
++  onCambia,
++  annunci,
++  conPunteggi,
++  visibili,
++  totale,
++}: {
++  filtri: Filtri;
++  onCambia: (f: Filtri) => void;
++  annunci: { id: string; titolo: string }[];
++  /** Se nessun candidato ha una percentuale, il filtro per compatibilità non si offre. */
++  conPunteggi: boolean;
++  visibili: number;
++  totale: number;
++}) {
++  const attivi = numeroFiltriAttivi(filtri);
++  const imposta = (parziale: Partial<Filtri>) => onCambia({ ...filtri, ...parziale });
++
++  return (
++    <div className="ricerca-barra" role="search" aria-label="Cerca tra i candidati">
++      <input
++        type="search"
++        className="ricerca-input"
++        placeholder="Cerca per nome, lavoro o annuncio"
++        aria-label="Cerca tra i candidati"
++        value={filtri.testo}
++        maxLength={LUNGHEZZA_MASSIMA_RICERCA}
++        autoComplete="off"
++        onChange={(e) => imposta({ testo: e.target.value })}
++      />
++
++      {annunci.length > 1 && (
++        <select
++          className="ricerca-select"
++          aria-label="Annuncio"
++          value={filtri.annuncioId ?? ""}
++          onChange={(e) => imposta({ annuncioId: e.target.value || null })}
++        >
++          <option value="">Tutti gli annunci</option>
++          {annunci.map((a) => (
++            <option key={a.id} value={a.id}>
++              {a.titolo}
++            </option>
++          ))}
++        </select>
++      )}
++
++      <div className="chip-row" role="group" aria-label="Stato">
++        {(Object.keys(ETICHETTE_STATO) as FiltroStato[]).map((s) => (
++          <Interruttore key={s} acceso={filtri.stato === s} onClick={() => imposta({ stato: s })}>
++            {ETICHETTE_STATO[s]}
++          </Interruttore>
++        ))}
++      </div>
++
++      <div className="chip-row" role="group" aria-label="Filtri">
++        <Interruttore acceso={filtri.soloVerificati} onClick={() => imposta({ soloVerificati: !filtri.soloVerificati })}>
++          Reddito verificato
++        </Interruttore>
++        <Interruttore acceso={filtri.senzaBlocchi} onClick={() => imposta({ senzaBlocchi: !filtri.senzaBlocchi })}>
++          Senza blocchi
++        </Interruttore>
++      </div>
++
++      {conPunteggi && (
++        <div className="chip-row" role="group" aria-label="Compatibilità">
++          {SOGLIE_COMPATIBILITA.map((m) => (
++            <Interruttore key={m} acceso={filtri.minimo === m} onClick={() => imposta({ minimo: m })}>
++              {etichettaMinimo(m)}
++            </Interruttore>
++          ))}
++        </div>
++      )}
++
++      <div className="ricerca-riepilogo" aria-live="polite">
++        {attivi > 0 && (
++          <>
++            <span>{riepilogoRicerca(visibili, totale)}</span>
++            <button type="button" className="redo-link" onClick={() => onCambia(FILTRI_VUOTI)}>
++              Azzera filtri
++            </button>
++          </>
++        )}
++      </div>
++    </div>
++  );
++}
++
++function Interruttore({
++  acceso,
++  onClick,
++  children,
++}: {
++  acceso: boolean;
++  onClick: () => void;
++  children: React.ReactNode;
++}) {
++  return (
++    <button type="button" aria-pressed={acceso} className={`chip ${acceso ? "on" : ""}`} onClick={onClick}>
++      {children}
++    </button>
++  );
++}
+diff --git a/src/lib/ricerca-candidati.ts b/src/lib/ricerca-candidati.ts
+new file mode 100644
+index 0000000..05eac2a
+--- /dev/null
++++ b/src/lib/ricerca-candidati.ts
+@@ -0,0 +1,182 @@
++/**
++ * La ricerca e i filtri nel Database inquilini: quali candidature mostrare
++ * dato ciò che il proprietario ha scritto e scelto. Logica pura, senza
++ * database: si prova con `npm test`.
++ *
++ * Tutto avviene sui dati che la schermata ha GIÀ in pagina: non si legge,
++ * non si salva e non si invia niente di nuovo, nemmeno ciò che si cerca.
++ *
++ * Non c'è nessun filtro su caratteristiche personali (nucleo, figli,
++ * animali): coerentemente con la scelta di non averne nei criteri.
++ */
++import type { CandidaturaRicevuta } from "./types";
++
++export type FiltroStato = "tutte" | "da_valutare" | "valutate";
++
++/** Le soglie sono quelle delle etichette di compatibilità della schermata (70 e 50). */
++export type MinimoCompatibilita = 0 | 50 | 70;
++export const SOGLIE_COMPATIBILITA: readonly MinimoCompatibilita[] = [0, 50, 70];
++
++export type Filtri = {
++  testo: string;
++  stato: FiltroStato;
++  soloVerificati: boolean;
++  senzaBlocchi: boolean;
++  minimo: MinimoCompatibilita;
++  /** un solo annuncio, o tutti (nullo) */
++  annuncioId: string | null;
++};
++
++export const FILTRI_VUOTI: Filtri = Object.freeze({
++  testo: "",
++  stato: "tutte",
++  soloVerificati: false,
++  senzaBlocchi: false,
++  minimo: 0,
++  annuncioId: null,
++});
++
++/** Quanti caratteri si considerano di ciò che si cerca. */
++export const LUNGHEZZA_MASSIMA_RICERCA = 100;
++
++/**
++ * Minuscole, senza accenti, spazi ridotti a uno, accorciato. Un valore che non
++ * è testo vale testo vuoto: la ricerca non deve mai far crollare la schermata.
++ */
++export function normalizzaRicerca(t: unknown): string {
++  if (typeof t !== "string") return "";
++  return t
++    .slice(0, LUNGHEZZA_MASSIMA_RICERCA * 4) // prima di lavorarlo: un testo incollato enorme non rallenta
++    .normalize("NFD")
++    .replace(/[\u0300-\u036f]/g, "")
++    .toLowerCase()
++    .replace(/[’‘`´]/g, "'")
++    .replace(/\s+/g, " ")
++    .trim()
++    .slice(0, LUNGHEZZA_MASSIMA_RICERCA);
++}
++
++/** Le parole cercate: ognuna deve comparire, in un punto qualunque. */
++export function paroleRicerca(t: unknown): string[] {
++  const n = normalizzaRicerca(t);
++  return n ? n.split(" ") : [];
++}
++
++/** Tutto ciò in cui si cerca, già normalizzato. */
++function testoCercabile(c: CandidaturaRicevuta): string {
++  return normalizzaRicerca(
++    [c.nome, c.cognome, c.tenant_profiles?.professione, c.listings?.titolo, c.listings?.zona]
++      .filter((x): x is string => typeof x === "string")
++      .join(" ")
++  );
++}
++
++/**
++ * Una candidatura rispetta i filtri? `stato` dà lo stato effettivo, che può
++ * essere cambiato da una decisione appena presa e non ancora ricaricata.
++ */
++export function corrisponde(
++  c: CandidaturaRicevuta,
++  f: Filtri,
++  stato: (c: CandidaturaRicevuta) => string
++): boolean {
++  if (f.annuncioId !== null && c.listing_id !== f.annuncioId) return false;
++
++  const inAttesa = stato(c) === "in_attesa";
++  if (f.stato === "da_valutare" && !inAttesa) return false;
++  if (f.stato === "valutate" && inAttesa) return false;
++
++  // Dopo un rifiuto del profilo resta solo il nome: chi non ha il profilo non
++  // risulta verificato, e lo dice la schermata stessa.
++  if (f.soloVerificati && c.tenant_profiles?.verificato !== true) return false;
++
++  // Senza una valutazione non si può dire che sia bloccato: resta.
++  if (f.senzaBlocchi && c.valutazione?.match.bloccato === true) return false;
++
++  // Una soglia si applica a chi ha una percentuale. Chi non ce l'ha (nessun
++  // criterio impostato) non può dimostrare di raggiungerla.
++  if (f.minimo > 0) {
++    const p = c.valutazione?.match.punteggio;
++    if (typeof p !== "number" || p < f.minimo) return false;
++  }
++
++  const parole = paroleRicerca(f.testo);
++  if (parole.length > 0) {
++    const testo = testoCercabile(c);
++    if (!parole.every((p) => testo.includes(p))) return false;
++  }
++
++  return true;
++}
++
++/** Le candidature che rispettano i filtri, nell'ordine di arrivo. */
++export function filtraCandidature<T extends CandidaturaRicevuta>(
++  elenco: T[],
++  f: Filtri,
++  stato: (c: CandidaturaRicevuta) => string
++): T[] {
++  return elenco.filter((c) => corrisponde(c, f, stato));
++}
++
++/** Quanti filtri sono accesi (la ricerca di testo conta come uno). */
++export function numeroFiltriAttivi(f: Filtri): number {
++  return (
++    (normalizzaRicerca(f.testo) ? 1 : 0) +
++    (f.stato !== "tutte" ? 1 : 0) +
++    (f.soloVerificati ? 1 : 0) +
++    (f.senzaBlocchi ? 1 : 0) +
++    (f.minimo > 0 ? 1 : 0) +
++    (f.annuncioId !== null ? 1 : 0)
++  );
++}
++
++/**
++ * Almeno un candidato ha una percentuale? Se nessuno ce l'ha (il proprietario
++ * non ha impostato criteri) il filtro per compatibilità non si offre: lo
++ * accenderlo nasconderebbe tutti.
++ */
++export function haPunteggi(elenco: CandidaturaRicevuta[]): boolean {
++  return elenco.some((c) => typeof c.valutazione?.match.punteggio === "number");
++}
++
++/** Gli annunci tra cui scegliere, senza doppioni, in ordine alfabetico. */
++export function opzioniAnnunci(elenco: CandidaturaRicevuta[]): { id: string; titolo: string }[] {
++  const visti = new Map<string, string>();
++  for (const c of elenco) {
++    if (!visti.has(c.listing_id)) visti.set(c.listing_id, c.listings?.titolo ?? "Annuncio");
++  }
++  return [...visti].map(([id, titolo]) => ({ id, titolo })).sort((a, b) => a.titolo.localeCompare(b.titolo, "it"));
++}
++
++/**
++ * I filtri ripuliti da ciò che non ha più senso sull'elenco di adesso. L'elenco
++ * si ricarica quando si decide su un candidato: se un filtro puntava a un
++ * annuncio che non c'è più, o a una compatibilità minima quando nessuno ha più
++ * una percentuale, la schermata resterebbe vuota senza che si capisca perché.
++ */
++export function filtriValidi(f: Filtri, elenco: CandidaturaRicevuta[]): Filtri {
++  const annuncioEsiste = f.annuncioId !== null && elenco.some((c) => c.listing_id === f.annuncioId);
++  return {
++    ...f,
++    annuncioId: annuncioEsiste ? f.annuncioId : null,
++    minimo: haPunteggi(elenco) ? f.minimo : 0,
++  };
++}
++
++/** «3 candidature su 12»: quante se ne vedono, su quante ce ne sono. */
++export function riepilogoRicerca(visibili: number, totale: number): string {
++  if (visibili === 0) return `Nessuna candidatura su ${totale}`;
++  return `${visibili} candidatur${visibili === 1 ? "a" : "e"} su ${totale}`;
++}
++
++export const TESTO_NESSUN_RISULTATO = "Nessuna candidatura corrisponde a ciò che hai cercato.";
++
++export const ETICHETTE_STATO: Record<FiltroStato, string> = {
++  tutte: "Tutte",
++  da_valutare: "Da valutare",
++  valutate: "Già valutate",
++};
++
++export function etichettaMinimo(m: MinimoCompatibilita): string {
++  return m === 0 ? "Qualsiasi compatibilità" : `Almeno ${m}%`;
++}
+-- 
+2.43.0
+

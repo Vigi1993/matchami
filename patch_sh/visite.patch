@@ -1,0 +1,2006 @@
+From 8394d2a9d39f25cb4c75feff9282b7f4eeaf3b91 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 8 Oct 2026 14:00:39 +0000
+Subject: [PATCH] =?UTF-8?q?feat(visite):=20disponibilit=C3=A0=20e=20prenot?=
+ =?UTF-8?q?azione=20delle=20visite?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RICHIEDE LA MIGRAZIONE 0022 PRIMA DEL PUSH.
+
+La tabella 'visite' esisteva dalla prima migrazione e nessuna schermata la
+usava. Le sue regole di accesso avevano due difetti, che nessuno aveva visto
+proprio perché nessuno la usava:
+- 'tenant books' lasciava all'inquilino il permesso di modificare QUALUNQUE
+  colonna della sua visita (data, annuncio, stato), senza controlli sul
+  risultato
+- 'owner manages slots' era ALL senza controlli: il proprietario poteva
+  agganciare una visita alla candidatura di un ALTRO annuncio
+Si tolgono entrambe e si revocano le scritture dirette: tutto passa da
+funzioni che controllano ogni cosa.
+
+Come funziona:
+- il proprietario aggiunge posti liberi (data e ora) dalla scheda del suo
+  immobile; un inquilino con una candidatura ACCETTATA su quell'immobile ne
+  prenota uno dalla chat; a ogni match, una visita alla volta
+- regole nel database: posto tra almeno un'ora e non oltre 90 giorni; due
+  posti sullo stesso immobile a 30 minuti almeno; al massimo 30 liberi per
+  immobile; prenotazione con almeno mezz'ora di margine
+- una gara tra due prenotazioni dello stesso posto nello stesso istante: ne
+  vince una sola (15 prove reali, mai due, mai nessuna)
+- annullare finché la visita non è passata: se annulla l'inquilino il posto
+  torna libero, se annulla il proprietario la visita risulta annullata e
+  l'inquilino lo sa. Se un inquilino cancella l'account la sua visita futura
+  torna libera
+- notifiche (15 tipi in tutto) a chi deve saperlo; contengono titolo e
+  data, mai nomi
+
+Difetto trovato dal test e corretto prima del commit: il trigger di notifica
+era 'after update of stato', che scatta solo se l'istruzione cita la colonna;
+alla cancellazione di un account la cascata imposta solo candidatura_id e lo
+stato lo cambia un altro trigger: il proprietario non veniva avvisato.
+
+DATE. Il database conserva un istante (UTC); ciò che si scrive e si legge è
+SEMPRE l'ora di Roma, qualunque sia il fuso del telefono. Un'ora che non esiste
+(il salto di marzo) viene rifiutata; una che esiste due volte (ottobre) si
+risolve sulla prima. Il 25 ottobre 2026 finisce l'ora legale. Provato anche in
+processi con fusi diversi (Auckland, New York, Tokyo, Roma, UTC) e su ogni
+quarto d'ora del 2026 e 2027.
+
+App: pannello 'Visite' nella scheda dell'immobile (proprietario); pannello
+'Prenota una visita' nella chat (inquilino prenota, entrambi annullano, con
+conferma in due tempi). Se il caricamento delle visite fallisce la chat si apre
+lo stesso.
+
+PRIVACY: le visite sono un trattamento nuovo (giorno e ora, chi ha
+prenotato). L'informativa (versione 2026-10-provvisoria-6: va riaccettata) lo
+dichiara; due frasi che sarebbero diventate false sono state corrette (le
+notifiche non contengono più 'al massimo il titolo': per le visite c'è anche
+la data; la conservazione cita le visite). Un test lega ogni affermazione alla
+migrazione.
+
+Test: 445 in tutto. Migrazione provata su PostgreSQL da zero e in UNA
+transazione, anche rilanciata (circa 90 controlli); date; 20 prove di
+interazione; una guardia confronta ogni chiamata rpc nel codice con la firma
+della funzione. Difetti reintrodotti di proposito: tutti presi.
+---
+ package.json                              |   2 +-
+ scripts/test-informativa.mjs              |  28 ++
+ scripts/test-notifiche.mjs                |  13 +-
+ scripts/test-visite.mjs                   | 385 +++++++++++++++++++
+ src/app/(app)/immobili/ImmobiliClient.tsx |  18 +-
+ src/app/(app)/immobili/page.tsx           |   7 +-
+ src/app/chat/[id]/ChatClient.tsx          |  11 +
+ src/app/chat/[id]/page.tsx                |  13 +
+ src/app/globals.css                       |  66 ++++
+ src/components/VisitaChat.tsx             | 158 ++++++++
+ src/components/VisiteImmobile.tsx         | 199 ++++++++++
+ src/content/informativa.ts                |   7 +-
+ src/lib/notifiche.ts                      |  17 +
+ src/lib/verifica.ts                       |  13 +
+ src/lib/visite.ts                         | 262 +++++++++++++
+ supabase/migrations/0022_visite.sql       | 440 ++++++++++++++++++++++
+ 16 files changed, 1624 insertions(+), 15 deletions(-)
+ create mode 100644 scripts/test-visite.mjs
+ create mode 100644 src/components/VisitaChat.tsx
+ create mode 100644 src/components/VisiteImmobile.tsx
+ create mode 100644 src/lib/visite.ts
+ create mode 100644 supabase/migrations/0022_visite.sql
+
+diff --git a/package.json b/package.json
+index e47a992..98c64d7 100644
+--- a/package.json
++++ b/package.json
+@@ -7,7 +7,7 @@
+     "build": "next build",
+     "start": "next start",
+     "lint": "eslint",
+-    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-informativa.mjs b/scripts/test-informativa.mjs
+index a45ccc9..b7cf100 100644
+--- a/scripts/test-informativa.mjs
++++ b/scripts/test-informativa.mjs
+@@ -377,3 +377,31 @@ test("messaggi letti: nessuna schermata mostra a chi ha scritto se il messaggio
+   const pagina = fs.readFileSync(path.join(radice, "src", "app", "chat", "[id]", "page.tsx"), "utf8");
+   assert.match(pagina, /\.select\("id, mittente_id, testo, created_at"\)/);
+ });
++
++// ------------------------------------------------------------
++// Ciò che il testo dice delle visite è vero
++// ------------------------------------------------------------
++
++test("visite: il testo le dichiara, dice chi le vede e cosa contengono le notifiche, e la migrazione lo fa davvero", () => {
++  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
++  assert.match(tutto, /visite \(giorno e ora, e chi le ha prenotate\)/);
++  assert.match(tutto, /Li vedono solo le persone che hanno un match accettato su quell'immobile/);
++  assert.match(tutto, /nome e cognome di chi ha prenotato, per le visite degli ultimi 30 giorni/);
++  assert.match(tutto, /per le visite, il giorno e l'ora; mai nomi di persone/);
++  assert.match(tutto, /una visita, un invito o un documento restano finché non cancelli l'account \(o, per le visite, l'immobile\)/);
++
++  const sql22 = fs.readFileSync(path.join(migrazioni, "0022_visite.sql"), "utf8");
++  // chi non ha un match accettato non vede i posti liberi
++  assert.match(sql22, /c\.tenant_id = auth\.uid\(\)\s+and c\.status = 'accettata'/);
++  // il proprietario vede gli ultimi 30 giorni
++  assert.match(sql22, /v\.data_ora >= now\(\) - interval '30 days'/);
++  // e nelle notifiche delle visite ci sono solo il titolo e la data, mai nomi
++  const trigger = sql22.slice(sql22.indexOf("create or replace function public.notifica_visita()"), sql22.indexOf("drop trigger if exists notifica_visita"));
++  assert.match(trigger, /jsonb_build_object\('titolo', left\(l\.titolo, 80\), 'quando', new\.data_ora\)/);
++  assert.ok(!/nome|cognome/i.test(trigger), "le notifiche delle visite contengono un nome");
++  // chi cancella l'immobile o l'account: le visite non restano appese
++  const tabella = fs.readFileSync(path.join(migrazioni, "0001_init.sql"), "utf8").match(/create table visite \(([\s\S]*?)\n\);/);
++  assert.ok(tabella, "non trovo la tabella delle visite");
++  assert.match(tabella[1], /listing_id uuid not null references listings\(id\) on delete cascade/);
++  assert.match(tabella[1], /candidatura_id uuid references candidature\(id\) on delete set null/);
++});
+diff --git a/scripts/test-notifiche.mjs b/scripts/test-notifiche.mjs
+index 16190f0..b9ddd33 100644
+--- a/scripts/test-notifiche.mjs
++++ b/scripts/test-notifiche.mjs
+@@ -15,12 +15,13 @@ const sql = fs.readFileSync(path.join(radice, "supabase", "migrations", "0019_no
+ // Dopo la 0019 l'elenco dei tipi e il trigger delle candidature sono stati riscritti dalla 0020
+ // (il ritiro di una candidatura): la verità è l'ultima definizione.
+ const sql0020 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0020_ritira_candidatura.sql"), "utf8");
++const sql0022 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0022_visite.sql"), "utf8");
+ 
+ /** I tipi che il vincolo sulla tabella ammette. */
+ function tipiDelDatabase() {
+   // l'ultima definizione del vincolo, in ordine di migrazione
+-  const tutte = [...(sql + "\n" + sql0020).matchAll(/check \(tipo in \(([\s\S]*?)\)\)/g)];
+-  assert.ok(tutte.length >= 2, "dovrei trovare il vincolo della 0019 e quello della 0020");
++  const tutte = [...(sql + "\n" + sql0020 + "\n" + sql0022).matchAll(/check \(tipo in \(([\s\S]*?)\)\)/g)];
++  assert.ok(tutte.length >= 3, "dovrei trovare il vincolo della 0019, quello della 0020 e quello della 0022");
+   return [...tutte[tutte.length - 1][1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
+ }
+ 
+@@ -29,7 +30,10 @@ const trigger =
+   sql.slice(sql.indexOf("-- 4. I trigger"), sql.indexOf("-- 5. Pulizia")) +
+   "\n" +
+   // la 0020 riscrive la funzione delle candidature: si guarda solo da lì in poi
+-  sql0020.slice(sql0020.indexOf("-- 5. La notifica al proprietario"));
++  sql0020.slice(sql0020.indexOf("-- 5. La notifica al proprietario")) +
++  "\n" +
++  // la 0022 aggiunge il trigger delle visite: si guarda la sua funzione
++  sql0022.slice(sql0022.indexOf("create or replace function public.notifica_visita()"), sql0022.indexOf("drop trigger if exists notifica_visita"));
+ 
+ // ------------------------------------------------------------
+ // I tipi
+@@ -67,6 +71,7 @@ const ROTTE = {
+   "/profilo": ["src", "app", "(app)", "profilo", "page.tsx"],
+   "/gestione-affitti": ["src", "app", "(app)", "gestione-affitti", "page.tsx"],
+   "/chat/": ["src", "app", "chat", "[id]", "page.tsx"],
++  "/immobili": ["src", "app", "(app)", "immobili", "page.tsx"],
+ };
+ 
+ test("link: ogni percorso che i trigger scrivono esiste nell'app", () => {
+@@ -105,7 +110,7 @@ test("testi: ogni tipo ha un titolo e un testo suoi, mai la formula generica", (
+     const d = n.descriviNotifica(t, { titolo: "Casa" });
+     assert.ok(d.titolo.trim() && d.testo.trim(), t);
+     assert.notEqual(d.titolo, generico.titolo, `«${t}» usa il titolo generico`);
+-    assert.ok(!/undefined|null|\[object/.test(d.titolo + d.testo), `${t}: ${d.testo}`);
++    assert.ok(!/\bundefined\b|\bnull\b|\[object/.test(d.titolo + d.testo), `${t}: ${d.testo}`);
+     assert.ok(!visti.has(d.titolo), `due tipi con lo stesso titolo: ${d.titolo}`);
+     visti.add(d.titolo);
+   }
+diff --git a/scripts/test-visite.mjs b/scripts/test-visite.mjs
+new file mode 100644
+index 0000000..d8a45bc
+--- /dev/null
++++ b/scripts/test-visite.mjs
+@@ -0,0 +1,385 @@
++/**
++ * Test delle visite (src/lib/visite.ts). Si lancia con:   npm test
++ *
++ * Le date sono la parte che sbaglia in silenzio: un'ora che salta o che si
++ * ripete due volte l'anno, un telefono con un fuso diverso, un mese di 30
++ * giorni. Qui si provano uno per uno.
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { execFileSync } from "node:child_process";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const percorso = path.join(radice, "src", "lib", "visite.ts");
++const v = caricaTs(percorso);
++const base = caricaTs(path.join(radice, "src", "lib", "verifica.ts"));
++const sql = fs.readFileSync(path.join(radice, "supabase", "migrations", "0022_visite.sql"), "utf8");
++
++const ORA = 3600_000, MIN = 60_000, GIORNO = 86_400_000;
++
++// ------------------------------------------------------------
++// Da «ora di Roma» a un istante
++// ------------------------------------------------------------
++
++test("estate: a Roma sono due ore avanti rispetto a UTC", () => {
++  assert.equal(v.daInputRoma("2026-10-12T10:00"), "2026-10-12T08:00:00.000Z");
++  assert.equal(v.daInputRoma("2026-07-01T00:00"), "2026-06-30T22:00:00.000Z");
++});
++
++test("inverno: a Roma è un'ora avanti", () => {
++  assert.equal(v.daInputRoma("2026-12-12T10:00"), "2026-12-12T09:00:00.000Z");
++  assert.equal(v.daInputRoma("2026-01-15T23:45"), "2026-01-15T22:45:00.000Z");
++});
++
++test("ora legale in primavera: l'ora che SALTA non esiste, e non si inventa", () => {
++  // il 29 marzo 2026 alle 02:00 le lancette vanno a 03:00: le 02:00-02:59 non ci sono
++  assert.equal(v.daInputRoma("2026-03-29T02:00"), null);
++  assert.equal(v.daInputRoma("2026-03-29T02:30"), null);
++  assert.equal(v.daInputRoma("2026-03-29T02:59"), null);
++  // a cavallo del salto, invece, le ore ci sono
++  assert.equal(v.daInputRoma("2026-03-29T01:59"), "2026-03-29T00:59:00.000Z");
++  assert.equal(v.daInputRoma("2026-03-29T03:00"), "2026-03-29T01:00:00.000Z");
++});
++
++test("ora solare in autunno: l'ora che si RIPETE si risolve sempre sulla prima", () => {
++  // il 25 ottobre 2026 alle 03:00 le lancette tornano a 02:00: le 02:00-02:59 ci sono due volte
++  assert.equal(v.daInputRoma("2026-10-25T02:30"), "2026-10-25T00:30:00.000Z", "la prima volta (ancora ora legale)");
++  assert.equal(v.daInputRoma("2026-10-25T02:00"), "2026-10-25T00:00:00.000Z");
++  assert.equal(v.daInputRoma("2026-10-25T02:59"), "2026-10-25T00:59:00.000Z");
++  // prima e dopo la ripetizione, nessuna ambiguità
++  assert.equal(v.daInputRoma("2026-10-25T01:59"), "2026-10-24T23:59:00.000Z");
++  assert.equal(v.daInputRoma("2026-10-25T03:00"), "2026-10-25T02:00:00.000Z");
++  assert.equal(v.daInputRoma("2026-10-25T10:00"), "2026-10-25T09:00:00.000Z", "dopo il cambio è inverno");
++  assert.equal(v.daInputRoma("2026-10-24T10:00"), "2026-10-24T08:00:00.000Z", "il giorno prima è ancora estate");
++});
++
++test("ora legale: le date del 2027 (l'ultima domenica di marzo e di ottobre)", () => {
++  assert.equal(v.daInputRoma("2027-03-28T02:30"), null, "28 marzo 2027: salto");
++  assert.equal(v.daInputRoma("2027-10-31T02:30"), "2027-10-31T00:30:00.000Z", "31 ottobre 2027: ripetuta");
++});
++
++test("date impossibili: giorno inesistente, mese, ora o minuto fuori scala", () => {
++  for (const x of ["2026-02-29T10:00", "2026-04-31T10:00", "2026-06-31T10:00", "2026-13-01T10:00", "2026-00-10T10:00", "2026-10-00T10:00", "2026-10-32T10:00", "2026-10-12T24:00", "2026-10-12T10:60", "2026-10-12T25:00"]) {
++    assert.equal(v.daInputRoma(x), null, x);
++  }
++  assert.ok(v.daInputRoma("2028-02-29T10:00"), "il 29 febbraio di un anno bisestile esiste");
++  assert.equal(v.daInputRoma("2100-02-29T10:00"), null, "il 2100 non è bisestile");
++});
++
++test("forme non ammesse: vuoto, non testo, con secondi, con fuso, scritte male", () => {
++  for (const x of ["", " ", null, undefined, 42, {}, [], "2026-10-12", "10:00", "2026-10-12 10:00", "2026-10-12T10:00:00", "2026-10-12T10:00Z", "2026-10-12T10:00+02:00", "12/10/2026 10:00", "2026-1-2T9:00", "boh", "2026-10-12T10:0"]) {
++    assert.equal(v.daInputRoma(x), null, JSON.stringify(x));
++  }
++});
++
++test("andata e ritorno: ogni quarto d'ora del 2026 e del 2027 si converte e si riconverte (tranne la seconda ora ripetuta)", () => {
++  const inizio = Date.UTC(2026, 0, 1), fine = Date.UTC(2028, 0, 1);
++  let controllati = 0, ripetuti = 0;
++  for (let t = inizio; t < fine; t += 15 * MIN) {
++    const locale = v.aInputRoma(t);
++    const indietro = v.daInputRoma(locale);
++    assert.ok(indietro, `l'ora ${locale} (da ${new Date(t).toISOString()}) non torna indietro`);
++    const r = Date.parse(indietro);
++    if (r === t) controllati++;
++    else {
++      // l'unico caso ammesso: la SECONDA volta di un'ora ripetuta, che torna alla prima (un'ora prima)
++      assert.equal(r, t - ORA, `${locale}: atteso ${new Date(t - ORA).toISOString()}, ottenuto ${indietro}`);
++      ripetuti++;
++    }
++  }
++  assert.equal(ripetuti, 8, "quattro quarti d'ora per ciascuna delle due notti di ottobre (2026 e 2027): " + ripetuti);
++  assert.ok(controllati > 70000);
++});
++
++test("il fuso del telefono non conta: lo stesso risultato da Auckland, New York, Tokyo e Roma", () => {
++  const script = `
++    import { caricaTs } from ${JSON.stringify(path.join(radice, "scripts", "carica-ts.mjs"))};
++    const v = caricaTs(${JSON.stringify(percorso)});
++    console.log(JSON.stringify([
++      v.daInputRoma("2026-10-12T10:00"), v.daInputRoma("2026-10-25T02:30"), v.daInputRoma("2026-03-29T02:30"),
++      v.formattaQuando("2026-10-12T08:00:00Z"), v.aInputRoma("2026-10-12T08:00:00Z"), v.chiaveGiorno("2026-10-12T22:30:00Z"),
++    ]));`;
++  const risultati = ["Pacific/Auckland", "America/New_York", "Asia/Tokyo", "Europe/Rome", "UTC"].map((TZ) =>
++    execFileSync(process.execPath, ["--input-type=module", "-e", script], { env: { ...process.env, TZ }, encoding: "utf8" }).trim()
++  );
++  assert.equal(new Set(risultati).size, 1, "i fusi danno risultati diversi:\n" + risultati.join("\n"));
++  assert.deepEqual(JSON.parse(risultati[0]), ["2026-10-12T08:00:00.000Z", "2026-10-25T00:30:00.000Z", null, "lunedì 12 ottobre · 10:00", "2026-10-12T10:00", "2026-10-13"]);
++});
++
++// ------------------------------------------------------------
++// Mostrare una data
++// ------------------------------------------------------------
++
++test("mostrare: giorno, ora e la frase completa in italiano", () => {
++  assert.equal(v.formattaGiorno("2026-10-12T08:00:00Z"), "lunedì 12 ottobre");
++  assert.equal(v.formattaOra("2026-10-12T08:00:00Z"), "10:00");
++  assert.equal(v.formattaQuando("2026-10-12T08:00:00Z"), "lunedì 12 ottobre · 10:00");
++  assert.equal(v.formattaQuando("2026-12-25T11:30:00Z"), "venerdì 25 dicembre · 12:30");
++  assert.equal(v.formattaOra("2026-10-12T22:00:00Z"), "00:00", "mezzanotte, non «24:00»");
++});
++
++test("mostrare: una data illeggibile dà una stringa vuota, mai «Invalid Date»", () => {
++  for (const x of ["", "boh", null, undefined, 42, "2026-13-45", {}]) {
++    assert.equal(v.formattaQuando(x), "", String(x));
++  }
++  assert.equal(v.formattaGiorno("boh"), "");
++  assert.equal(v.formattaOra("boh"), "");
++  assert.equal(v.aInputRoma("boh"), "");
++  assert.equal(v.chiaveGiorno("boh"), "");
++});
++
++test("giorno: si cambia a mezzanotte di Roma, non a quella di UTC", () => {
++  assert.equal(v.chiaveGiorno("2026-10-12T21:59:00Z"), "2026-10-12");
++  assert.equal(v.chiaveGiorno("2026-10-12T22:00:00Z"), "2026-10-13", "mezzanotte a Roma in estate");
++  assert.equal(v.chiaveGiorno("2026-12-12T22:59:00Z"), "2026-12-12");
++  assert.equal(v.chiaveGiorno("2026-12-12T23:00:00Z"), "2026-12-13", "mezzanotte a Roma in inverno");
++});
++
++// ------------------------------------------------------------
++// Proporre un posto
++// ------------------------------------------------------------
++
++const ADESSO = Date.parse("2026-10-08T12:00:00Z");
++const tra = (ms) => new Date(ADESSO + ms).toISOString();
++
++test("posto: valido tra più di un'ora e meno di novanta giorni", () => {
++  assert.equal(v.validaNuovoPosto(tra(61 * MIN), ADESSO, [], 0), null);
++  assert.equal(v.validaNuovoPosto(tra(5 * GIORNO), ADESSO, [], 0), null);
++  assert.equal(v.validaNuovoPosto(tra(89 * GIORNO), ADESSO, [], 0), null);
++});
++
++test("posto: troppo vicino o nel passato", () => {
++  for (const ms of [-GIORNO, 0, 59 * MIN, 30 * MIN]) assert.equal(v.validaNuovoPosto(tra(ms), ADESSO, [], 0), "Il posto deve essere tra almeno un'ora.", String(ms));
++  assert.equal(v.validaNuovoPosto(tra(60 * MIN), ADESSO, [], 0), null, "esattamente un'ora va bene, come per il database (< non <=)");
++});
++
++test("posto: troppo lontano", () => {
++  assert.equal(v.validaNuovoPosto(tra(91 * GIORNO), ADESSO, [], 0), "Il posto deve essere entro 90 giorni.");
++  assert.equal(v.validaNuovoPosto(tra(90 * GIORNO), ADESSO, [], 0), null, "esattamente novanta giorni va bene");
++});
++
++test("posto: non valido, nullo o illeggibile", () => {
++  for (const x of [null, "boh", "", "2026-13-99"]) assert.equal(v.validaNuovoPosto(x, ADESSO, [], 0), "Scegli una data e un'ora valide.", String(x));
++});
++
++test("posto: a mezz'ora da un altro (prima o dopo) no, a trenta minuti esatti sì", () => {
++  const base = tra(2 * GIORNO);
++  assert.match(v.validaNuovoPosto(base, ADESSO, [base], 0), /servono almeno 30 minuti/, "identico");
++  assert.match(v.validaNuovoPosto(tra(2 * GIORNO + 20 * MIN), ADESSO, [base], 0), /servono almeno 30 minuti/);
++  assert.match(v.validaNuovoPosto(tra(2 * GIORNO + 29 * MIN), ADESSO, [base], 0), /servono almeno 30 minuti/);
++  assert.match(v.validaNuovoPosto(tra(2 * GIORNO - 29 * MIN), ADESSO, [base], 0), /servono almeno 30 minuti/);
++  assert.equal(v.validaNuovoPosto(tra(2 * GIORNO + 30 * MIN), ADESSO, [base], 0), null);
++  assert.equal(v.validaNuovoPosto(tra(2 * GIORNO - 30 * MIN), ADESSO, [base], 0), null);
++});
++
++test("posto: i secondi non contano, come per il database (che taglia al minuto)", () => {
++  const base = tra(2 * GIORNO);
++  const trentaMinutiEUnSecondoDopo = new Date(Date.parse(base) + 30 * MIN + 1000).toISOString();
++  // dopo il troncamento al minuto sono esattamente 30 minuti: ammesso
++  assert.equal(v.validaNuovoPosto(trentaMinutiEUnSecondoDopo, ADESSO, [base], 0), null);
++  const ventinoveMinutiE59Secondi = new Date(Date.parse(base) + 29 * MIN + 59_000).toISOString();
++  assert.match(v.validaNuovoPosto(ventinoveMinutiE59Secondi, ADESSO, [base], 0), /servono almeno 30 minuti/);
++});
++
++test("posto: gli altri immobili non c'entrano (si passano solo i posti di questo)", () => {
++  assert.equal(v.validaNuovoPosto(tra(2 * GIORNO), ADESSO, [], 5), null);
++});
++
++test("posto: il trentunesimo posto libero no", () => {
++  assert.match(v.validaNuovoPosto(tra(2 * GIORNO), ADESSO, [], 30), /Hai già 30 posti liberi/);
++  assert.equal(v.validaNuovoPosto(tra(2 * GIORNO), ADESSO, [], 29), null);
++});
++
++test("posto: un elenco di posti con valori illeggibili non rompe niente", () => {
++  assert.equal(v.validaNuovoPosto(tra(2 * GIORNO), ADESSO, ["boh", "", null], 0), null);
++});
++
++test("limiti del campo: da un'ora da adesso a novanta giorni, in ora di Roma", () => {
++  const l = v.limitiSelezione(ADESSO);
++  assert.equal(l.min, "2026-10-08T15:00", "adesso 14:00 a Roma + 1 ora");
++  assert.equal(l.max, v.aInputRoma(ADESSO + 90 * GIORNO));
++  assert.match(l.max, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
++});
++
++test("le regole rispecchiate sono quelle della migrazione", () => {
++  assert.match(sql, /v_quando < now\(\) \+ interval '1 hour'/);
++  assert.equal(v.ANTICIPO_MINIMO_ORE, 1);
++  assert.match(sql, /v_quando > now\(\) \+ interval '90 days'/);
++  assert.equal(v.ANTICIPO_MASSIMO_GIORNI, 90);
++  assert.match(sql, /abs\(extract\(epoch from \(data_ora - v_quando\)\)\) < 1800/);
++  assert.equal(v.DISTANZA_MINIMA_MINUTI * 60, 1800);
++  assert.match(sql, /\) >= 30 then\s+raise exception 'TROPPI_POSTI'/);
++  assert.equal(v.MASSIMO_POSTI_LIBERI, 30);
++  assert.ok((sql.match(/interval '30 minutes'/g) ?? []).length >= 2, "il margine di prenotazione manca nella migrazione");
++  assert.equal(v.MARGINE_PRENOTAZIONE_MINUTI, 30);
++});
++
++// ------------------------------------------------------------
++// Raggruppare
++// ------------------------------------------------------------
++
++const riga = (id, stato, dopoMs, o = {}) => ({ visita_id: id, listing_id: "L1", titolo: "Bilocale", data_ora: tra(dopoMs), stato, candidatura_id: stato === "proposta" ? null : "c1", nome_inquilino: stato === "proposta" ? null : "Tina Rossi", ...o });
++
++test("visite di un immobile: prenotate, libere e chiuse, ciascuna dalla più vicina", () => {
++  const e = [
++    riga("b", "proposta", 3 * GIORNO), riga("a", "proposta", 1 * GIORNO), riga("p2", "confermata", 5 * GIORNO), riga("p1", "confermata", 2 * GIORNO),
++    riga("vecchia", "confermata", -2 * GIORNO), riga("annullata", "rifiutata", 4 * GIORNO), riga("scaduto", "proposta", -1 * GIORNO),
++    riga("altro", "proposta", 1 * GIORNO, { listing_id: "L2" }),
++  ];
++  const g = v.raggruppaVisiteImmobile(e, "L1", ADESSO);
++  assert.deepEqual(g.prenotate.map((x) => x.visita_id), ["p1", "p2"]);
++  assert.deepEqual(g.liberi.map((x) => x.visita_id), ["a", "b"]);
++  assert.deepEqual(g.chiuse.map((x) => x.visita_id), ["annullata", "scaduto", "vecchia"], "le chiuse: la più recente per prima");
++});
++
++test("visite di un immobile: ogni riga sta in un gruppo solo, e le altre non compaiono", () => {
++  const e = [riga("1", "proposta", GIORNO), riga("2", "confermata", GIORNO), riga("3", "rifiutata", GIORNO), riga("4", "completata", -GIORNO), riga("5", "proposta", GIORNO, { listing_id: "L9" })];
++  const g = v.raggruppaVisiteImmobile(e, "L1", ADESSO);
++  assert.equal(g.prenotate.length + g.liberi.length + g.chiuse.length, 4);
++  const id = [...g.prenotate, ...g.liberi, ...g.chiuse].map((x) => x.visita_id);
++  assert.equal(new Set(id).size, id.length, "una riga in due gruppi");
++});
++
++test("visite di un immobile: l'elenco vuoto e le righe di un altro immobile non rompono niente", () => {
++  assert.deepEqual(v.raggruppaVisiteImmobile([], "L1", ADESSO), { prenotate: [], liberi: [], chiuse: [] });
++  assert.deepEqual(v.raggruppaVisiteImmobile([riga("x", "proposta", GIORNO, { listing_id: "L2" })], "L1", ADESSO), { prenotate: [], liberi: [], chiuse: [] });
++});
++
++test("visite di un immobile: non si modifica l'elenco ricevuto", () => {
++  const e = [riga("b", "proposta", 3 * GIORNO), riga("a", "proposta", GIORNO)];
++  const copia = JSON.parse(JSON.stringify(e));
++  v.raggruppaVisiteImmobile(e, "L1", ADESSO);
++  assert.deepEqual(e, copia);
++});
++
++test("un posto libero con una candidatura (incoerente) non si offre come libero", () => {
++  const g = v.raggruppaVisiteImmobile([riga("x", "proposta", GIORNO, { candidatura_id: "c9" })], "L1", ADESSO);
++  assert.equal(g.liberi.length, 0);
++});
++
++test("posti per giorno: raggruppati per giorno di Roma, anche a cavallo della mezzanotte", () => {
++  const posti = [
++    { visita_id: "1", data_ora: "2026-10-12T07:00:00Z" }, { visita_id: "2", data_ora: "2026-10-12T21:30:00Z" },
++    { visita_id: "3", data_ora: "2026-10-12T22:30:00Z" }, { visita_id: "4", data_ora: "2026-10-13T08:00:00Z" },
++    { visita_id: "x", data_ora: "boh" },
++  ];
++  const g = v.raggruppaPostiPerGiorno(posti);
++  assert.deepEqual(g.map((x) => [x.chiave, x.posti.map((p) => p.visita_id).join("")]), [["2026-10-12", "12"], ["2026-10-13", "34"]]);
++  assert.equal(g[0].etichetta, "lunedì 12 ottobre");
++  assert.deepEqual(v.raggruppaPostiPerGiorno([]), []);
++});
++
++test("visita attiva: confermata e futura, la più vicina; le altre no", () => {
++  const e = [{ visita_id: "a", data_ora: tra(-GIORNO), stato: "confermata" }, { visita_id: "b", data_ora: tra(3 * GIORNO), stato: "confermata" }, { visita_id: "c", data_ora: tra(2 * GIORNO), stato: "confermata" }, { visita_id: "d", data_ora: tra(GIORNO), stato: "rifiutata" }];
++  assert.equal(v.visitaAttiva(e, ADESSO).visita_id, "c");
++  assert.equal(v.visitaAttiva([], ADESSO), null);
++  assert.equal(v.visitaAttiva([e[0], e[3]], ADESSO), null);
++});
++
++test("visita annullata di recente: l'inquilino deve saperlo finché non è passata", () => {
++  const e = [{ visita_id: "a", data_ora: tra(-GIORNO), stato: "rifiutata" }, { visita_id: "b", data_ora: tra(2 * GIORNO), stato: "rifiutata" }];
++  assert.equal(v.visitaAnnullataRecente(e, ADESSO).visita_id, "b");
++  assert.equal(v.visitaAnnullataRecente([e[0]], ADESSO), null);
++});
++
++// ------------------------------------------------------------
++// Testi
++// ------------------------------------------------------------
++
++test("testi: non presumono il genere, e non promettono promemoria che non esistono", () => {
++  const tutto = [v.SUGGERIMENTO_POSTI, v.NESSUN_POSTO_PER_INQUILINO, v.NESSUNA_VISITA_PER_PROPRIETARIO, v.AVVISO_ANNULLAMENTO_AL_PROPRIETARIO, v.AVVISO_ANNULLAMENTO_ALL_INQUILINO].join(" ");
++  assert.ok(!/\b(lui|lei)\b/i.test(tutto), tutto);
++  assert.ok(!/promemoria|ti ricorder|ricorderemo|riceverai un (sms|email)/i.test(tutto), tutto);
++});
++
++// ------------------------------------------------------------
++// Gli errori del database
++// ------------------------------------------------------------
++
++const GENERICO = base.messaggioErroreVerifica("qualcosa di sconosciuto");
++
++test("errori: ogni codice che la migrazione può sollevare ha una frase sua", () => {
++  const codici = [...new Set([...sql.matchAll(/raise exception '([A-Z_]+)'/g)].map((m) => m[1]))];
++  assert.ok(codici.length >= 14, `trovati solo ${codici.length} codici`);
++  for (const c of codici) {
++    const frase = base.messaggioErroreVerifica(`ERROR: ${c} (P0001)`);
++    assert.notEqual(frase, GENERICO, `il codice ${c} non ha un messaggio: la persona vedrebbe «Riprova»`);
++    assert.ok(!frase.includes(c), `${c} compare nella frase`);
++  }
++});
++
++test("errori: i messaggi dati prima di chiamare il database sono gli stessi che darebbe lui", () => {
++  assert.equal(v.validaNuovoPosto(null, ADESSO, [], 0), base.messaggioErroreVerifica("DATA_NON_VALIDA"));
++  assert.equal(v.validaNuovoPosto(tra(10 * MIN), ADESSO, [], 0), base.messaggioErroreVerifica("DATA_TROPPO_VICINA"));
++  assert.equal(v.validaNuovoPosto(tra(100 * GIORNO), ADESSO, [], 0), base.messaggioErroreVerifica("DATA_TROPPO_LONTANA"));
++  assert.equal(v.validaNuovoPosto(tra(2 * GIORNO), ADESSO, [], 30), base.messaggioErroreVerifica("TROPPI_POSTI"));
++  assert.equal(v.validaNuovoPosto(tra(2 * GIORNO + 10 * MIN), ADESSO, [tra(2 * GIORNO)], 0), base.messaggioErroreVerifica("POSTO_TROPPO_VICINO"));
++});
++
++test("errori: «già prenotata» e «non disponibile» non si confondono, e le frasi non parlano di codici", () => {
++  const a = base.messaggioErroreVerifica("VISITA_GIA_PRENOTATA"), b = base.messaggioErroreVerifica("VISITA_NON_DISPONIBILE"), c = base.messaggioErroreVerifica("VISITA_PRENOTATA");
++  assert.equal(new Set([a, b, c]).size, 3);
++  for (const f of [a, b, c]) assert.ok(!/[A-Z_]{8,}/.test(f), f);
++  assert.match(a, /annullala/);
++  assert.match(b, /Scegline un altro/);
++});
++
++test("le notifiche delle visite: i tipi, i link e la data compaiono nel testo", () => {
++  const n = caricaTs(path.join(radice, "src", "lib", "notifiche.ts"));
++  assert.ok(n.TIPI_NOTIFICA.includes("visita_prenotata") && n.TIPI_NOTIFICA.includes("visita_annullata"));
++  assert.match(n.descriviNotifica("visita_prenotata", { titolo: "Casa", quando: "2026-10-12T08:00:00+00:00" }).testo, /«Casa»: lunedì 12 ottobre · 10:00\./);
++  assert.match(n.descriviNotifica("visita_annullata", { titolo: "Casa", quando: "2026-10-12T08:00:00+00:00" }).testo, /di lunedì 12 ottobre · 10:00 è stata annullata/);
++  assert.match(n.descriviNotifica("visita_annullata", { titolo: "Casa" }).testo, /^La visita a «Casa» è stata annullata\.$/);
++});
++
++// ------------------------------------------------------------
++// Le chiamate nel codice corrispondono alle funzioni del database
++// ------------------------------------------------------------
++
++/** Tutti i file di codice dell'app. */
++function filiDiCodice(dir = path.join(radice, "src")) {
++  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
++    if (e.name.startsWith("__")) return [];
++    const p = path.join(dir, e.name);
++    return e.isDirectory() ? filiDiCodice(p) : /\.(ts|tsx)$/.test(e.name) ? [p] : [];
++  });
++}
++
++/** Nome e parametri di ogni funzione definita dalla migrazione 0022 e chiamabile dall'app. */
++function funzioniDellaMigrazione() {
++  const f = new Map();
++  for (const m of sql.matchAll(/create or replace function public\.(\w+)\(([^)]*)\)/g)) {
++    f.set(m[1], [...m[2].matchAll(/\b(p_\w+)\s/g)].map((x) => x[1]).sort());
++  }
++  return f;
++}
++
++test("chiamate: ogni chiamata a una funzione delle visite porta esattamente i parametri che la migrazione dichiara", () => {
++  const funzioni = funzioniDellaMigrazione();
++  const daControllare = ["crea_slot_visita", "elimina_posto_visita", "prenota_visita", "annulla_visita", "visite_del_proprietario", "posti_liberi_per_candidatura", "visite_della_candidatura"];
++  for (const n of daControllare) assert.ok(funzioni.has(n), `la migrazione non definisce ${n}`);
++
++  const trovate = new Map(daControllare.map((n) => [n, 0]));
++  for (const file of filiDiCodice()) {
++    const codice = fs.readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
++    for (const nome of daControllare) {
++      for (const m of codice.matchAll(new RegExp(`"${nome}"\\s*(?:,\\s*\\{([^}]*)\\}|\\))`, "g"))) {
++        const usati = m[1] === undefined ? [] : [...m[1].matchAll(/\b(p_\w+)\s*:/g)].map((x) => x[1]).sort();
++        assert.deepEqual(usati, funzioni.get(nome), `${path.relative(radice, file)} chiama ${nome} con ${JSON.stringify(usati)}, la migrazione vuole ${JSON.stringify(funzioni.get(nome))}`);
++        trovate.set(nome, trovate.get(nome) + 1);
++      }
++    }
++  }
++  // e ognuna è davvero chiamata da qualche parte (altrimenti il controllo non guarda niente)
++  for (const [nome, n] of trovate) assert.ok(n >= 1, `nessuna chiamata a ${nome} nel codice`);
++});
++
++test("chiamate: la guardia sa riconoscere un argomento sbagliato", () => {
++  const funzioni = funzioniDellaMigrazione();
++  const sbagliata = '.rpc("prenota_visita", { p_visita: x, p_candidature: y })';
++  const m = sbagliata.match(/"prenota_visita"\s*,\s*\{([^}]*)\}/);
++  const usati = [...m[1].matchAll(/\b(p_\w+)\s*:/g)].map((x) => x[1]).sort();
++  assert.notDeepEqual(usati, funzioni.get("prenota_visita"));
++});
+diff --git a/src/app/(app)/immobili/ImmobiliClient.tsx b/src/app/(app)/immobili/ImmobiliClient.tsx
+index cb781aa..79bab1b 100644
+--- a/src/app/(app)/immobili/ImmobiliClient.tsx
++++ b/src/app/(app)/immobili/ImmobiliClient.tsx
+@@ -19,6 +19,8 @@ import { Field } from "@/components/ui/Field";
+ import { Stepper } from "@/components/ui/Stepper";
+ import { createClient } from "@/lib/supabase/client";
+ import { IconPalazzo } from "@/components/icons";
++import { VisiteImmobile } from "@/components/VisiteImmobile";
++import type { VisitaProprietario } from "@/lib/visite";
+ import {
+   creaImmobile,
+   aggiornaImmobile,
+@@ -28,8 +30,11 @@ import {
+ 
+ export function ImmobiliClient({
+   immobili,
++  visite = [],
+ }: {
+   immobili: ImmobileDettaglio[];
++  /** i posti liberi e le prenotazioni di tutti i miei immobili */
++  visite?: VisitaProprietario[];
+ }) {
+   const [nuovoAperto, setNuovoAperto] = useState(false);
+   const [selezionato, setSelezionato] = useState<ImmobileDettaglio | null>(
+@@ -125,11 +130,14 @@ export function ImmobiliClient({
+         title={selezionato?.titolo ?? "Immobile"}
+       >
+         {selezionato && (
+-          <ImmobileForm
+-            action={aggiornaImmobile}
+-            immobile={selezionato}
+-            onSaved={() => setSelezionato(null)}
+-          />
++          <>
++            <VisiteImmobile immobileId={selezionato.id} visite={visite} />
++            <ImmobileForm
++              action={aggiornaImmobile}
++              immobile={selezionato}
++              onSaved={() => setSelezionato(null)}
++            />
++          </>
+         )}
+       </Sheet>
+     </PageContainer>
+diff --git a/src/app/(app)/immobili/page.tsx b/src/app/(app)/immobili/page.tsx
+index a86461d..370d2dc 100644
+--- a/src/app/(app)/immobili/page.tsx
++++ b/src/app/(app)/immobili/page.tsx
+@@ -1,6 +1,7 @@
+ import { createClient } from "@/lib/supabase/server";
+ import { ImmobiliClient } from "./ImmobiliClient";
+ import type { ImmobileDettaglio } from "@/lib/types";
++import type { VisitaProprietario } from "@/lib/visite";
+ import { criteriDaRighe } from "@/lib/match";
+ import type { RigaCriterioDb } from "@/lib/match";
+ 
+@@ -10,7 +11,7 @@ export default async function ImmobiliPage() {
+     data: { user },
+   } = await supabase.auth.getUser();
+ 
+-  const [{ data: listings }, { data: candidature }] = await Promise.all([
++  const [{ data: listings }, { data: candidature }, { data: visite }] = await Promise.all([
+     supabase
+       .from("listings")
+       .select(
+@@ -22,6 +23,8 @@ export default async function ImmobiliPage() {
+       .from("candidature")
+       .select("id, listing_id, listings!inner(owner_id)")
+       .eq("listings.owner_id", user!.id),
++    // i posti liberi e le prenotazioni di tutti i miei immobili, in una chiamata sola
++    supabase.rpc("visite_del_proprietario"),
+   ]);
+ 
+   const nCandidaturePerListing = new Map<string, number>();
+@@ -49,5 +52,5 @@ export default async function ImmobiliPage() {
+     nCandidature: nCandidaturePerListing.get(l.id) ?? 0,
+   }));
+ 
+-  return <ImmobiliClient immobili={immobili} />;
++  return <ImmobiliClient immobili={immobili} visite={(visite ?? []) as VisitaProprietario[]} />;
+ }
+diff --git a/src/app/chat/[id]/ChatClient.tsx b/src/app/chat/[id]/ChatClient.tsx
+index a256e4f..ae88188 100644
+--- a/src/app/chat/[id]/ChatClient.tsx
++++ b/src/app/chat/[id]/ChatClient.tsx
+@@ -6,6 +6,8 @@ import { createClient } from "@/lib/supabase/client";
+ import type { Messaggio } from "@/lib/types";
+ import { IconIndietro, IconInvia } from "@/components/icons";
+ import { AvvisoMessaggio, AvvisoTruffe, ConfermaInvioRischioso } from "@/components/AvvisiChat";
++import { VisitaChat } from "@/components/VisitaChat";
++import type { PostoLibero, VisitaCandidatura } from "@/lib/visite";
+ import { rilevaRischioPagamento, type Rischio } from "@/lib/truffe";
+ 
+ export function ChatClient({
+@@ -14,12 +16,19 @@ export function ChatClient({
+   altroNome,
+   titoloAnnuncio,
+   messaggiIniziali,
++  ruolo = "inquilino",
++  visite = [],
++  posti = [],
+ }: {
+   candidaturaId: string;
+   userId: string;
+   altroNome: string;
+   titoloAnnuncio: string;
+   messaggiIniziali: Messaggio[];
++  /** i dati delle visite: se il caricamento non è riuscito, la chat si apre lo stesso */
++  ruolo?: string;
++  visite?: VisitaCandidatura[];
++  posti?: PostoLibero[];
+ }) {
+   const router = useRouter();
+   const [messaggi, setMessaggi] = useState<Messaggio[]>(messaggiIniziali);
+@@ -133,6 +142,8 @@ export function ChatClient({
+ 
+       <AvvisoTruffe />
+ 
++      <VisitaChat candidaturaId={candidaturaId} ruolo={ruolo} visite={visite} posti={posti} />
++
+       <div className="chat-scroll">
+         {messaggi.length === 0 && (
+           <p className="chat-empty">
+diff --git a/src/app/chat/[id]/page.tsx b/src/app/chat/[id]/page.tsx
+index 1e99a93..613c3f3 100644
+--- a/src/app/chat/[id]/page.tsx
++++ b/src/app/chat/[id]/page.tsx
+@@ -4,6 +4,7 @@ import { INFORMATIVA } from "@/content/informativa";
+ import { haAccettatoInformativa } from "@/lib/informativa";
+ import { ChatClient } from "./ChatClient";
+ import type { Messaggio } from "@/lib/types";
++import type { PostoLibero, VisitaCandidatura } from "@/lib/visite";
+ 
+ export default async function ChatPage({
+   params,
+@@ -60,6 +61,15 @@ export default async function ChatPage({
+     .eq("candidatura_id", id)
+     .order("created_at", { ascending: true });
+ 
++  // Le visite di questo match, e per l'inquilino i posti tra cui scegliere. Se una lettura
++  // non riesce, la chat si apre lo stesso: il pannello dirà che non ci sono posti.
++  const [{ data: visite }, { data: posti }] = await Promise.all([
++    supabase.rpc("visite_della_candidatura", { p_candidatura: id }),
++    isTenant
++      ? supabase.rpc("posti_liberi_per_candidatura", { p_candidatura: id })
++      : Promise.resolve({ data: [] as PostoLibero[] }),
++  ]);
++
+   const altroNome =
+     `${altroProfilo?.nome ?? ""} ${altroProfilo?.cognome ?? ""}`.trim() ||
+     "Utente";
+@@ -70,6 +80,9 @@ export default async function ChatPage({
+       userId={user!.id}
+       altroNome={altroNome}
+       titoloAnnuncio={listing?.titolo ?? ""}
++      ruolo={isTenant ? "inquilino" : "proprietario"}
++      visite={(visite ?? []) as VisitaCandidatura[]}
++      posti={(posti ?? []) as PostoLibero[]}
+       messaggiIniziali={(messaggi ?? []) as Messaggio[]}
+     />
+   );
+diff --git a/src/app/globals.css b/src/app/globals.css
+index 10118b2..d8ba83a 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -2881,3 +2881,69 @@ mark.segnaposto {
+   font-size: 12px;
+   color: var(--muted);
+ }
++
++/* ============================================================
++   Visite
++   ============================================================ */
++
++.visite-panel {
++  margin-bottom: 22px;
++  padding-bottom: 18px;
++  border-bottom: 1px solid rgba(16, 21, 26, 0.1);
++}
++.visite-aggiungi {
++  display: flex;
++  flex-direction: column;
++  gap: 8px;
++}
++.visite-lista {
++  list-style: none;
++  margin: 6px 0 0;
++  padding: 0;
++}
++.visite-lista li {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 12px;
++  padding: 8px 0;
++  font-size: 13px;
++  border-bottom: 1px solid rgba(16, 21, 26, 0.08);
++}
++.visite-conferma {
++  display: flex;
++  flex-wrap: wrap;
++  align-items: center;
++  justify-content: flex-end;
++  gap: 8px;
++  font-size: 12px;
++}
++.visite-chiuse {
++  margin-top: 12px;
++  font-size: 12px;
++  color: var(--muted);
++}
++.visite-chiuse summary {
++  cursor: pointer;
++}
++.chat-visita {
++  flex-shrink: 0;
++  margin: 0 12px 6px;
++  font-size: 12.5px;
++  background: rgba(62, 107, 87, 0.12);
++  border-radius: 12px;
++  max-height: 45vh;
++  overflow-y: auto;
++}
++.chat-visita > summary {
++  cursor: pointer;
++  padding: 9px 14px;
++  font-weight: 600;
++  color: var(--ink);
++}
++.chat-visita-corpo {
++  padding: 0 14px 12px;
++}
++.chat-visita-corpo p {
++  margin: 0 0 8px;
++}
+diff --git a/src/components/VisitaChat.tsx b/src/components/VisitaChat.tsx
+new file mode 100644
+index 0000000..1919f5d
+--- /dev/null
++++ b/src/components/VisitaChat.tsx
+@@ -0,0 +1,158 @@
++"use client";
++
++import { useState } from "react";
++import { useRouter } from "next/navigation";
++import { createClient } from "@/lib/supabase/client";
++import { messaggioErroreVerifica } from "@/lib/verifica";
++import {
++  AVVISO_ANNULLAMENTO_ALL_INQUILINO,
++  AVVISO_ANNULLAMENTO_AL_PROPRIETARIO,
++  NESSUN_POSTO_PER_INQUILINO,
++  NESSUNA_VISITA_PER_PROPRIETARIO,
++  formattaOra,
++  formattaQuando,
++  raggruppaPostiPerGiorno,
++  visitaAnnullataRecente,
++  visitaAttiva,
++  type PostoLibero,
++  type VisitaCandidatura,
++} from "@/lib/visite";
++
++/**
++ * La visita di un match, dentro la chat. L'inquilino prenota uno dei posti
++ * che il proprietario ha indicato; l'uno e l'altro possono annullare finché la
++ * visita non è passata. Le regole vere stanno nel database (migrazione 0022).
++ */
++export function VisitaChat({
++  candidaturaId,
++  ruolo,
++  visite,
++  posti,
++}: {
++  candidaturaId: string;
++  ruolo: "inquilino" | "proprietario" | string;
++  visite: VisitaCandidatura[];
++  posti: PostoLibero[];
++}) {
++  const router = useRouter();
++  const [adesso] = useState(() => Date.now());
++  const [errore, setErrore] = useState<string | null>(null);
++  const [inCorso, setInCorso] = useState<string | null>(null);
++  const [confermaAnnullo, setConfermaAnnullo] = useState(false);
++
++  const inquilino = ruolo !== "proprietario";
++  const attiva = visitaAttiva(visite, adesso);
++  const annullata = visitaAnnullataRecente(visite, adesso);
++  const giorni = raggruppaPostiPerGiorno(posti);
++
++  async function chiama(chiave: string, nome: string, args: Record<string, unknown>): Promise<boolean> {
++    setErrore(null);
++    setInCorso(chiave);
++    try {
++      const { error } = await createClient().rpc(nome, args);
++      if (error) {
++        setErrore(messaggioErroreVerifica(error.message));
++        return false;
++      }
++      router.refresh();
++      return true;
++    } finally {
++      setInCorso(null);
++    }
++  }
++
++  const titolo = attiva
++    ? `Visita: ${formattaQuando(attiva.data_ora)}`
++    : inquilino
++      ? "Prenota una visita"
++      : "Visita";
++
++  return (
++    <details className="chat-visita">
++      <summary>{titolo}</summary>
++
++      {attiva ? (
++        <div className="chat-visita-corpo">
++          <p>
++            <b>Visita confermata:</b> {formattaQuando(attiva.data_ora)}.
++          </p>
++          {confermaAnnullo ? (
++            <div className="chat-conferma" role="alertdialog" aria-label="Annulla la visita">
++              <p>{inquilino ? AVVISO_ANNULLAMENTO_ALL_INQUILINO : AVVISO_ANNULLAMENTO_AL_PROPRIETARIO}</p>
++              <div className="flex gap-3">
++                <button type="button" className="btn-danger-outline" style={{ borderColor: "rgba(16,21,26,.14)", color: "var(--ink)" }} onClick={() => setConfermaAnnullo(false)}>
++                  Indietro
++                </button>
++                <button
++                  type="button"
++                  className="opp-cta"
++                  disabled={inCorso !== null}
++                  onClick={async () => {
++                    if (await chiama("annulla", "annulla_visita", { p_visita: attiva.visita_id })) setConfermaAnnullo(false);
++                  }}
++                >
++                  {inCorso === "annulla" ? "Annullo..." : "Sì, annulla la visita"}
++                </button>
++              </div>
++            </div>
++          ) : (
++            <button type="button" className="redo-link" onClick={() => setConfermaAnnullo(true)}>
++              Annulla la visita
++            </button>
++          )}
++        </div>
++      ) : (
++        <div className="chat-visita-corpo">
++          {annullata && inquilino && (
++            <p className="note-box is-no" style={{ marginTop: 0 }}>
++              Il proprietario ha annullato la visita di {formattaQuando(annullata.data_ora)}.
++            </p>
++          )}
++
++          {inquilino ? (
++            giorni.length === 0 ? (
++              <p className="field-note">{NESSUN_POSTO_PER_INQUILINO}</p>
++            ) : (
++              <>
++                <p className="field-note" style={{ marginTop: 0 }}>
++                  Scegli quando vuoi vedere la casa. Gli orari sono quelli di Roma.
++                </p>
++                {giorni.map((g) => (
++                  <div key={g.chiave} className="chat-visita-giorno">
++                    <div className="pref-label" style={{ margin: "8px 0 6px 0" }}>
++                      <span>{g.etichetta}</span>
++                    </div>
++                    <div className="chip-row">
++                      {g.posti.map((p) => (
++                        <button
++                          key={p.visita_id}
++                          type="button"
++                          className="chip"
++                          disabled={inCorso !== null}
++                          aria-label={`Prenota ${formattaQuando(p.data_ora)}`}
++                          onClick={() => chiama(`prenota-${p.visita_id}`, "prenota_visita", { p_visita: p.visita_id, p_candidatura: candidaturaId })}
++                        >
++                          {inCorso === `prenota-${p.visita_id}` ? "..." : formattaOra(p.data_ora)}
++                        </button>
++                      ))}
++                    </div>
++                  </div>
++                ))}
++              </>
++            )
++          ) : (
++            <p className="field-note" style={{ marginTop: 0 }}>
++              {NESSUNA_VISITA_PER_PROPRIETARIO}
++            </p>
++          )}
++        </div>
++      )}
++
++      {errore && (
++        <p className="note-error" style={{ margin: "8px 14px 10px" }} role="alert">
++          {errore}
++        </p>
++      )}
++    </details>
++  );
++}
+diff --git a/src/components/VisiteImmobile.tsx b/src/components/VisiteImmobile.tsx
+new file mode 100644
+index 0000000..af8f8bd
+--- /dev/null
++++ b/src/components/VisiteImmobile.tsx
+@@ -0,0 +1,199 @@
++"use client";
++
++import { useState } from "react";
++import { useRouter } from "next/navigation";
++import { createClient } from "@/lib/supabase/client";
++import { messaggioErroreVerifica } from "@/lib/verifica";
++import {
++  AVVISO_ANNULLAMENTO_AL_PROPRIETARIO,
++  SUGGERIMENTO_POSTI,
++  daInputRoma,
++  formattaQuando,
++  limitiSelezione,
++  raggruppaVisiteImmobile,
++  validaNuovoPosto,
++  type VisitaProprietario,
++} from "@/lib/visite";
++
++/**
++ * Le visite di un immobile, per il proprietario: aggiunge i posti in cui è
++ * disponibile, vede chi ha prenotato, toglie un posto libero o annulla una
++ * visita. Le regole vere stanno nelle funzioni del database (migrazione 0022).
++ */
++export function VisiteImmobile({
++  immobileId,
++  visite,
++}: {
++  immobileId: string;
++  visite: VisitaProprietario[];
++}) {
++  const router = useRouter();
++  // «adesso» si fissa quando la schermata si apre: cambiarlo a ogni disegno farebbe
++  // muovere i limiti del campo sotto le dita di chi lo sta usando
++  const [adesso] = useState(() => Date.now());
++  const [valore, setValore] = useState("");
++  const [errore, setErrore] = useState<string | null>(null);
++  const [inCorso, setInCorso] = useState<string | null>(null);
++  const [daAnnullare, setDaAnnullare] = useState<string | null>(null);
++
++  const { prenotate, liberi, chiuse } = raggruppaVisiteImmobile(visite, immobileId, adesso);
++  const limiti = limitiSelezione(adesso);
++
++  async function chiama(chiave: string, nome: string, args: Record<string, unknown>): Promise<boolean> {
++    setErrore(null);
++    setInCorso(chiave);
++    try {
++      const { error } = await createClient().rpc(nome, args);
++      if (error) {
++        setErrore(messaggioErroreVerifica(error.message));
++        return false;
++      }
++      router.refresh();
++      return true;
++    } finally {
++      setInCorso(null);
++    }
++  }
++
++  async function aggiungi() {
++    const iso = daInputRoma(valore);
++    // La regola vera la applica il database, con l'ora di quel momento: qui, con l'ora di
++    // quando si è aperta la schermata, si evita solo di chiamarlo per un errore ovvio.
++    const problema = validaNuovoPosto(
++      iso,
++      adesso,
++      [...prenotate, ...liberi].map((v) => v.data_ora),
++      liberi.length
++    );
++    if (problema) {
++      setErrore(problema);
++      return;
++    }
++    if (await chiama("aggiungi", "crea_slot_visita", { p_listing: immobileId, p_data_ora: iso })) setValore("");
++  }
++
++  return (
++    <div className="visite-panel">
++      <div className="pref-label" style={{ margin: "0 0 4px 0" }}>
++        <span>Visite</span>
++      </div>
++      <p className="field-note" style={{ margin: "0 0 10px 0" }}>
++        {SUGGERIMENTO_POSTI}
++      </p>
++
++      <div className="visite-aggiungi">
++        <input
++          type="datetime-local"
++          className="ricerca-input"
++          aria-label="Data e ora del nuovo posto"
++          value={valore}
++          min={limiti.min}
++          max={limiti.max}
++          step={900}
++          onChange={(e) => {
++            setValore(e.target.value);
++            setErrore(null);
++          }}
++        />
++        <button type="button" className="opp-cta" disabled={!valore || inCorso !== null} onClick={aggiungi}>
++          {inCorso === "aggiungi" ? "Aggiungo..." : "Aggiungi un posto"}
++        </button>
++      </div>
++      <p className="field-note" style={{ margin: "6px 0 0 0" }}>
++        Gli orari sono quelli di Roma. Tra due posti servono almeno 30 minuti.
++      </p>
++
++      {errore && (
++        <p className="note-error" style={{ marginTop: 8 }} role="alert">
++          {errore}
++        </p>
++      )}
++
++      {prenotate.length > 0 && (
++        <>
++          <div className="sotto-label">Prenotate — {prenotate.length}</div>
++          <ul className="visite-lista">
++            {prenotate.map((v) => (
++              <li key={v.visita_id}>
++                <span>
++                  <b>{formattaQuando(v.data_ora)}</b>
++                  <br />
++                  {v.nome_inquilino ?? "Utente"}
++                </span>
++                {daAnnullare === v.visita_id ? (
++                  <span className="visite-conferma">
++                    <span>{AVVISO_ANNULLAMENTO_AL_PROPRIETARIO}</span>
++                    <button type="button" className="redo-link" onClick={() => setDaAnnullare(null)}>
++                      Indietro
++                    </button>
++                    <button
++                      type="button"
++                      className="redo-link"
++                      disabled={inCorso !== null}
++                      onClick={async () => {
++                        if (await chiama(`annulla-${v.visita_id}`, "annulla_visita", { p_visita: v.visita_id })) setDaAnnullare(null);
++                      }}
++                    >
++                      {inCorso === `annulla-${v.visita_id}` ? "Annullo..." : "Sì, annulla"}
++                    </button>
++                  </span>
++                ) : (
++                  <button type="button" className="redo-link" onClick={() => setDaAnnullare(v.visita_id)}>
++                    Annulla la visita
++                  </button>
++                )}
++              </li>
++            ))}
++          </ul>
++        </>
++      )}
++
++      {liberi.length > 0 && (
++        <>
++          <div className="sotto-label">Posti liberi — {liberi.length}</div>
++          <ul className="visite-lista">
++            {liberi.map((v) => (
++              <li key={v.visita_id}>
++                <span>{formattaQuando(v.data_ora)}</span>
++                <button
++                  type="button"
++                  className="redo-link"
++                  aria-label={`Togli il posto di ${formattaQuando(v.data_ora)}`}
++                  disabled={inCorso !== null}
++                  onClick={() => chiama(`togli-${v.visita_id}`, "elimina_posto_visita", { p_visita: v.visita_id })}
++                >
++                  {inCorso === `togli-${v.visita_id}` ? "Tolgo..." : "Togli"}
++                </button>
++              </li>
++            ))}
++          </ul>
++        </>
++      )}
++
++      {prenotate.length === 0 && liberi.length === 0 && (
++        <p className="field-note" style={{ marginTop: 12 }}>
++          Nessun posto indicato per ora.
++        </p>
++      )}
++
++      {chiuse.length > 0 && (
++        <details className="visite-chiuse">
++          <summary>Passate o annullate — {chiuse.length}</summary>
++          <ul className="visite-lista">
++            {chiuse.map((v) => (
++              <li key={v.visita_id}>
++                <span>
++                  {formattaQuando(v.data_ora)}
++                  {v.nome_inquilino ? ` · ${v.nome_inquilino}` : ""}
++                </span>
++                <span className="field-note" style={{ margin: 0 }}>
++                  {v.stato === "rifiutata" ? "Annullata" : v.candidatura_id ? "Passata" : "Non prenotato"}
++                </span>
++              </li>
++            ))}
++          </ul>
++        </details>
++      )}
++    </div>
++  );
++}
+diff --git a/src/content/informativa.ts b/src/content/informativa.ts
+index 013b0ef..eb0d016 100644
+--- a/src/content/informativa.ts
++++ b/src/content/informativa.ts
+@@ -28,7 +28,7 @@ export const INFORMATIVA = {
+    * controllo che fa il database (migrazione 0017): un test fallisce se
+    * questa stringa non lo supera.
+    */
+-  versione: "2026-10-provvisoria-5",
++  versione: "2026-10-provvisoria-6",
+   provvisoria: true,
+   titolo: "Informativa sulla privacy",
+   aggiornata: "ottobre 2026",
+@@ -54,7 +54,7 @@ export const INFORMATIVA = {
+         "Se sei inquilino: lavoro, reddito tuo e del tuo nucleo, garante, fideiussione, protesti (li dichiari tu e non vengono verificati), animali, composizione del nucleo, numero di figli, presentazione, foto del profilo e le tue preferenze di ricerca (budget, zone, locali, metri, caratteristiche).",
+         "Se sei proprietario: tipo di proprietario, numero di immobili, obiettivo; gli annunci con titolo, descrizione, zona, prezzo, caratteristiche e foto; i criteri che chiedi ai candidati.",
+         "Per le verifiche: il documento d'identità e la prova di proprietà dell'immobile (proprietari); se sei inquilino e chiedi di verificare il reddito, un documento d'identità e una prova del reddito (una busta paga, la CU o la dichiarazione dei redditi); e i contratti di affitto caricati per dichiarare un affitto. Non chiediamo lo stato di famiglia.",
+-        "Mentre usi l'app: candidature, messaggi, contratti, recensioni, richieste di conferma di un affitto e inviti. Inoltre le notifiche sulle novità del tuo account (per esempio l'esito di una verifica o la risposta a una candidatura): contengono il tipo di evento e, al massimo, il titolo di un annuncio, mai nomi di persone.",
++        "Mentre usi l'app: candidature, messaggi, visite (giorno e ora, e chi le ha prenotate), contratti, recensioni, richieste di conferma di un affitto e inviti. Inoltre le notifiche sulle novità del tuo account (per esempio l'esito di una verifica o la risposta a una candidatura): contengono il tipo di evento e, al massimo, il titolo di un annuncio e, per le visite, il giorno e l'ora; mai nomi di persone.",
+         "Dati di un'altra persona: se inviti il tuo proprietario, scrivi il suo nome e, se vuoi, la sua email.",
+       ],
+     },
+@@ -79,6 +79,7 @@ export const INFORMATIVA = {
+         "Se rifiuta la tua candidatura, del tuo profilo gli resta solo il tuo nome, oltre alla valutazione che aveva già fatto. Tu vedi il motivo del rifiuto, non la sua valutazione completa.",
+         "Se ritiri una candidatura mentre è ancora in attesa, il proprietario non la vede più: non legge né il tuo profilo né le recensioni su di te, e riceve solo una notifica con il titolo dell'annuncio. La candidatura resta nel tuo elenco e non puoi candidarti di nuovo allo stesso annuncio.",
+         "I messaggi li leggono solo le due persone, dopo che la candidatura è stata accettata. L'app ricorda quali messaggi hai già letto, solo per mostrarti quanti ne restano da leggere: non lo mostra all'altra persona.",
++        "Le visite: il proprietario indica i giorni e gli orari in cui è disponibile per un suo immobile. Li vedono solo le persone che hanno un match accettato su quell'immobile; chi non lo ha non vede nemmeno quali orari ci sono. Chi prenota vede la propria visita, e il proprietario vede nome e cognome di chi ha prenotato, per le visite degli ultimi 30 giorni.",
+         "Nella chat, l'app evidenzia i messaggi che parlano di pagamenti sospetti (per esempio un IBAN, una caparra o un anticipo) e ti avvisa prima di inviarne uno così, per aiutarti a riconoscere una truffa. È un controllo automatico che fa parte della visualizzazione della chat: non salviamo il risultato e non lo comunichiamo a nessuno, e non impedisce mai di inviare un messaggio.",
+         "Le recensioni su un inquilino le leggono la persona recensita, chi le ha scritte e i proprietari a cui ha inviato una candidatura.",
+         "Gli annunci pubblicati e verificati li vedono tutti gli utenti connessi. L'indirizzo esatto degli immobili non lo raccogliamo.",
+@@ -95,7 +96,7 @@ export const INFORMATIVA = {
+     {
+       titolo: "Per quanto tempo conserviamo i dati",
+       paragrafi: [
+-        "Al momento non c'è una scadenza automatica: una candidatura, un messaggio, un invito o un documento restano finché non cancelli l'account. Un documento caricato per la verifica del reddito puoi toglierlo tu, ma solo finché non hai inviato la richiesta. Le notifiche sono pensate per sparire dopo 60 giorni se lette e dopo 180 se non lette, ma questa pulizia non è ancora attiva. I tempi di conservazione saranno definiti nel testo definitivo.",
++        "Al momento non c'è una scadenza automatica: una candidatura, un messaggio, una visita, un invito o un documento restano finché non cancelli l'account (o, per le visite, l'immobile). Un documento caricato per la verifica del reddito puoi toglierlo tu, ma solo finché non hai inviato la richiesta. Le notifiche sono pensate per sparire dopo 60 giorni se lette e dopo 180 se non lette, ma questa pulizia non è ancora attiva. I tempi di conservazione saranno definiti nel testo definitivo.",
+       ],
+     },
+     {
+diff --git a/src/lib/notifiche.ts b/src/lib/notifiche.ts
+index fe554e5..1b1ea11 100644
+--- a/src/lib/notifiche.ts
++++ b/src/lib/notifiche.ts
+@@ -8,6 +8,7 @@
+  * compone qui, così le parole si possono cambiare senza toccare i dati.
+  */
+ import { percorsoInterno } from "./percorso";
++import { formattaQuando } from "./visite";
+ 
+ /** Gli stessi tipi del vincolo sulla tabella `notifiche`: un test li tiene allineati. */
+ export const TIPI_NOTIFICA = [
+@@ -24,6 +25,8 @@ export const TIPI_NOTIFICA = [
+   "rapporto_confermato",
+   "rapporto_rifiutato",
+   "feedback_ricevuto",
++  "visita_prenotata",
++  "visita_annullata",
+ ] as const;
+ 
+ export type TipoNotifica = (typeof TIPI_NOTIFICA)[number];
+@@ -115,6 +118,20 @@ export function descriviNotifica(
+         titolo: "Affitto non confermato",
+         testo: "L'altra persona non ha confermato l'affitto che hai dichiarato.",
+       };
++    case "visita_prenotata": {
++      const quando = formattaQuando(dati?.quando);
++      return {
++        titolo: "Visita prenotata",
++        testo: `Una persona ha prenotato una visita a ${annuncio(dati, "un tuo immobile")}${quando ? `: ${quando}` : ""}.`,
++      };
++    }
++    case "visita_annullata": {
++      const quando = formattaQuando(dati?.quando);
++      return {
++        titolo: "Visita annullata",
++        testo: `La visita a ${annuncio(dati, "un immobile")}${quando ? ` di ${quando}` : ""} è stata annullata.`,
++      };
++    }
+     case "feedback_ricevuto":
+       return {
+         titolo: "Nuovo feedback",
+diff --git a/src/lib/verifica.ts b/src/lib/verifica.ts
+index 190157f..e6c1efe 100644
+--- a/src/lib/verifica.ts
++++ b/src/lib/verifica.ts
+@@ -192,6 +192,19 @@ const MESSAGGI: Record<string, string> = {
+   INQUILINO_INESISTENTE: "Inquilino non trovato.",
+   // decisioni sulle candidature
+   CANDIDATURA_NON_TUA: "Questa candidatura non risulta tua.",
++  // visite
++  DATA_NON_VALIDA: "Scegli una data e un'ora valide.",
++  DATA_TROPPO_VICINA: "Il posto deve essere tra almeno un'ora.",
++  DATA_TROPPO_LONTANA: "Il posto deve essere entro 90 giorni.",
++  TROPPI_POSTI: "Hai già 30 posti liberi su questo immobile: toglierne uno, o aspetta che qualcuno prenoti.",
++  POSTO_TROPPO_VICINO: "Tra due visite sullo stesso immobile servono almeno 30 minuti.",
++  VISITA_NON_TUA: "Questa visita non risulta tua.",
++  VISITA_PRENOTATA: "Questo posto è già stato prenotato: per toglierlo, annulla la visita.",
++  VISITA_NON_DISPONIBILE: "Questo posto non è più disponibile. Scegline un altro.",
++  VISITA_GIA_PRENOTATA: "Hai già una visita prenotata: annullala se vuoi sceglierne un'altra.",
++  VISITA_NON_ANNULLABILE: "Questa visita non si può annullare.",
++  VISITA_GIA_PASSATA: "Questa visita è già passata.",
++  CANDIDATURA_NON_ACCETTATA: "Puoi prenotare una visita solo dopo che il proprietario ha accettato la tua candidatura.",
+   CONVERSAZIONE_NON_TUA: "Questa conversazione non è tua.",
+   CANDIDATURA_RITIRATA: "La persona ha ritirato la candidatura: non c'è più nulla da valutare.",
+   CANDIDATURA_NON_RITIRABILE:
+diff --git a/src/lib/visite.ts b/src/lib/visite.ts
+new file mode 100644
+index 0000000..738a2b1
+--- /dev/null
++++ b/src/lib/visite.ts
+@@ -0,0 +1,262 @@
++/**
++ * Le visite agli immobili: come si interpreta e si mostra una data, quali
++ * date si possono proporre, come si raggruppano. Logica pura, senza database:
++ * si prova con `npm test`.
++ *
++ * Le regole vere (anticipo, distanza tra i posti, quanti ce ne possono essere,
++ * chi può prenotare) stanno nelle funzioni del database (migrazione 0022); qui
++ * si rispecchiano per dare un errore chiaro prima di chiamarle.
++ *
++ * LE DATE. Il database conserva un istante (UTC). L'app è pensata per Milano:
++ * ciò che la persona scrive e legge è SEMPRE l'ora di Roma, qualunque sia il
++ * fuso del suo telefono. Questo conta due volte l'anno (ora legale), e il
++ * 25 ottobre 2026 è una di quelle.
++ */
++
++export const ZONA_ORARIA = "Europe/Rome";
++
++// ------------------------------------------------------------
++// Le regole del database, rispecchiate (un test le tiene allineate)
++// ------------------------------------------------------------
++
++/** Un posto si può offrire solo tra almeno un'ora... */
++export const ANTICIPO_MINIMO_ORE = 1;
++/** ...e non oltre novanta giorni. */
++export const ANTICIPO_MASSIMO_GIORNI = 90;
++/** Due posti sullo stesso immobile distano almeno questo: una visita occupa tempo. */
++export const DISTANZA_MINIMA_MINUTI = 30;
++/** Al massimo tanti posti liberi per immobile. */
++export const MASSIMO_POSTI_LIBERI = 30;
++/** Un posto si prenota solo con almeno questo margine. */
++export const MARGINE_PRENOTAZIONE_MINUTI = 30;
++
++const MINUTO = 60_000;
++const ORA = 60 * MINUTO;
++const GIORNO = 24 * ORA;
++
++// ------------------------------------------------------------
++// Date in ora di Roma
++// ------------------------------------------------------------
++
++type Parti = { anno: number; mese: number; giorno: number; ora: number; minuto: number };
++
++const formato = new Intl.DateTimeFormat("en-GB", {
++  timeZone: ZONA_ORARIA,
++  year: "numeric",
++  month: "2-digit",
++  day: "2-digit",
++  hour: "2-digit",
++  minute: "2-digit",
++  hourCycle: "h23",
++});
++
++/** L'anno, il mese, il giorno, l'ora e il minuto che a Roma corrispondono a un istante. */
++function partiRoma(istante: number): Parti {
++  const p = Object.fromEntries(formato.formatToParts(new Date(istante)).map((x) => [x.type, x.value]));
++  return { anno: +p.year, mese: +p.month, giorno: +p.day, ora: +p.hour, minuto: +p.minute };
++}
++
++const due = (n: number) => String(n).padStart(2, "0");
++
++/**
++ * Da «2026-10-12T10:00» (quello che dà un campo data e ora) all'istante in
++ * cui a Roma sono le 10:00 di quel giorno, in formato ISO. Nullo se non è una
++ * data valida o se quell'ora a Roma NON ESISTE (nella notte in cui si passa
++ * all'ora legale, le 02:30 saltano). Se un'ora esiste DUE volte (nella notte in
++ * cui si torna all'ora solare) si sceglie la prima, sempre.
++ */
++export function daInputRoma(valore: unknown): string | null {
++  if (typeof valore !== "string") return null;
++  const m = valore.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
++  if (!m) return null;
++  const [anno, mese, giorno, ora, minuto] = m.slice(1).map(Number);
++  if (mese < 1 || mese > 12 || giorno < 1 || giorno > 31 || ora > 23 || minuto > 59) return null;
++
++  const nominale = Date.UTC(anno, mese - 1, giorno, ora, minuto);
++
++  // Roma è a +1 (inverno) o +2 (estate) rispetto a UTC: si provano tutti e due e si tiene
++  // quello per cui a Roma risulta proprio l'ora scritta. Lo stesso confronto scarta anche i
++  // giorni che non esistono (il 31 aprile diventerebbe il 1° maggio) e le ore che saltano.
++  const candidati = [2, 1]
++    .map((offset) => nominale - offset * ORA)
++    .filter((c) => {
++      const p = partiRoma(c);
++      return p.anno === anno && p.mese === mese && p.giorno === giorno && p.ora === ora && p.minuto === minuto;
++    })
++    .sort((a, b) => a - b); // se due: la prima in ordine di tempo
++  return candidati.length > 0 ? new Date(candidati[0]).toISOString() : null;
++}
++
++/** L'inverso: da un istante a «2026-10-12T10:00», per riempire un campo data e ora. */
++export function aInputRoma(istante: string | number | Date): string {
++  const t = new Date(istante).getTime();
++  if (Number.isNaN(t)) return "";
++  const p = partiRoma(t);
++  return `${p.anno}-${due(p.mese)}-${due(p.giorno)}T${due(p.ora)}:${due(p.minuto)}`;
++}
++
++/** Il giorno a Roma, «2026-10-12»: per raggruppare. */
++export function chiaveGiorno(iso: string): string {
++  const t = Date.parse(iso);
++  if (Number.isNaN(t)) return "";
++  const p = partiRoma(t);
++  return `${p.anno}-${due(p.mese)}-${due(p.giorno)}`;
++}
++
++const nomeGiorno = new Intl.DateTimeFormat("it-IT", { timeZone: ZONA_ORARIA, weekday: "long", day: "numeric", month: "long" });
++const nomeOra = new Intl.DateTimeFormat("it-IT", { timeZone: ZONA_ORARIA, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
++
++/** «lunedì 12 ottobre» */
++export function formattaGiorno(iso: string): string {
++  const t = Date.parse(iso);
++  return Number.isNaN(t) ? "" : nomeGiorno.format(new Date(t));
++}
++
++/** «10:00» */
++export function formattaOra(iso: string): string {
++  const t = Date.parse(iso);
++  return Number.isNaN(t) ? "" : nomeOra.format(new Date(t));
++}
++
++/** «lunedì 12 ottobre · 10:00». Una data illeggibile dà una stringa vuota, non «Invalid Date». */
++export function formattaQuando(iso: unknown): string {
++  if (typeof iso !== "string") return "";
++  const g = formattaGiorno(iso);
++  return g ? `${g} · ${formattaOra(iso)}` : "";
++}
++
++// ------------------------------------------------------------
++// Proporre un posto
++// ------------------------------------------------------------
++
++/**
++ * Cosa non va in un posto che il proprietario vuole aggiungere, con le regole
++ * del database: da almeno un'ora, entro novanta giorni, a mezz'ora dagli altri,
++ * e non più di trenta liberi. Nullo se va bene.
++ *
++ * `esistenti` sono i posti già presenti sull'immobile (liberi e prenotati),
++ * `liberi` quanti sono già liberi in futuro.
++ */
++export function validaNuovoPosto(
++  iso: string | null,
++  adesso: number,
++  esistenti: string[],
++  liberi: number
++): string | null {
++  if (iso === null) return "Scegli una data e un'ora valide.";
++  const t = Date.parse(iso);
++  if (Number.isNaN(t)) return "Scegli una data e un'ora valide.";
++  if (t < adesso + ANTICIPO_MINIMO_ORE * ORA) return "Il posto deve essere tra almeno un'ora.";
++  if (t > adesso + ANTICIPO_MASSIMO_GIORNI * GIORNO) return `Il posto deve essere entro ${ANTICIPO_MASSIMO_GIORNI} giorni.`;
++  if (liberi >= MASSIMO_POSTI_LIBERI) return `Hai già ${MASSIMO_POSTI_LIBERI} posti liberi su questo immobile: toglierne uno, o aspetta che qualcuno prenoti.`;
++
++  // il database tronca al minuto: lo si fa anche qui
++  const minuto = Math.floor(t / MINUTO) * MINUTO;
++  const vicino = esistenti.some((e) => {
++    const x = Date.parse(e);
++    return !Number.isNaN(x) && Math.abs(x - minuto) < DISTANZA_MINIMA_MINUTI * MINUTO;
++  });
++  if (vicino) return `Tra due visite sullo stesso immobile servono almeno ${DISTANZA_MINIMA_MINUTI} minuti.`;
++
++  return null;
++}
++
++/** Il primo e l'ultimo istante che si possono scegliere, per i limiti del campo data e ora. */
++export function limitiSelezione(adesso: number): { min: string; max: string } {
++  return {
++    min: aInputRoma(adesso + ANTICIPO_MINIMO_ORE * ORA),
++    max: aInputRoma(adesso + ANTICIPO_MASSIMO_GIORNI * GIORNO),
++  };
++}
++
++// ------------------------------------------------------------
++// Le visite, raggruppate
++// ------------------------------------------------------------
++
++/** Una riga di `visite_del_proprietario`. */
++export type VisitaProprietario = {
++  visita_id: string;
++  listing_id: string;
++  titolo: string;
++  data_ora: string;
++  stato: string;
++  candidatura_id: string | null;
++  nome_inquilino: string | null;
++};
++
++/** Una riga di `posti_liberi_per_candidatura`. */
++export type PostoLibero = { visita_id: string; data_ora: string };
++
++/** Una riga di `visite_della_candidatura`. */
++export type VisitaCandidatura = { visita_id: string; data_ora: string; stato: string };
++
++/**
++ * Le visite di UN immobile, divise per come si presentano al proprietario.
++ * Ordine: dalla più vicina. Una visita è passata se la data lo è, qualunque
++ * sia lo stato (l'app non sposta lo stato a visita finita).
++ */
++export function raggruppaVisiteImmobile(
++  righe: VisitaProprietario[],
++  immobileId: string,
++  adesso: number
++): { prenotate: VisitaProprietario[]; liberi: VisitaProprietario[]; chiuse: VisitaProprietario[] } {
++  const dellImmobile = righe
++    .filter((r) => r.listing_id === immobileId)
++    .sort((a, b) => Date.parse(a.data_ora) - Date.parse(b.data_ora));
++  const futura = (r: VisitaProprietario) => Date.parse(r.data_ora) > adesso;
++  return {
++    prenotate: dellImmobile.filter((r) => r.stato === "confermata" && futura(r)),
++    liberi: dellImmobile.filter((r) => r.stato === "proposta" && r.candidatura_id === null && futura(r)),
++    // le passate e le annullate, la più recente per prima
++    chiuse: dellImmobile
++      .filter((r) => !futura(r) || r.stato === "rifiutata")
++      .sort((a, b) => Date.parse(b.data_ora) - Date.parse(a.data_ora)),
++  };
++}
++
++/** I posti raggruppati per giorno, nell'ordine in cui arrivano. */
++export function raggruppaPostiPerGiorno(posti: PostoLibero[]): { chiave: string; etichetta: string; posti: PostoLibero[] }[] {
++  const gruppi: { chiave: string; etichetta: string; posti: PostoLibero[] }[] = [];
++  for (const p of posti) {
++    const chiave = chiaveGiorno(p.data_ora);
++    if (!chiave) continue;
++    const ultimo = gruppi[gruppi.length - 1];
++    if (ultimo && ultimo.chiave === chiave) ultimo.posti.push(p);
++    else gruppi.push({ chiave, etichetta: formattaGiorno(p.data_ora), posti: [p] });
++  }
++  return gruppi;
++}
++
++/** La visita confermata e non ancora passata di una candidatura, se c'è. */
++export function visitaAttiva(visite: VisitaCandidatura[], adesso: number): VisitaCandidatura | null {
++  return (
++    visite
++      .filter((v) => v.stato === "confermata" && Date.parse(v.data_ora) > adesso)
++      .sort((a, b) => Date.parse(a.data_ora) - Date.parse(b.data_ora))[0] ?? null
++  );
++}
++
++/** L'ultima visita annullata dal proprietario e non ancora passata: la persona deve saperlo. */
++export function visitaAnnullataRecente(visite: VisitaCandidatura[], adesso: number): VisitaCandidatura | null {
++  return (
++    visite
++      .filter((v) => v.stato === "rifiutata" && Date.parse(v.data_ora) > adesso)
++      .sort((a, b) => Date.parse(a.data_ora) - Date.parse(b.data_ora))[0] ?? null
++  );
++}
++
++// ------------------------------------------------------------
++// Testi
++// ------------------------------------------------------------
++
++export const SUGGERIMENTO_POSTI =
++  "Gli inquilini con un match su questo immobile potranno prenotare uno di questi posti dalla chat.";
++
++export const NESSUN_POSTO_PER_INQUILINO =
++  "Il proprietario non ha ancora indicato quando è disponibile. Puoi chiederglielo qui in chat.";
++
++export const NESSUNA_VISITA_PER_PROPRIETARIO =
++  "Nessuna visita fissata con questa persona. Puoi indicare i tuoi posti liberi dalla scheda dell'immobile.";
++
++export const AVVISO_ANNULLAMENTO_AL_PROPRIETARIO = "L'inquilino verrà avvisato.";
++export const AVVISO_ANNULLAMENTO_ALL_INQUILINO = "Il proprietario verrà avvisato e il posto tornerà libero.";
+diff --git a/supabase/migrations/0022_visite.sql b/supabase/migrations/0022_visite.sql
+new file mode 100644
+index 0000000..77f459a
+--- /dev/null
++++ b/supabase/migrations/0022_visite.sql
+@@ -0,0 +1,440 @@
++-- ============================================================
++-- MatchAmI — visite: disponibilità e prenotazione
++--
++-- La tabella `visite` esisteva dalla prima migrazione e nessuna schermata la
++-- usava. Le sue regole di accesso avevano due difetti, che nessuno aveva
++-- visto proprio perché nessuno la usava:
++--   - «visite: tenant books» lasciava all'inquilino il permesso di modificare
++--     QUALUNQUE colonna della sua visita (la data, l'annuncio, lo stato),
++--     senza alcun controllo sul risultato;
++--   - «visite: owner manages slots» era `ALL` senza controlli: il proprietario
++--     poteva agganciare una visita alla candidatura di un ALTRO annuncio.
++-- Si tolgono entrambe: le scritture passano solo da funzioni che controllano
++-- ogni cosa.
++--
++-- COME FUNZIONA
++--   - il proprietario aggiunge posti liberi per un suo immobile (data e ora);
++--   - un inquilino con una candidatura ACCETTATA su quell'immobile ne
++--     prenota uno; a ogni match, una visita alla volta;
++--   - si può annullare finché la visita non è passata. Se annulla l'inquilino
++--     il posto torna libero; se annulla il proprietario la visita risulta
++--     annullata e l'inquilino lo sa;
++--   - ogni prenotazione o annullamento avvisa l'altra parte.
++--
++-- GLI STATI (l'enumerato esiste già, non si tocca)
++--   proposta   = posto libero, offerto dal proprietario
++--   confermata = prenotato da un inquilino
++--   rifiutata  = annullata dal proprietario (resta, così l'inquilino lo vede)
++--   completata = non assegnata a nessuno dall'app: una visita passata si
++--                riconosce dalla data, senza spostare lo stato
++--
++-- ORDINE: esegui questa migrazione PRIMA del push del codice.
++-- ============================================================
++
++-- ------------------------------------------------------------
++-- 1. Niente scritture dirette
++-- ------------------------------------------------------------
++
++drop policy if exists "visite: owner manages slots" on visite;
++drop policy if exists "visite: tenant books" on visite;
++revoke insert, update, delete on visite from authenticated, anon;
++
++-- ------------------------------------------------------------
++-- 2. Indici
++-- ------------------------------------------------------------
++
++-- Due posti identici sullo stesso immobile non hanno senso (la funzione impedisce
++-- anche quelli troppo vicini: questo è l'ultimo argine).
++create unique index if not exists visite_slot_unico
++  on visite (listing_id, data_ora)
++  where stato <> 'rifiutata';
++
++create index if not exists visite_candidatura_idx on visite (candidatura_id);
++create index if not exists visite_immobile_data_idx on visite (listing_id, data_ora);
++
++-- ------------------------------------------------------------
++-- 3. Coerenza: se la candidatura sparisce (account cancellato), una visita
++--    confermata non resta agganciata a nessuno
++-- ------------------------------------------------------------
++
++create or replace function public.visite_coerenza()
++returns trigger
++language plpgsql
++as $$
++begin
++  if new.candidatura_id is null
++     and old.candidatura_id is not null
++     and new.stato = 'confermata' then
++    new.stato := case when new.data_ora > now() then 'proposta' else 'completata' end;
++  end if;
++  return new;
++end;
++$$;
++
++drop trigger if exists visite_coerenza on visite;
++create trigger visite_coerenza
++  before update on visite
++  for each row execute function public.visite_coerenza();
++
++-- ------------------------------------------------------------
++-- 4. Il proprietario aggiunge e toglie posti liberi
++-- ------------------------------------------------------------
++
++create or replace function public.crea_slot_visita(p_listing uuid, p_data_ora timestamptz)
++returns uuid
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_quando timestamptz;
++  v_id uuid;
++begin
++  if auth.uid() is null then
++    raise exception 'NON_AUTENTICATO';
++  end if;
++
++  if not exists (select 1 from listings where id = p_listing and owner_id = auth.uid()) then
++    raise exception 'IMMOBILE_NON_TUO';
++  end if;
++
++  if p_data_ora is null then
++    raise exception 'DATA_NON_VALIDA';
++  end if;
++
++  -- al minuto: i secondi non servono a nessuno
++  v_quando := date_trunc('minute', p_data_ora);
++
++  if v_quando < now() + interval '1 hour' then
++    raise exception 'DATA_TROPPO_VICINA';
++  end if;
++  if v_quando > now() + interval '90 days' then
++    raise exception 'DATA_TROPPO_LONTANA';
++  end if;
++
++  if (select count(*) from visite
++       where listing_id = p_listing and stato = 'proposta'
++         and candidatura_id is null and data_ora > now()) >= 30 then
++    raise exception 'TROPPI_POSTI';
++  end if;
++
++  -- una visita occupa tempo: due sullo stesso immobile distano almeno 30 minuti
++  if exists (
++    select 1 from visite
++     where listing_id = p_listing and stato <> 'rifiutata'
++       and abs(extract(epoch from (data_ora - v_quando))) < 1800
++  ) then
++    raise exception 'POSTO_TROPPO_VICINO';
++  end if;
++
++  insert into visite (listing_id, data_ora) values (p_listing, v_quando)
++  returning id into v_id;
++  return v_id;
++end;
++$$;
++
++-- Solo un posto ancora libero. Uno già prenotato si annulla con annulla_visita,
++-- che avvisa l'inquilino.
++create or replace function public.elimina_posto_visita(p_visita uuid)
++returns void
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_libero boolean;
++begin
++  if auth.uid() is null then
++    raise exception 'NON_AUTENTICATO';
++  end if;
++
++  select (v.candidatura_id is null and v.stato = 'proposta') into v_libero
++    from visite v join listings l on l.id = v.listing_id
++   where v.id = p_visita and l.owner_id = auth.uid();
++
++  if v_libero is null then
++    raise exception 'VISITA_NON_TUA';
++  end if;
++  if not v_libero then
++    raise exception 'VISITA_PRENOTATA';
++  end if;
++
++  delete from visite where id = p_visita and candidatura_id is null and stato = 'proposta';
++end;
++$$;
++
++-- ------------------------------------------------------------
++-- 5. L'inquilino prenota
++--
++-- Solo da una candidatura SUA e ACCETTATA, su un posto libero dello stesso
++-- immobile, con almeno mezz'ora di margine, e una sola visita alla volta per
++-- match. L'aggiornamento è condizionato: se due persone prenotano lo stesso
++-- posto nello stesso istante, ne vince una sola.
++-- ------------------------------------------------------------
++
++create or replace function public.prenota_visita(p_visita uuid, p_candidatura uuid)
++returns void
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_c candidature;
++begin
++  if auth.uid() is null then
++    raise exception 'NON_AUTENTICATO';
++  end if;
++
++  select * into v_c from candidature where id = p_candidatura and tenant_id = auth.uid();
++  if not found then
++    raise exception 'CANDIDATURA_NON_TUA';
++  end if;
++  if v_c.status <> 'accettata' then
++    raise exception 'CANDIDATURA_NON_ACCETTATA';
++  end if;
++
++  if exists (
++    select 1 from visite
++     where candidatura_id = p_candidatura and stato = 'confermata' and data_ora > now()
++  ) then
++    raise exception 'VISITA_GIA_PRENOTATA';
++  end if;
++
++  update visite
++     set candidatura_id = p_candidatura, stato = 'confermata'
++   where id = p_visita
++     and listing_id = v_c.listing_id
++     and candidatura_id is null
++     and stato = 'proposta'
++     and data_ora > now() + interval '30 minutes';
++
++  if not found then
++    -- il posto non c'è, è già preso, o manca meno di mezz'ora: la risposta è una sola
++    raise exception 'VISITA_NON_DISPONIBILE';
++  end if;
++end;
++$$;
++
++-- ------------------------------------------------------------
++-- 6. Annullare
++--
++-- Una visita CONFERMATA e non ancora passata, da una delle due parti. Se
++-- annulla l'inquilino il posto torna libero; se annulla il proprietario la
++-- visita resta come «rifiutata» (annullata), così l'inquilino la vede.
++-- ------------------------------------------------------------
++
++create or replace function public.annulla_visita(p_visita uuid)
++returns void
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v record;
++begin
++  if auth.uid() is null then
++    raise exception 'NON_AUTENTICATO';
++  end if;
++
++  select vi.id, vi.stato::text as stato, vi.data_ora, vi.candidatura_id,
++         l.owner_id, c.tenant_id
++    into v
++    from visite vi
++    join listings l on l.id = vi.listing_id
++    left join candidature c on c.id = vi.candidatura_id
++   where vi.id = p_visita;
++
++  if not found or (v.owner_id is distinct from auth.uid() and v.tenant_id is distinct from auth.uid()) then
++    raise exception 'VISITA_NON_TUA';
++  end if;
++  if v.stato <> 'confermata' then
++    raise exception 'VISITA_NON_ANNULLABILE';
++  end if;
++  if v.data_ora <= now() then
++    raise exception 'VISITA_GIA_PASSATA';
++  end if;
++
++  if v.tenant_id = auth.uid() then
++    update visite set candidatura_id = null, stato = 'proposta' where id = p_visita;
++  else
++    update visite set stato = 'rifiutata' where id = p_visita;
++  end if;
++end;
++$$;
++
++-- ------------------------------------------------------------
++-- 7. Avvisare l'altra parte
++-- ------------------------------------------------------------
++
++alter table notifiche drop constraint if exists notifiche_tipo_check;
++alter table notifiche add constraint notifiche_tipo_check check (tipo in (
++  'candidatura_ricevuta', 'candidatura_accettata', 'candidatura_rifiutata', 'candidatura_ritirata',
++  'immobile_verificato', 'immobile_respinto',
++  'reddito_verificato', 'reddito_respinto',
++  'affitto_verificato', 'affitto_respinto',
++  'rapporto_confermato', 'rapporto_rifiutato',
++  'feedback_ricevuto',
++  'visita_prenotata', 'visita_annullata'
++));
++
++create or replace function public.notifica_visita()
++returns trigger
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  l listings;
++  v_tenant uuid;
++  v_dati jsonb;
++begin
++  select * into l from listings where id = new.listing_id;
++  v_dati := jsonb_build_object('titolo', left(l.titolo, 80), 'quando', new.data_ora);
++
++  if old.stato = 'proposta' and new.stato = 'confermata' then
++    -- un inquilino ha prenotato: lo sa il proprietario
++    perform public.crea_notifica(l.owner_id, 'visita_prenotata', v_dati, '/immobili');
++
++  elsif old.stato = 'confermata' and new.stato = 'proposta' then
++    -- l'inquilino ha annullato (o ha cancellato l'account): lo sa il proprietario
++    perform public.crea_notifica(l.owner_id, 'visita_annullata', v_dati, '/immobili');
++
++  elsif old.stato = 'confermata' and new.stato = 'rifiutata' then
++    -- il proprietario ha annullato: lo sa l'inquilino, che ritrova la chat
++    select tenant_id into v_tenant from candidature where id = new.candidatura_id;
++    perform public.crea_notifica(v_tenant, 'visita_annullata', v_dati, '/chat/' || new.candidatura_id::text);
++  end if;
++
++  return new;
++end;
++$$;
++
++-- Niente «update of stato»: se l'inquilino cancella l'account, la cascata imposta
++-- solo `candidatura_id` e lo stato lo cambia il trigger di coerenza. Un trigger
++-- legato alla colonna non scatterebbe, e il proprietario non verrebbe avvisato.
++drop trigger if exists notifica_visita on visite;
++create trigger notifica_visita
++  after update on visite
++  for each row
++  when (old.stato is distinct from new.stato)
++  execute function public.notifica_visita();
++
++-- ------------------------------------------------------------
++-- 8. Cosa si legge
++--
++-- Funzioni, non letture dirette: l'inquilino non deve vedere i posti di un
++-- immobile a cui non è collegato da un match, e il proprietario riceve il nome
++-- di chi ha prenotato (lo stesso che vede già nella chat).
++-- ------------------------------------------------------------
++
++-- Tutte le visite dei MIEI immobili: i posti liberi, le prenotazioni, e quelle
++-- degli ultimi 30 giorni.
++create or replace function public.visite_del_proprietario()
++returns table (
++  visita_id uuid,
++  listing_id uuid,
++  titolo text,
++  data_ora timestamptz,
++  stato text,
++  candidatura_id uuid,
++  nome_inquilino text
++)
++language sql
++stable
++security definer
++set search_path = public
++as $$
++  select
++    v.id,
++    v.listing_id,
++    l.titolo,
++    v.data_ora,
++    v.stato::text,
++    v.candidatura_id,
++    case when v.candidatura_id is null then null
++         else coalesce(nullif(btrim(coalesce(p.nome, '') || ' ' || coalesce(p.cognome, '')), ''), 'Utente')
++    end
++  from visite v
++  join listings l on l.id = v.listing_id
++  left join candidature c on c.id = v.candidatura_id
++  left join profiles p on p.id = c.tenant_id
++  where auth.uid() is not null
++    and l.owner_id = auth.uid()
++    and v.data_ora >= now() - interval '30 days'
++  order by v.data_ora;
++$$;
++
++-- I posti liberi dell'immobile di UNA mia candidatura accettata.
++create or replace function public.posti_liberi_per_candidatura(p_candidatura uuid)
++returns table (visita_id uuid, data_ora timestamptz)
++language sql
++stable
++security definer
++set search_path = public
++as $$
++  select v.id, v.data_ora
++    from visite v
++    join candidature c on c.listing_id = v.listing_id
++   where auth.uid() is not null
++     and c.id = p_candidatura
++     and c.tenant_id = auth.uid()
++     and c.status = 'accettata'
++     and v.candidatura_id is null
++     and v.stato = 'proposta'
++     and v.data_ora > now() + interval '30 minutes'
++   order by v.data_ora
++   limit 30;
++$$;
++
++-- Le visite di una candidatura, visibili alle due parti.
++create or replace function public.visite_della_candidatura(p_candidatura uuid)
++returns table (visita_id uuid, data_ora timestamptz, stato text)
++language sql
++stable
++security definer
++set search_path = public
++as $$
++  select v.id, v.data_ora, v.stato::text
++    from visite v
++    join candidature c on c.id = v.candidatura_id
++    join listings l on l.id = c.listing_id
++   where auth.uid() is not null
++     and v.candidatura_id = p_candidatura
++     and (c.tenant_id = auth.uid() or l.owner_id = auth.uid())
++   order by v.data_ora desc
++   limit 10;
++$$;
++
++-- Permessi: solo chi ha un account. Le funzioni dei trigger non servono a nessuno.
++revoke all on function
++  public.crea_slot_visita(uuid, timestamptz), public.elimina_posto_visita(uuid),
++  public.prenota_visita(uuid, uuid), public.annulla_visita(uuid),
++  public.visite_del_proprietario(), public.posti_liberi_per_candidatura(uuid),
++  public.visite_della_candidatura(uuid)
++from public, anon;
++
++grant execute on function
++  public.crea_slot_visita(uuid, timestamptz), public.elimina_posto_visita(uuid),
++  public.prenota_visita(uuid, uuid), public.annulla_visita(uuid),
++  public.visite_del_proprietario(), public.posti_liberi_per_candidatura(uuid),
++  public.visite_della_candidatura(uuid)
++to authenticated;
++
++revoke all on function public.visite_coerenza(), public.notifica_visita() from public, anon, authenticated;
++
++-- ------------------------------------------------------------
++-- Verifica
++-- ------------------------------------------------------------
++
++select routine_name from information_schema.routines
++where routine_name in ('crea_slot_visita', 'elimina_posto_visita', 'prenota_visita', 'annulla_visita',
++                       'visite_del_proprietario', 'posti_liberi_per_candidatura', 'visite_della_candidatura')
++order by 1;   -- 7 righe
++
++-- deve risultare 0: nessuna policy di scrittura sulle visite
++select count(*) as policy_di_scrittura_rimaste
++from pg_policy where polrelid = 'visite'::regclass and polcmd in ('a', 'w', 'd', '*');
++
++select count(*) as notifica_visita_ammessa
++from pg_constraint where conname = 'notifiche_tipo_check'
++  and pg_get_constraintdef(oid) like '%visita_prenotata%';   -- 1
+-- 
+2.43.0
+

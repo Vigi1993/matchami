@@ -1,0 +1,1439 @@
+From b211a0bf9f3e99bec1b786c324a7d50a232503a1 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 8 Oct 2026 14:59:33 +0000
+Subject: [PATCH] feat(preferiti): preferiti, scarti che si ricordano e annulla
+ l'ultima scelta
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RICHIEDE LA MIGRAZIONE 0023 PRIMA DEL PUSH.
+
+Fin qui scartare un annuncio era solo uno stato della pagina (ricaricando
+ricompariva), e non esisteva un modo di dire 'mi interessa, ma non ancora':
+l'unico gesto positivo era candidarsi, e subito.
+
+- tabella scelte_annunci (preferito / scartato), leggibile SOLO dall'inquilino
+  che le fa; nessuna scrittura diretta, solo funzioni che controllano ogni
+  cosa (solo inquilini, solo annunci pubblicati e verificati, niente per un
+  annuncio a cui ci si è già candidati, tetto di 100 preferiti)
+- SALVA (segnalibro) nel mazzo e nella scheda: l'annuncio esce dal mazzo e si
+  ritrova in Profilo -> Preferiti, da cui ci si candida o lo si toglie
+- gli SCARTI si ricordano per 30 giorni, poi l'annuncio può riapparire (un
+  prezzo cambia). Ogni nuova scelta cancella gli scarti vecchi della stessa
+  persona: la pulizia avviene davvero, senza lavoro programmato
+- ANNULLA l'ultima scelta, un passo alla volta, sugli scarti e sui
+  salvataggi; non oltre una candidatura (si ritira da Candidature). Disponibile
+  anche a mazzo finito
+- candidarsi a un annuncio salvato lo toglie dai preferiti (trigger)
+- il mazzo vuoto dice PERCHÉ: 'hai già scelto tutti gli annunci disponibili'
+  invece di 'nessun annuncio'; a mazzo finito dice dove sono finiti scarti e
+  preferiti
+- scartare non si ferma per un errore di rete; salvare sì, e lo dice
+
+Insidie gestite: le chiamate rpc di Supabase sono PIGRE (partono solo se
+attese): prove con un mock fedele. Gli identificativi nascosti entrano in un
+filtro 'not in (...)': passano solo se sono uuid veri (un test prova valori
+costruiti per rompere la query). La guardia sui nomi degli argomenti non
+vedeva le chiamate nascoste dietro una funzione di servizio: ora sono dirette.
+
+PRIVACY: dato nuovo (cosa si salva e si scarta). Il proprietario non lo vede
+mai (nessun codice lo legge direttamente, un test lo difende). Informativa
+versione 2026-10-provvisoria-7 (va riaccettata), con la precisazione onesta
+che gli scarti vecchi si cancellano alla scelta SUCCESSIVA, non da soli.
+
+Test: 468 in tutto. Migrazione provata su PostgreSQL da zero e in UNA
+transazione, anche rilanciata; 28 prove di interazione, ripetute trenta volte
+senza un fallimento dopo aver tolto un'instabilità (i pulsanti restano spenti
+mentre un'azione è in corso e la prova cliccava troppo presto). Difetti
+reintrodotti di proposito: tutti presi.
+---
+ package.json                                |   2 +-
+ scripts/test-informativa.mjs                |  36 +++
+ scripts/test-scelte.mjs                     | 180 +++++++++++++
+ src/app/(app)/HomeClient.tsx                | 128 +++++++++-
+ src/app/(app)/SchedaImmobile.tsx            |   8 +
+ src/app/(app)/page.tsx                      |  23 +-
+ src/app/(app)/preferiti/PreferitiClient.tsx | 108 ++++++++
+ src/app/(app)/preferiti/page.tsx            |  31 +++
+ src/app/(app)/profilo/ProfiloClient.tsx     |   5 +
+ src/app/(app)/profilo/page.tsx              |   4 +
+ src/app/globals.css                         |  63 +++++
+ src/components/RigaPreferiti.tsx            |  21 ++
+ src/components/icons.tsx                    |  17 ++
+ src/content/informativa.ts                  |   7 +-
+ src/lib/scelte.ts                           | 117 +++++++++
+ src/lib/verifica.ts                         |   5 +
+ supabase/migrations/0023_preferiti.sql      | 264 ++++++++++++++++++++
+ 17 files changed, 1008 insertions(+), 11 deletions(-)
+ create mode 100644 scripts/test-scelte.mjs
+ create mode 100644 src/app/(app)/preferiti/PreferitiClient.tsx
+ create mode 100644 src/app/(app)/preferiti/page.tsx
+ create mode 100644 src/components/RigaPreferiti.tsx
+ create mode 100644 src/lib/scelte.ts
+ create mode 100644 supabase/migrations/0023_preferiti.sql
+
+diff --git a/package.json b/package.json
+index 98c64d7..8a9d01e 100644
+--- a/package.json
++++ b/package.json
+@@ -7,7 +7,7 @@
+     "build": "next build",
+     "start": "next start",
+     "lint": "eslint",
+-    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-informativa.mjs b/scripts/test-informativa.mjs
+index b7cf100..2958ce5 100644
+--- a/scripts/test-informativa.mjs
++++ b/scripts/test-informativa.mjs
+@@ -405,3 +405,39 @@ test("visite: il testo le dichiara, dice chi le vede e cosa contengono le notifi
+   assert.match(tabella[1], /listing_id uuid not null references listings\(id\) on delete cascade/);
+   assert.match(tabella[1], /candidatura_id uuid references candidature\(id\) on delete set null/);
+ });
++
++// ------------------------------------------------------------
++// Ciò che il testo dice dei preferiti e degli scarti è vero
++// ------------------------------------------------------------
++
++test("preferiti e scarti: il testo li dichiara, dice chi li vede e per quanto si conservano, e la migrazione lo fa davvero", () => {
++  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
++  assert.match(tutto, /gli annunci che salvi tra i preferiti o che scarti/);
++  assert.match(tutto, /il proprietario non sa quali annunci hai salvato o scartato/);
++  assert.match(tutto, /I preferiti restano finché li togli\. Gli annunci che scarti smettono di contare dopo 30 giorni e si cancellano la volta successiva che scarti o salvi un annuncio/);
++
++  const sql23 = fs.readFileSync(path.join(migrazioni, "0023_preferiti.sql"), "utf8");
++  // solo chi sceglie le legge, e nessuno scrive direttamente
++  assert.match(sql23, /for select using \(tenant_id = auth\.uid\(\)\)/);
++  assert.match(sql23, /revoke insert, update, delete on scelte_annunci from authenticated;/);
++  // gli scarti vecchi si cancellano DAVVERO, nel momento in cui chi li ha fatti sceglie di nuovo
++  const funzioni = [...sql23.matchAll(/create or replace function public\.(scarta_annuncio|salva_preferito)\([\s\S]*?\n\$\$;/g)];
++  assert.equal(funzioni.length, 2, "attese le due funzioni che scelgono");
++  for (const f of funzioni) assert.match(f[0], /delete from scelte_annunci\s+where tenant_id = auth\.uid\(\) and tipo = 'scartato'\s+and created_at <= now\(\) - interval '30 days'/, `${f[1]} non cancella gli scarti vecchi`);
++  // e i preferiti non scadono: nessuna cancellazione dei preferiti per età
++  assert.ok(!/tipo = 'preferito'[^;]*interval '30 days'[^;]*delete|delete[^;]*tipo = 'preferito'[^;]*interval/.test(sql23), "i preferiti scadono");
++});
++
++test("preferiti e scarti: nessun codice dell'app legge la tabella direttamente, e nessuna funzione per i proprietari la espone", () => {
++  // si legge solo con le funzioni (che guardano chi chiama): un proprietario non ha modo di arrivarci
++  function filiDiCodice(dir = path.join(radice, "src")) {
++    return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
++      if (e.name.startsWith("__")) return [];
++      const p = path.join(dir, e.name);
++      return e.isDirectory() ? filiDiCodice(p) : /\.(ts|tsx)$/.test(e.name) ? [p] : [];
++    });
++  }
++  for (const f of filiDiCodice()) assert.ok(!/scelte_annunci/.test(fs.readFileSync(f, "utf8")), `${path.relative(radice, f)} nomina la tabella delle scelte`);
++  const altre = fs.readdirSync(migrazioni).filter((x) => /^\d{4}_.*\.sql$/.test(x) && x !== "0023_preferiti.sql");
++  for (const f of altre) assert.ok(!/scelte_annunci/.test(fs.readFileSync(path.join(migrazioni, f), "utf8")), `${f} nomina la tabella delle scelte`);
++});
+diff --git a/scripts/test-scelte.mjs b/scripts/test-scelte.mjs
+new file mode 100644
+index 0000000..fecffe4
+--- /dev/null
++++ b/scripts/test-scelte.mjs
+@@ -0,0 +1,180 @@
++/**
++ * Test dei preferiti e degli scarti (src/lib/scelte.ts). Si lancia con:   npm test
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const s = caricaTs(path.join(radice, "src", "lib", "scelte.ts"));
++const v = caricaTs(path.join(radice, "src", "lib", "verifica.ts"));
++const sql = fs.readFileSync(path.join(radice, "supabase", "migrations", "0023_preferiti.sql"), "utf8");
++const leggi = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8");
++
++const sc = (id, tipo = "scartato") => ({ listingId: id, tipo });
++
++// ------------------------------------------------------------
++// La storia (su cui si regge «annulla»)
++// ------------------------------------------------------------
++
++test("storia: ogni scelta si aggiunge in fondo, senza modificare quella di partenza", () => {
++  const a = [sc("1")]; const copia = JSON.parse(JSON.stringify(a));
++  const b = s.registra(a, sc("2", "preferito"));
++  assert.deepEqual(b, [sc("1"), sc("2", "preferito")]);
++  assert.deepEqual(a, copia);
++});
++
++test("storia: oltre il limite si dimenticano le più vecchie, non le più recenti", () => {
++  let storia = [];
++  for (let i = 0; i < 80; i++) storia = s.registra(storia, sc("a" + i));
++  assert.equal(storia.length, s.MASSIMO_STORIA);
++  assert.equal(storia[0].listingId, "a30");
++  assert.equal(storia[storia.length - 1].listingId, "a79");
++});
++
++test("storia: l'ultima scelta, e vuota se non ce ne sono", () => {
++  assert.equal(s.ultimaScelta([]), null);
++  assert.deepEqual(s.ultimaScelta([sc("1"), sc("2", "preferito")]), sc("2", "preferito"));
++});
++
++test("annulla: toglie l'ultima e dice quale era; ripetuto torna indietro un passo alla volta", () => {
++  let storia = [sc("1"), sc("2", "preferito"), sc("3")];
++  const ordine = [];
++  for (let i = 0; i < 3; i++) { const r = s.annullaUltima(storia); ordine.push(r.annullata.listingId); storia = r.storia; }
++  assert.deepEqual(ordine, ["3", "2", "1"]);
++  assert.deepEqual(storia, []);
++});
++
++test("annulla: con la storia vuota non fa niente e non crolla", () => {
++  const r = s.annullaUltima([]);
++  assert.deepEqual(r, { storia: [], annullata: null });
++});
++
++test("annulla: l'elenco di partenza non si modifica", () => {
++  const a = [sc("1"), sc("2")]; const copia = JSON.parse(JSON.stringify(a));
++  s.annullaUltima(a); assert.deepEqual(a, copia);
++});
++
++test("dopo una candidatura la storia riparte da zero: non si torna indietro oltre quel punto", () => {
++  assert.deepEqual(s.svuota(), []);
++});
++
++// ------------------------------------------------------------
++// Gli annunci nascosti: si rimettono in una query, quindi devono essere identificativi veri
++// ------------------------------------------------------------
++
++const U1 = "11111111-1111-1111-1111-111111111111", U2 = "22222222-2222-2222-2222-222222222222";
++
++test("nascosti: un elenco di identificativi, e la forma con l'oggetto", () => {
++  assert.deepEqual(s.idsNascosti([U1, U2]), [U1, U2]);
++  assert.deepEqual(s.idsNascosti([{ annunci_nascosti: U1 }, { annunci_nascosti: U2 }]), [U1, U2]);
++  assert.deepEqual(s.idsNascosti([U1, { annunci_nascosti: U2 }]), [U1, U2]);
++});
++
++test("nascosti: niente doppioni, e un valore che non è un identificativo si scarta", () => {
++  assert.deepEqual(s.idsNascosti([U1, U1, U2, U1]), [U1, U2]);
++  for (const cattivo of ["", "x", "1", "null", "11111111-1111-1111-1111-11111111111", "11111111-1111-1111-1111-1111111111111", 42, null, undefined, {}, [], true]) {
++    assert.deepEqual(s.idsNascosti([cattivo]), [], JSON.stringify(cattivo));
++  }
++});
++
++test("nascosti: un valore costruito per rompere una query non passa mai", () => {
++  // gli identificativi finiscono dentro un filtro «not in (...)»: un testo qualunque lo altererebbe
++  for (const x of ["1),(2", `${U1}),id.neq.(x`, `${U1}' or '1'='1`, `${U1}\n${U2}`, `${U1},${U2}`, "'; drop table listings; --"]) {
++    assert.deepEqual(s.idsNascosti([x]), [], x);
++  }
++  for (const id of s.idsNascosti([U1, "x),(y", U2])) assert.match(id, /^[0-9a-f-]{36}$/i);
++});
++
++test("nascosti: non è un elenco (errore del database, nullo, testo): nessun annuncio nascosto, nessun crollo", () => {
++  for (const x of [null, undefined, "boh", 42, {}, { error: "x" }]) assert.deepEqual(s.idsNascosti(x), [], String(x));
++});
++
++test("nascosti: l'identificativo maiuscolo è accettato, una lettera fuori dall'esadecimale no", () => {
++  assert.equal(s.idsNascosti(["AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA"]).length, 1);
++  assert.equal(s.idsNascosti(["GGGGGGGG-GGGG-GGGG-GGGG-GGGGGGGGGGGG"]).length, 0);
++});
++
++// ------------------------------------------------------------
++// Testi
++// ------------------------------------------------------------
++
++test("riga del Profilo: nessuno, uno, più, e valori strani", () => {
++  assert.equal(s.sottotitoloPreferiti(0), "Salva gli annunci che ti interessano, per scegliere con calma");
++  assert.equal(s.sottotitoloPreferiti(1), "1 annuncio salvato");
++  assert.equal(s.sottotitoloPreferiti(7), "7 annunci salvati");
++  // un valore che non è un numero finito e positivo vale zero, mai «NaN annunci» o «Infinity annunci»
++  for (const x of [-3, NaN, Infinity, null, undefined, "5"]) assert.equal(s.sottotitoloPreferiti(x), s.sottotitoloPreferiti(0), String(x));
++  assert.equal(s.sottotitoloPreferiti(2.9), "2 annunci salvati");
++});
++
++test("testi: non presumono il genere e parlano dei 30 giorni giusti", () => {
++  const tutto = [s.TESTO_SALVATO, s.TESTO_PREFERITO_TOLTO, s.TESTO_SCARTO_ANNULLATO, s.TESTO_DOVE_SONO, s.TESTO_NESSUN_PREFERITO, s.TESTO_NOTA_PREFERITI, s.TITOLO_TUTTI_SCELTI, s.sottotitoloPreferiti(0)].join(" ");
++  assert.ok(!/\b(lui|lei|interessato|interessata|candidato|candidata)\b/i.test(tutto), tutto);
++  assert.match(s.TESTO_DOVE_SONO, /dopo 30 giorni/);
++  assert.match(s.TESTO_NOTA_PREFERITI, /dopo 30 giorni/);
++});
++
++// ------------------------------------------------------------
++// La migrazione e le chiamate
++// ------------------------------------------------------------
++
++test("regole rispecchiate: i 30 giorni e il tetto di 100 sono quelli della migrazione", () => {
++  assert.equal(s.GIORNI_SCARTO, 30);
++  // tre usi: la pulizia in «scarta», la pulizia in «salva», e la finestra di «annunci_nascosti»
++  assert.equal((sql.match(/interval '30 days'/g) ?? []).length, 3, "i 30 giorni della migrazione non sono più tre");
++  assert.equal(s.MASSIMO_PREFERITI, 100);
++  assert.match(sql, /where tenant_id = auth\.uid\(\) and tipo = 'preferito'\) >= 100/);
++});
++
++const GENERICO = v.messaggioErroreVerifica("qualcosa di sconosciuto");
++
++test("errori: ogni codice che la migrazione può sollevare ha una frase sua, senza codici dentro", () => {
++  const codici = [...new Set([...sql.matchAll(/raise exception '([A-Z_]+)'/g)].map((m) => m[1]))];
++  assert.ok(codici.length >= 5, `trovati solo ${codici.length}`);
++  for (const c of codici) {
++    const frase = v.messaggioErroreVerifica(`ERROR: ${c} (P0001)`);
++    assert.notEqual(frase, GENERICO, `il codice ${c} non ha un messaggio`);
++    assert.ok(!frase.includes(c), c);
++  }
++  assert.match(v.messaggioErroreVerifica("TROPPI_PREFERITI"), /100 preferiti/);
++});
++
++function filiDiCodice(dir = path.join(radice, "src")) {
++  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
++    if (e.name.startsWith("__")) return [];
++    const p = path.join(dir, e.name);
++    return e.isDirectory() ? filiDiCodice(p) : /\.(ts|tsx)$/.test(e.name) ? [p] : [];
++  });
++}
++
++test("chiamate: ogni chiamata a una funzione delle scelte porta esattamente i parametri della migrazione", () => {
++  const funzioni = new Map();
++  for (const m of sql.matchAll(/create or replace function public\.(\w+)\(([^)]*)\)/g)) funzioni.set(m[1], [...m[2].matchAll(/\b(p_\w+)\s/g)].map((x) => x[1]).sort());
++  const nomi = ["scarta_annuncio", "salva_preferito", "annulla_scelta", "annunci_nascosti", "elenco_preferiti", "numero_preferiti"];
++  for (const n of nomi) assert.ok(funzioni.has(n), `la migrazione non definisce ${n}`);
++  const trovate = new Map(nomi.map((n) => [n, 0]));
++  for (const file of filiDiCodice()) {
++    const codice = fs.readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
++    for (const nome of nomi) {
++      for (const m of codice.matchAll(new RegExp(`"${nome}"\\s*(?:,\\s*\\{([^}]*)\\}|\\))`, "g"))) {
++        const usati = m[1] === undefined ? [] : [...m[1].matchAll(/\b(p_\w+)\s*:/g)].map((x) => x[1]).sort();
++        assert.deepEqual(usati, funzioni.get(nome), `${path.relative(radice, file)} chiama ${nome} con ${JSON.stringify(usati)}, la migrazione vuole ${JSON.stringify(funzioni.get(nome))}`);
++        trovate.set(nome, trovate.get(nome) + 1);
++      }
++    }
++  }
++  for (const [nome, n] of trovate) assert.ok(n >= 1, `nessuna chiamata a ${nome} nel codice`);
++});
++
++test("migrazione: nessuna scrittura diretta, e una sola regola di lettura: le proprie scelte", () => {
++  assert.match(sql, /revoke insert, update, delete on scelte_annunci from authenticated;/);
++  assert.match(sql, /for select using \(tenant_id = auth\.uid\(\)\)/);
++  assert.ok(!/for (insert|update|delete|all)\b/.test(sql), "c'è una policy di scrittura");
++});
++
++test("privacy: la logica delle scelte non ha accesso alla rete né al browser", () => {
++  const c = leggi("src", "lib", "scelte.ts").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
++  for (const vietato of [/\bimport\s+(?!type)/, /\bfetch\(/, /XMLHttpRequest/, /localStorage/, /sessionStorage/, /supabase/i, /console\./]) assert.ok(!vietato.test(c), `${vietato}`);
++});
+diff --git a/src/app/(app)/HomeClient.tsx b/src/app/(app)/HomeClient.tsx
+index e367c85..cf1fe6f 100644
+--- a/src/app/(app)/HomeClient.tsx
++++ b/src/app/(app)/HomeClient.tsx
+@@ -6,12 +6,28 @@ import type { AffidabilitaResult } from "@/lib/affidabilita";
+ import type { ListingConMatch } from "@/lib/types";
+ import { TOLLERANZA_BUDGET, statoMazzo } from "@/lib/match";
+ import { candidati } from "./actions";
++import { createClient } from "@/lib/supabase/client";
++import { messaggioErroreVerifica } from "@/lib/verifica";
++import {
++  TESTO_DOVE_SONO,
++  TESTO_PREFERITO_TOLTO,
++  TESTO_SALVATO,
++  TESTO_SCARTO_ANNULLATO,
++  TITOLO_TUTTI_SCELTI,
++  annullaUltima,
++  registra,
++  svuota,
++  ultimaScelta,
++  type Scelta,
++} from "@/lib/scelte";
+ import {
+   IconChevronSu,
+   IconCuore,
+   IconX,
+   IconCasa,
+   IconInfo,
++  IconAnnulla,
++  IconSegnalibro,
+ } from "@/components/icons";
+ import { SchedaImmobile } from "./SchedaImmobile";
+ 
+@@ -23,6 +39,7 @@ export function HomeClient({
+   listings,
+   esclusi,
+   mostraMatch,
++  nascosti = 0,
+ }: {
+   affidabilita: AffidabilitaResult;
+   /** il mazzo già ordinato: prima gli annunci in ricerca, poi gli altri */
+@@ -31,6 +48,8 @@ export function HomeClient({
+   esclusi: number;
+   /** false se l'inquilino non ha impostato nessun criterio di ricerca */
+   mostraMatch: boolean;
++  /** annunci disponibili che l'inquilino ha già scartato (di recente) o salvato */
++  nascosti?: number;
+ }) {
+   // Il mazzo si congela alla prima visualizzazione. Dopo una candidatura
+   // la pagina viene rigenerata dal server senza l'annuncio appena scelto:
+@@ -43,6 +62,9 @@ export function HomeClient({
+     new Set()
+   );
+   const [pending, startTransition] = useTransition();
++  // Le scelte fatte in questa sessione, per «annulla»; e l'ultimo avviso mostrato.
++  const [storia, setStoria] = useState<Scelta[]>([]);
++  const [avviso, setAvviso] = useState<{ errore: boolean; testo: string } | null>(null);
+ 
+   // ---- stato del trascinamento della card ----
+   const [fotoIdx, setFotoIdx] = useState(0);
+@@ -67,22 +89,78 @@ export function HomeClient({
+   const oltreBudget = mazzo.filter((l) => l.match.sforoBudgetPct !== null).length;
+   const tolleranzaPct = Math.round(TOLLERANZA_BUDGET * 100);
+ 
++  // Le chiamate di Supabase partono solo se qualcuno ne attende il risultato:
++  // il `.then` (o un `await`) è ciò che le fa partire.
++
++  // Scartare è immediato e non si ferma per un errore di rete: se il ricordo non
++  // si salva, l'annuncio ricompare un'altra volta, nient'altro.
+   function scarta() {
++    if (attuale) {
++      setStoria((s) => registra(s, { listingId: attuale.id, tipo: "scartato" }));
++      createClient()
++        .rpc("scarta_annuncio", { p_listing: attuale.id })
++        .then(undefined, () => undefined);
++    }
++    setAvviso(null);
+     setIndex((i) => i + 1);
+     setFotoIdx(0);
+   }
+ 
++  // Salvare, invece, è una scelta voluta: se non riesce lo si dice e si resta sulla stessa casa.
++  function salva() {
++    if (!attuale || pending || mostraSeparatore) return;
++    const listing = attuale;
++    startTransition(async () => {
++      let errore: string | null = null;
++      try {
++        const { error } = await createClient().rpc("salva_preferito", { p_listing: listing.id });
++        if (error) errore = messaggioErroreVerifica(error.message);
++      } catch {
++        errore = messaggioErroreVerifica("");
++      }
++      if (errore) {
++        setAvviso({ errore: true, testo: errore });
++        return;
++      }
++      setStoria((s) => registra(s, { listingId: listing.id, tipo: "preferito" }));
++      setAvviso({ errore: false, testo: TESTO_SALVATO });
++      setSchedaAperta(false);
++      setIndex((i) => i + 1);
++      setFotoIdx(0);
++    });
++  }
++
++  // Torna indietro di una scelta (uno scarto o un salvataggio) e la toglie dal database.
++  function annulla() {
++    const { storia: nuova, annullata } = annullaUltima(storia);
++    if (!annullata || pending) return;
++    setStoria(nuova);
++    createClient()
++      .rpc("annulla_scelta", { p_listing: annullata.listingId })
++      .then(undefined, () => undefined);
++    setAvviso({ errore: false, testo: annullata.tipo === "preferito" ? TESTO_PREFERITO_TOLTO : TESTO_SCARTO_ANNULLATO });
++    setSchedaAperta(false);
++    setIndex((i) => Math.max(0, i - 1));
++    setFotoIdx(0);
++  }
++
+   function candidati_(listing: ListingConMatch) {
+     startTransition(async () => {
+       const res = await candidati(listing.id);
+       if (!res?.error) {
+         setCandidatureInviate((prev) => new Set(prev).add(listing.id));
+       }
++      // una candidatura non si annulla da qui (si ritira da «Candidature»): dopo,
++      // «annulla» non torna indietro oltre questo punto
++      setStoria(svuota());
++      setAvviso(null);
+       setIndex((i) => i + 1);
+       setFotoIdx(0);
+     });
+   }
+ 
++  const puoAnnullare = ultimaScelta(storia) !== null && !pending;
++
+   // Azionata sia dal rilascio del trascinamento sia dai pulsanti: fa
+   // "volare via" la card nella direzione scelta, poi passa alla prossima.
+   function swipe(direzione: "left" | "right") {
+@@ -224,12 +302,16 @@ export function HomeClient({
+               <IconCasa className="icon-ring" />
+             </div>
+             <h2>
+-              {esclusi > 0
+-                ? "Nessuna casa nel tuo budget"
+-                : "Nessun annuncio per la tua ricerca"}
++              {nascosti > 0
++                ? TITOLO_TUTTI_SCELTI
++                : esclusi > 0
++                  ? "Nessuna casa nel tuo budget"
++                  : "Nessun annuncio per la tua ricerca"}
+             </h2>
+             <p>
+-              {esclusi > 0
++              {nascosti > 0
++                ? TESTO_DOVE_SONO
++                : esclusi > 0
+                 ? `Ci sono ${esclusi} ${esclusi === 1 ? "casa" : "case"} oltre il ${tolleranzaPct}% del tuo budget, che non ti mostriamo. Se vuoi vederle, aggiorna il budget in Profilo → La tua ricerca.`
+                 : "Appena ci saranno immobili pubblicati che rientrano nei tuoi criteri, li vedrai qui. Nel frattempo puoi aggiornare i criteri in Profilo → La tua ricerca."}
+             </p>
+@@ -244,10 +326,16 @@ export function HomeClient({
+             </div>
+             <h2>Hai visto tutti gli annunci disponibili</h2>
+             <p>
+-              Torna più tardi: ne arrivano di nuovi appena vengono pubblicati.
++              Torna più tardi: ne arrivano di nuovi appena vengono pubblicati.{" "}
++              {TESTO_DOVE_SONO}
+               {esclusi > 0 &&
+                 ` Altre ${esclusi} ${esclusi === 1 ? "casa è" : "case sono"} oltre il ${tolleranzaPct}% del tuo budget e non te ${esclusi === 1 ? "la" : "le"} mostriamo: se vuoi vederle, aggiorna il budget in Profilo.`}
+             </p>
++            {puoAnnullare && (
++              <button type="button" className="link-quiet" onClick={annulla}>
++                Annulla l&apos;ultima scelta
++              </button>
++            )}
+           </div>
+         )}
+ 
+@@ -276,6 +364,11 @@ export function HomeClient({
+             <Link href="/profilo" className="link-quiet">
+               Modifica la tua ricerca
+             </Link>
++            {puoAnnullare && (
++              <button type="button" className="link-quiet" onClick={annulla}>
++                Annulla l&apos;ultima scelta
++              </button>
++            )}
+           </div>
+         )}
+ 
+@@ -392,6 +485,14 @@ export function HomeClient({
+       {/* ---- Pulsanti scarta / candidati ---- */}
+       {attuale && !finito && !mostraSeparatore && (
+         <div className="actions">
++          <button
++            className="btn-undo"
++            onClick={annulla}
++            disabled={!puoAnnullare}
++            aria-label="Annulla l'ultima scelta"
++          >
++            <IconAnnulla />
++          </button>
+           <button
+             className="btn-pass"
+             onClick={() => swipe("left")}
+@@ -400,6 +501,14 @@ export function HomeClient({
+           >
+             <IconX />
+           </button>
++          <button
++            className="btn-save"
++            onClick={salva}
++            disabled={pending}
++            aria-label="Salva nei preferiti"
++          >
++            <IconSegnalibro />
++          </button>
+           <button
+             className="btn-like"
+             onClick={() => swipe("right")}
+@@ -416,11 +525,18 @@ export function HomeClient({
+         mostraMatch={mostraMatch}
+         onClose={() => setSchedaAperta(false)}
+         onPassa={() => swipe("left")}
++        onSalva={salva}
+         onCandidati={() => swipe("right")}
+         inCorso={pending}
+       />
+ 
+-      {candidatureInviate.size > 0 && (
++      {avviso && (
++        <div className={`toast-inline ${avviso.errore ? "is-no" : ""}`} role={avviso.errore ? "alert" : "status"}>
++          {avviso.testo}
++        </div>
++      )}
++
++      {!avviso && candidatureInviate.size > 0 && (
+         <div className="toast-inline">
+           Candidatura inviata — la trovi in &quot;Candidature&quot;.
+         </div>
+diff --git a/src/app/(app)/SchedaImmobile.tsx b/src/app/(app)/SchedaImmobile.tsx
+index 405afa0..dc900bf 100644
+--- a/src/app/(app)/SchedaImmobile.tsx
++++ b/src/app/(app)/SchedaImmobile.tsx
+@@ -14,6 +14,7 @@ export function SchedaImmobile({
+   mostraMatch,
+   onClose,
+   onPassa,
++  onSalva,
+   onCandidati,
+   inCorso,
+ }: {
+@@ -22,6 +23,8 @@ export function SchedaImmobile({
+   mostraMatch: boolean;
+   onClose: () => void;
+   onPassa: () => void;
++  /** salvare tra i preferiti, per decidere dopo */
++  onSalva?: () => void;
+   onCandidati: () => void;
+   inCorso: boolean;
+ }) {
+@@ -115,6 +118,11 @@ export function SchedaImmobile({
+         >
+           Passo
+         </button>
++        {onSalva && (
++          <button type="button" onClick={onSalva} disabled={inCorso} className="btn-neutro">
++            Salva
++          </button>
++        )}
+         <button
+           type="button"
+           onClick={onCandidati}
+diff --git a/src/app/(app)/page.tsx b/src/app/(app)/page.tsx
+index 14fca2c..70943d5 100644
+--- a/src/app/(app)/page.tsx
++++ b/src/app/(app)/page.tsx
+@@ -7,6 +7,7 @@ import { computeAffidabilita } from "@/lib/affidabilita";
+ import { haCriteriDiRicerca, preparaMazzo, profiloRicercaDaRighe } from "@/lib/match";
+ import type { ProfiloRicerca } from "@/lib/match";
+ import type { TenantProfile, ListingConMatch, ListingProprietario } from "@/lib/types";
++import { idsNascosti } from "@/lib/scelte";
+ 
+ export default async function Home() {
+   const supabase = await createClient();
+@@ -36,6 +37,7 @@ async function TenantHome({ userId }: { userId: string }) {
+     { data: interessiRows },
+     { data: recensioni },
+     { data: giaCandidato },
++    { data: nascostiRighe },
+   ] = await Promise.all([
+     supabase.from("tenant_profiles").select("*").eq("profile_id", userId).single(),
+     supabase.from("tenant_zone_interesse").select("zona").eq("tenant_id", userId),
+@@ -45,6 +47,9 @@ async function TenantHome({ userId }: { userId: string }) {
+       .eq("tenant_id", userId),
+     supabase.from("recensioni").select("voto").eq("tenant_id", userId),
+     supabase.from("candidature").select("listing_id").eq("tenant_id", userId),
++    // i preferiti e gli scarti degli ultimi 30 giorni: non si rimettono nel mazzo.
++    // Se la lettura non riesce, il mazzo si vede intero: meglio un annuncio in più che nessuno.
++    supabase.rpc("annunci_nascosti"),
+   ]);
+ 
+   const numeroRecensioni = recensioni?.length ?? 0;
+@@ -78,7 +83,11 @@ async function TenantHome({ userId }: { userId: string }) {
+     )
+     .eq("pubblicato", true);
+ 
+-  const listingIdsEsclusi = (giaCandidato ?? []).map((c) => c.listing_id as string);
++  // Gli identificativi dei nascosti entrano in un filtro: passano solo se sono identificativi veri.
++  const idsScelti = idsNascosti(nascostiRighe);
++  const listingIdsEsclusi = [
++    ...new Set([...(giaCandidato ?? []).map((c) => c.listing_id as string), ...idsScelti]),
++  ];
+   if (listingIdsEsclusi.length > 0) {
+     query = query.not("id", "in", `(${listingIdsEsclusi.join(",")})`);
+   }
+@@ -102,12 +111,24 @@ async function TenantHome({ userId }: { userId: string }) {
+ 
+   const { mazzo, esclusi } = preparaMazzo(listingsOrdinati, profiloRicerca);
+ 
++  // Se il mazzo è vuoto, bisogna dire PERCHÉ: nessun annuncio, o li ha già scelti tutti.
++  let nascosti = 0;
++  if (listingsOrdinati.length === 0 && idsScelti.length > 0) {
++    const { count } = await supabase
++      .from("listings")
++      .select("id", { count: "exact", head: true })
++      .in("id", idsScelti)
++      .eq("pubblicato", true);
++    nascosti = count ?? 0;
++  }
++
+   return (
+     <HomeClient
+       affidabilita={affidabilita}
+       listings={mazzo as unknown as ListingConMatch[]}
+       esclusi={esclusi}
+       mostraMatch={haCriteriDiRicerca(profiloRicerca)}
++      nascosti={nascosti}
+     />
+   );
+ }
+diff --git a/src/app/(app)/preferiti/PreferitiClient.tsx b/src/app/(app)/preferiti/PreferitiClient.tsx
+new file mode 100644
+index 0000000..8d602bd
+--- /dev/null
++++ b/src/app/(app)/preferiti/PreferitiClient.tsx
+@@ -0,0 +1,108 @@
++"use client";
++
++import { useState } from "react";
++import { useRouter } from "next/navigation";
++import { createClient } from "@/lib/supabase/client";
++import { messaggioErroreVerifica } from "@/lib/verifica";
++import { IconSegnalibro } from "@/components/icons";
++import {
++  TESTO_CANDIDATURA_INVIATA,
++  TESTO_NESSUN_PREFERITO,
++  descrizionePreferito,
++  type Preferito,
++} from "@/lib/scelte";
++import { candidati } from "../actions";
++
++/**
++ * Gli annunci salvati. Da qui ci si candida (e l'annuncio esce dai preferiti, lo
++ * fa il database) o si toglie.
++ */
++export function PreferitiClient({ preferiti, errore }: { preferiti: Preferito[]; errore: boolean }) {
++  const router = useRouter();
++  const [inCorso, setInCorso] = useState<string | null>(null);
++  const [messaggio, setMessaggio] = useState<{ errore: boolean; testo: string } | null>(null);
++
++  async function candidatiA(p: Preferito) {
++    setMessaggio(null);
++    setInCorso(p.listing_id);
++    try {
++      const res = await candidati(p.listing_id);
++      if (res?.error) {
++        setMessaggio({ errore: true, testo: res.error });
++        return;
++      }
++      setMessaggio({ errore: false, testo: TESTO_CANDIDATURA_INVIATA });
++      router.refresh();
++    } finally {
++      setInCorso(null);
++    }
++  }
++
++  async function togli(p: Preferito) {
++    setMessaggio(null);
++    setInCorso(p.listing_id);
++    try {
++      const { error } = await createClient().rpc("annulla_scelta", { p_listing: p.listing_id });
++      if (error) {
++        setMessaggio({ errore: true, testo: messaggioErroreVerifica(error.message) });
++        return;
++      }
++      router.refresh();
++    } finally {
++      setInCorso(null);
++    }
++  }
++
++  if (errore) {
++    return (
++      <div className="note-box is-no" style={{ marginTop: 0 }} role="alert">
++        <b>Non è stato possibile caricare i preferiti.</b> Riprova tra poco.
++      </div>
++    );
++  }
++
++  if (preferiti.length === 0) {
++    return (
++      <div className="empty-inline">
++        <IconSegnalibro className="icon-empty" />
++        <h3>Nessun preferito ancora</h3>
++        <p>{TESTO_NESSUN_PREFERITO}</p>
++      </div>
++    );
++  }
++
++  return (
++    <>
++      {messaggio && (
++        <div className={`note-box ${messaggio.errore ? "is-no" : ""}`} style={{ marginTop: 0 }} role={messaggio.errore ? "alert" : "status"}>
++          {messaggio.testo}
++        </div>
++      )}
++      <ul className="preferiti-lista">
++        {preferiti.map((p) => (
++          <li key={p.listing_id} className="preferito">
++            {p.foto ? (
++              // eslint-disable-next-line @next/next/no-img-element
++              <img src={p.foto} alt="" />
++            ) : (
++              <div className="mc-avatar">{p.titolo.slice(0, 2).toUpperCase()}</div>
++            )}
++            <div className="mc-body">
++              <div className="mc-zona">{p.zona}</div>
++              <div className="mc-title">{p.titolo}</div>
++              <div className="mc-meta">{descrizionePreferito(p)}</div>
++              <div className="preferito-azioni">
++                <button type="button" className="redo-link" disabled={inCorso !== null} onClick={() => togli(p)} aria-label={`Togli ${p.titolo} dai preferiti`}>
++                  Togli
++                </button>
++                <button type="button" className="opp-cta" disabled={inCorso !== null} onClick={() => candidatiA(p)} aria-label={`Candidati a ${p.titolo}`}>
++                  {inCorso === p.listing_id ? "Un attimo..." : "Candidati"}
++                </button>
++              </div>
++            </div>
++          </li>
++        ))}
++      </ul>
++    </>
++  );
++}
+diff --git a/src/app/(app)/preferiti/page.tsx b/src/app/(app)/preferiti/page.tsx
+new file mode 100644
+index 0000000..8a2f3ca
+--- /dev/null
++++ b/src/app/(app)/preferiti/page.tsx
+@@ -0,0 +1,31 @@
++import { redirect } from "next/navigation";
++import { createClient } from "@/lib/supabase/server";
++import { PageContainer } from "@/components/ui/PageContainer";
++import { TESTO_NOTA_PREFERITI, sottotitoloPreferiti, type Preferito } from "@/lib/scelte";
++import { PreferitiClient } from "./PreferitiClient";
++
++export default async function PreferitiPage() {
++  const supabase = await createClient();
++  const {
++    data: { user },
++  } = await supabase.auth.getUser();
++
++  // i preferiti sono una cosa da inquilini
++  const { data: profilo } = await supabase.from("profiles").select("ruolo").eq("id", user!.id).single();
++  if (profilo?.ruolo === "proprietario") redirect("/");
++
++  // gli annunci salvati e ancora disponibili, dal più recente, con la prima foto
++  const { data, error } = await supabase.rpc("elenco_preferiti");
++  const preferiti = (error ? [] : data ?? []) as Preferito[];
++
++  return (
++    <PageContainer>
++      <h1 className="screen-title">Preferiti</h1>
++      <p className="screen-sub">{error ? "Non sono riuscito a caricarli." : sottotitoloPreferiti(preferiti.length)}</p>
++      <PreferitiClient preferiti={preferiti} errore={Boolean(error)} />
++      <p className="field-note" style={{ marginTop: 18 }}>
++        {TESTO_NOTA_PREFERITI}
++      </p>
++    </PageContainer>
++  );
++}
+diff --git a/src/app/(app)/profilo/ProfiloClient.tsx b/src/app/(app)/profilo/ProfiloClient.tsx
+index ca8539c..4aae34b 100644
+--- a/src/app/(app)/profilo/ProfiloClient.tsx
++++ b/src/app/(app)/profilo/ProfiloClient.tsx
+@@ -1,6 +1,7 @@
+ "use client";
+ 
+ import { RigaNovita } from "@/components/RigaNovita";
++import { RigaPreferiti } from "@/components/RigaPreferiti";
+ import { rigaProfilo } from "@/lib/verifica-inquilino";
+ import { useActionState, useState } from "react";
+ import { Sheet } from "@/components/Sheet";
+@@ -35,6 +36,8 @@ import {
+ type Props = {
+   /** le novità non ancora lette */
+   nonLette: number;
++  /** quanti annunci ha salvato tra i preferiti */
++  preferiti?: number;
+   /** gli affitti dichiarati e confermati, costruiti dal server */
+   affittiPanel: React.ReactNode;
+   /** il pannello per verificare il reddito con i documenti, costruito dal server */
+@@ -54,6 +57,7 @@ type Props = {
+ 
+ export function ProfiloClient({
+   nonLette,
++  preferiti = 0,
+   nome,
+   cognome,
+   email,
+@@ -150,6 +154,7 @@ export function ProfiloClient({
+ 
+       <div className="card-grid">
+         <RigaNovita nonLette={nonLette} />
++        <RigaPreferiti preferiti={preferiti} />
+         {/* I tuoi dati */}
+         <Row
+           color="var(--ink)"
+diff --git a/src/app/(app)/profilo/page.tsx b/src/app/(app)/profilo/page.tsx
+index 20c88bc..00e2dc8 100644
+--- a/src/app/(app)/profilo/page.tsx
++++ b/src/app/(app)/profilo/page.tsx
+@@ -85,9 +85,13 @@ export default async function ProfiloPage() {
+       ? recensioni!.reduce((s, r) => s + (r.voto as number), 0) / numeroRecensioni
+       : null;
+ 
++  // quanti annunci ha salvato (solo quelli ancora disponibili); se non si legge, zero
++  const { data: numeroPreferiti } = await supabase.rpc("numero_preferiti");
++
+   return (
+     <ProfiloClient
+       nonLette={nonLette}
++      preferiti={typeof numeroPreferiti === "number" ? numeroPreferiti : 0}
+       nome={profile?.nome ?? null}
+       cognome={profile?.cognome ?? null}
+       email={user!.email ?? null}
+diff --git a/src/app/globals.css b/src/app/globals.css
+index d8ba83a..a278148 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -2947,3 +2947,66 @@ mark.segnaposto {
+ .chat-visita-corpo p {
+   margin: 0 0 8px;
+ }
++
++/* ============================================================
++   Preferiti e annulla (mazzo)
++   ============================================================ */
++
++.actions .btn-undo,
++.actions .btn-save {
++  width: 46px;
++  height: 46px;
++}
++.actions .btn-undo svg,
++.actions .btn-save svg {
++  width: 20px;
++  height: 20px;
++  stroke: var(--paper);
++}
++.btn-neutro {
++  flex: 1;
++  padding: 12px 14px;
++  font-size: 14px;
++  font-weight: 600;
++  color: var(--ink);
++  background: transparent;
++  border: 1px solid rgba(16, 21, 26, 0.18);
++  border-radius: 12px;
++  cursor: pointer;
++}
++.btn-neutro:disabled {
++  opacity: 0.4;
++  cursor: default;
++}
++
++.preferiti-lista {
++  list-style: none;
++  margin: 0;
++  padding: 0;
++  display: flex;
++  flex-direction: column;
++  gap: 10px;
++}
++.preferito {
++  display: flex;
++  gap: 12px;
++  padding: 12px;
++  background: #fff;
++  border: 1px solid rgba(16, 21, 26, 0.1);
++  border-radius: 14px;
++}
++.preferito > img,
++.preferito > .mc-avatar {
++  flex-shrink: 0;
++  width: 72px;
++  height: 72px;
++  border-radius: 12px;
++  object-fit: cover;
++}
++.preferito-azioni {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 12px;
++  margin-top: 10px;
++}
+diff --git a/src/components/RigaPreferiti.tsx b/src/components/RigaPreferiti.tsx
+new file mode 100644
+index 0000000..ee520ed
+--- /dev/null
++++ b/src/components/RigaPreferiti.tsx
+@@ -0,0 +1,21 @@
++"use client";
++
++import { useRouter } from "next/navigation";
++import { Row } from "@/components/ui/Row";
++import { IconSegnalibro } from "@/components/icons";
++import { sottotitoloPreferiti } from "@/lib/scelte";
++
++/** La riga «Preferiti» del Profilo dell'inquilino: apre l'elenco degli annunci salvati. */
++export function RigaPreferiti({ preferiti }: { preferiti: number }) {
++  const router = useRouter();
++  return (
++    <Row
++      color={preferiti > 0 ? "var(--moss)" : "var(--ink-soft)"}
++      icon={<IconSegnalibro className="fill-none stroke-white stroke-2" />}
++      title="Preferiti"
++      subtitle={sottotitoloPreferiti(preferiti)}
++      cta="Vedi i preferiti"
++      onClick={() => router.push("/preferiti")}
++    />
++  );
++}
+diff --git a/src/components/icons.tsx b/src/components/icons.tsx
+index 36e6905..5ff109c 100644
+--- a/src/components/icons.tsx
++++ b/src/components/icons.tsx
+@@ -189,3 +189,20 @@ export function IconBusta({ className }: IconProps) {
+     </svg>
+   );
+ }
++
++export function IconSegnalibro({ className }: IconProps) {
++  return (
++    <svg viewBox="0 0 24 24" className={className} aria-hidden>
++      <path d="M6 3.5h12a1 1 0 0 1 1 1V21l-7-4.5L5 21V4.5a1 1 0 0 1 1-1z" />
++    </svg>
++  );
++}
++
++export function IconAnnulla({ className }: IconProps) {
++  return (
++    <svg viewBox="0 0 24 24" className={className} aria-hidden>
++      <path d="M9 14L4 9l5-5" />
++      <path d="M4 9h10a6 6 0 0 1 0 12h-3" />
++    </svg>
++  );
++}
+diff --git a/src/content/informativa.ts b/src/content/informativa.ts
+index eb0d016..e19d274 100644
+--- a/src/content/informativa.ts
++++ b/src/content/informativa.ts
+@@ -28,7 +28,7 @@ export const INFORMATIVA = {
+    * controllo che fa il database (migrazione 0017): un test fallisce se
+    * questa stringa non lo supera.
+    */
+-  versione: "2026-10-provvisoria-6",
++  versione: "2026-10-provvisoria-7",
+   provvisoria: true,
+   titolo: "Informativa sulla privacy",
+   aggiornata: "ottobre 2026",
+@@ -51,7 +51,7 @@ export const INFORMATIVA = {
+       titolo: "Quali dati raccogliamo",
+       elenco: [
+         "Account: email, password (conservata come impronta, non in chiaro), nome, cognome e ruolo, inquilino o proprietario.",
+-        "Se sei inquilino: lavoro, reddito tuo e del tuo nucleo, garante, fideiussione, protesti (li dichiari tu e non vengono verificati), animali, composizione del nucleo, numero di figli, presentazione, foto del profilo e le tue preferenze di ricerca (budget, zone, locali, metri, caratteristiche).",
++        "Se sei inquilino: lavoro, reddito tuo e del tuo nucleo, garante, fideiussione, protesti (li dichiari tu e non vengono verificati), animali, composizione del nucleo, numero di figli, presentazione, foto del profilo, le tue preferenze di ricerca (budget, zone, locali, metri, caratteristiche) e gli annunci che salvi tra i preferiti o che scarti.",
+         "Se sei proprietario: tipo di proprietario, numero di immobili, obiettivo; gli annunci con titolo, descrizione, zona, prezzo, caratteristiche e foto; i criteri che chiedi ai candidati.",
+         "Per le verifiche: il documento d'identità e la prova di proprietà dell'immobile (proprietari); se sei inquilino e chiedi di verificare il reddito, un documento d'identità e una prova del reddito (una busta paga, la CU o la dichiarazione dei redditi); e i contratti di affitto caricati per dichiarare un affitto. Non chiediamo lo stato di famiglia.",
+         "Mentre usi l'app: candidature, messaggi, visite (giorno e ora, e chi le ha prenotate), contratti, recensioni, richieste di conferma di un affitto e inviti. Inoltre le notifiche sulle novità del tuo account (per esempio l'esito di una verifica o la risposta a una candidatura): contengono il tipo di evento e, al massimo, il titolo di un annuncio e, per le visite, il giorno e l'ora; mai nomi di persone.",
+@@ -79,6 +79,7 @@ export const INFORMATIVA = {
+         "Se rifiuta la tua candidatura, del tuo profilo gli resta solo il tuo nome, oltre alla valutazione che aveva già fatto. Tu vedi il motivo del rifiuto, non la sua valutazione completa.",
+         "Se ritiri una candidatura mentre è ancora in attesa, il proprietario non la vede più: non legge né il tuo profilo né le recensioni su di te, e riceve solo una notifica con il titolo dell'annuncio. La candidatura resta nel tuo elenco e non puoi candidarti di nuovo allo stesso annuncio.",
+         "I messaggi li leggono solo le due persone, dopo che la candidatura è stata accettata. L'app ricorda quali messaggi hai già letto, solo per mostrarti quanti ne restano da leggere: non lo mostra all'altra persona.",
++        "I preferiti e gli annunci che scarti li vede solo chi li sceglie: il proprietario non sa quali annunci hai salvato o scartato.",
+         "Le visite: il proprietario indica i giorni e gli orari in cui è disponibile per un suo immobile. Li vedono solo le persone che hanno un match accettato su quell'immobile; chi non lo ha non vede nemmeno quali orari ci sono. Chi prenota vede la propria visita, e il proprietario vede nome e cognome di chi ha prenotato, per le visite degli ultimi 30 giorni.",
+         "Nella chat, l'app evidenzia i messaggi che parlano di pagamenti sospetti (per esempio un IBAN, una caparra o un anticipo) e ti avvisa prima di inviarne uno così, per aiutarti a riconoscere una truffa. È un controllo automatico che fa parte della visualizzazione della chat: non salviamo il risultato e non lo comunichiamo a nessuno, e non impedisce mai di inviare un messaggio.",
+         "Le recensioni su un inquilino le leggono la persona recensita, chi le ha scritte e i proprietari a cui ha inviato una candidatura.",
+@@ -96,7 +97,7 @@ export const INFORMATIVA = {
+     {
+       titolo: "Per quanto tempo conserviamo i dati",
+       paragrafi: [
+-        "Al momento non c'è una scadenza automatica: una candidatura, un messaggio, una visita, un invito o un documento restano finché non cancelli l'account (o, per le visite, l'immobile). Un documento caricato per la verifica del reddito puoi toglierlo tu, ma solo finché non hai inviato la richiesta. Le notifiche sono pensate per sparire dopo 60 giorni se lette e dopo 180 se non lette, ma questa pulizia non è ancora attiva. I tempi di conservazione saranno definiti nel testo definitivo.",
++        "Al momento non c'è una scadenza automatica: una candidatura, un messaggio, una visita, un invito o un documento restano finché non cancelli l'account (o, per le visite, l'immobile). I preferiti restano finché li togli. Gli annunci che scarti smettono di contare dopo 30 giorni e si cancellano la volta successiva che scarti o salvi un annuncio. Un documento caricato per la verifica del reddito puoi toglierlo tu, ma solo finché non hai inviato la richiesta. Le notifiche sono pensate per sparire dopo 60 giorni se lette e dopo 180 se non lette, ma questa pulizia non è ancora attiva. I tempi di conservazione saranno definiti nel testo definitivo.",
+       ],
+     },
+     {
+diff --git a/src/lib/scelte.ts b/src/lib/scelte.ts
+new file mode 100644
+index 0000000..a3f9720
+--- /dev/null
++++ b/src/lib/scelte.ts
+@@ -0,0 +1,117 @@
++/**
++ * Preferiti e scarti degli annunci, dal lato dell'inquilino: la storia delle
++ * scelte fatte nel mazzo (su cui si regge «annulla»), l'elenco degli annunci da
++ * non rimettere nel mazzo, e i testi. Logica pura, senza database: si prova con
++ * `npm test`.
++ *
++ * Le regole vere (chi può scegliere, il tetto di 100 preferiti, i 30 giorni
++ * dello scarto, la pulizia) stanno nelle funzioni del database (migrazione
++ * 0023).
++ */
++
++/** Per quanti giorni si ricorda uno scarto; poi l'annuncio può riapparire. */
++export const GIORNI_SCARTO = 30;
++
++/** Quanti annunci si possono salvare. */
++export const MASSIMO_PREFERITI = 100;
++
++/** Quante scelte si tengono in memoria per «annulla»: oltre, le più vecchie si dimenticano. */
++export const MASSIMO_STORIA = 50;
++
++export type TipoScelta = "scartato" | "preferito";
++
++/** Una scelta fatta nel mazzo, nell'ordine in cui è stata fatta. */
++export type Scelta = { listingId: string; tipo: TipoScelta };
++
++/**
++ * Aggiunge una scelta alla storia. Una candidatura NON è una scelta annullabile
++ * (si ritira da «Candidature»): dopo averne inviata una, `svuota` riparte da
++ * zero, perché tornare indietro oltre quel punto riporterebbe sotto gli occhi
++ * un annuncio a cui ci si è già candidati.
++ */
++export function registra(storia: Scelta[], scelta: Scelta): Scelta[] {
++  const nuova = [...storia, scelta];
++  return nuova.length > MASSIMO_STORIA ? nuova.slice(nuova.length - MASSIMO_STORIA) : nuova;
++}
++
++/** La storia dopo una candidatura: non si torna indietro oltre quel punto. */
++export function svuota(): Scelta[] {
++  return [];
++}
++
++/** L'ultima scelta, se c'è: è quella che «annulla» toglie. */
++export function ultimaScelta(storia: Scelta[]): Scelta | null {
++  return storia.length > 0 ? storia[storia.length - 1] : null;
++}
++
++/** La storia senza l'ultima scelta, e quale era. Una storia vuota resta com'è. */
++export function annullaUltima(storia: Scelta[]): { storia: Scelta[]; annullata: Scelta | null } {
++  if (storia.length === 0) return { storia, annullata: null };
++  return { storia: storia.slice(0, -1), annullata: storia[storia.length - 1] };
++}
++
++/**
++ * Gli identificativi che `annunci_nascosti` restituisce. PostgREST dà un elenco
++ * di valori semplici per una funzione che restituisce un insieme di uuid, ma
++ * qualche versione li incapsula in un oggetto: si accettano tutte e due le
++ * forme, e si scarta ciò che non è un identificativo.
++ */
++export function idsNascosti(dati: unknown): string[] {
++  if (!Array.isArray(dati)) return [];
++  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
++  const ids: string[] = [];
++  for (const x of dati) {
++    const v = typeof x === "string" ? x : x && typeof x === "object" ? Object.values(x as Record<string, unknown>)[0] : null;
++    if (typeof v === "string" && uuid.test(v)) ids.push(v);
++  }
++  return [...new Set(ids)];
++}
++
++// ------------------------------------------------------------
++// Testi
++// ------------------------------------------------------------
++
++export const TESTO_SALVATO = "Salvato nei preferiti — lo trovi in Profilo → Preferiti.";
++export const TESTO_PREFERITO_TOLTO = "Tolto dai preferiti.";
++export const TESTO_SCARTO_ANNULLATO = "Scarto annullato.";
++
++/** Cosa si dice quando il mazzo è finito: dove sono finiti gli annunci scartati e quelli salvati. */
++export const TESTO_DOVE_SONO = `Gli annunci che scarti tornano a comparire dopo ${GIORNI_SCARTO} giorni; quelli che salvi li trovi in Profilo → Preferiti.`;
++
++/** La riga del Profilo. */
++export function sottotitoloPreferiti(n: number): string {
++  const x = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
++  if (x === 0) return "Salva gli annunci che ti interessano, per scegliere con calma";
++  return x === 1 ? "1 annuncio salvato" : `${x} annunci salvati`;
++}
++
++export const TESTO_NESSUN_PREFERITO =
++  "Dal mazzo, tocca il segnalibro per salvare un annuncio che ti interessa senza candidarti subito.";
++
++export const TESTO_NOTA_PREFERITI = `I preferiti restano finché li togli. Gli annunci che scarti tornano a comparire dopo ${GIORNI_SCARTO} giorni.`;
++
++/** Il titolo della schermata quando tutti gli annunci disponibili sono già stati scelti. */
++export const TITOLO_TUTTI_SCELTI = "Hai già scelto tutti gli annunci disponibili";
++
++/** Una riga di `elenco_preferiti`. */
++export type Preferito = {
++  listing_id: string;
++  titolo: string;
++  zona: string;
++  prezzo: number;
++  locali: number | null;
++  mq: number | null;
++  foto: string | null;
++  salvato_at: string;
++};
++
++/** «€1.500/mese · 2 locali · 55 m²», senza ciò che manca. */
++export function descrizionePreferito(p: Pick<Preferito, "prezzo" | "locali" | "mq">): string {
++  const parti: string[] = [];
++  if (typeof p.prezzo === "number" && Number.isFinite(p.prezzo)) parti.push(`€${p.prezzo.toLocaleString("it-IT")}/mese`);
++  if (typeof p.locali === "number" && p.locali > 0) parti.push(p.locali === 1 ? "1 locale" : `${p.locali} locali`);
++  if (typeof p.mq === "number" && p.mq > 0) parti.push(`${p.mq} m²`);
++  return parti.join(" · ");
++}
++
++export const TESTO_CANDIDATURA_INVIATA = "Candidatura inviata — la trovi in Candidature.";
+diff --git a/src/lib/verifica.ts b/src/lib/verifica.ts
+index e6c1efe..b078132 100644
+--- a/src/lib/verifica.ts
++++ b/src/lib/verifica.ts
+@@ -192,6 +192,11 @@ const MESSAGGI: Record<string, string> = {
+   INQUILINO_INESISTENTE: "Inquilino non trovato.",
+   // decisioni sulle candidature
+   CANDIDATURA_NON_TUA: "Questa candidatura non risulta tua.",
++  // preferiti e scarti
++  SOLO_INQUILINI: "Solo chi cerca casa può salvare o scartare gli annunci.",
++  ANNUNCIO_NON_DISPONIBILE: "Questo annuncio non è più disponibile.",
++  GIA_CANDIDATO: "Hai già inviato la candidatura per questo annuncio.",
++  TROPPI_PREFERITI: "Hai già 100 preferiti: togline qualcuno per salvarne un altro.",
+   // visite
+   DATA_NON_VALIDA: "Scegli una data e un'ora valide.",
+   DATA_TROPPO_VICINA: "Il posto deve essere tra almeno un'ora.",
+diff --git a/supabase/migrations/0023_preferiti.sql b/supabase/migrations/0023_preferiti.sql
+new file mode 100644
+index 0000000..2b3df05
+--- /dev/null
++++ b/supabase/migrations/0023_preferiti.sql
+@@ -0,0 +1,264 @@
++-- ============================================================
++-- MatchAmI — preferiti e scarti degli annunci
++--
++-- Fin qui scartare un annuncio era solo uno stato della pagina: ricaricando
++-- ricompariva. E non esisteva un modo di dire «mi interessa, ma non ancora»:
++-- l'unico gesto positivo era candidarsi, e subito.
++--
++-- COME FUNZIONA
++--   - un inquilino può SALVARE un annuncio tra i preferiti: esce dal mazzo e si
++--     ritrova in una pagina sua, da cui candidarsi o toglierlo;
++--   - gli annunci SCARTATI si ricordano per 30 giorni, poi possono riapparire:
++--     un prezzo cambia, una casa può tornare interessante, e nasconderla per
++--     sempre sarebbe un danno. Per non conservare dati inutili, ogni nuova
++--     scelta cancella gli scarti più vecchi di 30 giorni DELLA STESSA PERSONA:
++--     la pulizia avviene davvero, senza bisogno di un lavoro programmato;
++--   - «annulla» toglie la scelta fatta;
++--   - candidarsi a un annuncio salvato lo toglie dai preferiti.
++--
++-- PRIVACY. Le scelte sono leggibili SOLO dalla persona che le ha fatte. Il
++-- proprietario non vede mai né i preferiti né i conteggi. Non si scrive
++-- direttamente nella tabella: solo con le funzioni, che controllano ogni cosa.
++--
++-- ORDINE: esegui questa migrazione PRIMA del push del codice.
++-- ============================================================
++
++-- ------------------------------------------------------------
++-- 1. La tabella
++-- ------------------------------------------------------------
++
++create table if not exists scelte_annunci (
++  tenant_id  uuid not null references profiles(id) on delete cascade,
++  listing_id uuid not null references listings(id) on delete cascade,
++  tipo       text not null check (tipo in ('preferito', 'scartato')),
++  created_at timestamptz not null default now(),
++  primary key (tenant_id, listing_id)
++);
++
++create index if not exists scelte_annunci_tipo_idx on scelte_annunci (tenant_id, tipo, created_at desc);
++
++alter table scelte_annunci enable row level security;
++
++drop policy if exists "scelte: solo le mie, in lettura" on scelte_annunci;
++create policy "scelte: solo le mie, in lettura" on scelte_annunci
++  for select using (tenant_id = auth.uid());
++
++revoke all on scelte_annunci from anon;
++revoke insert, update, delete on scelte_annunci from authenticated;
++
++-- ------------------------------------------------------------
++-- 2. Scartare e salvare
++--
++-- Solo gli inquilini; solo annunci che un inquilino può davvero vedere
++-- (pubblicati e verificati: le stesse condizioni della lettura degli annunci);
++-- niente per un annuncio a cui ci si è già candidati.
++-- ------------------------------------------------------------
++
++create or replace function public.scarta_annuncio(p_listing uuid)
++returns void
++language plpgsql
++security definer
++set search_path = public
++as $$
++begin
++  if auth.uid() is null then
++    raise exception 'NON_AUTENTICATO';
++  end if;
++  if not exists (select 1 from profiles where id = auth.uid() and ruolo = 'inquilino') then
++    raise exception 'SOLO_INQUILINI';
++  end if;
++  if not exists (
++    select 1 from listings
++     where id = p_listing and pubblicato = true and verifica_stato = 'verificato'
++  ) then
++    raise exception 'ANNUNCIO_NON_DISPONIBILE';
++  end if;
++  if exists (select 1 from candidature where tenant_id = auth.uid() and listing_id = p_listing) then
++    raise exception 'GIA_CANDIDATO';
++  end if;
++
++  -- la pulizia: gli scarti vecchi di chi chiama (e solo i suoi)
++  delete from scelte_annunci
++   where tenant_id = auth.uid() and tipo = 'scartato'
++     and created_at <= now() - interval '30 days';
++
++  insert into scelte_annunci (tenant_id, listing_id, tipo)
++  values (auth.uid(), p_listing, 'scartato')
++  on conflict (tenant_id, listing_id) do update set tipo = 'scartato', created_at = now();
++end;
++$$;
++
++create or replace function public.salva_preferito(p_listing uuid)
++returns void
++language plpgsql
++security definer
++set search_path = public
++as $$
++begin
++  if auth.uid() is null then
++    raise exception 'NON_AUTENTICATO';
++  end if;
++  if not exists (select 1 from profiles where id = auth.uid() and ruolo = 'inquilino') then
++    raise exception 'SOLO_INQUILINI';
++  end if;
++  if not exists (
++    select 1 from listings
++     where id = p_listing and pubblicato = true and verifica_stato = 'verificato'
++  ) then
++    raise exception 'ANNUNCIO_NON_DISPONIBILE';
++  end if;
++  if exists (select 1 from candidature where tenant_id = auth.uid() and listing_id = p_listing) then
++    raise exception 'GIA_CANDIDATO';
++  end if;
++
++  -- un tetto ai preferiti; salvare di nuovo uno che c'è già non conta
++  if (select count(*) from scelte_annunci where tenant_id = auth.uid() and tipo = 'preferito') >= 100
++     and not exists (select 1 from scelte_annunci
++                      where tenant_id = auth.uid() and listing_id = p_listing and tipo = 'preferito') then
++    raise exception 'TROPPI_PREFERITI';
++  end if;
++
++  delete from scelte_annunci
++   where tenant_id = auth.uid() and tipo = 'scartato'
++     and created_at <= now() - interval '30 days';
++
++  insert into scelte_annunci (tenant_id, listing_id, tipo)
++  values (auth.uid(), p_listing, 'preferito')
++  on conflict (tenant_id, listing_id) do update set tipo = 'preferito', created_at = now();
++end;
++$$;
++
++-- Toglie la scelta fatta, qualunque sia. Non fa errori se non c'era: «annulla»
++-- due volte è innocuo.
++create or replace function public.annulla_scelta(p_listing uuid)
++returns void
++language plpgsql
++security definer
++set search_path = public
++as $$
++begin
++  if auth.uid() is null then
++    raise exception 'NON_AUTENTICATO';
++  end if;
++  delete from scelte_annunci where tenant_id = auth.uid() and listing_id = p_listing;
++end;
++$$;
++
++-- ------------------------------------------------------------
++-- 3. Cosa si legge
++-- ------------------------------------------------------------
++
++-- Gli annunci da non rimettere nel mazzo: i preferiti (sempre) e gli scarti
++-- degli ultimi 30 giorni.
++create or replace function public.annunci_nascosti()
++returns setof uuid
++language sql
++stable
++security definer
++set search_path = public
++as $$
++  select listing_id
++    from scelte_annunci
++   where tenant_id = auth.uid()
++     and (tipo = 'preferito' or created_at > now() - interval '30 days');
++$$;
++
++-- I preferiti ancora disponibili, dal più recente, con la prima foto.
++create or replace function public.elenco_preferiti()
++returns table (
++  listing_id uuid,
++  titolo text,
++  zona text,
++  prezzo integer,
++  locali smallint,
++  mq smallint,
++  foto text,
++  salvato_at timestamptz
++)
++language sql
++stable
++security definer
++set search_path = public
++as $$
++  select
++    l.id, l.titolo, l.zona, l.prezzo, l.locali, l.mq,
++    (select p.url from listing_photos p where p.listing_id = l.id order by p.ordine limit 1),
++    s.created_at
++  from scelte_annunci s
++  join listings l on l.id = s.listing_id
++  where s.tenant_id = auth.uid()
++    and s.tipo = 'preferito'
++    and l.pubblicato = true
++    and l.verifica_stato = 'verificato'
++  order by s.created_at desc
++  limit 100;
++$$;
++
++-- Quanti sono, contando solo quelli ancora disponibili (come l'elenco).
++create or replace function public.numero_preferiti()
++returns integer
++language sql
++stable
++security definer
++set search_path = public
++as $$
++  select count(*)::integer
++    from scelte_annunci s
++    join listings l on l.id = s.listing_id
++   where s.tenant_id = auth.uid()
++     and s.tipo = 'preferito'
++     and l.pubblicato = true
++     and l.verifica_stato = 'verificato';
++$$;
++
++-- ------------------------------------------------------------
++-- 4. Candidarsi a un annuncio salvato lo toglie dai preferiti
++-- ------------------------------------------------------------
++
++create or replace function public.pulisci_scelta_dopo_candidatura()
++returns trigger
++language plpgsql
++security definer
++set search_path = public
++as $$
++begin
++  delete from scelte_annunci where tenant_id = new.tenant_id and listing_id = new.listing_id;
++  return new;
++end;
++$$;
++
++drop trigger if exists pulisci_scelta_dopo_candidatura on candidature;
++create trigger pulisci_scelta_dopo_candidatura
++  after insert on candidature
++  for each row execute function public.pulisci_scelta_dopo_candidatura();
++
++-- ------------------------------------------------------------
++-- Permessi
++-- ------------------------------------------------------------
++
++revoke all on function
++  public.scarta_annuncio(uuid), public.salva_preferito(uuid), public.annulla_scelta(uuid),
++  public.annunci_nascosti(), public.elenco_preferiti(), public.numero_preferiti()
++from public, anon;
++
++grant execute on function
++  public.scarta_annuncio(uuid), public.salva_preferito(uuid), public.annulla_scelta(uuid),
++  public.annunci_nascosti(), public.elenco_preferiti(), public.numero_preferiti()
++to authenticated;
++
++revoke all on function public.pulisci_scelta_dopo_candidatura() from public, anon, authenticated;
++
++-- ------------------------------------------------------------
++-- Verifica
++-- ------------------------------------------------------------
++
++select routine_name from information_schema.routines
++where routine_name in ('scarta_annuncio', 'salva_preferito', 'annulla_scelta',
++                       'annunci_nascosti', 'elenco_preferiti', 'numero_preferiti')
++order by 1;   -- 6 righe
++
++-- deve risultare 0: nessuna scrittura diretta per gli utenti
++select count(*) as scritture_dirette_possibili
++from information_schema.role_table_grants
++where table_name = 'scelte_annunci' and grantee in ('authenticated', 'anon')
++  and privilege_type in ('INSERT', 'UPDATE', 'DELETE');
+-- 
+2.43.0
+
