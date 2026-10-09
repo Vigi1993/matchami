@@ -7,7 +7,7 @@ import type { RuoloRapporto } from "@/lib/rapporti";
 import { èTokenRapporto } from "@/lib/uuid";
 import { redirect } from "next/navigation";
 import { INFORMATIVA } from "@/content/informativa";
-import { haAccettatoInformativa } from "@/lib/informativa";
+import { haAccettatoInformativa, versioniAccettabili } from "@/lib/informativa";
 
 type RichiestaPubblica = {
   nome_creatore: string;
@@ -111,7 +111,7 @@ export default async function RapportoPage({ params }: { params: Promise<{ token
   }
 
   // Chi agisce da loggato deve aver accettato l'informativa in vigore.
-  if (!(await haAccettatoInformativa(supabase, user.id, INFORMATIVA.versione))) {
+  if (!(await haAccettatoInformativa(supabase, user.id, versioniAccettabili(INFORMATIVA)))) {
     redirect(`/informativa/accetta?next=${encodeURIComponent(`/rapporto/${token}`)}`);
   }
 

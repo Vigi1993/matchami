@@ -29,6 +29,28 @@ export const INFORMATIVA = {
    * questa stringa non lo supera.
    */
   versione: "2026-10-provvisoria-8",
+  /**
+   * Versioni precedenti che chi le ha accettate NON deve riaccettare.
+   *
+   * Finché il testo è PROVVISORIO (dati di prova, nessun valore legale) un cambio
+   * di testo non ferma nessuno: riaccettare a ogni modifica sarebbe solo un
+   * fastidio. La versione resta comunque registrata a ogni accettazione, per la
+   * traccia.
+   *
+   * Quando arriverà il testo del legale: la versione cambia, QUESTO ELENCO SI
+   * SVUOTA e tutti riaccettano una volta. Un test fallisce se l'elenco non è
+   * vuoto su un testo definitivo: lì un cambio di dati trattati richiede davvero
+   * una nuova accettazione.
+   */
+  equivalenti: [
+    "2026-10-provvisoria-1",
+    "2026-10-provvisoria-2",
+    "2026-10-provvisoria-3",
+    "2026-10-provvisoria-4",
+    "2026-10-provvisoria-5",
+    "2026-10-provvisoria-6",
+    "2026-10-provvisoria-7",
+  ] as readonly string[],
   provvisoria: true,
   titolo: "Informativa sulla privacy",
   aggiornata: "ottobre 2026",

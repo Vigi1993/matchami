@@ -482,3 +482,37 @@ test("mappe: la guardia sa riconoscere un fornitore vero registrato con il testo
   assert.ok(finto.filter((f) => f.origine === "fornitore").length > 0);
   assert.ok(/senza inviare l'indirizzo a nessun servizio esterno/.test(tutto), "il testo attuale è quello provvisorio: con un fornitore vero la guardia fallirebbe");
 });
+
+// ------------------------------------------------------------
+// Le versioni equivalenti: un cambio di testo provvisorio non deve fermare nessuno, uno definitivo sì
+// ------------------------------------------------------------
+
+test("equivalenti: ben formate, senza doppioni, e diverse dalla versione in vigore", () => {
+  const eq = INFORMATIVA.equivalenti;
+  assert.ok(Array.isArray(eq), "manca l'elenco");
+  assert.equal(new Set(eq).size, eq.length, "doppioni");
+  assert.ok(!eq.includes(INFORMATIVA.versione), "la versione in vigore è nell'elenco delle equivalenti");
+  const regola = /^[0-9]{4}-[0-9]{2}(-[a-z0-9]+)+$/;
+  for (const v of eq) assert.ok(regola.test(v) && v.length <= 60, `versione non valida: ${v}`);
+});
+
+test("equivalenti: se il testo è PROVVISORIO, chi ha accettato una versione provvisoria precedente non viene fermato", () => {
+  // La versione è «<prefisso>-N»: devono esserci tutte le precedenti, da 1 a N-1. Se si cambia la
+  // versione senza aggiungere la vecchia all'elenco, chi l'aveva accettata verrebbe fermato di nuovo.
+  const m = INFORMATIVA.versione.match(/^(.*-provvisoria)-(\d+)$/);
+  assert.ok(m, `la versione provvisoria non ha la forma «…-provvisoria-N»: ${INFORMATIVA.versione}`);
+  const attese = Array.from({ length: Number(m[2]) - 1 }, (_, i) => `${m[1]}-${i + 1}`);
+  assert.deepEqual([...INFORMATIVA.equivalenti].sort(), attese.sort(), "mancano versioni precedenti tra le equivalenti (o ce ne sono di non previste)");
+});
+
+test("equivalenti: su un testo DEFINITIVO l'elenco deve essere vuoto (un cambio di dati trattati richiede una nuova accettazione)", () => {
+  // Quando arriverà il testo del legale `provvisoria` diventa false: da quel momento ogni cambio di
+  // versione ferma tutti, e questo test lo impone.
+  if (!INFORMATIVA.provvisoria) assert.deepEqual([...INFORMATIVA.equivalenti], [], "testo definitivo con versioni equivalenti: chi non ha accettato questo testo passerebbe lo stesso");
+  else assert.ok(INFORMATIVA.provvisoria === true);
+});
+
+test("equivalenti: la guardia sa riconoscere un testo definitivo con equivalenti", () => {
+  const finto = { provvisoria: false, equivalenti: ["2026-10-provvisoria-1"] };
+  assert.ok(!finto.provvisoria && finto.equivalenti.length > 0, "il caso che la guardia deve fermare");
+});

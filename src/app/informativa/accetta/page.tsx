@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { CorniceScura } from "@/components/CorniceScura";
 import { INFORMATIVA } from "@/content/informativa";
-import { haAccettatoInformativa } from "@/lib/informativa";
+import { haAccettatoInformativa, versioniAccettabili } from "@/lib/informativa";
 import { percorsoInterno } from "@/lib/percorso";
 import { AccettaForm } from "./AccettaForm";
 
@@ -28,7 +28,7 @@ export default async function AccettaPage({
   }
 
   // già accettata: non c'è niente da fare qui
-  if (await haAccettatoInformativa(supabase, user.id, INFORMATIVA.versione)) {
+  if (await haAccettatoInformativa(supabase, user.id, versioniAccettabili(INFORMATIVA))) {
     redirect(destinazione);
   }
 

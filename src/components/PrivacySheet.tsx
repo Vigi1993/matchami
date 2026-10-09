@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useActionState, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { INFORMATIVA } from "@/content/informativa";
+import { versioniAccettabili } from "@/lib/informativa";
 import { Sheet } from "@/components/Sheet";
 import { Chip } from "@/components/ui/Chip";
 import { Field } from "@/components/ui/Field";
@@ -36,12 +37,14 @@ export function PrivacySheet({
   const [accettataAl, setAccettataAl] = useState<string | null | undefined>(undefined);
   useEffect(() => {
     if (!open) return;
+    // più righe possibili (versioni equivalenti): si prende la più recente, con limit(1) e non con maybeSingle
     createClient()
       .from("accettazioni_informativa")
       .select("accettata_at")
-      .eq("versione", INFORMATIVA.versione)
-      .maybeSingle()
-      .then(({ data }) => setAccettataAl((data?.accettata_at as string | undefined) ?? null));
+      .in("versione", versioniAccettabili(INFORMATIVA))
+      .order("accettata_at", { ascending: false })
+      .limit(1)
+      .then(({ data }) => setAccettataAl((Array.isArray(data) && (data[0]?.accettata_at as string | undefined)) || null));
   }, [open]);
 
   useEffect(() => {

@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { INFORMATIVA } from "@/content/informativa";
-import { haAccettatoInformativa } from "@/lib/informativa";
+import { haAccettatoInformativa, versioniAccettabili } from "@/lib/informativa";
 import { ChatClient } from "./ChatClient";
 import type { Messaggio } from "@/lib/types";
 import type { PostoLibero, VisitaCandidatura } from "@/lib/visite";
@@ -19,7 +19,7 @@ export default async function ChatPage({
   } = await supabase.auth.getUser();
 
   // La chat sta fuori dal gruppo (app), quindi il blocco va ripetuto qui.
-  if (!(await haAccettatoInformativa(supabase, user!.id, INFORMATIVA.versione))) {
+  if (!(await haAccettatoInformativa(supabase, user!.id, versioniAccettabili(INFORMATIVA)))) {
     redirect(`/informativa/accetta?next=${encodeURIComponent(`/chat/${id}`)}`);
   }
 

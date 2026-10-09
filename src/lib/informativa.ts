@@ -13,43 +13,59 @@ export function versioneValida(versione: string): boolean {
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
 
+/** Le versioni che valgono come «accettata»: quella in vigore e quelle equivalenti. */
+export function versioniAccettabili(informativa: {
+  versione: string;
+  equivalenti?: readonly string[];
+}): string[] {
+  return [...new Set([informativa.versione, ...(informativa.equivalenti ?? [])])];
+}
+
 /**
- * Questa persona ha accettato la versione in vigore?
+ * Questa persona ha accettato la versione in vigore, o una equivalente?
  *
  * Se la domanda al database non riesce si risponde NO: la schermata di
  * accettazione compare invece di lasciar passare. Meglio fermare qualcuno
  * per un errore che lasciar usare l'app a chi non ha accettato.
+ *
+ * ATTENZIONE: si legge con `limit(1)`, NON con `maybeSingle()`. Chi ha accettato
+ * più versioni equivalenti ha più righe, e `maybeSingle()` dà errore quando ne
+ * trova più di una: l'errore vale «non accettata», e la persona verrebbe
+ * fermata proprio perché ha accettato più volte.
  */
 export async function haAccettatoInformativa(
   supabase: Supabase,
   userId: string,
-  versione: string
+  versioni: string | readonly string[]
 ): Promise<boolean> {
+  const lista = typeof versioni === "string" ? [versioni] : [...versioni];
   const { data, error } = await supabase
     .from("accettazioni_informativa")
     .select("versione")
     .eq("user_id", userId)
-    .eq("versione", versione)
-    .maybeSingle();
+    .in("versione", lista)
+    .limit(1);
 
   if (error) {
     console.error("haAccettatoInformativa: la lettura non è riuscita:", error.message);
     return false;
   }
-  return data !== null;
+  return Array.isArray(data) && data.length > 0;
 }
 
-/** Quando ha accettato la versione in vigore, se l'ha fatto. */
+/** Quando ha accettato (la versione in vigore o una equivalente: la più recente), se l'ha fatto. */
 export async function dataAccettazione(
   supabase: Supabase,
   userId: string,
-  versione: string
+  versioni: string | readonly string[]
 ): Promise<string | null> {
+  const lista = typeof versioni === "string" ? [versioni] : [...versioni];
   const { data } = await supabase
     .from("accettazioni_informativa")
     .select("accettata_at")
     .eq("user_id", userId)
-    .eq("versione", versione)
-    .maybeSingle();
-  return (data?.accettata_at as string | undefined) ?? null;
+    .in("versione", lista)
+    .order("accettata_at", { ascending: false })
+    .limit(1);
+  return (Array.isArray(data) && (data[0]?.accettata_at as string | undefined)) || null;
 }

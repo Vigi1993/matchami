@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { InvitoClient } from "./InvitoClient";
 import { redirect } from "next/navigation";
 import { INFORMATIVA } from "@/content/informativa";
-import { haAccettatoInformativa } from "@/lib/informativa";
+import { haAccettatoInformativa, versioniAccettabili } from "@/lib/informativa";
 import { descriviRequisiti } from "@/lib/invito";
 import type { RequisitiFeedback } from "@/lib/invito";
 
@@ -68,7 +68,7 @@ export default async function InvitoPage({
   } = await supabase.auth.getUser();
 
   // Chi agisce da loggato deve aver accettato l'informativa in vigore.
-  if (user && !(await haAccettatoInformativa(supabase, user.id, INFORMATIVA.versione))) {
+  if (user && !(await haAccettatoInformativa(supabase, user.id, versioniAccettabili(INFORMATIVA)))) {
     redirect(`/informativa/accetta?next=${encodeURIComponent(`/invito/${token}`)}`);
   }
 
