@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PageContainer } from "@/components/ui/PageContainer";
 import type { Notifica } from "@/lib/notifiche";
 import { NotificheLista } from "./NotificheLista";
+import { PreferenzeEmail } from "@/components/PreferenzeEmail";
 
 export default async function NotifichePage() {
   const supabase = await createClient();
@@ -14,10 +15,14 @@ export default async function NotifichePage() {
     .order("created_at", { ascending: false })
     .limit(50);
 
+  // Se la domanda non riesce si mostrano le email come attive (è l'impostazione di partenza).
+  const { data: emailAttive } = await supabase.rpc("preferenze_email_mie");
+
   return (
     <PageContainer>
       <h1 className="screen-title">Novità</h1>
       <p className="screen-sub">Gli esiti delle verifiche e le risposte che ti riguardano.</p>
+      <PreferenzeEmail attive={emailAttive !== false} />
       <NotificheLista notifiche={(data ?? []) as Notifica[]} />
     </PageContainer>
   );

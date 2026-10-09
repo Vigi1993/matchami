@@ -70,6 +70,11 @@ export default async function StaffPage() {
 
   return (
     <>
+      <p>
+        <Link href="/staff/email" className="redo-link">
+          Email di prova →
+        </Link>
+      </p>
       <h1 className="screen-title">Immobili da verificare</h1>
       <p className="screen-sub">
         {immobili.length === 0

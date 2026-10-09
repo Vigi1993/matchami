@@ -3,7 +3,10 @@ import { NextResponse, type NextRequest } from "next/server";
 
 // "/invito" è pubblico: il proprietario che riceve il link non ha
 // ancora un account quando lo apre.
-const PUBLIC_PATHS = ["/login", "/auth", "/invito", "/rapporto", "/informativa"];
+// "/email/disiscrivi" e "/api/email": la disiscrizione dal link nell'email e l'invio periodico non hanno
+// una sessione. Ognuno si protegge da sé: la prima con un codice lungo e casuale (e un clic di conferma),
+// il secondo con un segreto che solo lo scheduler conosce.
+const PUBLIC_PATHS = ["/login", "/auth", "/invito", "/rapporto", "/informativa", "/email/disiscrivi", "/api/email/"];
 
 /**
  * Rinfresca il token di sessione Supabase ad ogni richiesta e protegge

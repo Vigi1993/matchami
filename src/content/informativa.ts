@@ -28,7 +28,7 @@ export const INFORMATIVA = {
    * controllo che fa il database (migrazione 0017): un test fallisce se
    * questa stringa non lo supera.
    */
-  versione: "2026-10-provvisoria-9",
+  versione: "2026-10-provvisoria-10",
   /**
    * Versioni precedenti che chi le ha accettate NON deve riaccettare.
    *
@@ -51,6 +51,7 @@ export const INFORMATIVA = {
     "2026-10-provvisoria-6",
     "2026-10-provvisoria-7",
     "2026-10-provvisoria-8",
+    "2026-10-provvisoria-9",
   ] as readonly string[],
   provvisoria: true,
   titolo: "Informativa sulla privacy",
@@ -77,7 +78,7 @@ export const INFORMATIVA = {
         "Se sei inquilino: lavoro, reddito tuo e del tuo nucleo, garante, fideiussione, protesti (li dichiari tu e non vengono verificati), animali, composizione del nucleo, numero di figli, presentazione, foto del profilo, le tue preferenze di ricerca (budget, zone, locali, metri, caratteristiche) e gli annunci che salvi tra i preferiti o che scarti.",
         "Se sei proprietario: tipo di proprietario, numero di immobili, obiettivo; gli annunci con titolo, descrizione, zona, prezzo, caratteristiche e foto; l'indirizzo preciso, se lo indichi, e la posizione sulla mappa che se ne ricava; i criteri che chiedi ai candidati.",
         "Per le verifiche: il documento d'identità e la prova di proprietà dell'immobile (proprietari); se sei inquilino e chiedi di verificare il reddito, un documento d'identità e una prova del reddito (una busta paga, la CU o la dichiarazione dei redditi); e i contratti di affitto caricati per dichiarare un affitto. Non chiediamo lo stato di famiglia.",
-        "Mentre usi l'app: candidature, messaggi, visite (giorno e ora, e chi le ha prenotate), contratti, recensioni, richieste di conferma di un affitto e inviti. Inoltre le notifiche sulle novità del tuo account (per esempio l'esito di una verifica o la risposta a una candidatura): contengono il tipo di evento e, al massimo, il titolo di un annuncio e, per le visite, il giorno e l'ora; mai nomi di persone.",
+        "Mentre usi l'app: candidature, messaggi, visite (giorno e ora, e chi le ha prenotate), contratti, recensioni, richieste di conferma di un affitto e inviti. Inoltre le notifiche sulle novità del tuo account, e le email che le riassumono (la tua impostazione, la data dell'ultimo invio e un registro di data, esito e numero di notifiche, senza contenuto né indirizzi, per 90 giorni) (per esempio l'esito di una verifica o la risposta a una candidatura): contengono il tipo di evento e, al massimo, il titolo di un annuncio e, per le visite, il giorno e l'ora; mai nomi di persone.",
         "Dati di un'altra persona: se inviti il tuo proprietario, scrivi il suo nome e, se vuoi, la sua email.",
       ],
     },
@@ -136,6 +137,8 @@ export const INFORMATIVA = {
       paragrafi: [
         "Usiamo Supabase (database, accessi, file e le email di accesso) e Vercel (per ospitare l'app, che può conservare registri tecnici delle richieste). La regione dei dati è [da indicare].",
         "Per ora la posizione di un immobile sulla mappa è calcolata dall'app, senza inviare l'indirizzo a nessun servizio esterno.",
+        "Le email sulle novità contengono gli stessi testi delle notifiche (per esempio il titolo di un annuncio e, per le visite, il giorno e l'ora), mai nomi di persone né il testo dei messaggi. Sono un solo riepilogo, al massimo una volta all'ora, e solo per ciò che non hai ancora letto. Sono attive per impostazione predefinita: puoi disattivarle dalla pagina Novità o con un clic dal link in fondo a ogni email, senza accedere.",
+        "Per ora le email non partono davvero: se ne salva una copia di prova, solo testo, che lo staff può leggere per 7 giorni. Quando si sceglierà un servizio di invio email, ti scriveremo da lì e questo testo verrà aggiornato.",
         "Nella sezione bollette ci sono link ai siti di alcuni fornitori: aprirli ti porta fuori dall'app, e non registriamo su quali clicchi né passiamo ai fornitori nessun dato su di te.",
         "Nell'app non ci sono strumenti di analisi né pubblicità. Usiamo solo cookie tecnici, necessari a mantenerti connesso.",
       ],

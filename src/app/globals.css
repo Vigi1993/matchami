@@ -3127,3 +3127,19 @@ mark.segnaposto {
   background: rgba(201, 161, 90, 0.3);
   border-radius: 999px;
 }
+
+/* ============================================================
+   Email per le notifiche
+   ============================================================ */
+
+.preferenze-email {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  font-size: 13px;
+  background: rgba(16, 21, 26, 0.05);
+  border-radius: 12px;
+}

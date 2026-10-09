@@ -192,6 +192,9 @@ const MESSAGGI: Record<string, string> = {
   INQUILINO_INESISTENTE: "Inquilino non trovato.",
   // decisioni sulle candidature
   CANDIDATURA_NON_TUA: "Questa candidatura non risulta tua.",
+  // email per le notifiche
+  VALORE_NON_VALIDO: "Non è stato possibile cambiare l'impostazione. Riprova.",
+  ESITO_NON_VALIDO: "Non è stato possibile registrare l'invio.",
   // indirizzo degli immobili
   INDIRIZZO_IMMOBILE_NON_VALIDO: "Controlla l'indirizzo: servono la via, il numero civico e il CAP di cinque cifre.",
   POSIZIONE_NON_VALIDA: "Non è stato possibile calcolare la posizione sulla mappa. Controlla l'indirizzo.",
