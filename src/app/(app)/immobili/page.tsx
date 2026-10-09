@@ -2,6 +2,8 @@ import { createClient } from "@/lib/supabase/server";
 import { ImmobiliClient } from "./ImmobiliClient";
 import type { ImmobileDettaglio } from "@/lib/types";
 import type { VisitaProprietario } from "@/lib/visite";
+import { conVista } from "@/lib/mappe";
+import type { IndirizzoConVista } from "@/lib/mappe/tipi";
 import { criteriDaRighe } from "@/lib/match";
 import type { RigaCriterioDb } from "@/lib/match";
 
@@ -11,7 +13,7 @@ export default async function ImmobiliPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const [{ data: listings }, { data: candidature }, { data: visite }] = await Promise.all([
+  const [{ data: listings }, { data: candidature }, { data: visite }, { data: indirizziRighe }] = await Promise.all([
     supabase
       .from("listings")
       .select(
@@ -25,7 +27,12 @@ export default async function ImmobiliPage() {
       .eq("listings.owner_id", user!.id),
     // i posti liberi e le prenotazioni di tutti i miei immobili, in una chiamata sola
     supabase.rpc("visite_del_proprietario"),
+    // gli indirizzi dei miei immobili, con la posizione sulla mappa
+    supabase.rpc("indirizzi_dei_miei_immobili"),
   ]);
+
+  const indirizzi: Record<string, IndirizzoConVista> = {};
+  for (const r of indirizziRighe ?? []) indirizzi[r.listing_id as string] = conVista(r);
 
   const nCandidaturePerListing = new Map<string, number>();
   for (const c of candidature ?? []) {
@@ -52,5 +59,5 @@ export default async function ImmobiliPage() {
     nCandidature: nCandidaturePerListing.get(l.id) ?? 0,
   }));
 
-  return <ImmobiliClient immobili={immobili} visite={(visite ?? []) as VisitaProprietario[]} />;
+  return <ImmobiliClient immobili={immobili} visite={(visite ?? []) as VisitaProprietario[]} indirizzi={indirizzi} />;
 }

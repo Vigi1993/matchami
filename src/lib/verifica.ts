@@ -192,6 +192,10 @@ const MESSAGGI: Record<string, string> = {
   INQUILINO_INESISTENTE: "Inquilino non trovato.",
   // decisioni sulle candidature
   CANDIDATURA_NON_TUA: "Questa candidatura non risulta tua.",
+  // indirizzo degli immobili
+  INDIRIZZO_IMMOBILE_NON_VALIDO: "Controlla l'indirizzo: servono la via, il numero civico e il CAP di cinque cifre.",
+  POSIZIONE_NON_VALIDA: "Non è stato possibile calcolare la posizione sulla mappa. Controlla l'indirizzo.",
+  ORIGINE_NON_VALIDA: "Non è stato possibile salvare la posizione sulla mappa.",
   // preferiti e scarti
   SOLO_INQUILINI: "Solo chi cerca casa può salvare o scartare gli annunci.",
   ANNUNCIO_NON_DISPONIBILE: "Questo annuncio non è più disponibile.",

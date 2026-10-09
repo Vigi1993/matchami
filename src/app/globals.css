@@ -3010,3 +3010,77 @@ mark.segnaposto {
   gap: 12px;
   margin-top: 10px;
 }
+
+/* ============================================================
+   Indirizzo e mappa
+   ============================================================ */
+
+.indirizzo-panel {
+  margin-bottom: 22px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid rgba(16, 21, 26, 0.1);
+}
+.indirizzo-campi {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.indirizzo-riga {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.indirizzo-azioni {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+}
+.mappa-riquadro {
+  display: block;
+  width: 100%;
+  height: 180px;
+  border: 0;
+  border-radius: 12px;
+  object-fit: cover;
+}
+.mappa-provvisoria {
+  position: relative;
+  width: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(16, 21, 26, 0.05);
+}
+.mappa-provvisoria svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.mappa-provvisoria rect {
+  fill: #e9e4d6;
+}
+.mappa-provvisoria path {
+  fill: none;
+  stroke: rgba(16, 21, 26, 0.18);
+  stroke-width: 2;
+}
+.mappa-provvisoria circle:first-of-type {
+  fill: rgba(201, 105, 78, 0.25);
+}
+.mappa-provvisoria circle:last-of-type {
+  fill: var(--clay);
+}
+.mappa-provvisoria span {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  padding: 2px 8px;
+  font-size: 10.5px;
+  color: var(--ink);
+  background: rgba(247, 244, 236, 0.9);
+  border-radius: 999px;
+}
+.chat-indirizzo {
+  background: rgba(16, 21, 26, 0.06);
+}

@@ -5,6 +5,7 @@ import { haAccettatoInformativa } from "@/lib/informativa";
 import { ChatClient } from "./ChatClient";
 import type { Messaggio } from "@/lib/types";
 import type { PostoLibero, VisitaCandidatura } from "@/lib/visite";
+import { conVista } from "@/lib/mappe";
 
 export default async function ChatPage({
   params,
@@ -63,12 +64,16 @@ export default async function ChatPage({
 
   // Le visite di questo match, e per l'inquilino i posti tra cui scegliere. Se una lettura
   // non riesce, la chat si apre lo stesso: il pannello dirà che non ci sono posti.
-  const [{ data: visite }, { data: posti }] = await Promise.all([
+  const [{ data: visite }, { data: posti }, { data: indirizzi }] = await Promise.all([
     supabase.rpc("visite_della_candidatura", { p_candidatura: id }),
     isTenant
       ? supabase.rpc("posti_liberi_per_candidatura", { p_candidatura: id })
       : Promise.resolve({ data: [] as PostoLibero[] }),
+    // L'indirizzo preciso dell'immobile: lo dà il database solo al proprietario e a chi ha un
+    // match ACCETTATO su quell'immobile. Per chiunque altro non c'è niente.
+    supabase.rpc("indirizzo_per_candidatura", { p_candidatura: id }),
   ]);
+  const primoIndirizzo = Array.isArray(indirizzi) && indirizzi.length > 0 ? indirizzi[0] : null;
 
   const altroNome =
     `${altroProfilo?.nome ?? ""} ${altroProfilo?.cognome ?? ""}`.trim() ||
@@ -83,6 +88,7 @@ export default async function ChatPage({
       ruolo={isTenant ? "inquilino" : "proprietario"}
       visite={(visite ?? []) as VisitaCandidatura[]}
       posti={(posti ?? []) as PostoLibero[]}
+      indirizzo={primoIndirizzo ? conVista(primoIndirizzo) : null}
       messaggiIniziali={(messaggi ?? []) as Messaggio[]}
     />
   );

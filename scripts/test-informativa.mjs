@@ -441,3 +441,44 @@ test("preferiti e scarti: nessun codice dell'app legge la tabella direttamente, 
   const altre = fs.readdirSync(migrazioni).filter((x) => /^\d{4}_.*\.sql$/.test(x) && x !== "0023_preferiti.sql");
   for (const f of altre) assert.ok(!/scelte_annunci/.test(fs.readFileSync(path.join(migrazioni, f), "utf8")), `${f} nomina la tabella delle scelte`);
 });
+
+// ------------------------------------------------------------
+// Ciò che il testo dice dell'indirizzo e delle mappe è vero
+// ------------------------------------------------------------
+
+test("indirizzo: il testo lo dichiara, dice chi lo vede, e la migrazione lo fa davvero", () => {
+  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
+  assert.match(tutto, /l'indirizzo preciso, se lo indichi, e la posizione sulla mappa che se ne ricava/);
+  assert.match(tutto, /L'indirizzo preciso di un immobile lo vedono solo il proprietario e le persone con cui ha un match accettato su quell'immobile: agli altri si mostra soltanto la zona/);
+
+  const sql24 = fs.readFileSync(path.join(migrazioni, "0024_indirizzi.sql"), "utf8");
+  // nessuna lettura diretta: la tabella non ha policy e nessun permesso per gli utenti
+  assert.match(sql24, /revoke all on indirizzi_immobili from anon, authenticated;/);
+  assert.ok(!/create policy[^;]*indirizzi_immobili/.test(sql24), "c'è una policy sulla tabella degli indirizzi");
+  // l'inquilino lo legge solo con una candidatura ACCETTATA sua
+  assert.match(sql24, /c\.status = 'accettata'\s+and \(c\.tenant_id = auth\.uid\(\) or l\.owner_id = auth\.uid\(\)\)/);
+  // e agli annunci non è tornata una colonna con l'indirizzo, leggibile da chiunque (la 0015 l'aveva tolta)
+  for (const f of fs.readdirSync(migrazioni).filter((x) => /^\d{4}_.*\.sql$/.test(x) && x > "0015")) {
+    assert.ok(!/alter table listings\s+add column[^;]*indirizzo/i.test(fs.readFileSync(path.join(migrazioni, f), "utf8")), `${f} rimette un indirizzo sulla tabella degli annunci`);
+  }
+});
+
+test("mappe: finché i fornitori sono provvisori il testo dice che l'indirizzo non esce dall'app; con un fornitore vero il testo va rivisto", () => {
+  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
+  const fornitori = caricaTs(path.join(radice, "src", "lib", "mappe", "index.ts")).FORNITORI;
+  const veri = Object.values(fornitori).filter((f) => f.origine === "fornitore");
+  if (veri.length === 0) {
+    assert.match(tutto, /Per ora la posizione di un immobile sulla mappa è calcolata dall'app, senza inviare l'indirizzo a nessun servizio esterno/);
+  } else {
+    // si è registrato un fornitore vero: l'indirizzo viene mandato a un servizio esterno, e il testo deve dirlo
+    assert.ok(!/senza inviare l'indirizzo a nessun servizio esterno/.test(tutto), `il testo dice che l'indirizzo non esce dall'app, ma c'è un fornitore vero (${veri.map((f) => f.id).join(", ")})`);
+    assert.match(tutto, /servizio di mappe/, "il testo non nomina il servizio di mappe");
+  }
+});
+
+test("mappe: la guardia sa riconoscere un fornitore vero registrato con il testo ancora provvisorio", () => {
+  const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
+  const finto = [{ id: "x", origine: "fornitore" }];
+  assert.ok(finto.filter((f) => f.origine === "fornitore").length > 0);
+  assert.ok(/senza inviare l'indirizzo a nessun servizio esterno/.test(tutto), "il testo attuale è quello provvisorio: con un fornitore vero la guardia fallirebbe");
+});

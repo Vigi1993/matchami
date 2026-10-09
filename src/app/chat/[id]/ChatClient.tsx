@@ -7,6 +7,8 @@ import type { Messaggio } from "@/lib/types";
 import { IconIndietro, IconInvia } from "@/components/icons";
 import { AvvisoMessaggio, AvvisoTruffe, ConfermaInvioRischioso } from "@/components/AvvisiChat";
 import { VisitaChat } from "@/components/VisitaChat";
+import { IndirizzoChat } from "@/components/IndirizzoChat";
+import type { IndirizzoConVista } from "@/lib/mappe/tipi";
 import type { PostoLibero, VisitaCandidatura } from "@/lib/visite";
 import { rilevaRischioPagamento, type Rischio } from "@/lib/truffe";
 
@@ -19,6 +21,7 @@ export function ChatClient({
   ruolo = "inquilino",
   visite = [],
   posti = [],
+  indirizzo = null,
 }: {
   candidaturaId: string;
   userId: string;
@@ -29,6 +32,8 @@ export function ChatClient({
   ruolo?: string;
   visite?: VisitaCandidatura[];
   posti?: PostoLibero[];
+  /** l'indirizzo dell'immobile: solo per chi ha un match accettato */
+  indirizzo?: IndirizzoConVista | null;
 }) {
   const router = useRouter();
   const [messaggi, setMessaggi] = useState<Messaggio[]>(messaggiIniziali);
@@ -143,6 +148,8 @@ export function ChatClient({
       <AvvisoTruffe />
 
       <VisitaChat candidaturaId={candidaturaId} ruolo={ruolo} visite={visite} posti={posti} />
+
+      <IndirizzoChat indirizzo={indirizzo} ruolo={ruolo} />
 
       <div className="chat-scroll">
         {messaggi.length === 0 && (
