@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { clienteAmministratore } from "@/lib/supabase/admin";
 import { passwordCorretta } from "@/lib/supabase/password";
+import { svuotaCodaFile } from "@/lib/archivio";
 import {
   CONFERMA_ELIMINAZIONE,
   confermaEliminazioneValida,
@@ -67,6 +68,11 @@ export async function eliminaAccount(
       console.error("eliminaAccount: deleteUser:", error.message);
       return { error: "Non è stato possibile eliminare l'account. Riprova tra poco." };
     }
+
+    // 2b. I documenti dei contratti che cadono a cascata (anche quelli dell'ALTRA parte) hanno messo i loro
+    // file in una coda: si svuota subito. Se non riesce non è un errore per chi se ne va: lo riprende il
+    // giro periodico.
+    await svuotaCodaFile(admin);
   } catch (e) {
     console.error("eliminaAccount:", e);
     return { error: "Non è stato possibile eliminare l'account. Riprova tra poco." };

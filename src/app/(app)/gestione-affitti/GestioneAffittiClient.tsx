@@ -1,6 +1,8 @@
 "use client";
 
 import { BozzaContratto } from "@/components/BozzaContratto";
+import { ArchivioContratto } from "@/components/ArchivioContratto";
+import type { DocumentoContratto } from "@/lib/documenti-contratto";
 import { useActionState, useEffect, useState } from "react";
 import { Sheet } from "@/components/Sheet";
 import type {
@@ -26,11 +28,14 @@ export function GestioneAffittiClient({
   candidatureSenzaContratto,
   contratti,
   rapportiPanel,
+  documenti = {},
 }: {
   candidatureSenzaContratto: CandidaturaSenzaContratto[];
   contratti: ContrattoProprietario[];
   /** gli affitti dichiarati e confermati, costruiti dal server */
   rapportiPanel: React.ReactNode;
+  /** i documenti dei miei contratti, per identificativo del contratto */
+  documenti?: Record<string, DocumentoContratto[]>;
 }) {
   const [nuovaDa, setNuovaDa] = useState<CandidaturaSenzaContratto | null>(
     null
@@ -155,6 +160,7 @@ export function GestioneAffittiClient({
         title={`${selezionato?.nome ?? ""} ${selezionato?.cognome ?? ""}`}
       >
         {selezionato && <BozzaContratto contrattoId={selezionato.id} />}
+        {selezionato && <ArchivioContratto contrattoId={selezionato.id} documenti={documenti[selezionato.id] ?? []} />}
         {selezionato && (
           <ContrattoForm
             action={aggiornaContratto}

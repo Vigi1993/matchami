@@ -6,7 +6,7 @@ import { NextResponse, type NextRequest } from "next/server";
 // "/email/disiscrivi" e "/api/email": la disiscrizione dal link nell'email e l'invio periodico non hanno
 // una sessione. Ognuno si protegge da sé: la prima con un codice lungo e casuale (e un clic di conferma),
 // il secondo con un segreto che solo lo scheduler conosce.
-const PUBLIC_PATHS = ["/login", "/auth", "/invito", "/rapporto", "/informativa", "/email/disiscrivi", "/api/email/"];
+const PUBLIC_PATHS = ["/login", "/auth", "/invito", "/rapporto", "/informativa", "/email/disiscrivi", "/api/email/", "/api/archivio/"];
 
 /**
  * Rinfresca il token di sessione Supabase ad ogni richiesta e protegge

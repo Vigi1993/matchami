@@ -10,7 +10,7 @@ export const DA_INDICARE = "[da indicare]";
 /** Spazi ridotti a uno, ai lati niente, e nessun carattere di controllo. */
 export function pulisciTesto(x: unknown): string {
   if (typeof x !== "string") return "";
-  return x.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029\ufeff]/g, " ").replace(/\s+/g, " ").trim();
+  return x.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029\ufeff]/g, " ").replace(/\s+/g, " ").trim();
 }
 
 /** «Nome Cognome», o `null` se mancano entrambi. */

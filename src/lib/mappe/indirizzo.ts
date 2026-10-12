@@ -19,7 +19,7 @@ export const CITTA_PREDEFINITA = "Milano";
 /** Spazi ridotti a uno, ai lati niente, e nessun carattere di controllo (a capo, tabulazioni, invisibili). */
 export function pulisci(testo: unknown): string {
   if (typeof testo !== "string") return "";
-  return testo.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029\ufeff]/g, " ").replace(/\s+/g, " ").trim();
+  return testo.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029\ufeff]/g, " ").replace(/\s+/g, " ").trim();
 }
 
 export type EsitoIndirizzo = { ok: true; indirizzo: Indirizzo } | { ok: false; errore: string };

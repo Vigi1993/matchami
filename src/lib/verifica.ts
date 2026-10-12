@@ -199,6 +199,13 @@ const MESSAGGI: Record<string, string> = {
   INQUILINO_INESISTENTE: "Inquilino non trovato.",
   // decisioni sulle candidature
   CANDIDATURA_NON_TUA: "Questa candidatura non risulta tua.",
+  // documenti del contratto
+  CONTRATTO_NON_TUO: "Non puoi aggiungere documenti a questo contratto.",
+  TIPO_DOCUMENTO_NON_VALIDO: "Scegli che tipo di documento è.",
+  NOME_FILE_NON_VALIDO: "Il nome del file non è valido. Rinominalo e riprova.",
+  FILE_NON_VALIDO: "Il file non è valido: deve essere un PDF, un JPG o un PNG fino a 10 MB.",
+  TROPPI_DOCUMENTI: "Questo contratto ha già 30 documenti. Elimina uno che non serve più per aggiungerne altri.",
+  DOCUMENTO_NON_TUO: "Puoi eliminare solo i documenti che hai caricato tu.",
   // email per le notifiche
   VALORE_NON_VALIDO: "Non è stato possibile cambiare l'impostazione. Riprova.",
   ESITO_NON_VALIDO: "Non è stato possibile registrare l'invio.",

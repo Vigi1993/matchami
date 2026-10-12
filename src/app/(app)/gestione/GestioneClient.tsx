@@ -5,6 +5,8 @@ import { Sheet } from "@/components/Sheet";
 import type { ContrattoConAnnuncio } from "@/lib/types";
 import { LinkUtenze } from "@/components/LinkUtenze";
 import { BozzaContratto } from "@/components/BozzaContratto";
+import { ArchivioContratto } from "@/components/ArchivioContratto";
+import type { DocumentoContratto } from "@/lib/documenti-contratto";
 import { SOTTOTITOLO_UTENZE } from "@/lib/utenze";
 import {
   NESSUN_CONTRATTO_IN_CORSO,
@@ -26,8 +28,11 @@ function formatData(d: string | null): string {
 
 export function GestioneClient({
   contratti,
+  documenti = {},
 }: {
   contratti: ContrattoConAnnuncio[];
+  /** i documenti dei miei contratti, per identificativo del contratto */
+  documenti?: Record<string, DocumentoContratto[]>;
 }) {
   const [selezionato, setSelezionato] = useState<ContrattoConAnnuncio | null>(
     null
@@ -152,6 +157,7 @@ export function GestioneClient({
               value={formatData(selezionato.data_firma)}
             />
             <BozzaContratto contrattoId={selezionato.id} />
+            <ArchivioContratto contrattoId={selezionato.id} documenti={documenti[selezionato.id] ?? []} />
           </>
         )}
       </Sheet>

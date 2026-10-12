@@ -23,6 +23,7 @@ export const BUCKET_FILE_UTENTE = [
   "avatar-inquilini",
   "immobili-foto",
   "documenti-verifica",
+  "documenti-contratto",
 ] as const;
 
 /** La parte della libreria di Storage che serve qui: permette di provarla con un finto. */

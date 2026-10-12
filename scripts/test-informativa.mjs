@@ -200,11 +200,13 @@ test("file: i bucket pubblici e privati sono quelli che il testo descrive", () =
   // Se questa uguaglianza cambia, il testo («foto del profilo e degli annunci con
   // indirizzo pubblico, documenti privati») va riscritto: non va lasciato com'è.
   assert.deepEqual(pubblici, ["avatar-inquilini", "immobili-foto"], "i bucket pubblici sono cambiati: aggiorna la sezione 'File e foto'");
-  assert.deepEqual(privati, ["documenti-verifica"], "i bucket privati sono cambiati: aggiorna la sezione 'File e foto'");
+  assert.deepEqual(privati, ["documenti-contratto", "documenti-verifica"], "i bucket privati sono cambiati: aggiorna la sezione 'File e foto'");
 
   const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
   assert.match(tutto, /non richiede l'accesso/, "il testo non dice che le foto hanno un indirizzo pubblico");
   assert.match(tutto, /link temporanei/, "il testo non dice che i documenti si aprono con link temporanei");
+  // i documenti dei contratti si aprono in un altro modo, e il testo lo deve dire
+  assert.match(tutto, /I documenti dei contratti non hanno nessun link: si scaricano dall'app, e solo le due parti del contratto possono farlo/, "il testo non dice come si aprono i documenti dei contratti");
   assert.match(tutto, /foto del profilo/i);
   assert.match(tutto, /foto degli annunci/i);
 });
@@ -226,6 +228,12 @@ const NOME_NEL_TESTO = {
   identita: /documento d'identità/i,
   proprieta: /prova di proprietà/i,
   reddito: /prova del reddito/i,
+  // i documenti di un contratto (archivio con le due parti)
+  ape: /certificato energetico/i,
+  planimetria: /planimetria/i,
+  ricevuta: /ricevute/i,
+  registrazione: /registrazione/i,
+  altro: /altri documenti/i,
 };
 
 function tipiDocumentoDelDatabase() {

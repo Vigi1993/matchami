@@ -57,7 +57,7 @@ export function escapaHtml(testo: unknown): string {
 export function nomeBreve(nome: unknown): string | null {
   if (typeof nome !== "string") return null;
   const primo = nome
-    .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029\ufeff]/g, " ")
+    .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029\ufeff]/g, " ")
     .trim()
     .split(/\s+/)[0];
   if (!primo) return null;
