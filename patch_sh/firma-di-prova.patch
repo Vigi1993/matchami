@@ -1,0 +1,1225 @@
+From 18cb45a887da7f0610c1b17ce606672d1e844098 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 12 Oct 2026 14:02:19 +0000
+Subject: [PATCH] feat(firma): firma di prova del contratto, con un servizio di
+ firma provvisorio
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RICHIEDE LA MIGRAZIONE 0029 PRIMA DEL PUSH.
+
+Le due parti di un contratto 'in firma' possono registrare una FIRMA DI PROVA: serve a
+provare il percorso (chi ha firmato, quando, che cosa) prima di avere un servizio di
+firma vero. NON HA VALORE LEGALE e NON rende mai il contratto 'firmato'.
+
+LA PROMESSA STA NELLA STRUTTURA, non in un controllo:
+- la funzione che le persone chiamano scrive SEMPRE una firma 'provvisoria': non esiste
+  un parametro per dire altrimenti
+- nessuna funzione cambia lo stato del contratto (un test lo impone e la migrazione
+  verifica a fine corsa che nessuna funzione contenga 'update contratti')
+- una firma di un servizio VERO, quando ci sarà, avrà una funzione sua riservata al
+  ruolo di servizio e ci vorrà una migrazione nuova. Da qui non si sostituisce né si
+  ritira (FIRMA_GIA_REGISTRATA: trovato rileggendo la funzione, provato inserendo a mano una
+  firma 'vera')
+- l'azione dell'app rifiuta di registrare come 'di prova' una firma di un servizio che non
+  sia quello di prova, e lo fa PRIMA di chiamarlo
+
+COSA SI REGISTRA: chi (a ruoli: proprietario o inquilino), quando, e l'IMPRONTA del
+documento (SHA-256 del suo testo intero in forma canonica, col modello usato). L'impronta
+si calcola SUL SERVER dai dati veri: non arriva dal browser, quindi nessuno può dire
+'ho firmato questo' di un testo che non ha visto. Nessuna immagine di firma, nessun
+indirizzo IP, nessun dato del dispositivo.
+
+FIRMA SUPERATA: se i dati del contratto cambiano dopo la firma (un canone, una data, un
+nome) l'impronta di oggi è diversa da quella registrata e la firma si mostra come
+SUPERATA, da rifare. Se l'impronta di oggi non si è potuta calcolare la firma non si
+dichiara né valida né superata: mai un giudizio inventato.
+
+REGOLE: si firma solo se il contratto è 'in firma'; firmare di nuovo la stessa versione
+non cambia niente (la data resta); una versione diversa sostituisce la firma; ognuno ritira
+la propria. Il contratto si blocca mentre si firma: 6 firme insieme della stessa persona
+danno una riga e 0 errori; senza il blocco 10 prove su 10 danno errori.
+
+NOTA per il futuro, scritta nel codice e negli open point: oggi il proprietario può segnare
+'firmato' a mano (la regola dei contratti gli permette di scrivere tutto). Con una firma
+vera andrà chiuso: 'firmato' dovrà poterlo scrivere solo il servizio.
+
+APP: servizio di firma con interfaccia unica (registro, nome sbagliato = errore, test del
+contratto, e con un servizio vero un test impone di rivedere l'informativa); componente
+nei due pannelli dei contratti con conferma in due tempi, ritiro, 'rifirma' per le firme
+superate e la scritta fissa 'non ha valore legale e non rende il contratto firmato'; le
+pagine calcolano l'impronta di oggi solo per i contratti che hanno firme.
+
+Informativa 2026-10-provvisoria-14 (la 13 tra le equivalenti: nessuno deve riaccettare).
+
+Test: 813 in tutto; 11 prove eseguono le VERE azioni con finti server; 15 sul componente.
+Migrazione provata su PostgreSQL fedele a Supabase (circa 100 controlli). Verificato sul
+server (impronta con node:crypto, nessun calcolo senza firme). Difetti reintrodotti di
+proposito: 24 su 24 presi.
+---
+ package.json                                  |   2 +-
+ scripts/test-contratto.mjs                    |   5 +-
+ scripts/test-firma.mjs                        | 178 +++++++++++++++
+ src/app/(app)/contratto/firma-actions.ts      |  86 +++++++
+ .../GestioneAffittiClient.tsx                 |  13 ++
+ src/app/(app)/gestione-affitti/page.tsx       |   5 +
+ src/app/(app)/gestione/GestioneClient.tsx     |  11 +
+ src/app/(app)/gestione/page.tsx               |   5 +
+ src/components/FirmaContratto.tsx             | 129 +++++++++++
+ src/content/informativa.ts                    |   4 +-
+ src/lib/firma/carica.ts                       |  41 ++++
+ src/lib/firma/impronta.ts                     |  31 +++
+ src/lib/firma/index.ts                        |  33 +++
+ src/lib/firma/provvisorio.ts                  |  14 ++
+ src/lib/firma/stato.ts                        |  90 ++++++++
+ src/lib/firma/tipi.ts                         |  43 ++++
+ src/lib/verifica.ts                           |   7 +
+ supabase/migrations/0029_firme_contratto.sql  | 213 ++++++++++++++++++
+ 18 files changed, 906 insertions(+), 4 deletions(-)
+ create mode 100644 scripts/test-firma.mjs
+ create mode 100644 src/app/(app)/contratto/firma-actions.ts
+ create mode 100644 src/components/FirmaContratto.tsx
+ create mode 100644 src/lib/firma/carica.ts
+ create mode 100644 src/lib/firma/impronta.ts
+ create mode 100644 src/lib/firma/index.ts
+ create mode 100644 src/lib/firma/provvisorio.ts
+ create mode 100644 src/lib/firma/stato.ts
+ create mode 100644 src/lib/firma/tipi.ts
+ create mode 100644 supabase/migrations/0029_firme_contratto.sql
+
+diff --git a/package.json b/package.json
+index 16fd9fe..64e6062 100644
+--- a/package.json
++++ b/package.json
+@@ -8,7 +8,7 @@
+     "start": "next start",
+     "lint": "eslint",
+     "pretest": "node scripts/controlla-dipendenze.mjs",
+-    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-contratto.mjs b/scripts/test-contratto.mjs
+index a428858..a4c2594 100644
+--- a/scripts/test-contratto.mjs
++++ b/scripts/test-contratto.mjs
+@@ -385,10 +385,11 @@ function filiDiCodice(dir = path.join(radice, "src")) {
+   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => { if (e.name.startsWith("__")) return []; const p = path.join(dir, e.name); return e.isDirectory() ? filiDiCodice(p) : /\.(ts|tsx)$/.test(e.name) ? [p] : []; });
+ }
+ 
+-test("chiamate: la funzione dei dati del contratto si chiama con il suo parametro, e solo dalla pagina e dal PDF", () => {
++test("chiamate: la funzione dei dati del contratto si chiama con il suo parametro, e solo dai posti previsti", () => {
+   const trovate = [];
+   for (const f of filiDiCodice()) { const c = fs.readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, ""); for (const m of c.matchAll(/"dati_contratto"\s*(?:,\s*\{([^}]*)\}|\))/g)) { assert.deepEqual([...(m[1] ?? "").matchAll(/\b(p_\w+)\s*:/g)].map((x) => x[1]), ["p_contratto"], f); trovate.push(path.relative(radice, f).replaceAll("\\", "/")); } }
+-  assert.deepEqual(trovate.sort(), ["src/app/(app)/contratto/[id]/page.tsx", "src/app/(app)/contratto/[id]/pdf/route.ts"]);
++  // la pagina e il PDF; e, per la firma, l'azione che calcola l'impronta e il caricamento che dice se una firma è superata
++  assert.deepEqual(trovate.sort(), ["src/app/(app)/contratto/[id]/page.tsx", "src/app/(app)/contratto/[id]/pdf/route.ts", "src/app/(app)/contratto/firma-actions.ts", "src/lib/firma/carica.ts"]);
+ });
+ 
+ test("il PDF si scarica solo dopo aver controllato chi sei e l'informativa, e prima di leggere i dati", () => {
+diff --git a/scripts/test-firma.mjs b/scripts/test-firma.mjs
+new file mode 100644
+index 0000000..2e84407
+--- /dev/null
++++ b/scripts/test-firma.mjs
+@@ -0,0 +1,178 @@
++/**
++ * Test della firma di prova del contratto (src/lib/firma e i collegamenti con la migrazione 0029).
++ * Si lancia con:   npm test
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { createHash } from "node:crypto";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const imp = caricaTs(path.join(radice, "src", "lib", "firma", "impronta.ts"));
++const st = caricaTs(path.join(radice, "src", "lib", "firma", "stato.ts"));
++const reg = caricaTs(path.join(radice, "src", "lib", "firma", "index.ts"));
++const dati = caricaTs(path.join(radice, "src", "lib", "contratto", "dati.ts"));
++const con = caricaTs(path.join(radice, "src", "lib", "contratto", "index.ts"));
++const v = caricaTs(path.join(radice, "src", "lib", "verifica.ts"));
++const { INFORMATIVA } = caricaTs(path.join(radice, "src", "content", "informativa.ts"));
++// con i ritorni a capo di Windows normalizzati
++const leggi = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8").replace(/\r\n/g, "\n");
++const sql = leggi("supabase", "migrations", "0029_firme_contratto.sql");
++
++const RIGA = { contratto_id: "d1111111-1111-4111-8111-11111111111d", stato: "in_firma", canone: 1450, durata_mesi: 12, data_inizio: "2026-11-01", data_firma: null, titolo: "Bilocale Isola", zona: "Isola, Milano", locali: 2, mq: 55, classe_energetica: "B", ep_globale: "95.50", via: "Via Garibaldi", civico: "12", cap: "20121", citta: "Milano", locatore_nome: "Olga", locatore_cognome: "Bianchi", conduttore_nome: "Tina", conduttore_cognome: "Verdi", io_sono: "locatore" };
++const doc = (o = {}) => con.componiContratto(dati.datiDaRiga({ ...RIGA, ...o }));
++const H1 = "a".repeat(64), H2 = "b".repeat(64);
++const firma = (ruolo, o = {}) => ({ contratto_id: RIGA.contratto_id, ruolo, origine: "provvisoria", impronta: H1, firmata_at: "2026-10-12T10:00:00Z", mia: false, ...o });
++
++// ============================================================ l'impronta
++test("JSON canonico: chiavi in ordine, nessuno spazio, undefined ignorato, array nell'ordine dato", () => {
++  assert.equal(imp.jsonCanonico({ b: 2, a: 1 }), '{"a":1,"b":2}'); assert.equal(imp.jsonCanonico({ b: { d: 4, c: 3 }, a: [3, 1, 2] }), '{"a":[3,1,2],"b":{"c":3,"d":4}}');
++  assert.equal(imp.jsonCanonico({ a: undefined, b: null }), '{"b":null}'); assert.equal(imp.jsonCanonico([undefined, NaN, Infinity]), "[null,null,null]"); assert.equal(imp.jsonCanonico("a\"b"), '"a\\"b"');
++  assert.equal(imp.jsonCanonico({ a: 1, b: 2 }), imp.jsonCanonico({ b: 2, a: 1 }), "l'ordine di costruzione non conta");
++});
++test("JSON canonico: il testo si normalizza (una «è» precomposta e una «e»+accento sono la stessa cosa)", () => { assert.equal(imp.jsonCanonico("caf\u00e9"), imp.jsonCanonico("cafe\u0301")); assert.notEqual(imp.jsonCanonico("cafe"), imp.jsonCanonico("caf\u00e9")); });
++test("impronta: 64 caratteri esadecimali minuscoli, ed è proprio lo SHA-256 della forma canonica", () => {
++  const d = doc(); const h = imp.improntaDocumento(d); assert.match(h, /^[0-9a-f]{64}$/); assert.equal(h, createHash("sha256").update(imp.jsonCanonico(d), "utf8").digest("hex"));
++});
++test("impronta: lo stesso documento dà sempre la stessa impronta", () => { assert.equal(imp.improntaDocumento(doc()), imp.improntaDocumento(doc())); assert.equal(imp.improntaDocumento(doc()), imp.improntaDocumento(JSON.parse(JSON.stringify(doc())))); });
++test("impronta: basta cambiare UN dato perché cambi (importo, data, durata, nome, titolo, indirizzo, classe...)", () => {
++  const base = imp.improntaDocumento(doc()); const varianti = [{ canone: 1451 }, { data_inizio: "2026-11-02" }, { durata_mesi: 13 }, { conduttore_nome: "Tino" }, { locatore_cognome: "Bianchi " .trim() + "i" }, { titolo: "Bilocale Isola!" }, { civico: "13" }, { classe_energetica: "C" }, { mq: 56 }, { zona: "Navigli, Milano" }, { ep_globale: "95.51" }, { cap: "20122" }];
++  const visti = new Set([base]); for (const o of varianti) { const h = imp.improntaDocumento(doc(o)); assert.notEqual(h, base, JSON.stringify(o)); visti.add(h); } assert.equal(visti.size, varianti.length + 1, "due varianti hanno la stessa impronta");
++});
++test("impronta: cambia anche con la versione del modello o con un avviso (si firma un TESTO, non solo dei dati)", () => {
++  const d = doc(); const h = imp.improntaDocumento(d);
++  assert.notEqual(imp.improntaDocumento({ ...d, modello: { ...d.modello, versione: "2" } }), h); assert.notEqual(imp.improntaDocumento({ ...d, modello: { ...d.modello, id: "altro" } }), h);
++  assert.notEqual(imp.improntaDocumento({ ...d, avvisi: [...d.avvisi, "un avviso in più"] }), h); assert.notEqual(imp.improntaDocumento({ ...d, bozza: false }), h);
++  assert.notEqual(imp.improntaDocumento({ ...d, sezioni: d.sezioni.slice(1) }), h);
++});
++test("impronta: il caso senza dati e quello con dati sono diversi, e nessuno dei due lancia errori", () => {
++  const vuoto = con.componiContratto(dati.datiDaRiga({ contratto_id: RIGA.contratto_id, stato: "bozza", io_sono: "locatore" })); assert.match(imp.improntaDocumento(vuoto), /^[0-9a-f]{64}$/); assert.notEqual(imp.improntaDocumento(vuoto), imp.improntaDocumento(doc()));
++});
++
++// ============================================================ il servizio di firma e il suo registro
++test("registro: senza configurazione il servizio di prova; un nome sbagliato è un errore che dice quali ci sono", () => {
++  const prima = process.env.FIRMA_PROVIDER; delete process.env.FIRMA_PROVIDER;
++  try { for (const x of [undefined, null, "", "  ", "provvisorio"]) assert.equal(reg.fornitoreFirma(x).id, "provvisorio", JSON.stringify(x)); } finally { if (prima !== undefined) process.env.FIRMA_PROVIDER = prima; }
++  assert.throws(() => reg.fornitoreFirma("docusign"), (e) => /«docusign»/.test(e.message) && /provvisorio/.test(e.message));
++  for (const x of ["__proto__", "constructor", "toString", "hasOwnProperty"]) assert.throws(() => reg.fornitoreFirma(x), /sconosciuto/, x);
++});
++
++for (const [nome, f] of Object.entries(reg.FORNITORI_FIRMA)) {
++  test(`contratto [${nome}]: identificativo uguale al nome registrato, origine ammessa`, () => { assert.equal(f.id, nome); assert.ok(["provvisoria", "fornitore"].includes(f.origine)); assert.match(f.id, /^[a-z][a-z0-9_-]*$/); });
++  test(`contratto [${nome}]: firma() restituisce sempre un esito e non lancia errori, qualunque cosa riceva`, async () => {
++    for (const r of [{ contrattoId: RIGA.contratto_id, impronta: H1, firmatario: "u" }, { contrattoId: "", impronta: "", firmatario: "" }, null, undefined, {}, { impronta: 5 }, { impronta: H1.toUpperCase() }]) {
++      let e; await assert.doesNotReject(async () => { e = await f.firma(r); }, JSON.stringify(r)); assert.ok(e && typeof e.ok === "boolean", JSON.stringify(e)); if (!e.ok) { assert.equal(typeof e.errore, "string"); assert.equal(typeof e.definitivo, "boolean"); }
++    }
++  });
++  test(`contratto [${nome}]: un'impronta che non ha la forma giusta non si firma`, async () => { for (const h of ["", "abc", H1.slice(1), H1 + "a", H1.toUpperCase(), "g".repeat(64)]) { const e = await f.firma({ contrattoId: "x", impronta: h, firmatario: "u" }); assert.equal(e.ok, false, JSON.stringify(h)); } });
++}
++test("servizio di prova: firma una impronta valida, e basta (nessuna rete, nessun effetto)", async () => {
++  assert.deepEqual(await reg.FORNITORI_FIRMA.provvisorio.firma({ contrattoId: "x", impronta: H1, firmatario: "u" }), { ok: true }); assert.equal(reg.FORNITORI_FIRMA.provvisorio.origine, "provvisoria");
++  const c = leggi("src", "lib", "firma", "provvisorio.ts").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, ""); for (const vietato of [/\bfetch\(/, /supabase/i, /process\.env/, /console\./, /localStorage/]) assert.ok(!vietato.test(c), String(vietato));
++});
++
++test("informativa: finché il servizio è di prova lo dice; con un servizio vero va rivista", () => {
++  const t = JSON.stringify(INFORMATIVA); const veri = Object.values(reg.FORNITORI_FIRMA).filter((f) => f.origine === "fornitore");
++  if (veri.length === 0) assert.match(t, /Per ora la firma è di prova: non ha valore legale e non rende il contratto «firmato»/);
++  else { assert.ok(!/Per ora la firma è di prova/.test(t), `c'è un servizio vero (${veri.map((f) => f.id).join(", ")}) ma il testo dice che la firma è di prova`); assert.match(t, /servizio di firma/); }
++});
++test("informativa: dichiara cosa si conserva (chi, quando, impronta), cosa NO, chi la vede, e che si ritira", () => {
++  const t = JSON.stringify(INFORMATIVA);
++  assert.match(t, /conserviamo chi ha firmato \(il proprietario o l'inquilino\), quando, e un'impronta del testo firmato/); assert.match(t, /non conserviamo immagini di firme né dati del dispositivo/); assert.match(t, /La vedono solo le due parti, e ognuno può ritirare la propria/);
++});
++
++// ============================================================ cosa mostrare (la logica pura)
++const riep = (o = {}) => st.riepilogoFirme({ statoContratto: "in_firma", firme: [], improntaAttuale: H1, ...o });
++test("nessuna firma, contratto in firma: si può firmare, e le due righe sono nell'ordine proprietario, inquilino", () => {
++  const r = riep(); assert.equal(r.puoFirmare, true); assert.equal(r.haUnaFirmaMia, false); assert.equal(r.entrambeValide, false); assert.equal(r.sintesi, "Nessuna firma di prova ancora.");
++  assert.deepEqual(r.righe.map((x) => [x.ruolo, x.etichetta, x.firmata, x.testo]), [["locatore", "Proprietario", false, "Non ha ancora firmato"], ["conduttore", "Inquilino", false, "Non ha ancora firmato"]]);
++});
++test("si firma SOLO se il contratto è «in firma»: bozza, firmato e concluso no, e dice perché", () => {
++  assert.equal(riep({ statoContratto: "bozza" }).puoFirmare, false); assert.equal(riep({ statoContratto: "bozza" }).motivo, "La firma si apre quando il contratto è «in firma».");
++  for (const s of ["firmato", "concluso", "boh", ""]) { const r = riep({ statoContratto: s }); assert.equal(r.puoFirmare, false, s); assert.match(r.motivo, /non è più «in firma»/); }
++});
++test("la mia firma sulla versione attuale: non si rifirma, e si può ritirare", () => {
++  const r = riep({ firme: [firma("conduttore", { mia: true })] }); assert.equal(r.puoFirmare, false); assert.equal(r.haUnaFirmaMia, true); assert.equal(r.motivo, "Hai già firmato questa versione."); assert.equal(r.righe[1].valida, true); assert.match(r.righe[1].testo, /^Firma di prova del 12 ottobre 2026$/);
++  assert.equal(r.sintesi, "Manca la firma di prova di una delle due parti.");
++});
++test("una firma SUPERATA (il contratto è cambiato dopo): lo dice, si può rifirmare, e non vale", () => {
++  const r = riep({ improntaAttuale: H2, firme: [firma("conduttore", { mia: true })] }); assert.equal(r.righe[1].valida, false); assert.match(r.righe[1].testo, /SUPERATA: il contratto è cambiato dopo la firma/); assert.equal(r.puoFirmare, true); assert.equal(r.haUnaFirmaMia, true); assert.equal(r.entrambeValide, false); assert.equal(r.sintesi, "Il contratto è cambiato dopo una firma di prova: va rifatta.");
++});
++test("entrambe le parti hanno firmato la versione attuale: la sintesi dice che il contratto NON risulta firmato", () => {
++  const r = riep({ firme: [firma("locatore"), firma("conduttore", { mia: true })] }); assert.equal(r.entrambeValide, true); assert.match(r.sintesi, /NON risulta firmato: serve una firma vera/);
++});
++test("basta UNA firma superata per non essere «entrambe valide»", () => { assert.equal(riep({ firme: [firma("locatore"), firma("conduttore", { impronta: H2 })] }).entrambeValide, false); });
++test("se l'impronta di oggi non si è potuta calcolare la firma non è né valida né superata (mai un giudizio inventato)", () => {
++  const r = riep({ improntaAttuale: null, firme: [firma("locatore"), firma("conduttore", { mia: true })] }); assert.equal(r.righe[0].valida, null); assert.ok(!/SUPERATA/.test(JSON.stringify(r))); assert.equal(r.entrambeValide, false); assert.equal(r.puoFirmare, true, "si può firmare comunque: l'azione calcola l'impronta per conto suo");
++});
++test("la data è in italiano e in ora di Roma, anche a cavallo della mezzanotte", () => {
++  assert.match(riep({ firme: [firma("locatore", { firmata_at: "2026-10-12T23:30:00Z" })] }).righe[0].testo, /13 ottobre 2026/); assert.match(riep({ firme: [firma("locatore", { firmata_at: "2026-03-01T10:00:00Z" })] }).righe[0].testo, /1 marzo 2026/);
++});
++test("righe sconosciute o doppie non rompono niente (conta la prima per ruolo)", () => {
++  const r = riep({ firme: [firma("boh"), firma("locatore", { impronta: H1 }), firma("locatore", { impronta: H2 })] }); assert.equal(r.righe[0].valida, true); assert.equal(r.righe[1].firmata, false);
++});
++test("testi: dicono sempre che non ha valore legale e non rende «firmato», senza presumere il genere", () => {
++  assert.match(st.TESTO_NESSUN_VALORE, /non ha valore legale e non rende il contratto «firmato»/); const tutto = [st.TESTO_NESSUN_VALORE, ...Object.values(st.ETICHETTA_RUOLO), riep().sintesi, riep({ firme: [firma("locatore"), firma("conduttore")] }).sintesi].join(" ");
++  assert.ok(!/\b(lui|lei)\b/i.test(tutto), tutto);
++});
++test("nessuna combinazione di firme fa dire che il contratto è «firmato» senza il «NON»", () => {
++  for (const f of [[], [firma("locatore")], [firma("locatore"), firma("conduttore")], [firma("locatore", { impronta: H2 })]]) { const t = JSON.stringify(riep({ firme: f })); assert.ok(!/risulta firmato/.test(t.replace(/NON risulta firmato/g, "")), t); }
++});
++
++// ============================================================ coerenza con la migrazione
++test("regole rispecchiate: i ruoli, l'impronta, il modello e lo stato «in firma» sono quelli della migrazione", () => {
++  assert.match(sql, /ruolo\s+text not null check \(ruolo in \('locatore', 'conduttore'\)\)/); assert.deepEqual(Object.keys(st.ETICHETTA_RUOLO), ["locatore", "conduttore"]);
++  assert.match(sql, /impronta ~ '\^\[0-9a-f\]\{64\}\$'/); assert.match(sql, /v_stato <> 'in_firma'/); assert.match(sql, /modello_id\s+text not null check \(modello_id ~ '\^\[a-z\]\[a-z0-9_-\]\{0,39\}\$'\)/);
++  assert.match(sql, /char_length\(modello_versione\) between 1 and 20/); assert.match(sql, /unique \(contratto_id, firmatario\)/);
++});
++test("migrazione: la promessa è nella STRUTTURA: nessun parametro per scegliere l'origine, nessuna scrittura dello stato, firma vera intoccabile", () => {
++  const senzaCommenti = sql.replace(/--[^\n]*/g, ""); const firmaFn = senzaCommenti.slice(senzaCommenti.indexOf("create or replace function public.registra_firma_di_prova"), senzaCommenti.indexOf("create or replace function public.revoca_firma_di_prova"));
++  const params = firmaFn.match(/registra_firma_di_prova\(([\s\S]*?)\)\s*returns/)[1]; assert.ok(!/origine|fornitore|stato/i.test(params), "un parametro permette di scegliere l'origine: " + params);
++  assert.match(firmaFn, /'provvisoria', 'provvisorio'/); assert.ok(!/update\s+contratti/i.test(senzaCommenti), "una funzione scrive nello stato del contratto"); assert.ok(!/set\s+stato/i.test(senzaCommenti));
++  assert.match(firmaFn, /if v_esistente\.origine <> 'provvisoria' then\s+raise exception 'FIRMA_GIA_REGISTRATA'/); assert.match(senzaCommenti, /and origine = 'provvisoria';/, "il ritiro deve toccare solo le firme di prova");
++});
++test("migrazione: la tabella non ha permessi né regole dirette, e il blocco del contratto c'è", () => {
++  assert.match(sql, /alter table firme_contratto enable row level security;/); assert.match(sql, /revoke all on firme_contratto from anon, authenticated;/); assert.ok(!/create policy/i.test(sql.replace(/--[^\n]*/g, "")), "una regola sulla tabella delle firme");
++  assert.match(sql, /for update of c;/, "senza il blocco due firme insieme della stessa persona danno un errore"); assert.match(sql, /revoke all on function[\s\S]*?from public, anon;[\s\S]*?grant execute on function[\s\S]*?to authenticated;/);
++});
++test("migrazione: l'elenco delle firme non rivela chi sono le persone (nessun identificativo, nessun nome)", () => {
++  const colonne = sql.match(/firme_dei_miei_contratti\(\)\s+returns table \(([\s\S]*?)\)\s*language sql/)[1]; assert.ok(!/firmatario|user|nome|mail/i.test(colonne), colonne);
++  const tipo = leggi("src", "lib", "firma", "tipi.ts").match(/export type FirmaContratto = \{[\s\S]*?\n\};/)[0]; assert.ok(!/firmatario|user_id/.test(tipo), "il tipo della firma ha l'identificativo della persona");
++});
++test("errori: ogni codice della migrazione ha una frase sua, e «FIRMA_CONTRATTO_NON_TUO» non prende la frase dei documenti", () => {
++  const G = v.messaggioErroreVerifica("qualcosa di sconosciuto"); const codici = [...new Set([...sql.matchAll(/raise exception '([A-Z_]+)'/g)].map((m) => m[1]))];
++  for (const c of ["FIRMA_CONTRATTO_NON_TUO", "FIRMA_CONTRATTO_NON_IN_FIRMA", "FIRMA_IMPRONTA_NON_VALIDA", "FIRMA_MODELLO_NON_VALIDO", "FIRMA_NON_TROVATA", "FIRMA_GIA_REGISTRATA"]) assert.ok(codici.includes(c), c);
++  for (const c of codici) { const f = v.messaggioErroreVerifica(`ERROR: ${c} (P0001)`); assert.notEqual(f, G, `${c} non ha un messaggio`); assert.ok(!f.includes(c), c); }
++  assert.match(v.messaggioErroreVerifica("FIRMA_CONTRATTO_NON_TUO"), /Non puoi firmare questo contratto/); assert.ok(!/documenti/.test(v.messaggioErroreVerifica("FIRMA_CONTRATTO_NON_TUO"))); assert.match(v.messaggioErroreVerifica("FIRMA_CONTRATTO_NON_IN_FIRMA"), /«in firma»/);
++});
++
++function filiDiCodice(dir = path.join(radice, "src")) { return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => { if (e.name.startsWith("__")) return []; const p = path.join(dir, e.name); return e.isDirectory() ? filiDiCodice(p) : /\.(ts|tsx)$/.test(e.name) ? [p] : []; }); }
++const rel = (f) => path.relative(radice, f).replaceAll("\\", "/");
++test("chiamate: ogni funzione della firma si chiama con i parametri della migrazione, e solo dai posti previsti", () => {
++  const funzioni = new Map(); for (const m of sql.matchAll(/create or replace function public\.(\w+)\(([^)]*)\)/g)) funzioni.set(m[1], [...m[2].matchAll(/\b(p_\w+)\s/g)].map((x) => x[1]).sort());
++  const attese = { firme_dei_miei_contratti: ["src/lib/firma/carica.ts"], registra_firma_di_prova: ["src/app/(app)/contratto/firma-actions.ts"], revoca_firma_di_prova: ["src/app/(app)/contratto/firma-actions.ts"] }; const trovate = Object.fromEntries(Object.keys(attese).map((k) => [k, new Set()]));
++  for (const f of filiDiCodice()) { const c = fs.readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, ""); for (const nome of Object.keys(attese)) for (const m of c.matchAll(new RegExp(`"${nome}"\\s*(?:,\\s*\\{([^}]*)\\}|\\))`, "g"))) { assert.deepEqual([...(m[1] ?? "").matchAll(/\b(p_\w+)\s*:/g)].map((x) => x[1]).sort(), funzioni.get(nome), `${rel(f)} chiama ${nome} con parametri diversi`); trovate[nome].add(rel(f)); } }
++  for (const [nome, posti] of Object.entries(attese)) assert.deepEqual([...trovate[nome]].sort(), posti, `${nome}: chiamata da posti diversi dal previsto`);
++});
++test("privacy: nessun codice dell'app nomina la tabella delle firme", () => { for (const f of filiDiCodice()) assert.ok(!/firme_contratto/.test(fs.readFileSync(f, "utf8")), `${rel(f)} nomina la tabella delle firme`); });
++test("azione: l'impronta si calcola sul SERVER dai dati veri (non arriva dal browser), un servizio vero non si registra mai «di prova», e lo stato non si scrive", () => {
++  const a = leggi("src", "app", "(app)", "contratto", "firma-actions.ts"); const f = a.slice(a.indexOf("export async function firmaContratto"), a.indexOf("export async function ritiraFirma")); const i = (s) => f.indexOf(s);
++  assert.match(a, /export async function firmaContratto\(contrattoId: string\)/, "l'azione accetta altro oltre all'identificativo del contratto"); assert.match(f, /improntaDocumento\(documento\)/);
++  assert.ok(i('rpc("dati_contratto"') > 0 && i('rpc("dati_contratto"') < i("improntaDocumento(") && i("improntaDocumento(") < i("servizio.firma(") && i("servizio.firma(") < i('rpc("registra_firma_di_prova"'), "ordine: dati, impronta, servizio, registrazione");
++  assert.match(f, /servizio\.origine !== "provvisoria"/); assert.ok(i('servizio.origine !== "provvisoria"') < i("servizio.firma("), "il controllo dell'origine deve venire PRIMA di chiamare il servizio");
++  const c = a.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, ""); // niente scritture dirette né modifiche allo stato del contratto (la parola «stato» compare nei messaggi: «è stato possibile»)
++  assert.ok(!/\.from\(|\.update\(|\.insert\(|\bstato\s*[:=]|set\s+stato/.test(c), "l'azione scrive qualcosa o tocca lo stato del contratto");
++  assert.deepEqual([...c.matchAll(/\.rpc\("(\w+)"/g)].map((m) => m[1]).sort(), ["dati_contratto", "registra_firma_di_prova", "revoca_firma_di_prova"], "l'azione chiama funzioni diverse da quelle previste");
++});
++test("componente: nessuna chiamata diretta al database, solo le due azioni", () => {
++  const c = leggi("src", "components", "FirmaContratto.tsx").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, ""); for (const vietato of [/supabase/i, /\.rpc\(/, /fetch\(/, /createHash/, /\bimpronta\b/]) assert.ok(!vietato.test(c.replace(/improntaAttuale/g, "")), `il componente usa ${vietato}`);
++  assert.match(c, /firmaContratto\(contrattoId\)/); assert.match(c, /ritiraFirma\(contrattoId\)/);
++});
++test("collegamenti: la firma si vede nei due pannelli dei contratti, con le firme di QUEL contratto", () => {
++  for (const f of [["gestione", "GestioneClient.tsx"], ["gestione-affitti", "GestioneAffittiClient.tsx"]]) { const c = leggi("src", "app", "(app)", ...f); assert.match(c, /<FirmaContratto\s+contrattoId=\{selezionato\.id\}\s+statoContratto=\{selezionato\.stato\}\s+firme=\{firme\[selezionato\.id\]\?\.firme \?\? \[\]\}\s+improntaAttuale=\{firme\[selezionato\.id\]\?\.improntaAttuale \?\? null\}/, f.join("/")); }
++  for (const f of [["gestione", "page.tsx"], ["gestione-affitti", "page.tsx"]]) { const c = leggi("src", "app", "(app)", ...f); assert.match(c, /await caricaFirme\(supabase\)/); assert.match(c, /firme=\{firme\}/); }
++});
++test("la logica pura della firma non ha accesso alla rete né al browser", () => {
++  for (const f of ["tipi.ts", "provvisorio.ts", "stato.ts", "index.ts"]) { const c = leggi("src", "lib", "firma", f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, ""); for (const vietato of [/\bfetch\(/, /localStorage/, /console\./, /supabase\//]) assert.ok(!vietato.test(c), `${f} usa ${vietato}`); }
++});
+diff --git a/src/app/(app)/contratto/firma-actions.ts b/src/app/(app)/contratto/firma-actions.ts
+new file mode 100644
+index 0000000..2a5410b
+--- /dev/null
++++ b/src/app/(app)/contratto/firma-actions.ts
+@@ -0,0 +1,86 @@
++"use server";
++
++import { revalidatePath } from "next/cache";
++import { createClient } from "@/lib/supabase/server";
++import { componiContratto } from "@/lib/contratto";
++import { datiDaRiga } from "@/lib/contratto/dati";
++import type { RigaContratto } from "@/lib/contratto/tipi";
++import { fornitoreFirma } from "@/lib/firma";
++import { improntaDocumento } from "@/lib/firma/impronta";
++import { èUuid } from "@/lib/uuid";
++import { messaggioErroreVerifica } from "@/lib/verifica";
++
++export type EsitoFirmaAzione = { ok: true } | { error: string };
++
++/**
++ * Registra la FIRMA DI PROVA di chi chiama sul documento che il contratto produce ADESSO.
++ *
++ * L'impronta si calcola QUI, dal documento composto dai dati veri: non arriva dal browser, quindi una persona non
++ * può dire «ho firmato questo» di un testo che non ha visto. Il database ricontrolla che sia una delle due parti,
++ * che il contratto sia «in firma» e che l'impronta abbia la forma giusta.
++ *
++ * Questa azione registra SOLO firme di prova, e non cambia mai lo stato del contratto.
++ */
++export async function firmaContratto(contrattoId: string): Promise<EsitoFirmaAzione> {
++  const supabase = await createClient();
++  const {
++    data: { user },
++  } = await supabase.auth.getUser();
++  if (!user) return { error: messaggioErroreVerifica("NON_AUTENTICATO") };
++  if (!èUuid(contrattoId)) return { error: messaggioErroreVerifica("FIRMA_CONTRATTO_NON_TUO") };
++
++  // i dati del contratto: la funzione risponde solo alle due parti
++  const { data, error: eDati } = await supabase.rpc("dati_contratto", { p_contratto: contrattoId });
++  if (eDati) return { error: "Non è stato possibile preparare il documento da firmare. Riprova." };
++  const dati = datiDaRiga((Array.isArray(data) ? data[0] : null) as Partial<RigaContratto> | null);
++  if (!dati) return { error: messaggioErroreVerifica("FIRMA_CONTRATTO_NON_TUO") };
++
++  let documento;
++  try {
++    documento = componiContratto(dati);
++  } catch {
++    return { error: "Il modello di contratto non è configurato correttamente." };
++  }
++  const impronta = improntaDocumento(documento);
++
++  let servizio;
++  try {
++    servizio = fornitoreFirma();
++  } catch {
++    return { error: "Il servizio di firma non è configurato correttamente." };
++  }
++  // un servizio vero ha bisogno di una funzione sua nel database: da qui non si registra mai una firma vera come «di prova»
++  if (servizio.origine !== "provvisoria") return { error: "Questa versione dell'app registra soltanto firme di prova." };
++
++  const esito = await servizio.firma({ contrattoId, impronta, firmatario: user.id });
++  if (!esito.ok) return { error: "Non è stato possibile registrare la firma. Riprova." };
++
++  const { error } = await supabase.rpc("registra_firma_di_prova", {
++    p_contratto: contrattoId,
++    p_impronta: impronta,
++    p_modello_id: documento.modello.id,
++    p_modello_versione: documento.modello.versione,
++  });
++  if (error) return { error: messaggioErroreVerifica(error.message) };
++
++  revalidatePath("/gestione");
++  revalidatePath("/gestione-affitti");
++  return { ok: true };
++}
++
++/** Ritira la PROPRIA firma di prova. */
++export async function ritiraFirma(contrattoId: string): Promise<EsitoFirmaAzione> {
++  const supabase = await createClient();
++  const {
++    data: { user },
++  } = await supabase.auth.getUser();
++  if (!user) return { error: messaggioErroreVerifica("NON_AUTENTICATO") };
++  if (!èUuid(contrattoId)) return { error: messaggioErroreVerifica("FIRMA_NON_TROVATA") };
++
++  const { error } = await supabase.rpc("revoca_firma_di_prova", { p_contratto: contrattoId });
++  if (error) return { error: messaggioErroreVerifica(error.message) };
++
++  revalidatePath("/gestione");
++  revalidatePath("/gestione-affitti");
++  return { ok: true };
++}
+diff --git a/src/app/(app)/gestione-affitti/GestioneAffittiClient.tsx b/src/app/(app)/gestione-affitti/GestioneAffittiClient.tsx
+index d8e3a06..5550619 100644
+--- a/src/app/(app)/gestione-affitti/GestioneAffittiClient.tsx
++++ b/src/app/(app)/gestione-affitti/GestioneAffittiClient.tsx
+@@ -2,6 +2,8 @@
+ 
+ import { BozzaContratto } from "@/components/BozzaContratto";
+ import { ArchivioContratto } from "@/components/ArchivioContratto";
++import { FirmaContratto } from "@/components/FirmaContratto";
++import type { FirmeDelContratto } from "@/lib/firma/carica";
+ import type { DocumentoContratto } from "@/lib/documenti-contratto";
+ import { useActionState, useEffect, useState } from "react";
+ import { Sheet } from "@/components/Sheet";
+@@ -29,6 +31,7 @@ export function GestioneAffittiClient({
+   contratti,
+   rapportiPanel,
+   documenti = {},
++  firme = {},
+ }: {
+   candidatureSenzaContratto: CandidaturaSenzaContratto[];
+   contratti: ContrattoProprietario[];
+@@ -36,6 +39,8 @@ export function GestioneAffittiClient({
+   rapportiPanel: React.ReactNode;
+   /** i documenti dei miei contratti, per identificativo del contratto */
+   documenti?: Record<string, DocumentoContratto[]>;
++  /** le firme di prova dei miei contratti, per identificativo del contratto */
++  firme?: Record<string, FirmeDelContratto>;
+ }) {
+   const [nuovaDa, setNuovaDa] = useState<CandidaturaSenzaContratto | null>(
+     null
+@@ -160,6 +165,14 @@ export function GestioneAffittiClient({
+         title={`${selezionato?.nome ?? ""} ${selezionato?.cognome ?? ""}`}
+       >
+         {selezionato && <BozzaContratto contrattoId={selezionato.id} />}
++        {selezionato && (
++          <FirmaContratto
++            contrattoId={selezionato.id}
++            statoContratto={selezionato.stato}
++            firme={firme[selezionato.id]?.firme ?? []}
++            improntaAttuale={firme[selezionato.id]?.improntaAttuale ?? null}
++          />
++        )}
+         {selezionato && <ArchivioContratto contrattoId={selezionato.id} documenti={documenti[selezionato.id] ?? []} />}
+         {selezionato && (
+           <ContrattoForm
+diff --git a/src/app/(app)/gestione-affitti/page.tsx b/src/app/(app)/gestione-affitti/page.tsx
+index c867969..a3cbebf 100644
+--- a/src/app/(app)/gestione-affitti/page.tsx
++++ b/src/app/(app)/gestione-affitti/page.tsx
+@@ -4,6 +4,7 @@ import { RapportiPanel } from "@/components/RapportiPanel";
+ import { caricaRapportiMiei } from "@/lib/rapporti-server";
+ import type { CandidaturaSenzaContratto, ContrattoProprietario } from "@/lib/types";
+ import { raggruppaPerContratto, type DocumentoContratto } from "@/lib/documenti-contratto";
++import { caricaFirme } from "@/lib/firma/carica";
+ 
+ export default async function GestioneAffittiPage() {
+   const supabase = await createClient();
+@@ -101,10 +102,14 @@ export default async function GestioneAffittiPage() {
+   // I documenti di TUTTI i miei contratti, in una chiamata sola (mai il percorso dei file)
+   const { data: documenti } = await supabase.rpc("documenti_dei_miei_contratti");
+ 
++  // Le firme di prova, con l'impronta del documento di oggi per i contratti che ne hanno
++  const firme = await caricaFirme(supabase);
++
+   return (
+     <GestioneAffittiClient
+       candidatureSenzaContratto={candidatureSenzaContratto}
+       contratti={contrattiCompleti}
++      firme={firme}
+       documenti={raggruppaPerContratto((documenti ?? []) as DocumentoContratto[])}
+       rapportiPanel={
+         <RapportiPanel
+diff --git a/src/app/(app)/gestione/GestioneClient.tsx b/src/app/(app)/gestione/GestioneClient.tsx
+index aae65c8..8f72712 100644
+--- a/src/app/(app)/gestione/GestioneClient.tsx
++++ b/src/app/(app)/gestione/GestioneClient.tsx
+@@ -6,6 +6,8 @@ import type { ContrattoConAnnuncio } from "@/lib/types";
+ import { LinkUtenze } from "@/components/LinkUtenze";
+ import { BozzaContratto } from "@/components/BozzaContratto";
+ import { ArchivioContratto } from "@/components/ArchivioContratto";
++import { FirmaContratto } from "@/components/FirmaContratto";
++import type { FirmeDelContratto } from "@/lib/firma/carica";
+ import type { DocumentoContratto } from "@/lib/documenti-contratto";
+ import { SOTTOTITOLO_UTENZE } from "@/lib/utenze";
+ import {
+@@ -29,8 +31,11 @@ function formatData(d: string | null): string {
+ export function GestioneClient({
+   contratti,
+   documenti = {},
++  firme = {},
+ }: {
+   contratti: ContrattoConAnnuncio[];
++  /** le firme di prova dei miei contratti, per identificativo del contratto */
++  firme?: Record<string, FirmeDelContratto>;
+   /** i documenti dei miei contratti, per identificativo del contratto */
+   documenti?: Record<string, DocumentoContratto[]>;
+ }) {
+@@ -157,6 +162,12 @@ export function GestioneClient({
+               value={formatData(selezionato.data_firma)}
+             />
+             <BozzaContratto contrattoId={selezionato.id} />
++            <FirmaContratto
++              contrattoId={selezionato.id}
++              statoContratto={selezionato.stato}
++              firme={firme[selezionato.id]?.firme ?? []}
++              improntaAttuale={firme[selezionato.id]?.improntaAttuale ?? null}
++            />
+             <ArchivioContratto contrattoId={selezionato.id} documenti={documenti[selezionato.id] ?? []} />
+           </>
+         )}
+diff --git a/src/app/(app)/gestione/page.tsx b/src/app/(app)/gestione/page.tsx
+index 09b4f05..76e8acf 100644
+--- a/src/app/(app)/gestione/page.tsx
++++ b/src/app/(app)/gestione/page.tsx
+@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
+ import { GestioneClient } from "./GestioneClient";
+ import type { ContrattoConAnnuncio } from "@/lib/types";
+ import { raggruppaPerContratto, type DocumentoContratto } from "@/lib/documenti-contratto";
++import { caricaFirme } from "@/lib/firma/carica";
+ 
+ export default async function GestionePage() {
+   const supabase = await createClient();
+@@ -22,9 +23,13 @@ export default async function GestionePage() {
+   // I documenti di TUTTI i miei contratti, in una chiamata sola (mai il percorso dei file)
+   const { data: documenti } = await supabase.rpc("documenti_dei_miei_contratti");
+ 
++  // Le firme di prova, con l'impronta del documento di oggi per i contratti che ne hanno
++  const firme = await caricaFirme(supabase);
++
+   return (
+     <GestioneClient
+       contratti={(contratti ?? []) as unknown as ContrattoConAnnuncio[]}
++      firme={firme}
+       documenti={raggruppaPerContratto((documenti ?? []) as DocumentoContratto[])}
+     />
+   );
+diff --git a/src/components/FirmaContratto.tsx b/src/components/FirmaContratto.tsx
+new file mode 100644
+index 0000000..3caa743
+--- /dev/null
++++ b/src/components/FirmaContratto.tsx
+@@ -0,0 +1,129 @@
++"use client";
++
++import { useState } from "react";
++import Link from "next/link";
++import { useRouter } from "next/navigation";
++import { TESTO_NESSUN_VALORE, riepilogoFirme } from "@/lib/firma/stato";
++import type { FirmaContratto as Firma } from "@/lib/firma/tipi";
++import { firmaContratto, ritiraFirma } from "@/app/(app)/contratto/firma-actions";
++
++/**
++ * La firma di PROVA del contratto. Ognuna delle due parti firma la versione che vede nella bozza; se i dati cambiano
++ * dopo, la firma risulta superata e si rifà. Non ha valore legale e non rende mai il contratto «firmato»: lo dice
++ * in ogni schermata.
++ */
++export function FirmaContratto({
++  contrattoId,
++  statoContratto,
++  firme,
++  improntaAttuale,
++}: {
++  contrattoId: string;
++  statoContratto: string;
++  firme: Firma[];
++  improntaAttuale: string | null;
++}) {
++  const router = useRouter();
++  const [fase, setFase] = useState<"riposo" | "conferma" | "ritira">("riposo");
++  const [inCorso, setInCorso] = useState(false);
++  const [errore, setErrore] = useState<string | null>(null);
++
++  const r = riepilogoFirme({ statoContratto, firme, improntaAttuale });
++
++  async function esegui(azione: () => Promise<{ ok: true } | { error: string }>) {
++    setErrore(null);
++    setInCorso(true);
++    try {
++      const esito = await azione();
++      if ("error" in esito) {
++        setErrore(esito.error);
++        return;
++      }
++      setFase("riposo");
++      router.refresh();
++    } catch {
++      setErrore("Non sono riuscito a completare l'operazione. Riprova.");
++    } finally {
++      setInCorso(false);
++    }
++  }
++
++  return (
++    <div className="firma-contratto" style={{ margin: "0 0 18px 0" }}>
++      <div className="pref-label" style={{ margin: "0 0 4px 0" }}>
++        <span>Firma di prova</span>
++      </div>
++      <p className="field-note" style={{ margin: "0 0 8px 0" }}>
++        {TESTO_NESSUN_VALORE}
++      </p>
++
++      <ul style={{ listStyle: "none", padding: 0, margin: "0 0 8px 0" }}>
++        {r.righe.map((riga) => (
++          <li key={riga.ruolo} style={{ padding: "4px 0" }}>
++            <b>
++              {riga.etichetta}
++              {riga.mia ? " (tu)" : ""}
++            </b>
++            <div className={riga.valida === false ? "note-error" : "field-note"} style={{ margin: 0 }}>
++              {riga.testo}
++            </div>
++          </li>
++        ))}
++      </ul>
++
++      <p className="field-note" style={{ margin: "0 0 8px 0" }}>
++        {r.sintesi}
++      </p>
++
++      {errore && (
++        <p className="note-error" role="alert" style={{ margin: "0 0 8px 0" }}>
++          {errore}
++        </p>
++      )}
++
++      {r.puoFirmare && fase !== "conferma" && (
++        <button type="button" className="opp-cta" onClick={() => setFase("conferma")} disabled={inCorso}>
++          {r.haUnaFirmaMia ? "Rifirma di prova" : "Firma di prova"}
++        </button>
++      )}
++
++      {r.puoFirmare && fase === "conferma" && (
++        <div className="note-box" style={{ marginTop: 0 }}>
++          <p style={{ margin: "0 0 8px 0" }}>
++            Firmi di prova la versione del contratto che vedi nella bozza. Se i dati cambiano dopo, la firma risulta superata e va rifatta.
++          </p>
++          <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
++            <Link href={`/contratto/${contrattoId}`} className="redo-link">
++              Vedi la bozza
++            </Link>
++            <button type="button" className="redo-link" onClick={() => setFase("riposo")} disabled={inCorso}>
++              Indietro
++            </button>
++            <button type="button" className="opp-cta" disabled={inCorso} onClick={() => esegui(() => firmaContratto(contrattoId))}>
++              {inCorso ? "Registro..." : "Confermo la firma di prova"}
++            </button>
++          </div>
++        </div>
++      )}
++
++      {!r.puoFirmare && r.motivo && <p className="field-note">{r.motivo}</p>}
++
++      {r.haUnaFirmaMia &&
++        (fase === "ritira" ? (
++          <span className="visite-conferma">
++            <span>Vuoi ritirare la tua firma di prova?</span>
++            <button type="button" className="redo-link" onClick={() => setFase("riposo")} disabled={inCorso}>
++              Indietro
++            </button>
++            <button type="button" className="redo-link" disabled={inCorso} onClick={() => esegui(() => ritiraFirma(contrattoId))}>
++              {inCorso ? "Ritiro..." : "Sì, ritira"}
++            </button>
++          </span>
++        ) : (
++          <button type="button" className="redo-link" style={{ marginTop: 6 }} onClick={() => setFase("ritira")} disabled={inCorso}>
++            Ritira la mia firma di prova
++          </button>
++        ))}
++    </div>
++  );
++}
+diff --git a/src/content/informativa.ts b/src/content/informativa.ts
+index 79717c4..059fc0c 100644
+--- a/src/content/informativa.ts
++++ b/src/content/informativa.ts
+@@ -28,7 +28,7 @@ export const INFORMATIVA = {
+    * controllo che fa il database (migrazione 0017): un test fallisce se
+    * questa stringa non lo supera.
+    */
+-  versione: "2026-10-provvisoria-13",
++  versione: "2026-10-provvisoria-14",
+   /**
+    * Versioni precedenti che chi le ha accettate NON deve riaccettare.
+    *
+@@ -55,6 +55,7 @@ export const INFORMATIVA = {
+     "2026-10-provvisoria-10",
+     "2026-10-provvisoria-11",
+     "2026-10-provvisoria-12",
++    "2026-10-provvisoria-13",
+   ] as readonly string[],
+   provvisoria: true,
+   titolo: "Informativa sulla privacy",
+@@ -108,6 +109,7 @@ export const INFORMATIVA = {
+         "I messaggi li leggono solo le due persone, dopo che la candidatura è stata accettata. L'app ricorda quali messaggi hai già letto, solo per mostrarti quanti ne restano da leggere: non lo mostra all'altra persona.",
+         "L'indirizzo preciso di un immobile lo vedono solo il proprietario e le persone con cui ha un match accettato su quell'immobile: agli altri si mostra soltanto la zona.",
+         "Dal contratto di un affitto puoi vedere e scaricare in PDF una bozza con i dati dell'affitto: i nomi delle due parti, l'immobile (con l'indirizzo, se c'è), il canone, la durata e le date. La bozza la compone l'app al momento, la vedono solo le due parti e noi non la conserviamo. Per ora è una bozza di prova, senza valore legale.",
++        "Le due parti di un contratto «in firma» possono registrare una firma di prova: conserviamo chi ha firmato (il proprietario o l'inquilino), quando, e un'impronta del testo firmato, così da vedere se il contratto è cambiato dopo; non conserviamo immagini di firme né dati del dispositivo. La vedono solo le due parti, e ognuno può ritirare la propria. Per ora la firma è di prova: non ha valore legale e non rende il contratto «firmato».",
+         "Ogni contratto ha un archivio di documenti (certificato energetico, planimetria, ricevute, registrazione e altri documenti). I file che carichi li vedono le due parti del contratto, e tu puoi eliminare solo i tuoi. Sono PDF o immagini fino a 10 MB, al massimo 30 per contratto, in un archivio privato: di ogni documento conserviamo il tipo, il nome del file, la dimensione, la data e quale delle due parti l'ha caricato. Quando elimini un documento, il contratto o il tuo account, i file vengono tolti dall'archivio. Non ne analizziamo il contenuto.",
+         "I preferiti e gli annunci che scarti li vede solo chi li sceglie: il proprietario non sa quali annunci hai salvato o scartato.",
+         "Le visite: il proprietario indica i giorni e gli orari in cui è disponibile per un suo immobile. Li vedono solo le persone che hanno un match accettato su quell'immobile; chi non lo ha non vede nemmeno quali orari ci sono. Chi prenota vede la propria visita, e il proprietario vede nome e cognome di chi ha prenotato, per le visite degli ultimi 30 giorni.",
+diff --git a/src/lib/firma/carica.ts b/src/lib/firma/carica.ts
+new file mode 100644
+index 0000000..f126467
+--- /dev/null
++++ b/src/lib/firma/carica.ts
+@@ -0,0 +1,41 @@
++/**
++ * Le firme dei miei contratti, per le pagine: una chiamata per le firme e, per i contratti che ne hanno almeno
++ * una, il calcolo dell'impronta del documento di OGGI (serve a vedere se una firma è superata).
++ *
++ * SOLO codice del server.
++ */
++import { componiContratto } from "@/lib/contratto";
++import { datiDaRiga } from "@/lib/contratto/dati";
++import type { RigaContratto } from "@/lib/contratto/tipi";
++import { improntaDocumento } from "./impronta";
++import type { FirmaContratto } from "./tipi";
++
++type Rpc = { rpc(nome: string, args?: Record<string, unknown>): PromiseLike<{ data: unknown; error: { message: string } | null }> };
++
++export type FirmeDelContratto = { firme: FirmaContratto[]; improntaAttuale: string | null };
++
++export async function caricaFirme(supabase: Rpc): Promise<Record<string, FirmeDelContratto>> {
++  const { data, error } = await supabase.rpc("firme_dei_miei_contratti");
++  if (error || !Array.isArray(data)) return {};
++
++  const perContratto: Record<string, FirmaContratto[]> = {};
++  for (const r of data as FirmaContratto[]) {
++    if (r && typeof r.contratto_id === "string") (perContratto[r.contratto_id] ??= []).push(r);
++  }
++
++  const fuori: Record<string, FirmeDelContratto> = {};
++  await Promise.all(
++    Object.entries(perContratto).map(async ([id, firme]) => {
++      let impronta: string | null = null;
++      try {
++        const { data: righe, error: e } = await supabase.rpc("dati_contratto", { p_contratto: id });
++        const dati = e ? null : datiDaRiga((Array.isArray(righe) ? righe[0] : null) as Partial<RigaContratto> | null);
++        if (dati) impronta = improntaDocumento(componiContratto(dati));
++      } catch {
++        // se non si riesce a calcolare, la firma non si dichiara né valida né superata
++      }
++      fuori[id] = { firme, improntaAttuale: impronta };
++    })
++  );
++  return fuori;
++}
+diff --git a/src/lib/firma/impronta.ts b/src/lib/firma/impronta.ts
+new file mode 100644
+index 0000000..2115820
+--- /dev/null
++++ b/src/lib/firma/impronta.ts
+@@ -0,0 +1,31 @@
++/**
++ * L'impronta di un documento: un SHA-256 del suo testo intero, calcolato su una forma CANONICA (chiavi in ordine,
++ * nessuno spazio di formattazione, testo normalizzato). Lo stesso documento dà sempre la stessa impronta; basta
++ * cambiare una virgola, un nome o un importo perché cambi. Serve a sapere COSA si è firmato e a vedere se il
++ * contratto è cambiato dopo.
++ *
++ * SOLO codice del server (usa node:crypto).
++ */
++import { createHash } from "node:crypto";
++import type { DocumentoContratto } from "@/lib/contratto/tipi";
++
++/** JSON con le chiavi in ordine: due oggetti uguali producono lo stesso testo qualunque sia l'ordine di costruzione. */
++export function jsonCanonico(valore: unknown): string {
++  if (valore === null || typeof valore !== "object") {
++    if (typeof valore === "string") return JSON.stringify(valore.normalize("NFC"));
++    if (typeof valore === "number" && !Number.isFinite(valore)) return "null";
++    return JSON.stringify(valore === undefined ? null : valore);
++  }
++  if (Array.isArray(valore)) return `[${valore.map((v) => jsonCanonico(v)).join(",")}]`;
++  const o = valore as Record<string, unknown>;
++  return `{${Object.keys(o)
++    .filter((k) => o[k] !== undefined)
++    .sort()
++    .map((k) => `${JSON.stringify(k)}:${jsonCanonico(o[k])}`)
++    .join(",")}}`;
++}
++
++/** L'impronta (64 caratteri esadecimali minuscoli) di tutto ciò che il documento dice. */
++export function improntaDocumento(documento: DocumentoContratto): string {
++  return createHash("sha256").update(jsonCanonico(documento), "utf8").digest("hex");
++}
+diff --git a/src/lib/firma/index.ts b/src/lib/firma/index.ts
+new file mode 100644
+index 0000000..07523de
+--- /dev/null
++++ b/src/lib/firma/index.ts
+@@ -0,0 +1,33 @@
++/**
++ * Il solo punto in cui si decide QUALE servizio di firma si usa.
++ *
++ * PER COLLEGARE UN SERVIZIO VERO (punto 34)
++ *   1. si scrive un file in questa cartella che rispetta `ProviderFirma` (vedi tipi.ts) con `origine: "fornitore"`;
++ *   2. lo si registra qui sotto in `FORNITORI_FIRMA`;
++ *   3. si imposta FIRMA_PROVIDER con il suo `id`;
++ *   4. SI SCRIVE UNA MIGRAZIONE con una funzione riservata al ruolo di servizio che registra la firma vera e porta il
++ *      contratto a «firmato» (oggi nessuna funzione può farlo), e si toglie al proprietario il permesso di scrivere
++ *      «firmato» a mano (oggi la regola dei contratti glielo consente);
++ *   5. si aggiorna l'informativa: nomi e indirizzi email vanno al servizio, e il documento da firmare anche (un test
++ *      lo ricorda a chi registra un servizio vero).
++ * Finché il servizio registrato non è quello di prova, l'azione di firma si ferma con un errore: non registra mai
++ * come «di prova» una firma vera.
++ */
++import { fornitoreFirmaProvvisorio } from "./provvisorio";
++import type { ProviderFirma } from "./tipi";
++
++export const FORNITORI_FIRMA: Readonly<Record<string, ProviderFirma>> = {
++  [fornitoreFirmaProvvisorio.id]: fornitoreFirmaProvvisorio,
++};
++
++export const FORNITORE_FIRMA_PREDEFINITO = fornitoreFirmaProvvisorio.id;
++
++/** Un nome sbagliato è un errore di configurazione e si dice, non si ripiega in silenzio. */
++export function fornitoreFirma(nome?: string | null): ProviderFirma {
++  const scelto = (nome ?? process.env.FIRMA_PROVIDER ?? "").trim() || FORNITORE_FIRMA_PREDEFINITO;
++  const f = Object.prototype.hasOwnProperty.call(FORNITORI_FIRMA, scelto) ? FORNITORI_FIRMA[scelto] : undefined;
++  if (!f) throw new Error(`Servizio di firma sconosciuto: «${scelto}». Quelli disponibili: ${Object.keys(FORNITORI_FIRMA).join(", ")}.`);
++  return f;
++}
++
++export type { EsitoFirma, FirmaContratto, OrigineFirma, ProviderFirma, RichiestaFirma } from "./tipi";
+diff --git a/src/lib/firma/provvisorio.ts b/src/lib/firma/provvisorio.ts
+new file mode 100644
+index 0000000..f8856b4
+--- /dev/null
++++ b/src/lib/firma/provvisorio.ts
+@@ -0,0 +1,14 @@
++/**
++ * Il servizio di firma PROVVISORIO. Non firma niente di vero: risponde «fatto» e basta. Serve a provare tutto il
++ * percorso (chi firma, quando, che cosa, e cosa succede se il contratto cambia dopo) prima di scegliere un
++ * servizio. La firma che ne esce NON HA VALORE LEGALE e non rende il contratto «firmato».
++ */
++import type { EsitoFirma, ProviderFirma, RichiestaFirma } from "./tipi";
++
++export const fornitoreFirmaProvvisorio: ProviderFirma = {
++  id: "provvisorio",
++  origine: "provvisoria",
++  async firma(richiesta: RichiestaFirma): Promise<EsitoFirma> {
++    return /^[0-9a-f]{64}$/.test(richiesta?.impronta ?? "") ? { ok: true } : { ok: false, errore: "Impronta non valida.", definitivo: true };
++  },
++};
+diff --git a/src/lib/firma/stato.ts b/src/lib/firma/stato.ts
+new file mode 100644
+index 0000000..5a491f2
+--- /dev/null
++++ b/src/lib/firma/stato.ts
+@@ -0,0 +1,90 @@
++/**
++ * Cosa mostrare della firma di un contratto. Logica pura, senza database né rete.
++ *
++ * Una firma è «valida» se l'impronta registrata è quella del documento di OGGI: se i dati sono cambiati dopo la
++ * firma (un canone, una data, un nome) è «superata» e va rifatta. Una firma di PROVA non rende mai il contratto
++ * «firmato»: il testo lo dice ogni volta.
++ */
++import type { FirmaContratto } from "./tipi";
++
++export type RuoloFirma = "locatore" | "conduttore";
++
++export const ETICHETTA_RUOLO: Record<RuoloFirma, string> = { locatore: "Proprietario", conduttore: "Inquilino" };
++
++export type RigaFirma = {
++  ruolo: RuoloFirma;
++  etichetta: string;
++  /** ha firmato (di prova) */
++  firmata: boolean;
++  /** la firma è sulla versione attuale del documento; `null` se non si sa */
++  valida: boolean | null;
++  mia: boolean;
++  quando: string | null;
++  testo: string;
++};
++
++export type RiepilogoFirme = {
++  righe: [RigaFirma, RigaFirma];
++  /** io posso firmare (o rifirmare) adesso */
++  puoFirmare: boolean;
++  /** ho una mia firma da ritirare */
++  haUnaFirmaMia: boolean;
++  /** il motivo per cui non posso firmare, se c'è una cosa da dire */
++  motivo: string | null;
++  /** entrambe le parti hanno una firma di prova sulla versione attuale */
++  entrambeValide: boolean;
++  /** la frase di sintesi */
++  sintesi: string;
++};
++
++export const TESTO_NESSUN_VALORE =
++  "È una firma di prova: non ha valore legale e non rende il contratto «firmato».";
++
++const data = (iso: string) => new Date(iso).toLocaleDateString("it-IT", { timeZone: "Europe/Rome", day: "numeric", month: "long", year: "numeric" });
++
++export function riepilogoFirme(input: {
++  statoContratto: string;
++  firme: readonly FirmaContratto[];
++  /** l'impronta del documento di oggi; `null` se non si è riusciti a calcolarla */
++  improntaAttuale: string | null;
++}): RiepilogoFirme {
++  const ruoli: RuoloFirma[] = ["locatore", "conduttore"];
++
++  const righe = ruoli.map((ruolo): RigaFirma => {
++    const f = input.firme.find((x) => x.ruolo === ruolo);
++    if (!f) return { ruolo, etichetta: ETICHETTA_RUOLO[ruolo], firmata: false, valida: null, mia: false, quando: null, testo: "Non ha ancora firmato" };
++    const valida = input.improntaAttuale === null ? null : f.impronta === input.improntaAttuale;
++    const quando = data(f.firmata_at);
++    const testo = valida === false ? `Firma di prova del ${quando}, SUPERATA: il contratto è cambiato dopo la firma` : `Firma di prova del ${quando}`;
++    return { ruolo, etichetta: ETICHETTA_RUOLO[ruolo], firmata: true, valida, mia: f.mia, quando: f.firmata_at, testo };
++  }) as [RigaFirma, RigaFirma];
++
++  const mia = righe.find((r) => r.mia) ?? null;
++  const haUnaFirmaMia = mia !== null;
++  const miaValida = mia !== null && mia.valida === true;
++  const inFirma = input.statoContratto === "in_firma";
++
++  let motivo: string | null = null;
++  if (!inFirma) {
++    motivo =
++      input.statoContratto === "bozza"
++        ? "La firma si apre quando il contratto è «in firma»."
++        : "Il contratto non è più «in firma»: la firma di prova non serve.";
++  }
++  const puoFirmare = inFirma && !miaValida;
++  if (inFirma && miaValida) motivo = "Hai già firmato questa versione.";
++
++  const entrambeValide = righe.every((r) => r.firmata && r.valida === true);
++  const nSuperate = righe.filter((r) => r.firmata && r.valida === false).length;
++  const nFirmate = righe.filter((r) => r.firmata).length;
++
++  const sintesi = entrambeValide
++    ? "Entrambe le parti hanno firmato di prova questa versione. Il contratto NON risulta firmato: serve una firma vera."
++    : nSuperate > 0
++      ? "Il contratto è cambiato dopo una firma di prova: va rifatta."
++      : nFirmate === 0
++        ? "Nessuna firma di prova ancora."
++        : "Manca la firma di prova di una delle due parti.";
++
++  return { righe, puoFirmare, haUnaFirmaMia, motivo, entrambeValide, sintesi };
++}
+diff --git a/src/lib/firma/tipi.ts b/src/lib/firma/tipi.ts
+new file mode 100644
+index 0000000..d75b2e4
+--- /dev/null
++++ b/src/lib/firma/tipi.ts
+@@ -0,0 +1,43 @@
++/**
++ * La firma del contratto: i tipi comuni a ogni servizio di firma. Il resto dell'app parla SOLO con questi
++ * tipi; quale servizio sia (quello di prova, o uno vero) lo sa soltanto `index.ts`.
++ *
++ * ATTENZIONE, per chi collegherà un servizio vero: questa interfaccia descrive una firma IMMEDIATA (si chiama,
++ * risponde «fatto»). Un servizio vero è quasi sempre in due tempi (si manda la persona su una pagina del
++ * servizio, e il servizio avvisa a firma avvenuta): servirà estenderla, e ci vorrà una MIGRAZIONE con una funzione
++ * riservata al ruolo di servizio che registri la firma e, solo allora, porti il contratto a «firmato». Le funzioni
++ * di oggi non possono né scrivere una firma vera né cambiare lo stato del contratto: è voluto.
++ */
++
++export type RichiestaFirma = {
++  contrattoId: string;
++  /** l'impronta (SHA-256 in esadecimale) del testo che si firma */
++  impronta: string;
++  /** chi firma */
++  firmatario: string;
++};
++
++export type EsitoFirma =
++  | { ok: true; idEsterno?: string }
++  | { ok: false; errore: string; definitivo: boolean };
++
++export type OrigineFirma = "provvisoria" | "fornitore";
++
++export interface ProviderFirma {
++  /** il nome con cui si sceglie nella configurazione (FIRMA_PROVIDER) */
++  readonly id: string;
++  readonly origine: OrigineFirma;
++  /** NON deve lanciare errori: li restituisce come esito. */
++  firma(richiesta: RichiestaFirma): Promise<EsitoFirma>;
++}
++
++/** Una firma come la restituisce `firme_dei_miei_contratti` (mai l'identificativo della persona). */
++export type FirmaContratto = {
++  contratto_id: string;
++  ruolo: "locatore" | "conduttore";
++  origine: OrigineFirma;
++  impronta: string;
++  firmata_at: string;
++  /** l'ho firmata io */
++  mia: boolean;
++};
+diff --git a/src/lib/verifica.ts b/src/lib/verifica.ts
+index ed41cf5..6b6d141 100644
+--- a/src/lib/verifica.ts
++++ b/src/lib/verifica.ts
+@@ -199,6 +199,13 @@ const MESSAGGI: Record<string, string> = {
+   INQUILINO_INESISTENTE: "Inquilino non trovato.",
+   // decisioni sulle candidature
+   CANDIDATURA_NON_TUA: "Questa candidatura non risulta tua.",
++  // firma di prova del contratto
++  FIRMA_CONTRATTO_NON_TUO: "Non puoi firmare questo contratto.",
++  FIRMA_CONTRATTO_NON_IN_FIRMA: "Il contratto si può firmare solo quando è «in firma».",
++  FIRMA_IMPRONTA_NON_VALIDA: "Non è stato possibile preparare il documento da firmare. Riprova.",
++  FIRMA_MODELLO_NON_VALIDO: "Non è stato possibile preparare il documento da firmare. Riprova.",
++  FIRMA_NON_TROVATA: "Non hai una firma di prova da ritirare.",
++  FIRMA_GIA_REGISTRATA: "La tua firma è già registrata e da qui non si può cambiare.",
+   // documenti del contratto
+   CONTRATTO_NON_TUO: "Non puoi aggiungere documenti a questo contratto.",
+   TIPO_DOCUMENTO_NON_VALIDO: "Scegli che tipo di documento è.",
+diff --git a/supabase/migrations/0029_firme_contratto.sql b/supabase/migrations/0029_firme_contratto.sql
+new file mode 100644
+index 0000000..a06ae06
+--- /dev/null
++++ b/supabase/migrations/0029_firme_contratto.sql
+@@ -0,0 +1,213 @@
++-- ============================================================
++-- MatchAmI — firma di prova del contratto
++--
++-- Le due parti possono registrare una FIRMA DI PROVA: serve a provare il percorso
++-- (chi ha firmato, quando, che cosa) prima di avere un servizio di firma vero. NON HA
++-- NESSUN VALORE LEGALE e NON rende il contratto «firmato».
++--
++-- LA PROMESSA CHE QUESTA MIGRAZIONE FA RISPETTARE, per come è fatta e non per un controllo:
++--   - la funzione che le persone chiamano scrive SEMPRE una firma «provvisoria»: non esiste
++--     un parametro per dire altrimenti;
++--   - nessuna funzione qui cambia lo stato del contratto. Quando ci sarà un servizio vero,
++--     avrà una funzione sua, riservata al ruolo di servizio, e ci vorrà una migrazione nuova.
++--
++-- COSA SI REGISTRA: chi (a ruoli: proprietario o inquilino), quando, e l'IMPRONTA del
++-- documento firmato (un hash di tutto il suo testo in quel momento, con il modello usato).
++-- Se i dati del contratto cambiano dopo la firma, l'impronta del documento di oggi è
++-- diversa da quella registrata e l'app mostra la firma come SUPERATA. Nessuna immagine
++-- di firma, nessun indirizzo IP, nessun dato del dispositivo.
++--
++-- La firma si apre solo quando il contratto è «in firma». Ognuno può ritirare la propria.
++-- La tabella non ha nessuna lettura diretta: solo funzioni.
++--
++-- ORDINE: esegui questa migrazione PRIMA del push del codice.
++-- ============================================================
++
++create table if not exists firme_contratto (
++  id               uuid primary key default gen_random_uuid(),
++  contratto_id     uuid not null references contratti(id) on delete cascade,
++  firmatario       uuid not null references profiles(id) on delete cascade,
++  ruolo            text not null check (ruolo in ('locatore', 'conduttore')),
++  -- 'provvisoria' = firma di prova; 'fornitore' = per una firma vera, che oggi nessuna funzione può scrivere
++  origine          text not null check (origine in ('provvisoria', 'fornitore')),
++  fornitore        text not null check (char_length(fornitore) between 1 and 40),
++  -- SHA-256 in esadecimale del testo del contratto che si è firmato
++  impronta         text not null check (impronta ~ '^[0-9a-f]{64}$'),
++  modello_id       text not null check (modello_id ~ '^[a-z][a-z0-9_-]{0,39}$'),
++  modello_versione text not null check (char_length(modello_versione) between 1 and 20),
++  firmata_at       timestamptz not null default now(),
++  unique (contratto_id, firmatario)
++);
++
++alter table firme_contratto enable row level security;
++revoke all on firme_contratto from anon, authenticated;
++
++-- ------------------------------------------------------------
++-- Le firme dei MIEI contratti (di entrambe le parti), in una chiamata sola
++-- ------------------------------------------------------------
++
++create or replace function public.firme_dei_miei_contratti()
++returns table (
++  contratto_id uuid,
++  ruolo        text,
++  origine      text,
++  impronta     text,
++  firmata_at   timestamptz,
++  mia          boolean
++)
++language sql
++stable
++security definer
++set search_path = public
++as $$
++  select f.contratto_id, f.ruolo, f.origine, f.impronta, f.firmata_at, f.firmatario = auth.uid()
++    from firme_contratto f
++    join contratti c on c.id = f.contratto_id
++    join candidature k on k.id = c.candidatura_id
++    join listings l on l.id = k.listing_id
++   where auth.uid() is not null
++     and k.status = 'accettata'
++     and (k.tenant_id = auth.uid() or l.owner_id = auth.uid())
++   order by f.firmata_at;
++$$;
++
++-- ------------------------------------------------------------
++-- Firmare (di prova)
++--
++-- Firmare di nuovo la STESSA versione non cambia niente; firmare una versione DIVERSA
++-- (i dati sono cambiati) sostituisce la firma e ne aggiorna la data.
++-- ------------------------------------------------------------
++
++create or replace function public.registra_firma_di_prova(
++  p_contratto uuid,
++  p_impronta text,
++  p_modello_id text,
++  p_modello_versione text
++)
++returns uuid
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_stato stato_contratto;
++  v_ruolo text;
++  v_esistente firme_contratto;
++  v_id uuid;
++begin
++  if auth.uid() is null then
++    raise exception 'NON_AUTENTICATO';
++  end if;
++
++  -- il contratto si blocca: lo stato non può cambiare mentre si firma
++  select c.stato,
++         case when l.owner_id = auth.uid() then 'locatore' else 'conduttore' end
++    into v_stato, v_ruolo
++    from contratti c
++    join candidature k on k.id = c.candidatura_id
++    join listings l on l.id = k.listing_id
++   where c.id = p_contratto
++     and k.status = 'accettata'
++     and (k.tenant_id = auth.uid() or l.owner_id = auth.uid())
++     for update of c;
++  if not found then
++    raise exception 'FIRMA_CONTRATTO_NON_TUO';
++  end if;
++
++  if v_stato <> 'in_firma' then
++    raise exception 'FIRMA_CONTRATTO_NON_IN_FIRMA';
++  end if;
++
++  if p_impronta is null or p_impronta !~ '^[0-9a-f]{64}$' then
++    raise exception 'FIRMA_IMPRONTA_NON_VALIDA';
++  end if;
++  if p_modello_id is null or p_modello_id !~ '^[a-z][a-z0-9_-]{0,39}$'
++     or p_modello_versione is null or char_length(btrim(p_modello_versione)) not between 1 and 20 then
++    raise exception 'FIRMA_MODELLO_NON_VALIDO';
++  end if;
++
++  select * into v_esistente from firme_contratto where contratto_id = p_contratto and firmatario = auth.uid();
++
++  if found then
++    -- una firma VERA (di un servizio di firma) da qui non si tocca: né si sostituisce né si ritira
++    if v_esistente.origine <> 'provvisoria' then
++      raise exception 'FIRMA_GIA_REGISTRATA';
++    end if;
++
++    -- la stessa versione: niente da fare (la data resta quella della prima firma)
++    if v_esistente.impronta = p_impronta and v_esistente.modello_id = p_modello_id and v_esistente.modello_versione = btrim(p_modello_versione) then
++      return v_esistente.id;
++    end if;
++    update firme_contratto
++       set impronta = p_impronta, modello_id = p_modello_id, modello_versione = btrim(p_modello_versione), firmata_at = now()
++     where id = v_esistente.id
++    returning id into v_id;
++    return v_id;
++  end if;
++
++  -- SEMPRE «provvisoria»: non esiste un parametro per scegliere
++  insert into firme_contratto (contratto_id, firmatario, ruolo, origine, fornitore, impronta, modello_id, modello_versione)
++  values (p_contratto, auth.uid(), v_ruolo, 'provvisoria', 'provvisorio', p_impronta, p_modello_id, btrim(p_modello_versione))
++  returning id into v_id;
++  return v_id;
++end;
++$$;
++
++-- ------------------------------------------------------------
++-- Ritirare la PROPRIA firma di prova
++-- ------------------------------------------------------------
++
++create or replace function public.revoca_firma_di_prova(p_contratto uuid)
++returns void
++language plpgsql
++security definer
++set search_path = public
++as $$
++begin
++  if auth.uid() is null then
++    raise exception 'NON_AUTENTICATO';
++  end if;
++
++  delete from firme_contratto
++   where contratto_id = p_contratto
++     and firmatario = auth.uid()
++     and origine = 'provvisoria';
++  if not found then
++    raise exception 'FIRMA_NON_TROVATA';
++  end if;
++end;
++$$;
++
++-- ------------------------------------------------------------
++-- Permessi
++-- ------------------------------------------------------------
++
++revoke all on function
++  public.firme_dei_miei_contratti(),
++  public.registra_firma_di_prova(uuid, text, text, text),
++  public.revoca_firma_di_prova(uuid)
++from public, anon;
++
++grant execute on function
++  public.firme_dei_miei_contratti(),
++  public.registra_firma_di_prova(uuid, text, text, text),
++  public.revoca_firma_di_prova(uuid)
++to authenticated;
++
++-- ------------------------------------------------------------
++-- Verifica
++-- ------------------------------------------------------------
++
++select routine_name from information_schema.routines
++where routine_name in ('firme_dei_miei_contratti', 'registra_firma_di_prova', 'revoca_firma_di_prova')
++order by 1;   -- 3 righe
++
++-- deve risultare 0: nessun permesso diretto sulla tabella
++select count(*) as permessi_diretti_per_gli_utenti
++from information_schema.role_table_grants
++where table_name = 'firme_contratto' and grantee in ('authenticated', 'anon');
++
++-- deve risultare 0: nessuna funzione di questa migrazione scrive nello stato del contratto
++select count(*) as funzioni_che_toccano_lo_stato
++from pg_proc where proname in ('firme_dei_miei_contratti', 'registra_firma_di_prova', 'revoca_firma_di_prova')
++  and prosrc ~* 'update\s+contratti';
+-- 
+2.43.0
+

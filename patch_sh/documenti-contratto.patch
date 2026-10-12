@@ -1,0 +1,1757 @@
+From 0aecdaa9f80acf1d667ca0aa00f2aabdf55dfee6 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 12 Oct 2026 13:17:32 +0000
+Subject: [PATCH] feat(documenti): archivio dei documenti del contratto (APE,
+ planimetria, ricevute, registrazione)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RICHIEDE LA MIGRAZIONE 0028 PRIMA DEL PUSH. Per scaricare i documenti serve la
+chiave di servizio (SUPABASE_SECRET_KEY) già richiesta da email e cancellazione account.
+
+Ogni contratto ha un archivio: CIASCUNA delle due parti carica documenti, li
+vedono entrambe, li cancella solo chi li ha caricati. PDF, JPG o PNG fino a 10 MB,
+al massimo 30 per contratto, in un archivio privato.
+
+PRINCIPIO: l'archivio non concede MAI a un utente di leggere i file di un altro.
+Ognuno vede solo la propria cartella <id utente>/<file>. L'altra parte arriva a un
+file in UN solo punto: un percorso del server che prima chiede al database 'sei una
+delle due parti di quel contratto?' e solo se sì scarica il file con la chiave di
+servizio. Come per l'indirizzo: il controllo sta in un posto solo. Tre regole
+dell'archivio, tutte sulla propria cartella, nessuna che guardi altre tabelle (un test
+lo impone).
+
+IL SERVER GUARDA IL FILE, non si fida del browser: il file va dal browser
+all'archivio, poi il server lo LEGGE e ne controlla i primi byte (solo un PDF, un
+JPEG o un PNG veri che COMINCIANO come tali; un HTML chiamato ricevuta.pdf, o un
+poliglotta, non passa), ne legge la dimensione vera e confronta il contenuto con
+l'estensione. Ogni rifiuto TOGLIE il file (un file respinto non ha una riga e non
+sarebbe nemmeno in coda): con i permessi della persona e, se non riesce, con la
+chiave di servizio.
+
+SCARICAMENTO: sempre come scaricamento (mai aperto nella pagina), con il tipo
+registrato, nosniff e Content-Security-Policy sandbox; l'estensione è quella vera
+del file, non quella scritta da chi ha caricato; il nome nell'intestazione non può
+rompere l'intestazione (provato con 2000 nomi casuali e con a capo, virgolette,
+direzione del testo).
+
+FILE ORFANI. I file nell'archivio NON si cancellano da soli: se un contratto sparisce
+(una delle parti cancella l'account, o l'immobile viene eliminato) le righe cadono a
+cascata e i file, ANCHE QUELLI DELL'ALTRA PARTE, resterebbero lì senza nessuna riga
+che li indichi. Un trigger accoda il percorso di OGNI riga cancellata, a cascata
+compresa, in file_da_eliminare; il server la svuota dopo ogni cancellazione e dopo
+l'eliminazione di un account; /api/archivio/pulisci (CRON_SECRET) riprende ciò che
+fosse rimasto. Le righe della coda si cancellano SOLO dopo che il file è stato tolto.
+Provato: contratto cancellato, account cancellato, immobile cancellato.
+
+LIMITE DI 30: il contratto si blocca mentre si conta (for update). Provato con 6
+registrazioni in parallelo da 29: 0 prove su 8 oltre il limite; senza il blocco 8 su 8.
+
+DIFETTI TROVATI E CORRETTI
+- i caratteri che invertono la direzione del testo (U+202E: una ricevuta che a video
+  appare come ricevutaexe.pdf) NON venivano tolti dal nome del file. Trovato da un
+  test; corretto in TUTTI i punti con lo stesso pulitore: nome del file, nomi nel
+  contratto, indirizzo, saluto delle email
+- tre punti in cui un file respinto restava nell'archivio senza riga (contratto o
+  tipo non validi, lettura fallita, rimozione fallita)
+- due test vuoti: identificativi di sole cifre non cambiano con toUpperCase()
+
+La cancellazione dell'account già elenca gli archivi da svuotare: aggiunto
+documenti-contratto (un test esistente lo impone) e, dopo la cancellazione dell'utente,
+la coda si svuota. Percorsi PIATTI <utente>/<id>.<ext>: la funzione di cancellazione
+elenca la cartella della persona e non rimuoverebbe cartelle annidate.
+
+Informativa 2026-10-provvisoria-13 (la 12 tra le equivalenti: nessuno deve
+riaccettare): l'archivio, chi vede cosa, i limiti, che i file si tolgono, che
+non se ne analizza il contenuto, e come si aprono (dall'app, solo le due parti).
+
+Test: 777 in tutto; 33 prove eseguono le VERE azioni e i VERI percorsi con finti
+server; 23 sul componente. Migrazione provata su PostgreSQL fedele a Supabase (circa
+110 controlli). Verificato sul server: scaricamento identico al file caricato, casi
+non ammessi, pulizia periodica. Difetti reintrodotti di proposito: 29 su 29 presi.
+---
+ package.json                                  |   2 +-
+ scripts/test-documenti-contratto.mjs          | 275 +++++++++++++
+ scripts/test-informativa.mjs                  |  10 +-
+ .../contratto/[id]/documenti/[doc]/route.ts   |  69 ++++
+ src/app/(app)/contratto/documenti-actions.ts  | 125 ++++++
+ .../GestioneAffittiClient.tsx                 |   6 +
+ src/app/(app)/gestione-affitti/page.tsx       |   5 +
+ src/app/(app)/gestione/GestioneClient.tsx     |   6 +
+ src/app/(app)/gestione/page.tsx               |   9 +-
+ src/app/(app)/profilo/elimina-actions.ts      |   6 +
+ src/app/api/archivio/pulisci/route.ts         |  30 ++
+ src/components/ArchivioContratto.tsx          | 187 +++++++++
+ src/content/informativa.ts                    |   6 +-
+ src/lib/account.ts                            |   1 +
+ src/lib/archivio.ts                           |  64 +++
+ src/lib/contratto/dati.ts                     |   2 +-
+ src/lib/documenti-contratto.ts                | 165 ++++++++
+ src/lib/email/modello.ts                      |   2 +-
+ src/lib/mappe/indirizzo.ts                    |   2 +-
+ src/lib/supabase/middleware.ts                |   2 +-
+ src/lib/verifica.ts                           |   7 +
+ .../migrations/0028_documenti_contratto.sql   | 374 ++++++++++++++++++
+ 22 files changed, 1346 insertions(+), 9 deletions(-)
+ create mode 100644 scripts/test-documenti-contratto.mjs
+ create mode 100644 src/app/(app)/contratto/[id]/documenti/[doc]/route.ts
+ create mode 100644 src/app/(app)/contratto/documenti-actions.ts
+ create mode 100644 src/app/api/archivio/pulisci/route.ts
+ create mode 100644 src/components/ArchivioContratto.tsx
+ create mode 100644 src/lib/archivio.ts
+ create mode 100644 src/lib/documenti-contratto.ts
+ create mode 100644 supabase/migrations/0028_documenti_contratto.sql
+
+diff --git a/package.json b/package.json
+index f94dfe0..16fd9fe 100644
+--- a/package.json
++++ b/package.json
+@@ -8,7 +8,7 @@
+     "start": "next start",
+     "lint": "eslint",
+     "pretest": "node scripts/controlla-dipendenze.mjs",
+-    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-documenti-contratto.mjs b/scripts/test-documenti-contratto.mjs
+new file mode 100644
+index 0000000..cfed286
+--- /dev/null
++++ b/scripts/test-documenti-contratto.mjs
+@@ -0,0 +1,275 @@
++/**
++ * Test dell'archivio dei documenti di un contratto (src/lib/documenti-contratto.ts, src/lib/archivio.ts
++ * e i collegamenti con la migrazione 0028). Si lancia con:   npm test
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const dc = caricaTs(path.join(radice, "src", "lib", "documenti-contratto.ts"));
++const ar = caricaTs(path.join(radice, "src", "lib", "archivio.ts"));
++const ac = caricaTs(path.join(radice, "src", "lib", "account.ts"));
++const v = caricaTs(path.join(radice, "src", "lib", "verifica.ts"));
++const { INFORMATIVA } = caricaTs(path.join(radice, "src", "content", "informativa.ts"));
++// con i ritorni a capo di Windows normalizzati: un'estrazione di git può usarli
++const leggi = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8").replace(/\r\n/g, "\n");
++const sql = leggi("supabase", "migrations", "0028_documenti_contratto.sql");
++
++// con lettere esadecimali: un identificativo di sole cifre non cambia con toUpperCase() e le prove sul maiuscolo sarebbero vuote
++const U1 = "a1111111-1111-4111-8111-11111111111a", U2 = "b2222222-2222-4222-8222-22222222222b", ID = "c3333333-3333-4333-8333-33333333333c";
++const PDF = Uint8Array.from([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37, 0x0a]);
++const JPG = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]);
++const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]);
++const testo = (s) => Uint8Array.from(Buffer.from(s, "utf8"));
++
++// ============================================================ i tipi e i limiti
++test("tipi di documento: i cinque, con un'etichetta, e solo quelli sono validi", () => {
++  assert.deepEqual(dc.TIPI_DOCUMENTO.map((t) => t.id), ["ape", "planimetria", "ricevuta", "registrazione", "altro"]);
++  for (const t of dc.TIPI_DOCUMENTO) { assert.equal(dc.tipoDocumentoValido(t.id), true); assert.ok(t.etichetta.length > 3); assert.equal(dc.etichettaTipo(t.id), t.etichetta); }
++  for (const x of ["", "APE", "boh", "__proto__", "constructor", "toString", null, undefined, 5, {}, ["ape"], "ape "]) assert.equal(dc.tipoDocumentoValido(x), false, JSON.stringify(x));
++  assert.equal(dc.etichettaTipo("sconosciuto"), "Documento");
++});
++
++test("regole rispecchiate: i tipi, il limite di 30, i 10 MB, i 200 caratteri e i tipi di file sono quelli della migrazione", () => {
++  const tipi = sql.match(/tipo\s+text not null check \(tipo in \(([^)]*)\)\)/)[1].match(/'([^']+)'/g).map((x) => x.replaceAll("'", ""));
++  assert.deepEqual(tipi, dc.TIPI_DOCUMENTO.map((t) => t.id), "i tipi del database e dell'app sono diversi");
++  assert.match(sql, /\) >= 30 then\s+raise exception 'TROPPI_DOCUMENTI'/); assert.equal(dc.LIMITI_DOCUMENTI.maxPerContratto, 30);
++  assert.match(sql, /between 1 and 10485760/); assert.equal(dc.LIMITI_DOCUMENTI.maxByte, 10485760);
++  assert.match(sql, /char_length\(nome_file\) between 1 and 200/); assert.equal(dc.LIMITI_DOCUMENTI.maxNome, 200);
++  const mime = sql.match(/allowed_mime_types = array\[([^\]]*)\]/)[1].match(/'([^']+)'/g).map((x) => x.replaceAll("'", "")); assert.deepEqual(mime.sort(), ["application/pdf", "image/jpeg", "image/png"]);
++  assert.match(sql, /file_size_limit = 10485760/);
++});
++
++// ============================================================ cosa c'è DAVVERO dentro il file
++test("riconoscere il file dai primi byte: PDF, JPEG e PNG", () => {
++  assert.deepEqual(dc.riconosciFile(PDF), { tipo_file: "application/pdf", estensione: "pdf" }); assert.deepEqual(dc.riconosciFile(JPG), { tipo_file: "image/jpeg", estensione: "jpg" }); assert.deepEqual(dc.riconosciFile(PNG), { tipo_file: "image/png", estensione: "png" });
++  assert.equal(dc.riconosciFile(Uint8Array.from([...PDF, ...new Array(1000).fill(7)])).estensione, "pdf", "ciò che segue non conta");
++});
++
++test("un file che si finge un altro non passa: testo, HTML, script, SVG, zip, eseguibili, vuoto", () => {
++  const finti = { html: testo("<html><script>alert(1)</script></html>"), svg: testo('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>'), js: testo("alert(1)"), zip: Uint8Array.from([0x50, 0x4b, 0x03, 0x04, 0, 0]), exe: Uint8Array.from([0x4d, 0x5a, 0x90, 0, 3, 0]), elf: Uint8Array.from([0x7f, 0x45, 0x4c, 0x46, 2, 1]), gif: testo("GIF89a....."), vuoto: new Uint8Array(0), corto: Uint8Array.from([0x25, 0x50, 0x44]) };
++  for (const [nome, b] of Object.entries(finti)) assert.equal(dc.riconosciFile(b), null, nome);
++  for (const x of [null, undefined]) assert.equal(dc.riconosciFile(x), null);
++});
++
++test("il file deve COMINCIARE come un PDF/JPEG/PNG: una firma nel mezzo, o preceduta da altro, non conta", () => {
++  assert.equal(dc.riconosciFile(Uint8Array.from([0x20, ...PDF])), null, "uno spazio prima di %PDF-"); assert.equal(dc.riconosciFile(Uint8Array.from([...testo("<html>"), ...PDF])), null, "HTML seguito da %PDF-");
++  assert.equal(dc.riconosciFile(Uint8Array.from([0xff, 0xd8, 0x00, 0xe0])), null, "JPEG con il terzo byte sbagliato"); assert.equal(dc.riconosciFile(Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0b])), null, "PNG con l'ultimo byte sbagliato");
++  assert.equal(dc.riconosciFile(Uint8Array.from([0x25, 0x50, 0x44, 0x46, 0x2e])), null, "%PDF. e non %PDF-");
++});
++
++test("mai errori: qualunque sequenza di byte dà un tipo o nulla (3000 prove casuali, e tutte le lunghezze corte)", () => {
++  let seme = 4242; const rnd = () => (seme = (seme * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
++  for (let i = 0; i < 3000; i++) { const b = Uint8Array.from({ length: Math.floor(rnd() * 20) }, () => Math.floor(rnd() * 256)); assert.doesNotThrow(() => dc.riconosciFile(b)); const r = dc.riconosciFile(b); assert.ok(r === null || ["pdf", "jpg", "png"].includes(r.estensione)); }
++  for (let n = 0; n <= 8; n++) assert.doesNotThrow(() => dc.riconosciFile(PNG.slice(0, n)));
++});
++
++// ============================================================ il percorso
++test("percorso: <utente>/<id>.<estensione>, piatto, in minuscolo; identificativi o estensioni sbagliati non si costruiscono", () => {
++  assert.equal(dc.percorsoArchivio({ userId: U1, id: ID, estensione: "pdf" }), `${U1}/${ID}.pdf`); assert.equal(dc.percorsoArchivio({ userId: U1.toUpperCase(), id: ID.toUpperCase(), estensione: "jpg" }), `${U1}/${ID}.jpg`);
++  for (const x of [{ userId: "x", id: ID, estensione: "pdf" }, { userId: U1, id: "../x", estensione: "pdf" }, { userId: U1, id: ID, estensione: "exe" }, { userId: U1, id: ID, estensione: "jpeg" }, { userId: U1, id: ID, estensione: "" }, { userId: `${U1}/${U2}`, id: ID, estensione: "pdf" }]) assert.throws(() => dc.percorsoArchivio(x), JSON.stringify(x));
++});
++
++test("percorso: è «della persona» solo se sta nella sua cartella, ed è fatto esattamente così", () => {
++  assert.equal(dc.percorsoDiUtente(`${U1}/${ID}.pdf`, U1), true); assert.equal(dc.percorsoDiUtente(`${U1}/${ID}.png`, U1), true); assert.equal(dc.percorsoDiUtente(`${U1}/${ID}.jpg`, U1), true);
++  for (const p of [`${U2}/${ID}.pdf`, `${U1}/${ID}.PDF`, `${U1}/${ID}.jpeg`, `${U1}/${ID}.svg`, `${U1}/${ID}.pdf.exe`, `${U1}/../${U2}/${ID}.pdf`, `${U1}/${U1}/${ID}.pdf`, `${U1}/nome-libero.pdf`, `${U1}/${ID}`, `/${U1}/${ID}.pdf`, `${U1}/${ID}.pdf\n`, `${U1.toUpperCase()}/${ID}.pdf`, "", null, undefined, 5, {}]) assert.equal(dc.percorsoDiUtente(p, U1), false, JSON.stringify(p));
++  for (const u of ["", "x", "../x", null, undefined]) assert.equal(dc.percorsoDiUtente(`${U1}/${ID}.pdf`, u), false, JSON.stringify(u));
++});
++
++test("percorso: la regola dell'app e quella del database danno lo stesso verdetto su una serie di casi", () => {
++  const re = sql.match(/percorso\s+text not null unique\s+check \(percorso ~ '([^']+)'\)/)[1]; const db = new RegExp(re);
++  const casi = [`${U1}/${ID}.pdf`, `${U1}/${ID}.jpg`, `${U1}/${ID}.png`, `${U1}/${ID}.jpeg`, `${U1}/${ID}.PDF`, `${U1}/${ID}.svg`, `${U1}/${ID}`, `${U1}/${U2}/${ID}.pdf`, `${U1}/../${ID}.pdf`, `${U1}/x.pdf`, `${ID}.pdf`, `${U1}/${ID}.pdf.exe`, `${U1}/${ID}.pdf\n`];
++  for (const c of casi) { const appOk = dc.percorsoDiUtente(c, U1); const dbOk = db.test(c); assert.equal(appOk, dbOk, `«${c}»: app ${appOk}, database ${dbOk}`); }
++});
++
++// ============================================================ il nome del file
++test("nome pulito: spazi ridotti, caratteri di controllo e separatori di cartelle tolti, al massimo 200 caratteri (non byte)", () => {
++  assert.equal(dc.nomeFilePulito("  ricevuta   ottobre \n.pdf"), "ricevuta ottobre .pdf"); assert.equal(dc.nomeFilePulito("a/b\\c"), "a_b_c"); assert.equal(dc.nomeFilePulito("a\u0000b\u202ec"), "a b c"); assert.equal(dc.nomeFilePulito("../../etc/passwd"), ".._.._etc_passwd");
++  assert.equal([...dc.nomeFilePulito("x".repeat(500))].length, 200); assert.equal([...dc.nomeFilePulito("💥".repeat(500))].length, 200, "per punti di codice");
++  for (const x of [null, undefined, 5, {}, []]) assert.equal(dc.nomeFilePulito(x), "");
++});
++
++test("nome per lo scaricamento: l'intestazione non si può rompere, qualunque nome si scelga (2000 nomi casuali)", () => {
++  const cattivi = ['a"; filename="x.exe', "a\r\nSet-Cookie: s=1", "a\nContent-Type: text/html", "../../x", "a;b", "é à ü ñ", "💥", "Łukasz", "", "   ", ".pdf", "a.html", "nome.exe.pdf"];
++  for (const n of cattivi) { const r = dc.nomeDaScaricare(n, "pdf"); assert.match(r.ascii, /^[A-Za-z0-9._ -]+$/, `ascii di «${n}»: ${r.ascii}`); assert.ok(!/["\r\n;\\/]/.test(r.ascii)); assert.ok(!/[\s"';()*]/.test(r.utf8.replace(/%20/g, "")) , `utf8 di «${n}»: ${r.utf8}`); assert.match(r.ascii, /\.pdf$/); assert.match(r.utf8, /\.pdf$/); }
++  let seme = 7; const rnd = () => (seme = (seme * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
++  for (let i = 0; i < 2000; i++) { const n = Array.from({ length: Math.floor(rnd() * 30) }, () => String.fromCodePoint(rnd() < 0.5 ? 32 + Math.floor(rnd() * 95) : Math.floor(rnd() * 0x2000))).join(""); const r = dc.nomeDaScaricare(n, "png"); assert.match(r.ascii, /^[A-Za-z0-9._ -]+\.png$/, JSON.stringify(n)); assert.ok(!/[\r\n"]/.test(r.utf8)); }
++});
++
++test("nome per lo scaricamento: l'estensione è quella VERA del file, non quella scritta da chi ha caricato", () => {
++  assert.equal(dc.nomeDaScaricare("ricevuta.html", "pdf").ascii, "ricevuta.pdf"); assert.equal(dc.nomeDaScaricare("foto.exe", "jpg").ascii, "foto.jpg"); assert.equal(dc.nomeDaScaricare("x", "boh").ascii, "x.bin");
++  assert.equal(dc.nomeDaScaricare("Ricevuta d'ottobre à.pdf", "pdf").ascii, "Ricevuta d_ottobre a.pdf"); assert.match(dc.nomeDaScaricare("Ricevuta d'ottobre à.pdf", "pdf").utf8, /^Ricevuta%20d%27ottobre%20%C3%A0\.pdf$/);
++});
++
++test("file scelto: tipo, vuoto, troppo grande, senza nome", () => {
++  const ok = { type: "application/pdf", size: 1000, name: "a.pdf" }; assert.equal(dc.validaFileScelto(ok), null);
++  assert.match(dc.validaFileScelto({ ...ok, type: "text/html" }), /PDF/); assert.match(dc.validaFileScelto({ ...ok, size: 0 }), /vuoto/); assert.match(dc.validaFileScelto({ ...ok, size: 10 * 1024 * 1024 + 1 }), /10 MB/);
++  assert.equal(dc.validaFileScelto({ ...ok, size: 10 * 1024 * 1024 }), null, "10 MB esatti vanno bene"); assert.match(dc.validaFileScelto({ ...ok, name: "" }), /nome/); assert.match(dc.validaFileScelto({ ...ok, name: "   " }), /nome/);
++  assert.equal(dc.estensioneDichiarata("application/pdf"), "pdf"); assert.equal(dc.estensioneDichiarata("image/jpeg"), "jpg"); assert.equal(dc.estensioneDichiarata("image/png"), "png"); for (const t of ["image/svg+xml", "text/html", "", "constructor"]) assert.equal(dc.estensioneDichiarata(t), null, t);
++});
++
++// ============================================================ testi e raggruppamenti
++test("dimensione: byte, KB, MB con la virgola, e valori strani", () => {
++  assert.equal(dc.formattaDimensione(0), "0 B"); assert.equal(dc.formattaDimensione(1023), "1023 B"); assert.equal(dc.formattaDimensione(1024), "1 KB"); assert.equal(dc.formattaDimensione(870 * 1024), "870 KB"); assert.equal(dc.formattaDimensione(1.5 * 1024 * 1024), "1,5 MB"); assert.equal(dc.formattaDimensione(10 * 1024 * 1024), "10,0 MB");
++  for (const x of [-1, NaN, Infinity, "5", null, undefined]) assert.equal(dc.formattaDimensione(x), "", String(x));
++});
++
++test("chi ha caricato: a ruoli, mai un nome, e «da te» per i propri", () => {
++  assert.equal(dc.chiHaCaricato({ mio: true, da_ruolo: "locatore" }), "Caricato da te"); assert.equal(dc.chiHaCaricato({ mio: false, da_ruolo: "locatore" }), "Caricato dal proprietario"); assert.equal(dc.chiHaCaricato({ mio: false, da_ruolo: "conduttore" }), "Caricato dall'inquilino");
++});
++
++test("raggruppare per contratto: dal più recente, senza toccare l'elenco ricevuto, e senza righe rotte", () => {
++  const d = (id, c, t) => ({ id, contratto_id: c, tipo: "altro", nome_file: "x", dimensione: 1, tipo_file: "application/pdf", created_at: t, mio: true, da_ruolo: "locatore" });
++  const righe = [d("a", "K1", "2026-10-01T10:00:00Z"), d("b", "K2", "2026-10-02T10:00:00Z"), d("c", "K1", "2026-10-03T10:00:00Z")]; const copia = JSON.stringify(righe);
++  const g = dc.raggruppaPerContratto(righe); assert.deepEqual(g.K1.map((x) => x.id), ["c", "a"]); assert.deepEqual(g.K2.map((x) => x.id), ["b"]); assert.equal(JSON.stringify(righe), copia);
++  assert.deepEqual(dc.raggruppaPerContratto(null), {}); assert.deepEqual(dc.raggruppaPerContratto([null, {}, { contratto_id: 5 }]), {});
++});
++
++test("posti rimasti: da 30 a 0, mai negativi", () => { assert.equal(dc.postiRimasti(0), 30); assert.equal(dc.postiRimasti(29), 1); assert.equal(dc.postiRimasti(30), 0); assert.equal(dc.postiRimasti(99), 0); assert.equal(dc.postiRimasti(-3), 30); });
++
++test("testi: non presumono il genere di nessuno", () => { for (const t of [dc.TESTO_ARCHIVIO, dc.TESTO_LIMITE_RAGGIUNTO, ...dc.TIPI_DOCUMENTO.map((x) => x.etichetta)]) assert.ok(!/\b(lui|lei)\b/i.test(t), t); });
++
++// ============================================================ gli errori
++test("errori: ogni codice che la migrazione può sollevare ha una frase sua, e un errore sul nome non prende la frase dell'errore sul file", () => {
++  const G = v.messaggioErroreVerifica("qualcosa di sconosciuto");
++  const codici = [...new Set([...sql.matchAll(/raise exception '([A-Z_]+)'/g)].map((m) => m[1]))]; for (const c of ["CONTRATTO_NON_TUO", "TIPO_DOCUMENTO_NON_VALIDO", "NOME_FILE_NON_VALIDO", "FILE_NON_VALIDO", "TROPPI_DOCUMENTI", "DOCUMENTO_NON_TUO"]) assert.ok(codici.includes(c), c);
++  for (const c of codici) { const f = v.messaggioErroreVerifica(`ERROR: ${c} (P0001)`); assert.notEqual(f, G, `${c} non ha un messaggio`); assert.ok(!f.includes(c), c); }
++  assert.match(v.messaggioErroreVerifica("NOME_FILE_NON_VALIDO"), /nome del file/); assert.match(v.messaggioErroreVerifica("FILE_NON_VALIDO"), /PDF, un JPG o un PNG fino a 10 MB/);
++  assert.notEqual(v.messaggioErroreVerifica("NOME_FILE_NON_VALIDO"), v.messaggioErroreVerifica("FILE_NON_VALIDO"));
++  assert.match(v.messaggioErroreVerifica("TROPPI_DOCUMENTI"), /30 documenti/);
++});
++
++// ============================================================ la coda dei file
++function finto({ elenco = [], erroreElenco = null, erroriRimozione = {}, erroreEliminati = null, lancia = false } = {}) {
++  const reg = { rpc: [], rimossi: [], ordine: [] };
++  return {
++    reg,
++    rpc: async (nome, args) => { reg.rpc.push([nome, args]); if (nome === "file_da_eliminare_elenco") { reg.ordine.push("elenco"); if (lancia) throw new Error("boom"); return { data: elenco, error: erroreElenco ? { message: erroreElenco } : null }; } if (nome === "file_eliminati") { reg.ordine.push("file_eliminati"); return { data: args.p_ids.length, error: erroreEliminati ? { message: erroreEliminati } : null }; } return { data: null, error: null }; },
++    storage: { from: (bucket) => ({ remove: async (p) => { reg.ordine.push("remove:" + bucket); reg.rimossi.push([bucket, p]); if (erroriRimozione[bucket]) return { error: { message: "no" } }; return { error: null }; } }) },
++  };
++}
++const riga = (id, bucket = "documenti-contratto", percorso = `${U1}/${id}.pdf`) => ({ id, bucket, percorso });
++
++test("coda: si tolgono i file dall'archivio e SOLO DOPO si cancellano le righe", async () => {
++  const f = finto({ elenco: [riga("a"), riga("b")] }); const r = await ar.svuotaCodaFile(f);
++  assert.deepEqual(r, { letti: 2, rimossi: 2, errori: 0 }); assert.deepEqual(f.reg.ordine, ["elenco", "remove:documenti-contratto", "file_eliminati"]);
++  assert.deepEqual(f.reg.rimossi, [["documenti-contratto", [`${U1}/a.pdf`, `${U1}/b.pdf`]]]); assert.deepEqual(f.reg.rpc[1], ["file_eliminati", { p_ids: ["a", "b"] }]);
++});
++
++test("coda: se togliere un file non riesce, la sua riga RESTA (il giro dopo riprova), e gli altri archivi vanno avanti", async () => {
++  const f = finto({ elenco: [riga("a", "documenti-contratto"), riga("b", "altro-archivio")], erroriRimozione: { "documenti-contratto": true } }); const r = await ar.svuotaCodaFile(f);
++  assert.deepEqual(r, { letti: 2, rimossi: 1, errori: 1 }); assert.deepEqual(f.reg.rpc.at(-1), ["file_eliminati", { p_ids: ["b"] }], "la riga di «a» non doveva essere cancellata");
++  const tutti = finto({ elenco: [riga("a")], erroriRimozione: { "documenti-contratto": true } }); await ar.svuotaCodaFile(tutti); assert.ok(!tutti.reg.rpc.some((x) => x[0] === "file_eliminati"), "nessuna riga va cancellata se nessun file è stato tolto");
++});
++
++test("coda: vuota non fa niente; errori, risposte strane ed eccezioni non lanciano mai", async () => {
++  const v1 = finto({ elenco: [] }); assert.deepEqual(await ar.svuotaCodaFile(v1), { letti: 0, rimossi: 0, errori: 0 }); assert.deepEqual(v1.reg.ordine, ["elenco"]);
++  assert.deepEqual(await ar.svuotaCodaFile(finto({ erroreElenco: "giù" })), { letti: 0, rimossi: 0, errori: 1 }); assert.deepEqual(await ar.svuotaCodaFile({ ...finto(), rpc: async () => ({ data: "boh", error: null }) }), { letti: 0, rimossi: 0, errori: 1 });
++  await assert.doesNotReject(async () => ar.svuotaCodaFile(finto({ lancia: true }))); assert.equal((await ar.svuotaCodaFile(finto({ lancia: true }))).errori, 1);
++  const rotte = finto({ elenco: [null, {}, { id: 5, bucket: "x", percorso: "y" }, { id: "a", bucket: 5, percorso: "y" }, riga("ok")] }); assert.equal((await ar.svuotaCodaFile(rotte)).rimossi, 1, "solo la riga valida");
++  const eliminati = finto({ elenco: [riga("a")], erroreEliminati: "giù" }); assert.deepEqual(await ar.svuotaCodaFile(eliminati), { letti: 1, rimossi: 0, errori: 1 });
++});
++
++test("coda: il limite chiesto al database è quello dato (100 di base), e i file si raggruppano per archivio", async () => {
++  const f = finto({ elenco: [riga("a", "uno"), riga("b", "due"), riga("c", "uno")] }); await ar.svuotaCodaFile(f, 7); assert.deepEqual(f.reg.rpc[0], ["file_da_eliminare_elenco", { p_max: 7 }]); assert.equal(ar.MASSIMO_PER_GIRO, 100);
++  assert.equal(f.reg.rimossi.length, 2); assert.deepEqual(f.reg.rimossi.find((x) => x[0] === "uno")[1].length, 2);
++});
++
++// ============================================================ coerenza con la migrazione e con il resto dell'app
++test("cancellazione dell'account: l'archivio dei documenti dei contratti è nell'elenco di quelli da svuotare", () => {
++  assert.ok(ac.BUCKET_FILE_UTENTE.includes("documenti-contratto")); assert.equal(dc.BUCKET_DOCUMENTI_CONTRATTO, "documenti-contratto");
++  const e = leggi("src", "app", "(app)", "profilo", "elimina-actions.ts"); const i = e.indexOf("deleteUser(user.id)"); const j = e.indexOf("svuotaCodaFile(admin)"); assert.ok(i > 0 && j > i, "la coda si svuota DOPO aver cancellato l'utente (le righe cadono a cascata e la riempiono)");
++});
++
++test("migrazione: i file del contratto sono visibili solo a chi li ha caricati (tre regole, tutte sulla propria cartella)", () => {
++  const regole = [...sql.matchAll(/create policy "documenti-contratto: [^"]+" on storage\.objects\s+for (\w+) to authenticated\s+(with check|using) \(([^;]*)\);/g)];
++  assert.deepEqual(regole.map((m) => m[1]).sort(), ["delete", "insert", "select"]); for (const m of regole) { assert.match(m[3], /bucket_id = 'documenti-contratto'/); assert.match(m[3], /\(storage\.foldername\(name\)\)\[1\] = auth\.uid\(\)::text/); assert.ok(!/contratti|candidature|listings|is_staff/.test(m[3]), "una regola dell'archivio guarda altre tabelle: l'accesso tra le parti deve passare solo dal server"); }
++  assert.ok(!/for update/.test(sql.match(/create policy[\s\S]*?;/g).join("")), "esiste una regola di modifica"); assert.ok(!/for all/.test(sql.replace(/--[^\n]*/g, "")), "una regola per tutto");
++});
++
++test("migrazione: le tabelle non hanno permessi né regole dirette, la coda è solo del servizio, e il blocco del limite c'è", () => {
++  for (const t of ["documenti_contratto", "file_da_eliminare"]) { assert.match(sql, new RegExp(`alter table ${t} enable row level security;`)); assert.match(sql, new RegExp(`revoke all on ${t} from anon, authenticated;`)); }
++  assert.ok(!/create policy[^;]*(documenti_contratto|file_da_eliminare)\b[^;]*on (documenti_contratto|file_da_eliminare)/.test(sql));
++  assert.match(sql, /grant execute on function\s+public\.file_da_eliminare_elenco\(integer\),\s+public\.file_eliminati\(uuid\[\]\)\s+to service_role;/); assert.match(sql, /revoke all on function\s+public\.file_da_eliminare_elenco\(integer\),[\s\S]*?from public, anon, authenticated;/);
++  assert.match(sql, /for update of c;/, "senza il blocco due registrazioni insieme superano il limite"); assert.match(sql, /after delete on documenti_contratto\s+for each row execute function public\.accoda_file_documento_contratto\(\)/);
++  assert.match(sql, /on conflict \(id\) do update\s+set public = false/);
++});
++
++test("migrazione: nessuna funzione per le persone restituisce il percorso dei file in un elenco, e nessuna colonna ha dati personali", () => {
++  const elenco = sql.match(/documenti_dei_miei_contratti\(\)\s+returns table \(([\s\S]*?)\)\s+language sql/)[1]; assert.ok(!/percorso/.test(elenco), "l'elenco espone i percorsi"); assert.ok(!/mail|telef|fiscale|nome_utente|cognome/i.test(elenco));
++  assert.match(sql, /percorso_documento_contratto\(p_documento uuid\)\s+returns table \(contratto_id uuid, percorso text/);
++});
++
++function filiDiCodice(dir = path.join(radice, "src")) { return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => { if (e.name.startsWith("__")) return []; const p = path.join(dir, e.name); return e.isDirectory() ? filiDiCodice(p) : /\.(ts|tsx)$/.test(e.name) ? [p] : []; }); }
++const rel = (f) => path.relative(radice, f).replaceAll("\\", "/");
++
++test("chiamate: ogni funzione dei documenti si chiama con esattamente i parametri della migrazione, e solo dai posti previsti", () => {
++  const funzioni = new Map(); for (const m of sql.matchAll(/create or replace function public\.(\w+)\(([^)]*)\)/g)) funzioni.set(m[1], [...m[2].matchAll(/\b(p_\w+)\s/g)].map((x) => x[1]).sort());
++  const attese = { documenti_dei_miei_contratti: ["src/app/(app)/gestione-affitti/page.tsx", "src/app/(app)/gestione/page.tsx"], percorso_documento_contratto: ["src/app/(app)/contratto/[id]/documenti/[doc]/route.ts"], registra_documento_contratto: ["src/app/(app)/contratto/documenti-actions.ts"], elimina_documento_contratto: ["src/app/(app)/contratto/documenti-actions.ts"], file_da_eliminare_elenco: ["src/lib/archivio.ts"], file_eliminati: ["src/lib/archivio.ts"] };
++  const trovate = Object.fromEntries(Object.keys(attese).map((k) => [k, new Set()]));
++  for (const f of filiDiCodice()) { const c = fs.readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, ""); for (const nome of Object.keys(attese)) for (const m of c.matchAll(new RegExp(`"${nome}"\\s*(?:,\\s*\\{([^}]*)\\}|\\))`, "g"))) { assert.deepEqual([...(m[1] ?? "").matchAll(/\b(p_\w+)\s*:/g)].map((x) => x[1]).sort(), funzioni.get(nome), `${rel(f)} chiama ${nome} con parametri diversi da quelli della migrazione`); trovate[nome].add(rel(f)); } }
++  for (const [nome, posti] of Object.entries(attese)) assert.deepEqual([...trovate[nome]].sort(), posti.sort(), `${nome}: chiamata da posti diversi dal previsto`);
++});
++
++test("privacy: nessun codice dell'app nomina la tabella dei documenti o la coda (si passa solo dalle funzioni), e nessun componente conosce il percorso dei file", () => {
++  for (const f of filiDiCodice()) { const c = fs.readFileSync(f, "utf8"); assert.ok(!/documenti_contratto|file_da_eliminare\b/.test(c.replace(/"file_da_eliminare_elenco"/g, "")), `${rel(f)} nomina una tabella dei documenti`); }
++  const comp = leggi("src", "components", "ArchivioContratto.tsx"); assert.ok(!/\.percorso\b/.test(comp), "il componente legge il percorso di un file");
++  assert.ok(!/percorso:/.test(leggi("src", "lib", "documenti-contratto.ts").match(/export type DocumentoContratto = \{[\s\S]*?\n\};/)[0]), "il tipo del documento ha il percorso");
++});
++
++test("scaricamento: i controlli nell'ordine (identificativi, accesso, informativa, solo poi i dati), e il file arriva sempre come scaricamento e bloccato", () => {
++  const r = leggi("src", "app", "(app)", "contratto", "[id]", "documenti", "[doc]", "route.ts"); const i = (s) => r.indexOf(s);
++  assert.ok(i("èUuid(id)") > 0 && i("èUuid(id)") < i("getUser()") && i("getUser()") < i("haAccettatoInformativa(") && i("haAccettatoInformativa(") < i('rpc("percorso_documento_contratto"') && i('rpc("percorso_documento_contratto"') < i("clienteAmministratore()") && i("clienteAmministratore()") < i(".download("), "ordine dei controlli");
++  for (const h of ['"Cache-Control": "private, no-store"', '"X-Content-Type-Options": "nosniff"', "attachment; filename=", "default-src 'none'; sandbox"]) assert.ok(r.includes(h), h);
++  assert.match(r, /riga\.contratto_id !== id/, "l'identificativo del contratto nell'indirizzo deve essere quello del documento"); assert.ok(!/inline/.test(r), "un documento non si apre dentro la pagina");
++  assert.deepEqual([...r.matchAll(/export (?:async )?(?:function|const) (GET|POST|PUT|PATCH|DELETE)\b/g)].map((m) => m[1]), ["GET"]); assert.ok(!/console\./.test(r));
++});
++
++test("azioni: ogni rifiuto, dopo che il percorso è della persona, TOGLIE il file (un file respinto non ha una riga e non finirebbe nella coda)", () => {
++  const a = leggi("src", "app", "(app)", "contratto", "documenti-actions.ts"); const reg = a.slice(a.indexOf("export async function registraDocumento"), a.indexOf("export async function eliminaDocumento")); const i = (s) => reg.indexOf(s);
++  assert.ok(i("percorsoDiUtente(percorso, user.id)") > 0 && i("percorsoDiUtente(percorso, user.id)") < i("const togli"), "il controllo del percorso viene prima");
++  assert.ok(i("const rifiuta") > 0); assert.ok([...reg.matchAll(/return rifiuta\(/g)].length >= 7, "ci sono meno rifiuti con rimozione del previsto: " + [...reg.matchAll(/return rifiuta\(/g)].length);
++  const dopo = reg.slice(i("const rifiuta")); assert.ok(!/return \{ error:/.test(dopo.replace(/return \{ ok: true \}/g, "").replace(/const rifiuta[\s\S]*?\n  \};\n/, "")), "dopo la definizione di «rifiuta» c'è un rifiuto che non passa da lì");
++  assert.match(reg, /clienteAmministratore\(\)/, "se la rimozione normale non riesce si deve riprovare con la chiave di servizio");
++  for (const stop of [reg.slice(0, i("const archivio"))]) assert.ok(!/togli\(\)/.test(stop), "prima del controllo del percorso non si tocca niente");
++});
++
++test("azioni: il tipo e la dimensione si decidono dal CONTENUTO letto dal server, mai da ciò che dichiara il browser", () => {
++  const a = leggi("src", "app", "(app)", "contratto", "documenti-actions.ts"); const reg = a.slice(a.indexOf("export async function registraDocumento"), a.indexOf("export async function eliminaDocumento"));
++  assert.match(reg, /\.download\(percorso\)/); assert.match(reg, /riconosciFile\(bytes\)/); assert.match(reg, /p_dimensione: bytes\.length/); assert.match(reg, /p_tipo_file: riconosciuto\.tipo_file/); assert.match(reg, /percorso\.endsWith\(`\.\$\{riconosciuto\.estensione\}`\)/);
++  assert.ok(!/file\.type|tipoDichiarato|contentType/.test(reg), "il server si fida di un tipo dichiarato dal browser");
++});
++
++test("componente: il percorso si costruisce con l'identificativo della persona, e un file che arriva ma non si registra si toglie", () => {
++  const c = leggi("src", "components", "ArchivioContratto.tsx"); assert.match(c, /percorsoArchivio\(\{ userId: user\.id, id: crypto\.randomUUID\(\), estensione \}\)/); assert.match(c, /finally \{[\s\S]*?if \(percorso\) await supabase\.storage\.from\(BUCKET_DOCUMENTI_CONTRATTO\)\.remove\(\[percorso\]\)/);
++});
++
++test("percorsi pubblici: la pulizia periodica è raggiungibile senza accesso, e SOLO quella", () => {
++  const m = leggi("src", "lib", "supabase", "middleware.ts"); const voci = [...m.match(/const PUBLIC_PATHS = \[([^\]]*)\]/)[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]);
++  assert.ok(voci.includes("/api/archivio/")); for (const troppo of ["/api", "/api/", "/api/archivio", "/contratto", "/contratto/"]) assert.ok(!voci.includes(troppo), troppo);
++  const p = leggi("src", "app", "api", "archivio", "pulisci", "route.ts"); assert.ok(p.indexOf("autorizzaCron(") > 0 && p.indexOf("autorizzaCron(") < p.indexOf("clienteAmministratore()")); assert.match(p, /export const dynamic = "force-dynamic"/); assert.ok(!/console\./.test(p));
++});
++
++test("informativa: dichiara l'archivio, chi vede cosa, i limiti e che i file si tolgono; e dice come si aprono", () => {
++  const t = JSON.stringify(INFORMATIVA);
++  assert.match(t, /I file che carichi li vedono le due parti del contratto, e tu puoi eliminare solo i tuoi/); assert.match(t, /PDF o immagini fino a 10 MB, al massimo 30 per contratto, in un archivio privato/); assert.match(t, /Quando elimini un documento, il contratto o il tuo account, i file vengono tolti dall'archivio/); assert.match(t, /Non ne analizziamo il contenuto/); assert.match(t, /quale delle due parti l'ha caricato/);
++});
++
++test("la logica pura non ha accesso alla rete né al browser", () => {
++  for (const f of ["documenti-contratto.ts", "archivio.ts"]) { const c = leggi("src", "lib", f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, ""); for (const vietato of [/\bfetch\(/, /localStorage/, /process\.env/, /console\./, /supabase\//]) assert.ok(!vietato.test(c), `${f} usa ${vietato}`); }
++});
++
++test("nome: i caratteri che invertono la direzione del testo si tolgono (ricevuta\u202efdp.exe appare come ricevutaexe.pdf)", () => {
++  const bidi = ["\u202a", "\u202b", "\u202c", "\u202d", "\u202e", "\u2066", "\u2067", "\u2068", "\u2069"];
++  for (const c of bidi) { const n = dc.nomeFilePulito(`ricevuta${c}fdp.exe`); assert.ok(!n.includes(c), `U+${c.codePointAt(0).toString(16)} è rimasto in «${n}»`); }
++  const r = dc.nomeDaScaricare("ricevuta\u202efdp.exe", "pdf"); assert.match(r.ascii, /^[A-Za-z0-9._ -]+$/); assert.ok(!/%E2%80%AE/i.test(r.utf8), "la direzione è passata nell'intestazione");
++});
++
++test("nome: i caratteri di direzione si tolgono anche nei nomi delle persone e nell'indirizzo (stessa regola nei tre pulitori)", () => {
++  const dati = caricaTs(path.join(radice, "src", "lib", "contratto", "dati.ts")); const ind = caricaTs(path.join(radice, "src", "lib", "mappe", "indirizzo.ts"));
++  const email = caricaTs(path.join(radice, "src", "lib", "email", "modello.ts")); assert.equal(email.nomeBreve("Mario\u202eossoR"), "Mario", "il saluto di un'email: il primo nome, senza caratteri di direzione"); assert.ok(!email.nomeBreve("\u202eMario").includes("\u202e"));
++  assert.equal(dati.pulisciTesto("Mario\u202eossoR"), "Mario ossoR"); assert.equal(ind.pulisci("Via\u202e Roma"), "Via Roma");
++  for (const c of ["\u202a", "\u202e", "\u2066", "\u2069"]) { assert.ok(!dati.pulisciTesto(`a${c}b`).includes(c)); assert.ok(!ind.pulisci(`a${c}b`).includes(c)); assert.ok(!dc.nomeFilePulito(`a${c}b`).includes(c)); }
++});
+diff --git a/scripts/test-informativa.mjs b/scripts/test-informativa.mjs
+index 9f8e40a..d2aa1c4 100644
+--- a/scripts/test-informativa.mjs
++++ b/scripts/test-informativa.mjs
+@@ -200,11 +200,13 @@ test("file: i bucket pubblici e privati sono quelli che il testo descrive", () =
+   // Se questa uguaglianza cambia, il testo («foto del profilo e degli annunci con
+   // indirizzo pubblico, documenti privati») va riscritto: non va lasciato com'è.
+   assert.deepEqual(pubblici, ["avatar-inquilini", "immobili-foto"], "i bucket pubblici sono cambiati: aggiorna la sezione 'File e foto'");
+-  assert.deepEqual(privati, ["documenti-verifica"], "i bucket privati sono cambiati: aggiorna la sezione 'File e foto'");
++  assert.deepEqual(privati, ["documenti-contratto", "documenti-verifica"], "i bucket privati sono cambiati: aggiorna la sezione 'File e foto'");
+ 
+   const tutto = tutteLeStringhe(INFORMATIVA).join("\n");
+   assert.match(tutto, /non richiede l'accesso/, "il testo non dice che le foto hanno un indirizzo pubblico");
+   assert.match(tutto, /link temporanei/, "il testo non dice che i documenti si aprono con link temporanei");
++  // i documenti dei contratti si aprono in un altro modo, e il testo lo deve dire
++  assert.match(tutto, /I documenti dei contratti non hanno nessun link: si scaricano dall'app, e solo le due parti del contratto possono farlo/, "il testo non dice come si aprono i documenti dei contratti");
+   assert.match(tutto, /foto del profilo/i);
+   assert.match(tutto, /foto degli annunci/i);
+ });
+@@ -226,6 +228,12 @@ const NOME_NEL_TESTO = {
+   identita: /documento d'identità/i,
+   proprieta: /prova di proprietà/i,
+   reddito: /prova del reddito/i,
++  // i documenti di un contratto (archivio con le due parti)
++  ape: /certificato energetico/i,
++  planimetria: /planimetria/i,
++  ricevuta: /ricevute/i,
++  registrazione: /registrazione/i,
++  altro: /altri documenti/i,
+ };
+ 
+ function tipiDocumentoDelDatabase() {
+diff --git a/src/app/(app)/contratto/[id]/documenti/[doc]/route.ts b/src/app/(app)/contratto/[id]/documenti/[doc]/route.ts
+new file mode 100644
+index 0000000..ddad3d0
+--- /dev/null
++++ b/src/app/(app)/contratto/[id]/documenti/[doc]/route.ts
+@@ -0,0 +1,69 @@
++import { createClient } from "@/lib/supabase/server";
++import { clienteAmministratore } from "@/lib/supabase/admin";
++import { INFORMATIVA } from "@/content/informativa";
++import { haAccettatoInformativa, versioniAccettabili } from "@/lib/informativa";
++import { BUCKET_DOCUMENTI_CONTRATTO, nomeDaScaricare } from "@/lib/documenti-contratto";
++import { èUuid } from "@/lib/uuid";
++
++/**
++ * Scarica un documento di un contratto. È l'UNICO punto in cui una persona arriva a un file
++ * caricato da un'altra: l'archivio non concede a nessuno di leggere i file altrui, quindi qui
++ * si chiede prima al database «sei una delle due parti di questo contratto?» e solo se sì il server
++ * scarica il file con i suoi permessi.
++ *
++ * Il file si serve SEMPRE come scaricamento (mai aperto dentro la pagina), con il tipo registrato
++ * al caricamento e il divieto di indovinarne un altro: un file caricato da altri non deve poter
++ * eseguire niente nel browser di chi lo apre.
++ */
++export const dynamic = "force-dynamic";
++
++const TIPI_AMMESSI: Record<string, string> = { "application/pdf": "pdf", "image/jpeg": "jpg", "image/png": "png" };
++
++function testo(stato: number, messaggio: string): Response {
++  return new Response(messaggio, { status: stato, headers: { "Cache-Control": "private, no-store", "Content-Type": "text/plain; charset=utf-8" } });
++}
++
++export async function GET(_richiesta: Request, { params }: { params: Promise<{ id: string; doc: string }> }): Promise<Response> {
++  const { id, doc } = await params;
++  if (!èUuid(id) || !èUuid(doc)) return testo(404, "Documento non trovato.");
++
++  const supabase = await createClient();
++  const {
++    data: { user },
++  } = await supabase.auth.getUser();
++  if (!user) return testo(401, "Non autenticato.");
++
++  if (!(await haAccettatoInformativa(supabase, user.id, versioniAccettabili(INFORMATIVA)))) {
++    return testo(403, "Accetta l'informativa per continuare.");
++  }
++
++  // solo per le due parti: per chiunque altro, nessuna riga (e la stessa risposta di un documento inesistente)
++  const { data, error } = await supabase.rpc("percorso_documento_contratto", { p_documento: doc });
++  if (error) return testo(500, "Non è stato possibile leggere il documento.");
++  const riga = (Array.isArray(data) ? data[0] : null) as { contratto_id: string; percorso: string; nome_file: string; tipo_file: string } | null;
++  // anche l'identificativo del contratto nell'indirizzo deve essere quello giusto
++  if (!riga || riga.contratto_id !== id) return testo(404, "Documento non trovato.");
++
++  const estensione = TIPI_AMMESSI[riga.tipo_file];
++  if (!estensione) return testo(500, "Il documento non è in un formato ammesso.");
++
++  const admin = clienteAmministratore();
++  if (!admin) return testo(503, "L'archivio dei documenti non è ancora attivo su questo ambiente.");
++
++  const { data: blob, error: eFile } = await admin.storage.from(BUCKET_DOCUMENTI_CONTRATTO).download(riga.percorso);
++  if (eFile || !blob) return testo(404, "Il file non è più disponibile.");
++
++  const nome = nomeDaScaricare(riga.nome_file, estensione);
++  const corpo = await blob.arrayBuffer();
++  return new Response(corpo, {
++    status: 200,
++    headers: {
++      "Content-Type": riga.tipo_file,
++      "Content-Length": String(corpo.byteLength),
++      "Content-Disposition": `attachment; filename="${nome.ascii}"; filename*=UTF-8''${nome.utf8}`,
++      "Cache-Control": "private, no-store",
++      "X-Content-Type-Options": "nosniff",
++      "Content-Security-Policy": "default-src 'none'; sandbox",
++    },
++  });
++}
+diff --git a/src/app/(app)/contratto/documenti-actions.ts b/src/app/(app)/contratto/documenti-actions.ts
+new file mode 100644
+index 0000000..ffb5a2a
+--- /dev/null
++++ b/src/app/(app)/contratto/documenti-actions.ts
+@@ -0,0 +1,125 @@
++"use server";
++
++import { revalidatePath } from "next/cache";
++import { createClient } from "@/lib/supabase/server";
++import { clienteAmministratore } from "@/lib/supabase/admin";
++import { svuotaCodaFile } from "@/lib/archivio";
++import {
++  BUCKET_DOCUMENTI_CONTRATTO,
++  LIMITI_DOCUMENTI,
++  nomeFilePulito,
++  percorsoDiUtente,
++  riconosciFile,
++  tipoDocumentoValido,
++} from "@/lib/documenti-contratto";
++import { èUuid } from "@/lib/uuid";
++import { messaggioErroreVerifica } from "@/lib/verifica";
++
++export type EsitoDocumento = { ok: true } | { error: string };
++
++/**
++ * Registra un documento che la persona ha appena caricato nella SUA cartella dell'archivio.
++ *
++ * Il file lo ha mandato il browser direttamente all'archivio, quindi nome e tipo dichiarati non
++ * valgono niente: qui si LEGGE il file e si guardano i suoi primi byte. Solo un PDF, un JPEG o un
++ * PNG veri passano; la dimensione è quella vera. Se qualcosa non va il file si toglie subito
++ * dall'archivio: un file respinto non deve restare lì.
++ */
++export async function registraDocumento(contrattoId: string, tipo: string, percorso: string, nomeFile: string): Promise<EsitoDocumento> {
++  const supabase = await createClient();
++  const {
++    data: { user },
++  } = await supabase.auth.getUser();
++  if (!user) return { error: messaggioErroreVerifica("NON_AUTENTICATO") };
++
++  // un percorso che non è nella cartella di questa persona non si tocca, nemmeno per toglierlo
++  if (!percorsoDiUtente(percorso, user.id)) return { error: messaggioErroreVerifica("FILE_NON_VALIDO") };
++
++  const archivio = supabase.storage.from(BUCKET_DOCUMENTI_CONTRATTO);
++
++  /**
++   * Da qui in poi il file è della persona e sta nell'archivio: ogni rifiuto lo TOGLIE. Un file respinto
++   * non ha una riga, quindi non è nemmeno nella coda: se non lo togliamo noi, resta lì per sempre.
++   * Si prova con i permessi della persona e, se non riesce, con la chiave di servizio.
++   */
++  const togli = async () => {
++    try {
++      const { error } = await archivio.remove([percorso]);
++      if (!error) return;
++    } catch {
++      // si prova con la chiave di servizio
++    }
++    const admin = clienteAmministratore();
++    try {
++      const { error } = admin ? await admin.storage.from(BUCKET_DOCUMENTI_CONTRATTO).remove([percorso]) : { error: { message: "nessuna chiave di servizio" } };
++      if (error) console.error("registraDocumento: non sono riuscito a togliere un file respinto");
++    } catch {
++      console.error("registraDocumento: non sono riuscito a togliere un file respinto");
++    }
++  };
++  const rifiuta = async (messaggio: string): Promise<EsitoDocumento> => {
++    await togli();
++    return { error: messaggio };
++  };
++
++  if (!èUuid(contrattoId)) return rifiuta(messaggioErroreVerifica("CONTRATTO_NON_TUO"));
++  if (!tipoDocumentoValido(tipo)) return rifiuta(messaggioErroreVerifica("TIPO_DOCUMENTO_NON_VALIDO"));
++
++  const nome = nomeFilePulito(nomeFile);
++  if (nome === "") return rifiuta(messaggioErroreVerifica("NOME_FILE_NON_VALIDO"));
++
++  const { data: blob, error: eLettura } = await archivio.download(percorso);
++  if (eLettura || !blob) return rifiuta("Non riesco a leggere il file caricato. Riprova.");
++
++  if (blob.size < 1 || blob.size > LIMITI_DOCUMENTI.maxByte) return rifiuta(messaggioErroreVerifica("FILE_NON_VALIDO"));
++
++  const bytes = new Uint8Array(await blob.arrayBuffer());
++  const riconosciuto = riconosciFile(bytes);
++  // il contenuto deve essere ciò che l'estensione del percorso dice
++  if (!riconosciuto || !percorso.endsWith(`.${riconosciuto.estensione}`)) return rifiuta("Il file non è un PDF, un JPG o un PNG valido.");
++
++  const { error } = await supabase.rpc("registra_documento_contratto", {
++    p_contratto: contrattoId,
++    p_tipo: tipo,
++    p_percorso: percorso,
++    p_nome: nome,
++    p_dimensione: bytes.length,
++    p_tipo_file: riconosciuto.tipo_file,
++  });
++  if (error) return rifiuta(messaggioErroreVerifica(error.message));
++
++  revalidatePath("/gestione");
++  revalidatePath("/gestione-affitti");
++  return { ok: true };
++}
++
++/**
++ * Elimina un documento: solo chi lo ha caricato (lo decide il database). Il file si toglie
++ * dall'archivio subito; se non riesce, c'è la coda dei file da togliere.
++ */
++export async function eliminaDocumento(documentoId: string): Promise<EsitoDocumento> {
++  const supabase = await createClient();
++  const {
++    data: { user },
++  } = await supabase.auth.getUser();
++  if (!user) return { error: messaggioErroreVerifica("NON_AUTENTICATO") };
++  if (!èUuid(documentoId)) return { error: messaggioErroreVerifica("DOCUMENTO_NON_TUO") };
++
++  const { data: percorso, error } = await supabase.rpc("elimina_documento_contratto", { p_documento: documentoId });
++  if (error) return { error: messaggioErroreVerifica(error.message) };
++
++  // subito, con i permessi di chi ha caricato (la sua cartella); poi, se c'è la chiave di servizio, anche la coda
++  if (typeof percorso === "string" && percorsoDiUtente(percorso, user.id)) {
++    try {
++      await supabase.storage.from(BUCKET_DOCUMENTI_CONTRATTO).remove([percorso]);
++    } catch {
++      // resta nella coda: la riga cancellata l'ha già accodata
++    }
++  }
++  const admin = clienteAmministratore();
++  if (admin) await svuotaCodaFile(admin);
++
++  revalidatePath("/gestione");
++  revalidatePath("/gestione-affitti");
++  return { ok: true };
++}
+diff --git a/src/app/(app)/gestione-affitti/GestioneAffittiClient.tsx b/src/app/(app)/gestione-affitti/GestioneAffittiClient.tsx
+index 685aec5..d8e3a06 100644
+--- a/src/app/(app)/gestione-affitti/GestioneAffittiClient.tsx
++++ b/src/app/(app)/gestione-affitti/GestioneAffittiClient.tsx
+@@ -1,6 +1,8 @@
+ "use client";
+ 
+ import { BozzaContratto } from "@/components/BozzaContratto";
++import { ArchivioContratto } from "@/components/ArchivioContratto";
++import type { DocumentoContratto } from "@/lib/documenti-contratto";
+ import { useActionState, useEffect, useState } from "react";
+ import { Sheet } from "@/components/Sheet";
+ import type {
+@@ -26,11 +28,14 @@ export function GestioneAffittiClient({
+   candidatureSenzaContratto,
+   contratti,
+   rapportiPanel,
++  documenti = {},
+ }: {
+   candidatureSenzaContratto: CandidaturaSenzaContratto[];
+   contratti: ContrattoProprietario[];
+   /** gli affitti dichiarati e confermati, costruiti dal server */
+   rapportiPanel: React.ReactNode;
++  /** i documenti dei miei contratti, per identificativo del contratto */
++  documenti?: Record<string, DocumentoContratto[]>;
+ }) {
+   const [nuovaDa, setNuovaDa] = useState<CandidaturaSenzaContratto | null>(
+     null
+@@ -155,6 +160,7 @@ export function GestioneAffittiClient({
+         title={`${selezionato?.nome ?? ""} ${selezionato?.cognome ?? ""}`}
+       >
+         {selezionato && <BozzaContratto contrattoId={selezionato.id} />}
++        {selezionato && <ArchivioContratto contrattoId={selezionato.id} documenti={documenti[selezionato.id] ?? []} />}
+         {selezionato && (
+           <ContrattoForm
+             action={aggiornaContratto}
+diff --git a/src/app/(app)/gestione-affitti/page.tsx b/src/app/(app)/gestione-affitti/page.tsx
+index 4e254ac..c867969 100644
+--- a/src/app/(app)/gestione-affitti/page.tsx
++++ b/src/app/(app)/gestione-affitti/page.tsx
+@@ -3,6 +3,7 @@ import { GestioneAffittiClient } from "./GestioneAffittiClient";
+ import { RapportiPanel } from "@/components/RapportiPanel";
+ import { caricaRapportiMiei } from "@/lib/rapporti-server";
+ import type { CandidaturaSenzaContratto, ContrattoProprietario } from "@/lib/types";
++import { raggruppaPerContratto, type DocumentoContratto } from "@/lib/documenti-contratto";
+ 
+ export default async function GestioneAffittiPage() {
+   const supabase = await createClient();
+@@ -97,10 +98,14 @@ export default async function GestioneAffittiPage() {
+       .order("created_at", { ascending: false }),
+   ]);
+ 
++  // I documenti di TUTTI i miei contratti, in una chiamata sola (mai il percorso dei file)
++  const { data: documenti } = await supabase.rpc("documenti_dei_miei_contratti");
++
+   return (
+     <GestioneAffittiClient
+       candidatureSenzaContratto={candidatureSenzaContratto}
+       contratti={contrattiCompleti}
++      documenti={raggruppaPerContratto((documenti ?? []) as DocumentoContratto[])}
+       rapportiPanel={
+         <RapportiPanel
+           ruolo="proprietario"
+diff --git a/src/app/(app)/gestione/GestioneClient.tsx b/src/app/(app)/gestione/GestioneClient.tsx
+index 2df259a..aae65c8 100644
+--- a/src/app/(app)/gestione/GestioneClient.tsx
++++ b/src/app/(app)/gestione/GestioneClient.tsx
+@@ -5,6 +5,8 @@ import { Sheet } from "@/components/Sheet";
+ import type { ContrattoConAnnuncio } from "@/lib/types";
+ import { LinkUtenze } from "@/components/LinkUtenze";
+ import { BozzaContratto } from "@/components/BozzaContratto";
++import { ArchivioContratto } from "@/components/ArchivioContratto";
++import type { DocumentoContratto } from "@/lib/documenti-contratto";
+ import { SOTTOTITOLO_UTENZE } from "@/lib/utenze";
+ import {
+   NESSUN_CONTRATTO_IN_CORSO,
+@@ -26,8 +28,11 @@ function formatData(d: string | null): string {
+ 
+ export function GestioneClient({
+   contratti,
++  documenti = {},
+ }: {
+   contratti: ContrattoConAnnuncio[];
++  /** i documenti dei miei contratti, per identificativo del contratto */
++  documenti?: Record<string, DocumentoContratto[]>;
+ }) {
+   const [selezionato, setSelezionato] = useState<ContrattoConAnnuncio | null>(
+     null
+@@ -152,6 +157,7 @@ export function GestioneClient({
+               value={formatData(selezionato.data_firma)}
+             />
+             <BozzaContratto contrattoId={selezionato.id} />
++            <ArchivioContratto contrattoId={selezionato.id} documenti={documenti[selezionato.id] ?? []} />
+           </>
+         )}
+       </Sheet>
+diff --git a/src/app/(app)/gestione/page.tsx b/src/app/(app)/gestione/page.tsx
+index 476474c..09b4f05 100644
+--- a/src/app/(app)/gestione/page.tsx
++++ b/src/app/(app)/gestione/page.tsx
+@@ -1,6 +1,7 @@
+ import { createClient } from "@/lib/supabase/server";
+ import { GestioneClient } from "./GestioneClient";
+ import type { ContrattoConAnnuncio } from "@/lib/types";
++import { raggruppaPerContratto, type DocumentoContratto } from "@/lib/documenti-contratto";
+ 
+ export default async function GestionePage() {
+   const supabase = await createClient();
+@@ -18,7 +19,13 @@ export default async function GestionePage() {
+     .eq("candidature.tenant_id", user!.id)
+     .order("created_at", { ascending: false });
+ 
++  // I documenti di TUTTI i miei contratti, in una chiamata sola (mai il percorso dei file)
++  const { data: documenti } = await supabase.rpc("documenti_dei_miei_contratti");
++
+   return (
+-    <GestioneClient contratti={(contratti ?? []) as unknown as ContrattoConAnnuncio[]} />
++    <GestioneClient
++      contratti={(contratti ?? []) as unknown as ContrattoConAnnuncio[]}
++      documenti={raggruppaPerContratto((documenti ?? []) as DocumentoContratto[])}
++    />
+   );
+ }
+diff --git a/src/app/(app)/profilo/elimina-actions.ts b/src/app/(app)/profilo/elimina-actions.ts
+index ce64bc8..d1b68cc 100644
+--- a/src/app/(app)/profilo/elimina-actions.ts
++++ b/src/app/(app)/profilo/elimina-actions.ts
+@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
+ import { createClient } from "@/lib/supabase/server";
+ import { clienteAmministratore } from "@/lib/supabase/admin";
+ import { passwordCorretta } from "@/lib/supabase/password";
++import { svuotaCodaFile } from "@/lib/archivio";
+ import {
+   CONFERMA_ELIMINAZIONE,
+   confermaEliminazioneValida,
+@@ -67,6 +68,11 @@ export async function eliminaAccount(
+       console.error("eliminaAccount: deleteUser:", error.message);
+       return { error: "Non è stato possibile eliminare l'account. Riprova tra poco." };
+     }
++
++    // 2b. I documenti dei contratti che cadono a cascata (anche quelli dell'ALTRA parte) hanno messo i loro
++    // file in una coda: si svuota subito. Se non riesce non è un errore per chi se ne va: lo riprende il
++    // giro periodico.
++    await svuotaCodaFile(admin);
+   } catch (e) {
+     console.error("eliminaAccount:", e);
+     return { error: "Non è stato possibile eliminare l'account. Riprova tra poco." };
+diff --git a/src/app/api/archivio/pulisci/route.ts b/src/app/api/archivio/pulisci/route.ts
+new file mode 100644
+index 0000000..31335de
+--- /dev/null
++++ b/src/app/api/archivio/pulisci/route.ts
+@@ -0,0 +1,30 @@
++import { autorizzaCron } from "@/lib/email/cron";
++import { svuotaCodaFile } from "@/lib/archivio";
++import { clienteAmministratore } from "@/lib/supabase/admin";
++
++/**
++ * Toglie dall'archivio i file dei documenti che non esistono più (un contratto cancellato,
++ * un account eliminato). Si svuota da sola dopo ogni cancellazione; questo giro periodico riprende
++ * ciò che per un errore fosse rimasto. Lo chiama lo scheduler con `Authorization: Bearer <CRON_SECRET>`,
++ * lo stesso segreto dell'invio delle email. Senza il segreto non fa niente.
++ */
++export const dynamic = "force-dynamic";
++
++function risposta(stato: number, corpo: unknown): Response {
++  return Response.json(corpo, { status: stato, headers: { "Cache-Control": "no-store" } });
++}
++
++async function gestisci(richiesta: Request): Promise<Response> {
++  const esito = autorizzaCron(richiesta.headers.get("authorization"), process.env.CRON_SECRET);
++  if (esito === "non_configurato") return risposta(503, { errore: "Non configurato (manca CRON_SECRET)." });
++  if (esito === "rifiutato") return risposta(401, { errore: "Non autorizzato." });
++
++  const admin = clienteAmministratore();
++  if (!admin) return risposta(500, { errore: "La chiave di servizio non è configurata." });
++
++  const riepilogo = await svuotaCodaFile(admin);
++  return risposta(riepilogo.errori > 0 && riepilogo.rimossi === 0 && riepilogo.letti > 0 ? 500 : 200, riepilogo);
++}
++
++export const GET = gestisci;
++export const POST = gestisci;
+diff --git a/src/components/ArchivioContratto.tsx b/src/components/ArchivioContratto.tsx
+new file mode 100644
+index 0000000..44f4e70
+--- /dev/null
++++ b/src/components/ArchivioContratto.tsx
+@@ -0,0 +1,187 @@
++"use client";
++
++import { useState } from "react";
++import { useRouter } from "next/navigation";
++import { createClient } from "@/lib/supabase/client";
++import { SelettoreFile } from "@/components/SelettoreFile";
++import {
++  BUCKET_DOCUMENTI_CONTRATTO,
++  LIMITI_DOCUMENTI,
++  TESTO_ARCHIVIO,
++  TESTO_LIMITE_RAGGIUNTO,
++  TIPI_DOCUMENTO,
++  chiHaCaricato,
++  estensioneDichiarata,
++  etichettaTipo,
++  formattaDimensione,
++  percorsoArchivio,
++  postiRimasti,
++  validaFileScelto,
++  type DocumentoContratto,
++  type TipoDocumento,
++} from "@/lib/documenti-contratto";
++import { messaggioErroreVerifica } from "@/lib/verifica";
++import { eliminaDocumento, registraDocumento } from "@/app/(app)/contratto/documenti-actions";
++
++const data = (iso: string) => new Date(iso).toLocaleDateString("it-IT", { timeZone: "Europe/Rome", day: "numeric", month: "short", year: "numeric" });
++
++/**
++ * L'archivio dei documenti di un contratto. Li vedono entrambe le parti; ognuno cancella solo i suoi.
++ * Il file va dal browser all'archivio (nella cartella di chi lo carica); poi il server lo controlla
++ * davvero (che sia un PDF, un JPG o un PNG) e lo registra. Il download passa dal server.
++ */
++export function ArchivioContratto({ contrattoId, documenti }: { contrattoId: string; documenti: DocumentoContratto[] }) {
++  const router = useRouter();
++  const [tipo, setTipo] = useState<TipoDocumento>("ricevuta");
++  const [inCorso, setInCorso] = useState<string | null>(null);
++  const [errore, setErrore] = useState<string | null>(null);
++  const [daEliminare, setDaEliminare] = useState<string | null>(null);
++
++  const posti = postiRimasti(documenti.length);
++
++  async function carica(file: File | undefined) {
++    if (!file) return;
++    setErrore(null);
++    const problema = validaFileScelto(file);
++    if (problema) {
++      setErrore(problema);
++      return;
++    }
++    const estensione = estensioneDichiarata(file.type);
++    if (!estensione) {
++      setErrore("Il file deve essere un PDF, una foto JPG o una foto PNG.");
++      return;
++    }
++
++    setInCorso("carica");
++    let percorso: string | null = null;
++    const supabase = createClient();
++    try {
++      const {
++        data: { user },
++      } = await supabase.auth.getUser();
++      if (!user) {
++        setErrore(messaggioErroreVerifica("NON_AUTENTICATO"));
++        return;
++      }
++      percorso = percorsoArchivio({ userId: user.id, id: crypto.randomUUID(), estensione });
++
++      const { error: eFile } = await supabase.storage.from(BUCKET_DOCUMENTI_CONTRATTO).upload(percorso, file, { contentType: file.type, upsert: false });
++      if (eFile) {
++        percorso = null; // non è arrivato: niente da togliere
++        setErrore("Non sono riuscito a caricare il file. Riprova.");
++        return;
++      }
++
++      const esito = await registraDocumento(contrattoId, tipo, percorso, file.name);
++      if ("error" in esito) {
++        setErrore(esito.error);
++        return; // il server ha già provato a togliere il file; il blocco finally riprova (non costa niente, e vale come seconda possibilità)
++      }
++      percorso = null; // registrato: non si tocca
++      router.refresh();
++    } catch {
++      setErrore("Non sono riuscito a completare il caricamento. Riprova.");
++    } finally {
++      // se il file è arrivato ma la registrazione non si è conclusa (rete caduta), non lo si lascia nell'archivio
++      if (percorso) await supabase.storage.from(BUCKET_DOCUMENTI_CONTRATTO).remove([percorso]).catch(() => undefined);
++      setInCorso(null);
++    }
++  }
++
++  async function elimina(id: string) {
++    setErrore(null);
++    setInCorso(`elimina-${id}`);
++    try {
++      const esito = await eliminaDocumento(id);
++      if ("error" in esito) {
++        setErrore(esito.error);
++        return;
++      }
++      setDaEliminare(null);
++      router.refresh();
++    } catch {
++      setErrore("Non sono riuscito a eliminare il documento. Riprova.");
++    } finally {
++      setInCorso(null);
++    }
++  }
++
++  return (
++    <div className="archivio-contratto" style={{ margin: "0 0 18px 0" }}>
++      <div className="pref-label" style={{ margin: "0 0 4px 0" }}>
++        <span>
++          Documenti — {documenti.length} di {LIMITI_DOCUMENTI.maxPerContratto}
++        </span>
++      </div>
++      <p className="field-note" style={{ margin: "0 0 8px 0" }}>
++        {TESTO_ARCHIVIO}
++      </p>
++
++      {documenti.length === 0 ? (
++        <p className="field-note">Nessun documento ancora.</p>
++      ) : (
++        <ul className="archivio-lista" style={{ listStyle: "none", padding: 0, margin: "0 0 12px 0" }}>
++          {documenti.map((d) => (
++            <li key={d.id} className="archivio-voce" style={{ padding: "8px 0", borderBottom: "1px solid rgba(16,21,26,0.08)" }}>
++              <div>
++                <b>{etichettaTipo(d.tipo)}</b>
++                <div className="field-note" style={{ margin: 0 }}>
++                  {d.nome_file}
++                </div>
++                <div className="field-note" style={{ margin: 0 }}>
++                  {formattaDimensione(d.dimensione)} · {data(d.created_at)} · {chiHaCaricato(d)}
++                </div>
++              </div>
++              <div style={{ display: "flex", gap: 16, marginTop: 4, alignItems: "center" }}>
++                <a href={`/contratto/${contrattoId}/documenti/${d.id}`} className="redo-link" download aria-label={`Scarica ${d.nome_file}`}>
++                  Scarica
++                </a>
++                {d.mio &&
++                  (daEliminare === d.id ? (
++                    <span className="visite-conferma">
++                      <span>Il file verrà tolto anche all&apos;altra parte.</span>
++                      <button type="button" className="redo-link" onClick={() => setDaEliminare(null)}>
++                        Indietro
++                      </button>
++                      <button type="button" className="redo-link" disabled={inCorso !== null} onClick={() => elimina(d.id)}>
++                        {inCorso === `elimina-${d.id}` ? "Elimino..." : "Sì, elimina"}
++                      </button>
++                    </span>
++                  ) : (
++                    <button type="button" className="redo-link" aria-label={`Elimina ${d.nome_file}`} onClick={() => setDaEliminare(d.id)}>
++                      Elimina
++                    </button>
++                  ))}
++              </div>
++            </li>
++          ))}
++        </ul>
++      )}
++
++      {errore && (
++        <p className="note-error" role="alert" style={{ margin: "0 0 8px 0" }}>
++          {errore}
++        </p>
++      )}
++
++      {posti === 0 ? (
++        <p className="field-note">{TESTO_LIMITE_RAGGIUNTO}</p>
++      ) : (
++        <>
++          <div className="flex flex-wrap gap-2" role="group" aria-label="Tipo di documento" style={{ marginBottom: 8 }}>
++            {TIPI_DOCUMENTO.map((t) => (
++              <button key={t.id} type="button" className={`chip ${tipo === t.id ? "on" : ""}`} aria-pressed={tipo === t.id} onClick={() => setTipo(t.id)}>
++                {t.etichetta}
++              </button>
++            ))}
++          </div>
++          <SelettoreFile etichetta="Carica un documento" aria={`Carica un documento: ${etichettaTipo(tipo)}`} occupato={inCorso === "carica"} onFile={carica} />
++          <p className="field-note" style={{ marginTop: 6 }}>
++            PDF, JPG o PNG, fino a 10 MB.
++          </p>
++        </>
++      )}
++    </div>
++  );
++}
+diff --git a/src/content/informativa.ts b/src/content/informativa.ts
+index 3c0c0e7..79717c4 100644
+--- a/src/content/informativa.ts
++++ b/src/content/informativa.ts
+@@ -28,7 +28,7 @@ export const INFORMATIVA = {
+    * controllo che fa il database (migrazione 0017): un test fallisce se
+    * questa stringa non lo supera.
+    */
+-  versione: "2026-10-provvisoria-12",
++  versione: "2026-10-provvisoria-13",
+   /**
+    * Versioni precedenti che chi le ha accettate NON deve riaccettare.
+    *
+@@ -54,6 +54,7 @@ export const INFORMATIVA = {
+     "2026-10-provvisoria-9",
+     "2026-10-provvisoria-10",
+     "2026-10-provvisoria-11",
++    "2026-10-provvisoria-12",
+   ] as readonly string[],
+   provvisoria: true,
+   titolo: "Informativa sulla privacy",
+@@ -107,6 +108,7 @@ export const INFORMATIVA = {
+         "I messaggi li leggono solo le due persone, dopo che la candidatura è stata accettata. L'app ricorda quali messaggi hai già letto, solo per mostrarti quanti ne restano da leggere: non lo mostra all'altra persona.",
+         "L'indirizzo preciso di un immobile lo vedono solo il proprietario e le persone con cui ha un match accettato su quell'immobile: agli altri si mostra soltanto la zona.",
+         "Dal contratto di un affitto puoi vedere e scaricare in PDF una bozza con i dati dell'affitto: i nomi delle due parti, l'immobile (con l'indirizzo, se c'è), il canone, la durata e le date. La bozza la compone l'app al momento, la vedono solo le due parti e noi non la conserviamo. Per ora è una bozza di prova, senza valore legale.",
++        "Ogni contratto ha un archivio di documenti (certificato energetico, planimetria, ricevute, registrazione e altri documenti). I file che carichi li vedono le due parti del contratto, e tu puoi eliminare solo i tuoi. Sono PDF o immagini fino a 10 MB, al massimo 30 per contratto, in un archivio privato: di ogni documento conserviamo il tipo, il nome del file, la dimensione, la data e quale delle due parti l'ha caricato. Quando elimini un documento, il contratto o il tuo account, i file vengono tolti dall'archivio. Non ne analizziamo il contenuto.",
+         "I preferiti e gli annunci che scarti li vede solo chi li sceglie: il proprietario non sa quali annunci hai salvato o scartato.",
+         "Le visite: il proprietario indica i giorni e gli orari in cui è disponibile per un suo immobile. Li vedono solo le persone che hanno un match accettato su quell'immobile; chi non lo ha non vede nemmeno quali orari ci sono. Chi prenota vede la propria visita, e il proprietario vede nome e cognome di chi ha prenotato, per le visite degli ultimi 30 giorni.",
+         "Nella chat, l'app evidenzia i messaggi che parlano di pagamenti sospetti (per esempio un IBAN, una caparra o un anticipo) e ti avvisa prima di inviarne uno così, per aiutarti a riconoscere una truffa. È un controllo automatico che fa parte della visualizzazione della chat: non salviamo il risultato e non lo comunichiamo a nessuno, e non impedisce mai di inviare un messaggio.",
+@@ -119,7 +121,7 @@ export const INFORMATIVA = {
+     {
+       titolo: "File e foto",
+       paragrafi: [
+-        "La foto del profilo e le foto degli annunci si aprono con un indirizzo che non richiede l'accesso: chi conosce quel link può vederle. I documenti d'identità, di reddito, di proprietà e i contratti non hanno mai un indirizzo pubblico: si aprono con link temporanei, e solo a chi ne ha diritto.",
++        "La foto del profilo e le foto degli annunci si aprono con un indirizzo che non richiede l'accesso: chi conosce quel link può vederle. I documenti d'identità, di reddito, di proprietà e i contratti non hanno mai un indirizzo pubblico: si aprono con link temporanei, e solo a chi ne ha diritto. I documenti dei contratti non hanno nessun link: si scaricano dall'app, e solo le due parti del contratto possono farlo.",
+       ],
+     },
+     {
+diff --git a/src/lib/account.ts b/src/lib/account.ts
+index 9f4490c..72387c2 100644
+--- a/src/lib/account.ts
++++ b/src/lib/account.ts
+@@ -23,6 +23,7 @@ export const BUCKET_FILE_UTENTE = [
+   "avatar-inquilini",
+   "immobili-foto",
+   "documenti-verifica",
++  "documenti-contratto",
+ ] as const;
+ 
+ /** La parte della libreria di Storage che serve qui: permette di provarla con un finto. */
+diff --git a/src/lib/archivio.ts b/src/lib/archivio.ts
+new file mode 100644
+index 0000000..bcbe764
+--- /dev/null
++++ b/src/lib/archivio.ts
+@@ -0,0 +1,64 @@
++/**
++ * La coda dei file da togliere dall'archivio.
++ *
++ * Quando una riga di documento sparisce (anche a cascata: un contratto cancellato, un account eliminato)
++ * il database mette il percorso del file in una coda, perché i file nell'archivio NON si cancellano
++ * da soli. Qui la si svuota: si tolgono i file e SOLO dopo si cancellano le righe della coda. Se
++ * qualcosa va storto la riga resta, e il giro dopo riprova. Non lancia mai errori.
++ *
++ * SOLO codice del server: serve la chiave di servizio.
++ */
++
++/** Ciò che serve della libreria: permette di provarla con un finto. */
++export type AdminArchivio = {
++  rpc(
++    nome: string,
++    args?: Record<string, unknown>
++  ): PromiseLike<{ data: unknown; error: { message: string } | null }>;
++  storage: {
++    from(bucket: string): {
++      remove(percorsi: string[]): Promise<{ error: { message: string } | null }>;
++    };
++  };
++};
++
++export type RiepilogoCoda = { letti: number; rimossi: number; errori: number };
++
++export const MASSIMO_PER_GIRO = 100;
++
++export async function svuotaCodaFile(admin: AdminArchivio, max: number = MASSIMO_PER_GIRO): Promise<RiepilogoCoda> {
++  const esito: RiepilogoCoda = { letti: 0, rimossi: 0, errori: 0 };
++  try {
++    const { data, error } = await admin.rpc("file_da_eliminare_elenco", { p_max: max });
++    if (error || !Array.isArray(data)) return { ...esito, errori: 1 };
++
++    const righe = data as { id: string; bucket: string; percorso: string }[];
++    esito.letti = righe.length;
++
++    const perBucket = new Map<string, { id: string; percorso: string }[]>();
++    for (const r of righe) {
++      if (!r || typeof r.bucket !== "string" || typeof r.percorso !== "string" || typeof r.id !== "string") continue;
++      (perBucket.get(r.bucket) ?? perBucket.set(r.bucket, []).get(r.bucket)!).push(r);
++    }
++
++    const finiti: string[] = [];
++    for (const [bucket, elenco] of perBucket) {
++      try {
++        const { error: e } = await admin.storage.from(bucket).remove(elenco.map((r) => r.percorso));
++        if (e) esito.errori++;
++        else finiti.push(...elenco.map((r) => r.id));
++      } catch {
++        esito.errori++;
++      }
++    }
++
++    if (finiti.length > 0) {
++      const { error: e } = await admin.rpc("file_eliminati", { p_ids: finiti });
++      if (e) esito.errori++;
++      else esito.rimossi = finiti.length;
++    }
++  } catch {
++    esito.errori++;
++  }
++  return esito;
++}
+diff --git a/src/lib/contratto/dati.ts b/src/lib/contratto/dati.ts
+index ed37b7d..cf8a1f3 100644
+--- a/src/lib/contratto/dati.ts
++++ b/src/lib/contratto/dati.ts
+@@ -10,7 +10,7 @@ export const DA_INDICARE = "[da indicare]";
+ /** Spazi ridotti a uno, ai lati niente, e nessun carattere di controllo. */
+ export function pulisciTesto(x: unknown): string {
+   if (typeof x !== "string") return "";
+-  return x.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029\ufeff]/g, " ").replace(/\s+/g, " ").trim();
++  return x.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029\ufeff]/g, " ").replace(/\s+/g, " ").trim();
+ }
+ 
+ /** «Nome Cognome», o `null` se mancano entrambi. */
+diff --git a/src/lib/documenti-contratto.ts b/src/lib/documenti-contratto.ts
+new file mode 100644
+index 0000000..1ee2389
+--- /dev/null
++++ b/src/lib/documenti-contratto.ts
+@@ -0,0 +1,165 @@
++/**
++ * I documenti di un contratto (APE, planimetria, ricevute, registrazione): tipi, controlli sul
++ * file, percorso nell'archivio, testi. Logica pura, senza database né rete.
++ *
++ * Le regole sono quelle della migrazione 0028: un test le tiene allineate.
++ */
++import { èUuid } from "./uuid";
++import { DIMENSIONE_MAX_BYTE, estensioneDa, validaFileDocumento } from "./verifica";
++
++export const BUCKET_DOCUMENTI_CONTRATTO = "documenti-contratto";
++
++export const TIPI_DOCUMENTO = [
++  { id: "ape", etichetta: "Certificato energetico (APE)" },
++  { id: "planimetria", etichetta: "Planimetria" },
++  { id: "ricevuta", etichetta: "Ricevuta del canone" },
++  { id: "registrazione", etichetta: "Registrazione del contratto" },
++  { id: "altro", etichetta: "Altro" },
++] as const;
++
++export type TipoDocumento = (typeof TIPI_DOCUMENTO)[number]["id"];
++
++export const LIMITI_DOCUMENTI = {
++  maxByte: DIMENSIONE_MAX_BYTE,
++  maxPerContratto: 30,
++  maxNome: 200,
++} as const;
++
++export type TipoFile = "application/pdf" | "image/jpeg" | "image/png";
++
++/** Un documento come lo restituisce `documenti_dei_miei_contratti`: mai il percorso del file. */
++export type DocumentoContratto = {
++  id: string;
++  contratto_id: string;
++  tipo: TipoDocumento;
++  nome_file: string;
++  dimensione: number;
++  tipo_file: TipoFile;
++  created_at: string;
++  /** l'ho caricato io */
++  mio: boolean;
++  da_ruolo: "locatore" | "conduttore";
++};
++
++export function tipoDocumentoValido(x: unknown): x is TipoDocumento {
++  return typeof x === "string" && TIPI_DOCUMENTO.some((t) => t.id === x);
++}
++
++export function etichettaTipo(tipo: string): string {
++  return TIPI_DOCUMENTO.find((t) => t.id === tipo)?.etichetta ?? "Documento";
++}
++
++// ------------------------------------------------------------
++// Cosa c'è DAVVERO dentro il file
++// ------------------------------------------------------------
++
++/**
++ * Riconosce un file dai suoi PRIMI byte, non dal nome né dal tipo dichiarato (li sceglie chi
++ * carica). Solo PDF, JPEG e PNG, e solo se il file COMINCIA come tali: un testo HTML o uno script
++ * chiamato «ricevuta.pdf» non passa.
++ */
++export function riconosciFile(bytes: Uint8Array | null | undefined): { tipo_file: TipoFile; estensione: "pdf" | "jpg" | "png" } | null {
++  if (!bytes || bytes.length < 4) return null;
++  const inizia = (firma: number[]) => firma.every((b, i) => bytes[i] === b);
++  if (inizia([0x25, 0x50, 0x44, 0x46, 0x2d])) return { tipo_file: "application/pdf", estensione: "pdf" }; // %PDF-
++  if (inizia([0xff, 0xd8, 0xff])) return { tipo_file: "image/jpeg", estensione: "jpg" };
++  if (inizia([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return { tipo_file: "image/png", estensione: "png" };
++  return null;
++}
++
++// ------------------------------------------------------------
++// Il percorso nell'archivio: <id utente>/<id>.<estensione>, piatto
++// ------------------------------------------------------------
++
++export function percorsoArchivio(input: { userId: string; id: string; estensione: string }): string {
++  if (!èUuid(input.userId) || !èUuid(input.id)) throw new Error("Identificativo non valido");
++  if (!["pdf", "jpg", "png"].includes(input.estensione)) throw new Error("Estensione non ammessa");
++  return `${input.userId.toLowerCase()}/${input.id.toLowerCase()}.${input.estensione}`;
++}
++
++/** Il percorso è nella cartella di questa persona, ed è fatto come li fa `percorsoArchivio`? */
++export function percorsoDiUtente(percorso: unknown, userId: string): boolean {
++  if (typeof percorso !== "string" || !èUuid(userId)) return false;
++  return new RegExp(`^${userId.toLowerCase()}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.(pdf|jpg|png)$`).test(percorso);
++}
++
++// ------------------------------------------------------------
++// Il nome del file
++// ------------------------------------------------------------
++
++/** Il nome scelto da chi carica: spazi ridotti, niente caratteri di controllo né separatori di cartelle, al massimo 200. */
++export function nomeFilePulito(nome: unknown): string {
++  if (typeof nome !== "string") return "";
++  const t = nome
++    .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029\ufeff]/g, " ")
++    .replace(/[\\/]+/g, "_")
++    .replace(/\s+/g, " ")
++    .trim();
++  return [...t].slice(0, LIMITI_DOCUMENTI.maxNome).join("");
++}
++
++/**
++ * Il nome per l'intestazione di scaricamento. Una versione «sicura» in ASCII (per i programmi che non
++ * capiscono altro) e una in UTF-8 (RFC 5987). Mai virgolette, a capo o separatori di cartelle: sono il
++ * modo di rompere un'intestazione. L'estensione è quella vera del file, non quella scritta da chi ha caricato.
++ */
++export function nomeDaScaricare(nome: unknown, estensione: string): { ascii: string; utf8: string } {
++  const ext = ["pdf", "jpg", "png"].includes(estensione) ? estensione : "bin";
++  let base = nomeFilePulito(nome).replace(/\.[A-Za-z0-9]{1,5}$/, "");
++  if (base === "") base = "documento";
++  const ascii = base.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Za-z0-9._ -]/g, "_").slice(0, 100).trim() || "documento";
++  const utf8 = encodeURIComponent([...base].slice(0, 100).join("")).replace(/['()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase());
++  return { ascii: `${ascii}.${ext}`, utf8: `${utf8}.${ext}` };
++}
++
++/** Il file scelto, prima di caricarlo. Il messaggio, o `null` se va bene. */
++export function validaFileScelto(file: { type: string; size: number; name?: string }): string | null {
++  const base = validaFileDocumento(file);
++  if (base) return base;
++  if (nomeFilePulito(file.name ?? "") === "") return "Il file non ha un nome valido. Rinominalo e riprova.";
++  return null;
++}
++
++/** Il tipo dichiarato dal browser, per scegliere l'estensione (che poi si confronta con il contenuto vero). */
++export function estensioneDichiarata(tipo: string): "pdf" | "jpg" | "png" | null {
++  const e = estensioneDa(tipo);
++  return e === "pdf" || e === "jpg" || e === "png" ? e : null;
++}
++
++// ------------------------------------------------------------
++// Testi e raggruppamenti
++// ------------------------------------------------------------
++
++/** «850 KB», «1,2 MB». */
++export function formattaDimensione(byte: unknown): string {
++  if (typeof byte !== "number" || !Number.isFinite(byte) || byte < 0) return "";
++  if (byte < 1024) return `${Math.round(byte)} B`;
++  if (byte < 1024 * 1024) return `${Math.round(byte / 1024)} KB`;
++  return `${(byte / (1024 * 1024)).toFixed(1).replace(".", ",")} MB`;
++}
++
++/** Chi l'ha caricato, a ruoli (mai un nome): «Caricato da te», «dal proprietario», «dall'inquilino». */
++export function chiHaCaricato(d: Pick<DocumentoContratto, "mio" | "da_ruolo">): string {
++  if (d.mio) return "Caricato da te";
++  return d.da_ruolo === "locatore" ? "Caricato dal proprietario" : "Caricato dall'inquilino";
++}
++
++/** I documenti divisi per contratto, dal più recente. Non modifica l'elenco ricevuto. */
++export function raggruppaPerContratto(righe: readonly DocumentoContratto[] | null | undefined): Record<string, DocumentoContratto[]> {
++  const fuori: Record<string, DocumentoContratto[]> = {};
++  for (const r of righe ?? []) {
++    if (!r || typeof r.contratto_id !== "string") continue;
++    (fuori[r.contratto_id] ??= []).push(r);
++  }
++  for (const k of Object.keys(fuori)) fuori[k] = [...fuori[k]].sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0));
++  return fuori;
++}
++
++export function postiRimasti(nDocumenti: number): number {
++  return Math.max(0, LIMITI_DOCUMENTI.maxPerContratto - Math.max(0, nDocumenti));
++}
++
++export const TESTO_ARCHIVIO =
++  "Li vedono entrambe le parti del contratto. Puoi eliminare solo i documenti che hai caricato tu.";
++export const TESTO_LIMITE_RAGGIUNTO =
++  "Questo contratto ha già 30 documenti. Elimina uno che non serve più per aggiungerne altri.";
+diff --git a/src/lib/email/modello.ts b/src/lib/email/modello.ts
+index cc3fd5a..679f0ab 100644
+--- a/src/lib/email/modello.ts
++++ b/src/lib/email/modello.ts
+@@ -57,7 +57,7 @@ export function escapaHtml(testo: unknown): string {
+ export function nomeBreve(nome: unknown): string | null {
+   if (typeof nome !== "string") return null;
+   const primo = nome
+-    .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029\ufeff]/g, " ")
++    .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029\ufeff]/g, " ")
+     .trim()
+     .split(/\s+/)[0];
+   if (!primo) return null;
+diff --git a/src/lib/mappe/indirizzo.ts b/src/lib/mappe/indirizzo.ts
+index 3c21572..3e5d303 100644
+--- a/src/lib/mappe/indirizzo.ts
++++ b/src/lib/mappe/indirizzo.ts
+@@ -19,7 +19,7 @@ export const CITTA_PREDEFINITA = "Milano";
+ /** Spazi ridotti a uno, ai lati niente, e nessun carattere di controllo (a capo, tabulazioni, invisibili). */
+ export function pulisci(testo: unknown): string {
+   if (typeof testo !== "string") return "";
+-  return testo.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029\ufeff]/g, " ").replace(/\s+/g, " ").trim();
++  return testo.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029\ufeff]/g, " ").replace(/\s+/g, " ").trim();
+ }
+ 
+ export type EsitoIndirizzo = { ok: true; indirizzo: Indirizzo } | { ok: false; errore: string };
+diff --git a/src/lib/supabase/middleware.ts b/src/lib/supabase/middleware.ts
+index 99de609..771dfee 100644
+--- a/src/lib/supabase/middleware.ts
++++ b/src/lib/supabase/middleware.ts
+@@ -6,7 +6,7 @@ import { NextResponse, type NextRequest } from "next/server";
+ // "/email/disiscrivi" e "/api/email": la disiscrizione dal link nell'email e l'invio periodico non hanno
+ // una sessione. Ognuno si protegge da sé: la prima con un codice lungo e casuale (e un clic di conferma),
+ // il secondo con un segreto che solo lo scheduler conosce.
+-const PUBLIC_PATHS = ["/login", "/auth", "/invito", "/rapporto", "/informativa", "/email/disiscrivi", "/api/email/"];
++const PUBLIC_PATHS = ["/login", "/auth", "/invito", "/rapporto", "/informativa", "/email/disiscrivi", "/api/email/", "/api/archivio/"];
+ 
+ /**
+  * Rinfresca il token di sessione Supabase ad ogni richiesta e protegge
+diff --git a/src/lib/verifica.ts b/src/lib/verifica.ts
+index 7d7a991..ed41cf5 100644
+--- a/src/lib/verifica.ts
++++ b/src/lib/verifica.ts
+@@ -199,6 +199,13 @@ const MESSAGGI: Record<string, string> = {
+   INQUILINO_INESISTENTE: "Inquilino non trovato.",
+   // decisioni sulle candidature
+   CANDIDATURA_NON_TUA: "Questa candidatura non risulta tua.",
++  // documenti del contratto
++  CONTRATTO_NON_TUO: "Non puoi aggiungere documenti a questo contratto.",
++  TIPO_DOCUMENTO_NON_VALIDO: "Scegli che tipo di documento è.",
++  NOME_FILE_NON_VALIDO: "Il nome del file non è valido. Rinominalo e riprova.",
++  FILE_NON_VALIDO: "Il file non è valido: deve essere un PDF, un JPG o un PNG fino a 10 MB.",
++  TROPPI_DOCUMENTI: "Questo contratto ha già 30 documenti. Elimina uno che non serve più per aggiungerne altri.",
++  DOCUMENTO_NON_TUO: "Puoi eliminare solo i documenti che hai caricato tu.",
+   // email per le notifiche
+   VALORE_NON_VALIDO: "Non è stato possibile cambiare l'impostazione. Riprova.",
+   ESITO_NON_VALIDO: "Non è stato possibile registrare l'invio.",
+diff --git a/supabase/migrations/0028_documenti_contratto.sql b/supabase/migrations/0028_documenti_contratto.sql
+new file mode 100644
+index 0000000..8705583
+--- /dev/null
++++ b/supabase/migrations/0028_documenti_contratto.sql
+@@ -0,0 +1,374 @@
++-- ============================================================
++-- MatchAmI — documenti del contratto (APE, planimetria, ricevute, registrazione)
++--
++-- Ogni contratto ha un archivio in cui CIASCUNA delle due parti carica documenti. Li
++-- vedono entrambe; li cancella solo chi li ha caricati.
++--
++-- PRINCIPIO: l'archivio dei file NON concede mai a un utente di leggere i file di un
++-- altro. Ognuno vede soltanto la propria cartella (`<id utente>/<file>`), come per i
++-- documenti di verifica. Per far vedere un documento all'altra parte c'è UN solo punto:
++-- il server, che prima chiede al database «sei una delle due parti?» (la funzione
++-- `percorso_documento_contratto`) e solo allora scarica il file. Il controllo sta in un
++-- posto solo.
++--
++-- Per questo i percorsi sono PIATTI, `<id utente>/<id>.<estensione>`: la cancellazione
++-- dell'account elenca la cartella della persona e toglie ciò che trova a quel livello, e
++-- una cartella annidata non verrebbe rimossa.
++--
++-- FILE ORFANI. Se un contratto sparisce (una delle parti cancella l'account, o l'immobile
++-- viene eliminato) le righe dei documenti spariscono a cascata, ma i file stanno
++-- nell'archivio e NON si cancellano da soli: resterebbero lì, dati personali senza
++-- nessuna riga che li indichi. Un trigger accoda il percorso di OGNI riga cancellata, a
++-- cascata compresa, in `file_da_eliminare`; il server la svuota (e un controllo
++-- periodico la riprende se qualcosa è andato storto).
++--
++-- Le tabelle non hanno nessuna lettura diretta: solo funzioni, e quelle della coda solo
++-- per il ruolo di servizio.
++--
++-- ORDINE: esegui questa migrazione PRIMA del push del codice.
++-- ============================================================
++
++-- ------------------------------------------------------------
++-- 1. L'archivio dei file: privato, 10 MB, solo PDF e immagini
++-- ------------------------------------------------------------
++
++insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
++values (
++  'documenti-contratto', 'documenti-contratto', false,
++  10485760,                                            -- 10 MB
++  array['application/pdf', 'image/jpeg', 'image/png']
++)
++on conflict (id) do update
++  set public = false,
++      file_size_limit = 10485760,
++      allowed_mime_types = array['application/pdf', 'image/jpeg', 'image/png'];
++
++-- Solo la PROPRIA cartella: si carica, si legge (serve a controllare il file appena caricato)
++-- e si cancella ciò che è proprio. Nessuna regola di lettura sui file degli altri.
++drop policy if exists "documenti-contratto: carica nella propria cartella" on storage.objects;
++create policy "documenti-contratto: carica nella propria cartella" on storage.objects
++  for insert to authenticated
++  with check (bucket_id = 'documenti-contratto' and (storage.foldername(name))[1] = auth.uid()::text);
++
++drop policy if exists "documenti-contratto: legge i propri file" on storage.objects;
++create policy "documenti-contratto: legge i propri file" on storage.objects
++  for select to authenticated
++  using (bucket_id = 'documenti-contratto' and (storage.foldername(name))[1] = auth.uid()::text);
++
++drop policy if exists "documenti-contratto: cancella i propri file" on storage.objects;
++create policy "documenti-contratto: cancella i propri file" on storage.objects
++  for delete to authenticated
++  using (bucket_id = 'documenti-contratto' and (storage.foldername(name))[1] = auth.uid()::text);
++
++-- ------------------------------------------------------------
++-- 2. I documenti
++-- ------------------------------------------------------------
++
++create table if not exists documenti_contratto (
++  id            uuid primary key default gen_random_uuid(),
++  contratto_id  uuid not null references contratti(id) on delete cascade,
++  caricato_da   uuid not null references profiles(id) on delete cascade,
++  tipo          text not null check (tipo in ('ape', 'planimetria', 'ricevuta', 'registrazione', 'altro')),
++  nome_file     text not null check (char_length(nome_file) between 1 and 200),
++  -- <id utente>/<id>.<estensione>: piatto, nella cartella di chi ha caricato
++  percorso      text not null unique
++                check (percorso ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(pdf|jpg|png)$'),
++  dimensione    integer not null check (dimensione between 1 and 10485760),
++  tipo_file     text not null check (tipo_file in ('application/pdf', 'image/jpeg', 'image/png')),
++  created_at    timestamptz not null default now(),
++  -- l'estensione dice la stessa cosa del tipo del file
++  constraint documenti_contratto_estensione_coerente check (
++    (tipo_file = 'application/pdf' and percorso like '%.pdf')
++    or (tipo_file = 'image/jpeg' and percorso like '%.jpg')
++    or (tipo_file = 'image/png' and percorso like '%.png')
++  )
++);
++
++create index if not exists documenti_contratto_per_contratto_idx on documenti_contratto (contratto_id);
++
++alter table documenti_contratto enable row level security;
++revoke all on documenti_contratto from anon, authenticated;
++
++-- ------------------------------------------------------------
++-- 3. La coda dei file da togliere dall'archivio
++-- ------------------------------------------------------------
++
++create table if not exists file_da_eliminare (
++  id         uuid primary key default gen_random_uuid(),
++  bucket     text not null check (char_length(bucket) between 1 and 80),
++  percorso   text not null check (char_length(percorso) between 1 and 300),
++  created_at timestamptz not null default now(),
++  unique (bucket, percorso)
++);
++
++alter table file_da_eliminare enable row level security;
++revoke all on file_da_eliminare from anon, authenticated;
++
++-- Ogni riga di documento che sparisce (anche a cascata) mette il suo file in coda.
++create or replace function public.accoda_file_documento_contratto()
++returns trigger
++language plpgsql
++security definer
++set search_path = public
++as $$
++begin
++  insert into file_da_eliminare (bucket, percorso)
++  values ('documenti-contratto', old.percorso)
++  on conflict (bucket, percorso) do nothing;
++  return old;
++end;
++$$;
++
++drop trigger if exists documenti_contratto_accoda_file on documenti_contratto;
++create trigger documenti_contratto_accoda_file
++  after delete on documenti_contratto
++  for each row execute function public.accoda_file_documento_contratto();
++
++-- ------------------------------------------------------------
++-- 4. Le funzioni per le due parti
++--
++-- «Una delle due parti» vuol dire: il proprietario dell'immobile o l'inquilino della
++-- candidatura di quel contratto, e la candidatura è ACCETTATA. Per chiunque altro non c'è
++-- niente, e nemmeno si capisce se il documento esiste.
++-- ------------------------------------------------------------
++
++-- I documenti di TUTTI i miei contratti, in una volta sola. Non restituisce il percorso del
++-- file: quello lo dà solo `percorso_documento_contratto`, al momento di scaricare.
++create or replace function public.documenti_dei_miei_contratti()
++returns table (
++  id           uuid,
++  contratto_id uuid,
++  tipo         text,
++  nome_file    text,
++  dimensione   integer,
++  tipo_file    text,
++  created_at   timestamptz,
++  mio          boolean,
++  da_ruolo     text
++)
++language sql
++stable
++security definer
++set search_path = public
++as $$
++  select d.id, d.contratto_id, d.tipo, d.nome_file, d.dimensione, d.tipo_file, d.created_at,
++         d.caricato_da = auth.uid(),
++         case when d.caricato_da = l.owner_id then 'locatore' else 'conduttore' end
++    from documenti_contratto d
++    join contratti c on c.id = d.contratto_id
++    join candidature k on k.id = c.candidatura_id
++    join listings l on l.id = k.listing_id
++   where auth.uid() is not null
++     and k.status = 'accettata'
++     and (k.tenant_id = auth.uid() or l.owner_id = auth.uid())
++   order by d.created_at desc;
++$$;
++
++-- Dove sta il file, per scaricarlo. L'UNICO punto in cui un'altra persona può arrivare a un
++-- file: lo chiama il server, che poi lo scarica con i suoi permessi.
++create or replace function public.percorso_documento_contratto(p_documento uuid)
++returns table (contratto_id uuid, percorso text, nome_file text, tipo_file text)
++language sql
++stable
++security definer
++set search_path = public
++as $$
++  select d.contratto_id, d.percorso, d.nome_file, d.tipo_file
++    from documenti_contratto d
++    join contratti c on c.id = d.contratto_id
++    join candidature k on k.id = c.candidatura_id
++    join listings l on l.id = k.listing_id
++   where auth.uid() is not null
++     and d.id = p_documento
++     and k.status = 'accettata'
++     and (k.tenant_id = auth.uid() or l.owner_id = auth.uid());
++$$;
++
++-- Registra un documento GIÀ caricato nella cartella di chi chiama. Il server ha controllato il
++-- contenuto del file (che sia davvero un PDF, un JPEG o un PNG) e ne ha letto la dimensione.
++create or replace function public.registra_documento_contratto(
++  p_contratto uuid,
++  p_tipo text,
++  p_percorso text,
++  p_nome text,
++  p_dimensione integer,
++  p_tipo_file text
++)
++returns uuid
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_nome text := btrim(regexp_replace(coalesce(p_nome, ''), '[[:cntrl:]]+', ' ', 'g'));
++  v_id uuid;
++begin
++  if auth.uid() is null then
++    raise exception 'NON_AUTENTICATO';
++  end if;
++
++  -- Il contratto si BLOCCA mentre si conta: due registrazioni insieme non possono superare il limite.
++  perform 1
++     from contratti c
++     join candidature k on k.id = c.candidatura_id
++     join listings l on l.id = k.listing_id
++    where c.id = p_contratto
++      and k.status = 'accettata'
++      and (k.tenant_id = auth.uid() or l.owner_id = auth.uid())
++      for update of c;
++  if not found then
++    raise exception 'CONTRATTO_NON_TUO';
++  end if;
++
++  if p_tipo is null or p_tipo not in ('ape', 'planimetria', 'ricevuta', 'registrazione', 'altro') then
++    raise exception 'TIPO_DOCUMENTO_NON_VALIDO';
++  end if;
++
++  v_nome := btrim(regexp_replace(v_nome, '\s+', ' ', 'g'));
++  if char_length(v_nome) not between 1 and 200 then
++    raise exception 'NOME_FILE_NON_VALIDO';
++  end if;
++
++  -- il file deve stare nella cartella di chi chiama, con un nome che è un identificativo, e il suo
++  -- tipo deve concordare con l'estensione; la dimensione deve essere quella ammessa
++  if p_percorso is null
++     or p_percorso !~ ('^' || auth.uid()::text || '/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(pdf|jpg|png)$')
++     or p_tipo_file is null
++     or not (
++          (p_tipo_file = 'application/pdf' and p_percorso like '%.pdf')
++       or (p_tipo_file = 'image/jpeg' and p_percorso like '%.jpg')
++       or (p_tipo_file = 'image/png' and p_percorso like '%.png')
++     )
++     or p_dimensione is null or p_dimensione not between 1 and 10485760
++  then
++    raise exception 'FILE_NON_VALIDO';
++  end if;
++
++  if (select count(*) from documenti_contratto where contratto_id = p_contratto) >= 30 then
++    raise exception 'TROPPI_DOCUMENTI';
++  end if;
++
++  begin
++    insert into documenti_contratto (contratto_id, caricato_da, tipo, nome_file, percorso, dimensione, tipo_file)
++    values (p_contratto, auth.uid(), p_tipo, v_nome, p_percorso, p_dimensione, p_tipo_file)
++    returning id into v_id;
++  exception when unique_violation then
++    raise exception 'FILE_NON_VALIDO';
++  end;
++
++  return v_id;
++end;
++$$;
++
++-- Cancella un documento: solo chi lo ha caricato. Restituisce il percorso del file, così il
++-- server può toglierlo subito dall'archivio (se non ci riesce, c'è la coda).
++create or replace function public.elimina_documento_contratto(p_documento uuid)
++returns text
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_percorso text;
++begin
++  if auth.uid() is null then
++    raise exception 'NON_AUTENTICATO';
++  end if;
++
++  delete from documenti_contratto d
++   where d.id = p_documento
++     and d.caricato_da = auth.uid()
++     and exists (
++       select 1
++         from contratti c
++         join candidature k on k.id = c.candidatura_id
++         join listings l on l.id = k.listing_id
++        where c.id = d.contratto_id
++          and k.status = 'accettata'
++          and (k.tenant_id = auth.uid() or l.owner_id = auth.uid())
++     )
++  returning d.percorso into v_percorso;
++
++  if v_percorso is null then
++    raise exception 'DOCUMENTO_NON_TUO';
++  end if;
++  return v_percorso;
++end;
++$$;
++
++-- ------------------------------------------------------------
++-- 5. La coda, per il server (solo il ruolo di servizio)
++-- ------------------------------------------------------------
++
++create or replace function public.file_da_eliminare_elenco(p_max integer default 100)
++returns table (id uuid, bucket text, percorso text)
++language sql
++stable
++security definer
++set search_path = public
++as $$
++  select f.id, f.bucket, f.percorso
++    from file_da_eliminare f
++   order by f.created_at
++   limit least(greatest(coalesce(p_max, 100), 1), 500);
++$$;
++
++create or replace function public.file_eliminati(p_ids uuid[])
++returns integer
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_n integer;
++begin
++  delete from file_da_eliminare where id = any(coalesce(p_ids, '{}'::uuid[]));
++  get diagnostics v_n = row_count;
++  return v_n;
++end;
++$$;
++
++-- ------------------------------------------------------------
++-- Permessi
++-- ------------------------------------------------------------
++
++revoke all on function
++  public.documenti_dei_miei_contratti(),
++  public.percorso_documento_contratto(uuid),
++  public.registra_documento_contratto(uuid, text, text, text, integer, text),
++  public.elimina_documento_contratto(uuid)
++from public, anon;
++
++grant execute on function
++  public.documenti_dei_miei_contratti(),
++  public.percorso_documento_contratto(uuid),
++  public.registra_documento_contratto(uuid, text, text, text, integer, text),
++  public.elimina_documento_contratto(uuid)
++to authenticated;
++
++revoke all on function
++  public.file_da_eliminare_elenco(integer),
++  public.file_eliminati(uuid[]),
++  public.accoda_file_documento_contratto()
++from public, anon, authenticated;
++
++grant execute on function
++  public.file_da_eliminare_elenco(integer),
++  public.file_eliminati(uuid[])
++to service_role;
++
++-- ------------------------------------------------------------
++-- Verifica
++-- ------------------------------------------------------------
++
++select id, public from storage.buckets where id = 'documenti-contratto';   -- public deve essere false
++
++select routine_name from information_schema.routines
++where routine_name in ('documenti_dei_miei_contratti', 'percorso_documento_contratto', 'registra_documento_contratto',
++                       'elimina_documento_contratto', 'file_da_eliminare_elenco', 'file_eliminati')
++order by 1;   -- 6 righe
++
++-- devono risultare 0: nessun permesso diretto sulle tabelle nuove
++select count(*) as permessi_diretti_per_gli_utenti
++from information_schema.role_table_grants
++where table_name in ('documenti_contratto', 'file_da_eliminare') and grantee in ('authenticated', 'anon');
+-- 
+2.43.0
+

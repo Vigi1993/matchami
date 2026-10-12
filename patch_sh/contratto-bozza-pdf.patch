@@ -1,0 +1,1723 @@
+From ed5b870658b6cfda654b794f1c18ada9ce6c902d Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 12 Oct 2026 09:31:03 +0000
+Subject: [PATCH] feat(contratto): bozza del contratto e PDF, con un modello di
+ prova
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RICHIEDE LA MIGRAZIONE 0027 PRIMA DEL PUSH, E npm ci DOPO (nuova dipendenza: pdf-lib).
+
+Oggi il contratto erano quattro campi che il proprietario aggiornava a mano. Ora
+le due parti possono vedere e scaricare in PDF una bozza composta dai dati
+dell'affitto. Il modello è una BOZZA DI PROVA SENZA VALORE LEGALE.
+
+DATABASE (0027). dati_contratto(p_contratto): nomi delle due parti, immobile,
+indirizzo se c'è, canone, durata, date, classe energetica. Solo le due parti, solo
+con la candidatura ACCETTATA; per chiunque altro nessuna riga (nemmeno si capisce se
+il contratto esiste). Nessuna tabella nuova, non salva niente. Nessun dato che non
+raccogliamo (codici fiscali, residenze, documenti).
+
+DOCUMENTO
+- ogni dato che non abbiamo resta '[da indicare]' ed è elencato come 'da
+  completare'; non si inventa niente (provato anche con i dati vuoti)
+- il testo è volutamente minimo e descrittivo: nessuna clausola né richiamo di
+  legge (un test lo impone); scriverle spetta a un legale (punto 4)
+- la dicitura di bozza è in cima, nel titolo, su ogni pagina e come filigrana. La
+  decide il REGISTRO, non il modello: un modello non può dichiararsi validato da
+  solo, e uno 'validato' senza dire da chi e quando non si registra. Solo un modello
+  validato toglie filigrana e avvertenza, da tutte le pagine (provato sui contenuti)
+- stesso metodo di mappe, utenze, email e quotazioni: interfaccia unica
+  ModelloContratto, registro con nome sbagliato = errore che lo dice, test del
+  contratto che girano su ogni modello registrato
+
+PDF (pdf-lib, in UN solo file: un test lo impone). Generato al momento, non
+salvato. Metadati: solo il titolo, nessun autore né nome. Nessuno script, azione o
+collegamento nel file. Nome del file senza dati personali.
+
+DIFETTI TROVATI GUARDANDO UN PDF VERO, E CORRETTI
+- un titolo di migliaia di caratteri bloccava la generazione: il tempo cresceva col
+  QUADRATO della lunghezza (1600 caratteri 762 ms). Il titolo lo scrive il
+  proprietario e il PDF lo genera l'inquilino: era un modo per bloccare il server.
+  Ora la ricerca del punto di taglio è binaria su un tratto limitato (200000
+  caratteri in 256 ms) e ogni testo ha un tetto, con un avviso quando si abbrevia.
+  Tre campi da un milione di caratteri: 45 ms
+- la '²' non si vedeva in alcuni visualizzatori ('55 m .'): il modello scrive 'mq'
+  e gli apici diventano cifre
+- la filigrana usciva dalla pagina: ora sta sempre dentro (test sugli angoli)
+- un nome con caratteri che il font non ha ('Łukasz') veniva alterato in
+  silenzio: ora il documento lo dice. Il carattere Unicode incorporato resta da
+  fare per il modello validato
+
+APP
+- pagina /contratto/[id] e percorso /contratto/[id]/pdf: controllo in ordine
+  identificativo, accesso, informativa, solo poi i dati. Chi non è una delle due
+  parti riceve 'non trovato', come per un contratto inesistente
+- 'Vedi la bozza' e 'Scarica il PDF' nei pannelli dei contratti di inquilino e
+  proprietario
+- percorso del PDF: Cache-Control private, no-store, nosniff, solo GET
+
+PRIVACY. Informativa 2026-10-provvisoria-12 (la 11 tra le equivalenti: nessuno deve
+riaccettare). Guardia sulla privacy degli indirizzi resa precisa: una migrazione
+può leggerli solo dentro una funzione security definer che controlla chi chiama e
+solo se è nell'elenco esplicito (oggi la 0027); concessioni, regole e modifiche
+alla tabella restano vietate a qualunque altra.
+
+Test: 727 in tutto (la parte del contratto gira in 2,4 secondi). 19 prove
+eseguono il VERO percorso del PDF e la VERA pagina con un finto database. Verificato
+sul server: PDF scaricato come un browser e letto con pdfinfo e pdftotext. Difetti
+reintrodotti di proposito: 27 su 27 presi.
+---
+ package-lock.json                             |  43 ++
+ package.json                                  |   3 +-
+ scripts/test-contratto.mjs                    | 421 ++++++++++++++++++
+ scripts/test-mappe.mjs                        |  21 +-
+ src/app/(app)/contratto/[id]/page.tsx         |  99 ++++
+ src/app/(app)/contratto/[id]/pdf/route.ts     |  62 +++
+ .../GestioneAffittiClient.tsx                 |   2 +
+ src/app/(app)/gestione/GestioneClient.tsx     |   2 +
+ src/components/BozzaContratto.tsx             |  26 ++
+ src/content/informativa.ts                    |   4 +-
+ src/lib/contratto/dati.ts                     | 101 +++++
+ src/lib/contratto/index.ts                    |  56 +++
+ src/lib/contratto/modello-provvisorio.ts      | 104 +++++
+ src/lib/contratto/pdf.ts                      | 177 ++++++++
+ src/lib/contratto/testo-pdf.ts                | 126 ++++++
+ src/lib/contratto/tipi.ts                     |  91 ++++
+ supabase/migrations/0027_dati_contratto.sql   |  93 ++++
+ 17 files changed, 1427 insertions(+), 4 deletions(-)
+ create mode 100644 scripts/test-contratto.mjs
+ create mode 100644 src/app/(app)/contratto/[id]/page.tsx
+ create mode 100644 src/app/(app)/contratto/[id]/pdf/route.ts
+ create mode 100644 src/components/BozzaContratto.tsx
+ create mode 100644 src/lib/contratto/dati.ts
+ create mode 100644 src/lib/contratto/index.ts
+ create mode 100644 src/lib/contratto/modello-provvisorio.ts
+ create mode 100644 src/lib/contratto/pdf.ts
+ create mode 100644 src/lib/contratto/testo-pdf.ts
+ create mode 100644 src/lib/contratto/tipi.ts
+ create mode 100644 supabase/migrations/0027_dati_contratto.sql
+
+diff --git a/package-lock.json b/package-lock.json
+index 5afc38c..8c6ca6a 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -11,6 +11,7 @@
+         "@supabase/ssr": "^0.12.5",
+         "@supabase/supabase-js": "^2.114.0",
+         "next": "16.3.8",
++        "pdf-lib": "1.17.1",
+         "react": "19.2.8",
+         "react-dom": "19.2.8"
+       },
+@@ -1319,6 +1320,24 @@
+         "node": ">=12.4.0"
+       }
+     },
++    "node_modules/@pdf-lib/standard-fonts": {
++      "version": "1.0.0",
++      "resolved": "https://registry.npmjs.org/@pdf-lib/standard-fonts/-/standard-fonts-1.0.0.tgz",
++      "integrity": "sha512-hU30BK9IUN/su0Mn9VdlVKsWBS6GyhVfqjwl1FjZN4TxP6cCw0jP2w7V3Hf5uX7M0AZJ16vey9yE0ny7Sa59ZA==",
++      "license": "MIT",
++      "dependencies": {
++        "pako": "^1.0.6"
++      }
++    },
++    "node_modules/@pdf-lib/upng": {
++      "version": "1.0.1",
++      "resolved": "https://registry.npmjs.org/@pdf-lib/upng/-/upng-1.0.1.tgz",
++      "integrity": "sha512-dQK2FUMQtowVP00mtIksrlZhdFXQZPC+taih1q4CvPZ5vqdxR/LKBaFg0oAfzd1GlHZXXSPdQfzQnt+ViGvEIQ==",
++      "license": "MIT",
++      "dependencies": {
++        "pako": "^1.0.10"
++      }
++    },
+     "node_modules/@rtsao/scc": {
+       "version": "1.1.0",
+       "resolved": "https://registry.npmjs.org/@rtsao/scc/-/scc-1.1.0.tgz",
+@@ -5587,6 +5606,12 @@
+         "url": "https://github.com/sponsors/sindresorhus"
+       }
+     },
++    "node_modules/pako": {
++      "version": "1.0.11",
++      "resolved": "https://registry.npmjs.org/pako/-/pako-1.0.11.tgz",
++      "integrity": "sha512-4hLB8Py4zZce5s4yd9XzopqwVv/yGNhV1Bl8NTmCq1763HeK2+EwVTv+leGeL13Dnh2wfbqowVPXCIO0z4taYw==",
++      "license": "(MIT AND Zlib)"
++    },
+     "node_modules/parent-module": {
+       "version": "1.0.1",
+       "resolved": "https://registry.npmjs.org/parent-module/-/parent-module-1.0.1.tgz",
+@@ -5627,6 +5652,24 @@
+       "dev": true,
+       "license": "MIT"
+     },
++    "node_modules/pdf-lib": {
++      "version": "1.17.1",
++      "resolved": "https://registry.npmjs.org/pdf-lib/-/pdf-lib-1.17.1.tgz",
++      "integrity": "sha512-V/mpyJAoTsN4cnP31vc0wfNA1+p20evqqnap0KLoRUN0Yk/p3wN52DOEsL4oBFcLdb76hlpKPtzJIgo67j/XLw==",
++      "license": "MIT",
++      "dependencies": {
++        "@pdf-lib/standard-fonts": "^1.0.0",
++        "@pdf-lib/upng": "^1.0.1",
++        "pako": "^1.0.11",
++        "tslib": "^1.11.1"
++      }
++    },
++    "node_modules/pdf-lib/node_modules/tslib": {
++      "version": "1.14.1",
++      "resolved": "https://registry.npmjs.org/tslib/-/tslib-1.14.1.tgz",
++      "integrity": "sha512-Xni35NKzjgMrwevysHTCArtLDpPvye8zV/0E4EyYn43P7/7qvQwPh9BGkHewbMulVntbigmcT7rdX3BNo9wRJg==",
++      "license": "0BSD"
++    },
+     "node_modules/picocolors": {
+       "version": "1.1.1",
+       "resolved": "https://registry.npmjs.org/picocolors/-/picocolors-1.1.1.tgz",
+diff --git a/package.json b/package.json
+index de2b3ef..b3815c6 100644
+--- a/package.json
++++ b/package.json
+@@ -7,12 +7,13 @@
+     "build": "next build",
+     "start": "next start",
+     "lint": "eslint",
+-    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+     "@supabase/supabase-js": "^2.114.0",
+     "next": "16.3.8",
++    "pdf-lib": "1.17.1",
+     "react": "19.2.8",
+     "react-dom": "19.2.8"
+   },
+diff --git a/scripts/test-contratto.mjs b/scripts/test-contratto.mjs
+new file mode 100644
+index 0000000..a428858
+--- /dev/null
++++ b/scripts/test-contratto.mjs
+@@ -0,0 +1,421 @@
++/**
++ * Test della generazione del contratto e del PDF (src/lib/contratto). Si lancia con:   npm test
++ *
++ * Contengono il CONTRATTO di ogni modello: girano su tutti quelli registrati, quindi chi ne
++ * aggiunge uno validato da un legale li ritrova pronti.
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { PDFDocument, StandardFonts, PDFArray, decodePDFRawStream } from "pdf-lib";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const dati = caricaTs(path.join(radice, "src", "lib", "contratto", "dati.ts"));
++const reg = caricaTs(path.join(radice, "src", "lib", "contratto", "index.ts"));
++const tp = caricaTs(path.join(radice, "src", "lib", "contratto", "testo-pdf.ts"));
++const pdf = caricaTs(path.join(radice, "src", "lib", "contratto", "pdf.ts"));
++const prov = caricaTs(path.join(radice, "src", "lib", "contratto", "modello-provvisorio.ts"));
++const { INFORMATIVA } = caricaTs(path.join(radice, "src", "content", "informativa.ts"));
++const sql = fs.readFileSync(path.join(radice, "supabase", "migrations", "0027_dati_contratto.sql"), "utf8");
++const leggi = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8");
++
++const ID = "d1111111-1111-1111-1111-111111111111";
++const RIGA = { contratto_id: ID, stato: "in_firma", canone: 1450, durata_mesi: 12, data_inizio: "2026-11-01", data_firma: null, titolo: "Bilocale Isola", zona: "Isola, Milano", locali: 2, mq: 55, classe_energetica: "B", ep_globale: "95.50", via: "Via Garibaldi", civico: "12", cap: "20121", citta: "Milano", locatore_nome: "Olga", locatore_cognome: "Bianchi", conduttore_nome: "Tina", conduttore_cognome: "Verdi", io_sono: "locatore" };
++const COMPLETO = dati.datiDaRiga(RIGA);
++const VUOTO = dati.datiDaRiga({ contratto_id: ID, io_sono: "conduttore" });
++const tutto = (doc) => [doc.titolo, doc.sottotitolo ?? "", ...doc.avvisi, ...doc.sezioni.flatMap((s) => [s.titolo, ...s.paragrafi]), ...doc.firme.flatMap((f) => [f.ruolo, f.nome ?? ""])].join("\n");
++const misuraFinta = (t, g) => t.length * g * 0.5;
++const DATA = new Date("2026-10-12T10:00:00Z");
++
++// ============================================================ i dati
++test("pulizia del testo: spazi ridotti, a capo e caratteri invisibili tolti, e valori strani diventano vuoti", () => {
++  assert.equal(dati.pulisciTesto("  Via   Garibaldi \n"), "Via Garibaldi"); assert.equal(dati.pulisciTesto("a\u200bb\u0000c"), "a b c");
++  for (const x of [null, undefined, 42, {}, []]) assert.equal(dati.pulisciTesto(x), "");
++});
++
++test("nome completo: nome e cognome, uno solo, o nessuno", () => {
++  assert.equal(dati.nomeCompleto("Olga", "Bianchi"), "Olga Bianchi"); assert.equal(dati.nomeCompleto("Olga", null), "Olga"); assert.equal(dati.nomeCompleto(null, "Bianchi"), "Bianchi");
++  for (const [a, b] of [[null, null], ["", "  "], [undefined, undefined], [5, {}]]) assert.equal(dati.nomeCompleto(a, b), null);
++});
++
++test("date: «2026-11-01» diventa «1 novembre 2026»; una data che non esiste o scritta male vale nulla", () => {
++  assert.equal(dati.formattaDataIso("2026-11-01"), "1 novembre 2026"); assert.equal(dati.formattaDataIso("2026-12-31"), "31 dicembre 2026"); assert.equal(dati.formattaDataIso("2024-02-29"), "29 febbraio 2024");
++  for (const x of ["2026-02-30", "2026-13-01", "2025-02-29", "2026-00-10", "01/11/2026", "2026-1-1", "", null, undefined, 20261101, "2026-11-01T00:00:00Z", "novembre"]) assert.equal(dati.formattaDataIso(x), null, JSON.stringify(x));
++});
++
++test("date: il giorno non cambia con il fuso orario del computer", () => {
++  const prima = process.env.TZ; try { for (const tz of ["Pacific/Kiritimati", "America/Los_Angeles", "Europe/Rome", "UTC"]) { process.env.TZ = tz; assert.equal(dati.formattaDataIso("2026-11-01"), "1 novembre 2026", tz); } } finally { if (prima === undefined) delete process.env.TZ; else process.env.TZ = prima; }
++});
++
++test("righe dal database: dati completi", () => {
++  const d = COMPLETO; assert.equal(d.id, ID); assert.deepEqual(d.locatore, { nome: "Olga", cognome: "Bianchi" }); assert.deepEqual(d.conduttore, { nome: "Tina", cognome: "Verdi" });
++  assert.equal(d.canone, 1450); assert.equal(d.durataMesi, 12); assert.equal(d.dataInizio, "2026-11-01"); assert.equal(d.dataFirma, null); assert.equal(d.ioSono, "locatore");
++  assert.deepEqual(d.immobile.indirizzo, { via: "Via Garibaldi", civico: "12", cap: "20121", citta: "Milano" }); assert.equal(d.immobile.epGlobale, 95.5); assert.equal(d.immobile.classeEnergetica, "B");
++});
++
++test("righe dal database: ciò che manca resta nullo, e un indirizzo incompleto non si usa a pezzi", () => {
++  const d = VUOTO; assert.equal(d.canone, null); assert.equal(d.durataMesi, null); assert.equal(d.dataInizio, null); assert.equal(d.immobile.indirizzo, null); assert.equal(d.locatore.nome, null); assert.equal(d.ioSono, "conduttore");
++  for (const manca of ["via", "civico", "cap", "citta"]) assert.equal(dati.datiDaRiga({ ...RIGA, [manca]: null }).immobile.indirizzo, null, manca);
++  assert.equal(dati.datiDaRiga({ ...RIGA, via: "   " }).immobile.indirizzo, null);
++});
++
++test("righe dal database: numeri e date impossibili diventano nulli, mai valori inventati", () => {
++  for (const x of [0, -5, 1.5, NaN, "1450", null]) assert.equal(dati.datiDaRiga({ ...RIGA, canone: x }).canone, null, JSON.stringify(x));
++  assert.equal(dati.datiDaRiga({ ...RIGA, data_inizio: "2026-02-30" }).dataInizio, null); assert.equal(dati.datiDaRiga({ ...RIGA, ep_globale: "boh" }).immobile.epGlobale, null); assert.equal(dati.datiDaRiga({ ...RIGA, ep_globale: 0 }).immobile.epGlobale, 0, "zero è un valore");
++  assert.equal(dati.datiDaRiga({ ...RIGA, io_sono: "altro" }).ioSono, "conduttore");
++});
++
++test("una riga che non è un contratto non produce dati", () => { for (const x of [null, undefined, {}, { contratto_id: "" }, { contratto_id: 5 }, "boh"]) assert.equal(dati.datiDaRiga(x), null, JSON.stringify(x)); });
++
++// ============================================================ il registro e il CONTRATTO di ogni modello
++test("registro: senza configurazione il provvisorio; un nome sbagliato è un errore che dice quali ci sono", () => {
++  const prima = process.env.CONTRATTO_MODELLO; delete process.env.CONTRATTO_MODELLO;
++  try { for (const x of [undefined, null, "", "  ", "provvisorio"]) assert.equal(reg.modelloContratto(x).id, "provvisorio", JSON.stringify(x)); } finally { if (prima !== undefined) process.env.CONTRATTO_MODELLO = prima; }
++  assert.throws(() => reg.modelloContratto("legale"), (e) => /«legale»/.test(e.message) && /provvisorio/.test(e.message));
++  for (const x of ["__proto__", "constructor", "toString", "hasOwnProperty"]) assert.throws(() => reg.modelloContratto(x), /sconosciuto/, x);
++});
++
++for (const [nome, m] of Object.entries(reg.MODELLI_CONTRATTO)) {
++  test(`contratto [${nome}]: identificativo uguale al nome registrato, versione, origine ammessa, e nessun difetto`, () => {
++    assert.equal(m.id, nome); assert.ok(String(m.versione).trim().length > 0); assert.ok(["provvisorio", "validato"].includes(m.origine)); assert.deepEqual(reg.difettiDelModello(m), []);
++  });
++  test(`contratto [${nome}]: con dati completi il documento ha titolo, sezioni, firme, e ogni dato compare`, () => {
++    const d = m.genera(COMPLETO); const t = tutto(d);
++    assert.ok(d.titolo.length > 5 && d.sezioni.length >= 4 && d.firme.length === 2);
++    for (const atteso of ["Olga Bianchi", "Tina Verdi", "Bilocale Isola", "Via Garibaldi 12, 20121 Milano", "1450 euro", "12 mesi", "1 novembre 2026", "55", "Isola, Milano"]) assert.ok(t.includes(atteso), `manca «${atteso}»`);
++    assert.ok(/\bB\b/.test(t) && t.includes("95,5"), "mancano classe energetica e indice");
++    assert.deepEqual(d.firme.map((f) => f.nome), ["Olga Bianchi", "Tina Verdi"]);
++  });
++  test(`contratto [${nome}]: senza dati NON si inventa niente: ogni mancanza è «[da indicare]» ed è nell'elenco da completare`, () => {
++    const d = m.genera(VUOTO); const t = tutto(d);
++    assert.ok(t.includes(dati.DA_INDICARE)); assert.ok(d.daIndicare.length >= 5, d.daIndicare.join()); assert.equal(new Set(d.daIndicare).size, d.daIndicare.length, "doppioni nell'elenco");
++    for (const etichetta of ["nome del locatore", "nome del conduttore", "canone mensile", "durata", "data di inizio", "indirizzo dell'immobile"]) assert.ok(d.daIndicare.includes(etichetta), `«${etichetta}» non è nell'elenco`);
++    for (const falso of ["Olga", "Tina", "1450", "12 mesi", "Via ", "novembre"]) assert.ok(!t.includes(falso), `ha inventato «${falso}»`);
++    assert.deepEqual(d.firme.map((f) => f.nome), [null, null]);
++  });
++  test(`contratto [${nome}]: nessun «undefined», «null», «NaN» o «[object» in nessun testo, né con dati completi né vuoti`, () => {
++    for (const x of [COMPLETO, VUOTO]) assert.ok(!/undefined|\bnull\b|NaN|\[object/.test(tutto(m.genera(x))), tutto(m.genera(x)).slice(0, 300));
++  });
++  test(`contratto [${nome}]: dati completi = pochi segnaposto (solo ciò che non raccogliamo), e lo dice`, () => {
++    const d = m.genera(COMPLETO); assert.ok(d.daIndicare.length > 0 && d.daIndicare.length <= 12, d.daIndicare.join());
++    assert.ok(d.daIndicare.includes("codice fiscale del locatore") && d.daIndicare.includes("deposito cauzionale"), "i dati che non raccogliamo devono restare da indicare");
++    assert.ok(!d.daIndicare.includes("canone mensile") && !d.daIndicare.includes("nome del locatore"), "ciò che abbiamo non può essere «da indicare»");
++  });
++  test(`contratto [${nome}]: dati ostili non lanciano errori e restano testo`, () => {
++    const ostile = dati.datiDaRiga({ ...RIGA, titolo: '<script>alert(1)</script> & "x"', locatore_nome: "a".repeat(5000), conduttore_cognome: "'; DROP TABLE x; --", via: "💥".repeat(300) });
++    assert.doesNotThrow(() => m.genera(ostile)); assert.ok(tutto(m.genera(ostile)).includes("<script>"), "il testo di un altro non si altera");
++  });
++  test(`contratto [${nome}]: è deterministico`, () => { assert.deepEqual(m.genera(COMPLETO), m.genera(COMPLETO)); });
++}
++
++test("modello provvisorio: è dichiarato bozza senza valore legale, in cima e nel titolo", () => {
++  const d = reg.componiContratto(COMPLETO, "provvisorio");
++  assert.match(d.titolo, /^Bozza di contratto/); assert.equal(d.bozza, true); assert.equal(d.modello.origine, "provvisorio");
++  assert.ok(d.avvisi[0].startsWith("BOZZA DI PROVA")); assert.match(d.avvisi[0], /non è un contratto valido, non ha valore legale e non va firmato/); assert.match(d.avvisi[1], /verificato da un professionista/);
++});
++
++test("modello provvisorio: nessuna clausola di legge, nessun richiamo normativo, nessuna promessa", () => {
++  const t = tutto(reg.componiContratto(COMPLETO, "provvisorio"));
++  assert.ok(!/\bart\.|articolo \d|D\.?Lgs|decreto|legge n|L\. ?431|ai sensi|codice civile|c\.c\./i.test(t), "un modello di prova non deve citare norme: scriverle spetta a un legale"); assert.ok(!/garantit|conforme alla legge|a norma/i.test(t));
++});
++
++test("il «bozza» lo decide il registro: un modello non può togliersi la dicitura, e uno validato senza dire da chi non si usa", () => {
++  const base = { id: "x", versione: "1", genera: () => ({ ...reg.MODELLI_CONTRATTO.provvisorio.genera(COMPLETO), bozza: false }) };
++  assert.equal(reg.componiContratto(COMPLETO, null, { ...base, origine: "provvisorio" }).bozza, true, "un modello provvisorio che scrive bozza:false resta una bozza");
++  assert.throws(() => reg.componiContratto(COMPLETO, null, { ...base, origine: "validato" }), /deve dire da chi e quando/);
++  assert.throws(() => reg.componiContratto(COMPLETO, null, { ...base, origine: "validato", validazione: { da: "", data: "2026-10-01" } }), /da chi e quando/);
++  assert.throws(() => reg.componiContratto(COMPLETO, null, { ...base, origine: "validato", validazione: { da: "Studio Legale", data: "" } }), /da chi e quando/);
++  const ok = reg.componiContratto(COMPLETO, null, { ...base, origine: "validato", validazione: { da: "Studio Legale Rossi", data: "2026-10-01" } }); assert.equal(ok.bozza, false); assert.equal(ok.modello.origine, "validato");
++  for (const origine of ["boh", "", undefined]) assert.throws(() => reg.componiContratto(COMPLETO, null, { ...base, origine }), /non utilizzabile/);
++  assert.throws(() => reg.componiContratto(COMPLETO, null, { ...base, id: "Id Sbagliato", origine: "provvisorio" }), /identificativo/); assert.throws(() => reg.componiContratto(COMPLETO, null, { ...base, versione: " ", origine: "provvisorio" }), /versione/);
++});
++
++// ============================================================ il testo per il PDF
++test("caratteri ammessi: Latin-1 e le aggiunte di Windows-1252, ma non i caratteri di controllo né il resto", () => {
++  for (const c of ["A", "z", " ", "è", "à", "ù", "ì", "ò", "é", "€", "«", "»", "–", "—", "’", "“", "”", "•", "…"]) assert.equal(tp.inCp1252(c.codePointAt(0)), true, c);
++  for (const c of ["Ł", "ł", "Ж", "中", "💥", "\n", "\t", "\u0000", "\u2192", "\u200b", "\u0100"]) assert.equal(tp.inCp1252(c.codePointAt(0)), false, JSON.stringify(c));
++});
++
++test("sanitizzare: le lettere italiane restano, ciò che il font non ha si semplifica, e non si inventa niente di strano", () => {
++  assert.equal(tp.sanitizzaPerPdf("Perché è già così, più su: «ciò» – 1.450 €"), "Perché è già così, più su: «ciò» – 1.450 €");
++  assert.equal(tp.sanitizzaPerPdf("Łukasz Żółć"), "Lukasz Zólc"); assert.equal(tp.sanitizzaPerPdf("Ādams"), "Adams"); assert.equal(tp.sanitizzaPerPdf("Đorđe"), "Dorde");
++  assert.equal(tp.sanitizzaPerPdf("Иван"), "????"); assert.equal(tp.sanitizzaPerPdf("a💥b"), "a?b"); assert.equal(tp.sanitizzaPerPdf("a→b"), "a->b"); assert.equal(tp.sanitizzaPerPdf("−5"), "-5");
++});
++
++test("sanitizzare: a capo, tabulazioni e spazi particolari diventano uno spazio; i caratteri di controllo e invisibili spariscono", () => {
++  assert.equal(tp.sanitizzaPerPdf("a\nb\tc\r\nd"), "a b c  d"); assert.equal(tp.sanitizzaPerPdf("a\u00a0b"), "a b"); assert.equal(tp.sanitizzaPerPdf("a\u200bb\u0000c\u0007d\ufeffe\u00adf"), "abcdef");
++  for (const x of [null, undefined, 42, {}, []]) assert.equal(tp.sanitizzaPerPdf(x), "");
++});
++
++test("sanitizzare: gli apici diventano cifre semplici (alcuni visualizzatori non li disegnano)", () => { assert.equal(tp.sanitizzaPerPdf("55 m²"), "55 m2"); assert.equal(tp.sanitizzaPerPdf("m³ e ¹"), "m3 e 1"); });
++
++test("sanitizzare: qualunque testo diventa scrivibile, senza errori (prova su 3000 testi casuali, anche con caratteri fuori dal piano base)", () => {
++  let seme = 12345; const rnd = () => (seme = (seme * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
++  for (let i = 0; i < 3000; i++) {
++    let s = ""; const n = Math.floor(rnd() * 40);
++    for (let k = 0; k < n; k++) { const t = rnd(); s += String.fromCodePoint(t < 0.4 ? 32 + Math.floor(rnd() * 95) : t < 0.6 ? 0xa0 + Math.floor(rnd() * 96) : t < 0.8 ? Math.floor(rnd() * 0x3000) : 0x1f300 + Math.floor(rnd() * 300)); }
++    let fuori; assert.doesNotThrow(() => { fuori = tp.sanitizzaPerPdf(s); }, JSON.stringify(s));
++    for (const ch of fuori) assert.ok(tp.inCp1252(ch.codePointAt(0)), `«${ch}» (U+${ch.codePointAt(0).toString(16)}) non è scrivibile, da ${JSON.stringify(s)}`);
++  }
++});
++
++test("a capo: nessuna riga più larga del permesso, e nessuna parola persa", () => {
++  const larg = 120; const t = "Il locatore concede in locazione al conduttore, per uso abitativo, l'immobile situato in Via Garibaldi 12 a Milano";
++  const righe = tp.spezzaInRighe(t, larg, 10, false, misuraFinta); assert.ok(righe.length > 3); for (const r of righe) assert.ok(misuraFinta(r, 10) <= larg, r); assert.equal(righe.join(" "), t);
++});
++
++test("a capo: una parola più lunga della riga si spezza invece di uscire dalla pagina, e con una larghezza minuscola non gira a vuoto", () => {
++  const lunga = "x".repeat(100); const r = tp.spezzaInRighe(lunga, 50, 10, false, misuraFinta); assert.ok(r.length > 1); for (const x of r) assert.ok(misuraFinta(x, 10) <= 50, x); assert.equal(r.join(""), lunga);
++  const inizio = Date.now(); const m = tp.spezzaInRighe("abc def", 1, 10, false, misuraFinta); assert.equal(m.join(""), "abcdef"); assert.ok(Date.now() - inizio < 500, "troppo lento");
++  assert.deepEqual(tp.spezzaInRighe("", 100, 10, false, misuraFinta), []); assert.deepEqual(tp.spezzaInRighe("   \n  ", 100, 10, false, misuraFinta), []);
++});
++
++test("a capo: testi casuali non perdono né inventano caratteri e rispettano la larghezza", () => {
++  let seme = 99; const rnd = () => (seme = (seme * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
++  for (let i = 0; i < 500; i++) {
++    const parole = Array.from({ length: 1 + Math.floor(rnd() * 15) }, () => "ab".repeat(1 + Math.floor(rnd() * 30)).slice(0, 1 + Math.floor(rnd() * 70))); const testo = parole.join(" "); const larg = 30 + rnd() * 300;
++    const righe = tp.spezzaInRighe(testo, larg, 10, false, misuraFinta); assert.equal(righe.join("").replace(/ /g, ""), testo.replace(/ /g, ""), "persi o aggiunti caratteri"); for (const r of righe) assert.ok(misuraFinta(r, 10) <= larg + 1e-9, `${r.length} caratteri in ${larg}`);
++  }
++});
++
++test("caratteri semplificati: un nome come «Łukasz» si segnala, uno normale no, e gli spazi o i caratteri di controllo non contano", () => {
++  assert.equal(tp.perdeCaratteri("Łukasz"), true); assert.equal(tp.perdeCaratteri("Иван"), true); assert.equal(tp.perdeCaratteri("a💥b"), true); assert.equal(tp.perdeCaratteri("55 m²"), true, "l'apice diventa «2»: è un cambiamento");
++  for (const x of ["Marco", "Perché è già così", "1.450 €", "«ciò» – sì", "  a   b  ", "a\nb", "a\u200bb", "", null, undefined, 5]) assert.equal(tp.perdeCaratteri(x), false, JSON.stringify(x));
++  assert.equal(tp.documentoSemplificato(reg.componiContratto(COMPLETO)), false); assert.equal(tp.documentoSemplificato(reg.componiContratto(dati.datiDaRiga({ ...RIGA, conduttore_nome: "Łukasz" }))), true);
++});
++
++test("l'avviso sui caratteri semplificati si scrive senza i caratteri che descrive", () => { assert.equal(tp.perdeCaratteri(tp.AVVISO_CARATTERI_SEMPLIFICATI), false, "l'avviso stesso verrebbe alterato"); assert.match(tp.AVVISO_CARATTERI_SEMPLIFICATI, /controlla i nomi/); });
++
++test("i testi del modello provvisorio sono scrivibili tali e quali nel PDF (nessun carattere alterato)", () => {
++  for (const x of [COMPLETO, VUOTO]) { const d = reg.componiContratto(x); assert.equal(tp.documentoSemplificato(d), false, "il modello usa un carattere che il PDF non ha"); }
++  for (const t of [prov.TESTO_BOZZA, prov.TESTO_DA_COMPLETARE]) assert.equal(tp.perdeCaratteri(t), false, t);
++});
++
++// ============================================================ l'impaginazione
++const DOC = reg.componiContratto(COMPLETO);
++const DOC_LUNGO = { ...DOC, sezioni: [...DOC.sezioni, ...Array.from({ length: 30 }, (_, i) => ({ titolo: `Sezione extra ${i}`, paragrafi: ["Un paragrafo piuttosto lungo che va a capo più volte per riempire le pagine del documento di prova ".repeat(4)] }))] };
++
++test("impaginazione: ogni riga sta dentro i margini della pagina, in alto e in basso", () => {
++  for (const doc of [DOC, DOC_LUNGO, reg.componiContratto(VUOTO)]) for (const [n, p] of pdf.impagina(doc, misuraFinta).entries()) for (const r of p.righe) {
++    assert.ok(r.x >= pdf.MARGINE.sinistra - 1e-9, `pag ${n + 1}: x ${r.x}`); assert.ok(r.x + misuraFinta(r.testo, r.grandezza) <= pdf.PAGINA.larghezza - pdf.MARGINE.destra + 1e-6, `pag ${n + 1}: «${r.testo}» esce a destra`);
++    assert.ok(r.y >= pdf.MARGINE.basso - 20, `pag ${n + 1}: y ${r.y} sotto il margine`); assert.ok(r.y <= pdf.PAGINA.altezza - pdf.MARGINE.alto + 1e-9, `pag ${n + 1}: y ${r.y} sopra il margine`);
++  }
++});
++
++test("impaginazione: un documento lungo va su più pagine, e il testo del documento c'è per intero", () => {
++  const p = pdf.impagina(DOC_LUNGO, misuraFinta); assert.ok(p.length >= 3, "pagine: " + p.length);
++  const scritto = p.flatMap((x) => x.righe.map((r) => r.testo)).join(" "); for (const s of DOC_LUNGO.sezioni) assert.ok(scritto.includes(s.titolo), s.titolo);
++});
++
++test("impaginazione: un titolo di sezione non resta mai solo in fondo a una pagina", () => {
++  const p = pdf.impagina(DOC_LUNGO, misuraFinta);
++  p.forEach((pg, n) => { if (n === p.length - 1) return; const corpo = pg.righe.filter((r) => r.grandezza < 14 || r.grandezza > 12.6 || true); const ultima = pg.righe[pg.righe.length - 1]; assert.ok(!(ultima.grassetto && ultima.grandezza === 12.5), `pag ${n + 1} finisce con un titolo di sezione: «${ultima.testo}»`); void corpo; });
++});
++
++test("impaginazione: le firme ci sono sull'ultima pagina, ognuna con la sua riga e il nome sotto", () => {
++  const p = pdf.impagina(DOC, misuraFinta); const ultima = p[p.length - 1];
++  assert.ok(ultima.righe.some((r) => r.testo === "Il locatore") && ultima.righe.some((r) => r.testo === "Il conduttore")); assert.equal(ultima.linee.length, 2); assert.ok(ultima.righe.some((r) => r.testo === "Olga Bianchi") && ultima.righe.some((r) => r.testo === "Tina Verdi"));
++  for (const l of ultima.linee) assert.ok(l.x1 >= pdf.MARGINE.sinistra && l.x2 <= pdf.PAGINA.larghezza - pdf.MARGINE.destra);
++});
++
++test("impaginazione: nel riquadro degli avvisi stanno tutte le righe degli avvisi", () => {
++  const p = pdf.impagina(DOC, misuraFinta)[0]; const r = p.rettangoli[0]; assert.ok(r, "manca il riquadro");
++  const dentro = p.righe.filter((x) => x.y > r.y && x.y < r.y + r.altezza); assert.ok(dentro.length >= 3); assert.ok(dentro.some((x) => x.testo.startsWith("BOZZA DI PROVA")));
++});
++
++test("impaginazione: l'avviso sui caratteri semplificati compare solo quando serve", () => {
++  const con = pdf.impagina(reg.componiContratto(dati.datiDaRiga({ ...RIGA, conduttore_nome: "Łukasz" })), misuraFinta).flatMap((p) => p.righe.map((r) => r.testo)).join(" ");
++  const senza = pdf.impagina(DOC, misuraFinta).flatMap((p) => p.righe.map((r) => r.testo)).join(" "); assert.match(con, /semplificati/); assert.ok(!/semplificati/.test(senza));
++});
++
++test("pie di pagina: numero e totale; per una bozza dice che non ha valore legale, per un modello validato no", () => {
++  assert.deepEqual(pdf.piePagina(DOC, 2, 3).destra, "Pagina 2 di 3"); assert.match(pdf.piePagina(DOC, 1, 1).sinistra, /bozza di prova, nessun valore legale/); assert.match(pdf.piePagina(DOC, 1, 1).sinistra, /modello provvisorio v1/);
++  const val = { ...DOC, bozza: false, modello: { id: "legale", versione: "3", origine: "validato" } }; assert.ok(!/bozza/.test(pdf.piePagina(val, 1, 1).sinistra));
++});
++
++test("filigrana: sta SEMPRE dentro la pagina, qualunque sia la larghezza del testo, e non supera il corpo massimo", () => {
++  for (let k = 2; k <= 14; k += 0.5) { const f = pdf.posizioneFiligrana(k * 100); assert.ok(f.corpo <= 70 + 1e-9 && f.corpo > 10, `corpo ${f.corpo}`); for (const a of f.angoli) { assert.ok(a.x >= 0 && a.x <= pdf.PAGINA.larghezza, `k=${k}: x ${a.x.toFixed(1)}`); assert.ok(a.y >= 0 && a.y <= pdf.PAGINA.altezza, `k=${k}: y ${a.y.toFixed(1)}`); } }
++});
++
++// ============================================================ il PDF vero
++/** Il testo di ogni pagina, letto dai contenuti veri del PDF (non dalle mie strutture). */
++async function testiDelleLePagine(bytes) {
++  const d = await PDFDocument.load(bytes); const dec = new TextDecoder("windows-1252"); const fuori = [];
++  for (const pagina of d.getPages()) {
++    let c = pagina.node.Contents(); const flussi = c instanceof PDFArray ? c.asArray().map((x) => d.context.lookup(x)) : [c]; let testo = "";
++    for (const f of flussi) { const bytes2 = decodePDFRawStream(f).decode(); const s = Buffer.from(bytes2).toString("latin1"); for (const m of s.matchAll(/<([0-9A-Fa-f]+)>\s*Tj/g)) { const b = Buffer.from(m[1], "hex"); testo += dec.decode(b) + "\n"; } }
++    fuori.push(testo);
++  }
++  return fuori;
++}
++
++test("PDF: è un PDF valido (intestazione, fine, si riapre), di pagine A4", async () => {
++  const b = await pdf.generaPdf(DOC, { data: DATA }); assert.equal(Buffer.from(b.slice(0, 5)).toString(), "%PDF-"); assert.match(Buffer.from(b.slice(-10)).toString(), /%%EOF\s*$/);
++  const d = await PDFDocument.load(b); assert.ok(d.getPageCount() >= 1); for (const p of d.getPages()) { assert.ok(Math.abs(p.getWidth() - 595.28) < 0.01 && Math.abs(p.getHeight() - 841.89) < 0.01); }
++});
++
++test("PDF: il numero di pagine è quello dell'impaginazione, anche per un documento lungo", async () => {
++  const d0 = await PDFDocument.create(); const n = await d0.embedFont(StandardFonts.Helvetica); const g = await d0.embedFont(StandardFonts.HelveticaBold); const misura = (t, s, b) => (b ? g : n).widthOfTextAtSize(t, s);
++  for (const doc of [DOC, DOC_LUNGO]) { const b = await pdf.generaPdf(doc, { data: DATA }); assert.equal((await PDFDocument.load(b)).getPageCount(), pdf.impagina(doc, misura).length); }
++  assert.ok((await PDFDocument.load(await pdf.generaPdf(DOC_LUNGO, { data: DATA }))).getPageCount() >= 3);
++});
++
++test("PDF: il testo che contiene è quello del documento: nomi, dati, segnaposto e avvisi", async () => {
++  const t = (await testiDelleLePagine(await pdf.generaPdf(DOC, { data: DATA }))).join("\n");
++  for (const atteso of ["Bozza di contratto di locazione ad uso abitativo", "Olga Bianchi", "Tina Verdi", "Bilocale Isola", "Via Garibaldi 12, 20121 Milano", "1450 euro", "12 mesi", "1 novembre 2026", "[da indicare]", "BOZZA DI PROVA. Questo documento", "Il locatore", "Il conduttore"]) assert.ok(t.includes(atteso), `nel PDF manca «${atteso}»`);
++});
++
++test("PDF: una BOZZA porta la filigrana e l'avvertenza su OGNI pagina", async () => {
++  const pagine = await testiDelleLePagine(await pdf.generaPdf(DOC_LUNGO, { data: DATA })); assert.ok(pagine.length >= 3);
++  pagine.forEach((t, i) => { assert.ok(t.includes(pdf.TESTO_FILIGRANA), `pagina ${i + 1} senza filigrana`); assert.ok(t.includes("bozza di prova, nessun valore legale"), `pagina ${i + 1} senza avvertenza`); assert.ok(t.includes(`Pagina ${i + 1} di ${pagine.length}`), `pagina ${i + 1}: numerazione`); });
++});
++
++test("PDF: solo un modello VALIDATO toglie la filigrana e l'avvertenza, da tutte le pagine", async () => {
++  // un modello validato non ha gli avvisi «bozza di prova» nel proprio testo: qui si prova che la filigrana e l'avvertenza
++  // dipendano dal registro, e quindi si tolgono gli avvisi dal testo del modello di prova che si riusa
++  const val = { id: "legale", versione: "3", origine: "validato", validazione: { da: "Studio Legale Rossi", data: "2026-10-01" }, genera: (d) => ({ ...reg.MODELLI_CONTRATTO.provvisorio.genera(d), avvisi: [], sottotitolo: null }) };
++  const doc = reg.componiContratto(COMPLETO, null, val); assert.equal(doc.bozza, false);
++  const pagine = await testiDelleLePagine(await pdf.generaPdf({ ...doc, sezioni: DOC_LUNGO.sezioni }, { data: DATA })); assert.ok(pagine.length >= 3);
++  for (const [i, t] of pagine.entries()) { assert.ok(!t.includes(pdf.TESTO_FILIGRANA), `pagina ${i + 1}: filigrana presente`); assert.ok(!/bozza di prova/.test(t), `pagina ${i + 1}: avvertenza presente`); assert.ok(t.includes("modello legale v3"), `pagina ${i + 1}: piè di pagina`); }
++});
++
++test("PDF: i metadati contengono il titolo e basta: nessun autore, nessun nome di persona", async () => {
++  const b = await pdf.generaPdf(DOC, { data: DATA });
++  // updateMetadata:false, altrimenti pdf-lib riscrive il produttore appena apre il file
++  const d = await PDFDocument.load(b, { updateMetadata: false });
++  assert.equal(d.getTitle(), "Bozza di contratto di locazione ad uso abitativo"); assert.equal(d.getProducer(), "MatchAmI"); assert.equal(d.getCreator(), "MatchAmI");
++  assert.equal(d.getAuthor(), undefined); assert.equal(d.getSubject(), undefined); assert.equal(d.getKeywords(), undefined); assert.equal(d.getCreationDate().toISOString(), DATA.toISOString());
++  const info = d.getInfoDict(); const chiavi = info.keys().map(String).sort(); assert.deepEqual(chiavi, ["/CreationDate", "/Creator", "/ModDate", "/Producer", "/Title"], `chiavi dei metadati: ${chiavi.join()}`);
++  for (const k of info.keys()) assert.ok(!/Olga|Bianchi|Tina|Verdi/.test(String(info.get(k))), `un nome è finito in ${k}`);
++});
++
++test("PDF: stessi dati e stessa data danno lo stesso file (nessun elemento casuale)", async () => {
++  const a = await pdf.generaPdf(DOC, { data: DATA }), b = await pdf.generaPdf(DOC, { data: DATA }); assert.deepEqual(Buffer.from(a), Buffer.from(b));
++});
++
++test("PDF: nomi con caratteri che il font non ha non lo fanno fallire, vengono semplificati, e il documento lo dice", async () => {
++  for (const nome of ["Łukasz", "Иван", "💥💥", "Żółć Ādams", "a\nb\tc", "\u0000\u0007"]) {
++    const doc = reg.componiContratto(dati.datiDaRiga({ ...RIGA, conduttore_nome: nome, conduttore_cognome: "Nome" })); let b; await assert.doesNotReject(async () => { b = await pdf.generaPdf(doc, { data: DATA }); }, nome);
++    assert.equal(Buffer.from(b.slice(0, 5)).toString(), "%PDF-");
++  }
++  const t = (await testiDelleLePagine(await pdf.generaPdf(reg.componiContratto(dati.datiDaRiga({ ...RIGA, conduttore_nome: "Łukasz" })), { data: DATA }))).join("\n"); assert.ok(t.includes("Lukasz Verdi")); assert.ok(t.includes("semplificati: controlla i nomi"));
++});
++
++test("PDF: dati vuoti, dati ostili e testi enormi si scrivono lo stesso, in tempi ragionevoli", async () => {
++  const doc = reg.componiContratto(dati.datiDaRiga({ ...RIGA, titolo: "x".repeat(8000), locatore_nome: "y".repeat(8000), via: "z".repeat(8000) }));
++  const inizio = Date.now(); for (const d of [reg.componiContratto(VUOTO), doc, DOC_LUNGO]) { const b = await pdf.generaPdf(d, { data: DATA }); assert.equal(Buffer.from(b.slice(0, 5)).toString(), "%PDF-"); } assert.ok(Date.now() - inizio < 5000, `troppo lento: ${Date.now() - inizio} ms`);
++});
++
++test("PDF: un testo con codice o segni di controllo del PDF resta testo", async () => {
++  const doc = reg.componiContratto(dati.datiDaRiga({ ...RIGA, titolo: ") Tj /JS (app.alert(1)) <</S/JavaScript>> (", locatore_nome: "\\) \\( %%EOF" })); const b = await pdf.generaPdf(doc, { data: DATA });
++  const d = await PDFDocument.load(b); assert.equal(d.getPageCount(), 1 + (d.getPageCount() - 1)); assert.ok(!/\/JavaScript|\/JS\b|\/OpenAction|\/AA\b|\/Launch/.test(Buffer.from(b).toString("latin1")), "il PDF contiene azioni o script");
++});
++
++test("PDF: nessuno script, azione, collegamento o file incorporato", async () => {
++  const s = Buffer.from(await pdf.generaPdf(DOC, { data: DATA })).toString("latin1"); for (const vietato of [/\/JavaScript/, /\/JS\b/, /\/OpenAction/, /\/Launch/, /\/URI\b/, /\/EmbeddedFile/, /\/AcroForm/]) assert.ok(!vietato.test(s), String(vietato));
++});
++
++// ============================================================ coerenza con la migrazione
++test("la riga del database e il tipo dell'app hanno gli stessi campi, nello stesso ordine", () => {
++  const colonneSql = sql.match(/returns table \(([\s\S]*?)\)\s*language sql/)[1].split("\n").map((r) => r.trim().match(/^(\w+)\s/)?.[1]).filter(Boolean);
++  const tipo = leggi("src", "lib", "contratto", "tipi.ts"); const campiTs = [...tipo.match(/export type RigaContratto = \{([\s\S]*?)\n\};/)[1].matchAll(/^\s+(\w+):/gm)].map((m) => m[1]);
++  assert.deepEqual(campiTs, colonneSql, "il tipo dell'app e la funzione del database sono diversi");
++});
++
++test("migrazione: solo le due parti, solo con la candidatura accettata, e nessun dato personale oltre ai nomi", () => {
++  assert.match(sql, /k\.status = 'accettata'\s+and \(k\.tenant_id = auth\.uid\(\) or l\.owner_id = auth\.uid\(\)\)/); assert.match(sql, /revoke all on function public\.dati_contratto\(uuid\) from public, anon;/); assert.match(sql, /grant execute on function public\.dati_contratto\(uuid\) to authenticated;/);
++  const colonne = sql.match(/returns table \(([\s\S]*?)\)\s*language sql/)[1]; assert.ok(!/mail|telef|fiscale|documento|iban|nascita|password/i.test(colonne), colonne);
++  assert.ok(!/create table|insert into|update |delete from/i.test(sql.replace(/--[^\n]*/g, "")), "la migrazione salva qualcosa: la bozza non si conserva");
++});
++
++test("la logica del contratto non ha accesso alla rete né al database né al browser", () => {
++  for (const f of ["tipi.ts", "dati.ts", "modello-provvisorio.ts", "index.ts", "testo-pdf.ts"]) {
++    const c = leggi("src", "lib", "contratto", f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
++    for (const vietato of [/\bfetch\(/, /supabase/i, /localStorage/, /console\./, /\bimport\s+(?!type)(?![^;]*from\s+"\.\.?\/)/]) assert.ok(!vietato.test(c), `${f} usa ${vietato}`);
++  }
++  assert.match(leggi("src", "lib", "contratto", "index.ts"), /process\.env\.CONTRATTO_MODELLO/);
++});
++
++test("pdf-lib è usata in un solo file, così sostituirla non tocca altro", () => {
++  const conPdfLib = []; const visita = (dir) => { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { const p = path.join(dir, e.name); if (e.isDirectory()) visita(p); else if (/\.(ts|tsx)$/.test(e.name) && /from "pdf-lib"/.test(fs.readFileSync(p, "utf8"))) conPdfLib.push(path.relative(radice, p).replaceAll("\\", "/")); } };
++  visita(path.join(radice, "src")); assert.deepEqual(conPdfLib, ["src/lib/contratto/pdf.ts"]);
++  const pkg = JSON.parse(leggi("package.json")); assert.match(pkg.dependencies["pdf-lib"], /^\d+\.\d+\.\d+$/, "la versione di pdf-lib deve essere esatta, senza ^ né ~");
++});
++
++// ============================================================ i tetti e i tempi (un titolo gigante non deve bloccare il server)
++test("tetti: ogni testo ha una lunghezza massima, oltre la quale si abbrevia con «…» e si segnala", () => {
++  const lim = dati.LIMITI_TESTO; assert.ok(lim.nome >= 50 && lim.titolo >= 100 && lim.via >= 100, JSON.stringify(lim));
++  const d = dati.datiDaRiga({ ...RIGA, locatore_nome: "a".repeat(5000), titolo: "t".repeat(5000), via: "v".repeat(5000), zona: "z".repeat(5000) });
++  assert.equal([...d.locatore.nome].length, lim.nome); assert.ok(d.locatore.nome.endsWith("…")); assert.equal([...d.immobile.titolo].length, lim.titolo); assert.equal(d.troncato, true);
++  assert.equal(dati.datiDaRiga(RIGA).troncato, false, "dati normali non si abbreviano");
++});
++
++test("tetti: un testo esattamente al limite non si abbrevia, uno di un carattere in più sì; e non si taglia un carattere a metà", () => {
++  assert.deepEqual(dati.limita("a".repeat(10), 10), { testo: "a".repeat(10), troncato: false }); const o = dati.limita("a".repeat(11), 10); assert.equal(o.troncato, true); assert.equal(o.testo, "a".repeat(9) + "…");
++  const emoji = dati.limita("💥".repeat(20), 10); assert.equal([...emoji.testo].length, 10); assert.ok(!/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/.test(emoji.testo), "un carattere è stato tagliato a metà");
++  assert.deepEqual(dati.limita(null, 5), { testo: "", troncato: false });
++});
++
++test("tetti: il documento dice che qualcosa è stato abbreviato, solo quando è vero", () => {
++  const con = reg.componiContratto(dati.datiDaRiga({ ...RIGA, titolo: "t".repeat(5000) })); const senza = reg.componiContratto(COMPLETO);
++  assert.ok(con.avvisi.includes(prov.TESTO_ABBREVIATO) && !senza.avvisi.includes(prov.TESTO_ABBREVIATO)); assert.equal(tp.perdeCaratteri(prov.TESTO_ABBREVIATO), false, "l'avviso stesso verrebbe alterato nel PDF");
++});
++
++test("TEMPO: spezzare un testo enorme costa in proporzione alla sua lunghezza, non al suo quadrato", async () => {
++  const d = await PDFDocument.create(); const f = await d.embedFont(StandardFonts.Helvetica); const misura = (t, g) => f.widthOfTextAtSize(t, g);
++  const prova = (n) => { const t0 = process.hrtime.bigint(); const r = tp.spezzaInRighe("q".repeat(n), 483, 11, false, misura); const ms = Number(process.hrtime.bigint() - t0) / 1e6; for (const x of r) assert.ok(misura(x, 11) <= 483); return ms; };
++  prova(2000); const piccolo = prova(20000), grande = prova(200000);
++  assert.ok(grande < 3000, `200000 caratteri: ${grande.toFixed(0)} ms`);
++  // dieci volte più testo: al massimo una ventina di volte più tempo (un algoritmo quadratico ne farebbe cento)
++  assert.ok(grande < Math.max(piccolo, 5) * 40, `scala male: 20000 → ${piccolo.toFixed(1)} ms, 200000 → ${grande.toFixed(1)} ms`);
++});
++
++test("TEMPO: un PDF con tre campi da un milione di caratteri si genera in un attimo (si abbreviano) e il file resta piccolo", async () => {
++  const doc = reg.componiContratto(dati.datiDaRiga({ ...RIGA, titolo: "y".repeat(1e6), locatore_nome: "w".repeat(1e6), via: "z".repeat(1e6) }));
++  const t0 = Date.now(); const b = await pdf.generaPdf(doc, { data: DATA }); const ms = Date.now() - t0; assert.ok(ms < 3000, `${ms} ms`); assert.ok(b.length < 50_000, `il file pesa ${b.length} byte`); assert.ok((await PDFDocument.load(b)).getPageCount() <= 3);
++});
++
++test("TEMPO: la generazione di un documento normale è veloce (sotto un secondo, anche la prima volta)", async () => {
++  const t0 = Date.now(); await pdf.generaPdf(DOC, { data: DATA }); assert.ok(Date.now() - t0 < 1000, `${Date.now() - t0} ms`);
++});
++
++// ============================================================ collegamento con l'app
++function filiDiCodice(dir = path.join(radice, "src")) {
++  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => { if (e.name.startsWith("__")) return []; const p = path.join(dir, e.name); return e.isDirectory() ? filiDiCodice(p) : /\.(ts|tsx)$/.test(e.name) ? [p] : []; });
++}
++
++test("chiamate: la funzione dei dati del contratto si chiama con il suo parametro, e solo dalla pagina e dal PDF", () => {
++  const trovate = [];
++  for (const f of filiDiCodice()) { const c = fs.readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, ""); for (const m of c.matchAll(/"dati_contratto"\s*(?:,\s*\{([^}]*)\}|\))/g)) { assert.deepEqual([...(m[1] ?? "").matchAll(/\b(p_\w+)\s*:/g)].map((x) => x[1]), ["p_contratto"], f); trovate.push(path.relative(radice, f).replaceAll("\\", "/")); } }
++  assert.deepEqual(trovate.sort(), ["src/app/(app)/contratto/[id]/page.tsx", "src/app/(app)/contratto/[id]/pdf/route.ts"]);
++});
++
++test("il PDF si scarica solo dopo aver controllato chi sei e l'informativa, e prima di leggere i dati", () => {
++  const r = leggi("src", "app", "(app)", "contratto", "[id]", "pdf", "route.ts"); const i = (s) => r.indexOf(s);
++  assert.ok(i("UUID.test(id)") > 0 && i("UUID.test(id)") < i("getUser()") && i("getUser()") < i("haAccettatoInformativa(") && i("haAccettatoInformativa(") < i('rpc("dati_contratto"'), "l'ordine dei controlli non è quello previsto");
++  assert.match(r, /export const dynamic = "force-dynamic"/); assert.match(r, /"Cache-Control": "private, no-store"/); assert.match(r, /attachment; filename=/); assert.match(r, /"X-Content-Type-Options": "nosniff"/);
++  assert.deepEqual([...r.matchAll(/export (?:async )?(?:function|const) (GET|POST|PUT|PATCH|DELETE)\b/g)].map((m) => m[1]), ["GET"]); assert.ok(!/console\./.test(r), "il percorso scrive nei log");
++});
++
++test("il PDF non viene salvato da nessuna parte: nessuna scrittura su database né su storage", () => {
++  for (const f of ["src/app/(app)/contratto/[id]/pdf/route.ts", "src/app/(app)/contratto/[id]/page.tsx", "src/lib/contratto/pdf.ts"]) { const c = leggi(...f.split("/")).replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, ""); for (const vietato of [/\.insert\(/, /\.update\(/, /\.upsert\(/, /\.delete\(/, /storage/i, /writeFile/, /\.from\("[a-z_]+"\)/]) assert.ok(!vietato.test(c), `${f} usa ${vietato}`); }
++});
++
++test("la pagina e i pannelli: la bozza si apre dai due pannelli dei contratti, uno per ruolo", () => {
++  assert.match(leggi("src", "app", "(app)", "gestione", "GestioneClient.tsx"), /<BozzaContratto contrattoId=\{selezionato\.id\} \/>/);
++  assert.match(leggi("src", "app", "(app)", "gestione-affitti", "GestioneAffittiClient.tsx"), /<BozzaContratto contrattoId=\{selezionato\.id\} \/>/);
++  const c = leggi("src", "components", "BozzaContratto.tsx"); assert.match(c, /href=\{`\/contratto\/\$\{contrattoId\}`\}/); assert.match(c, /href=\{`\/contratto\/\$\{contrattoId\}\/pdf`\}[^>]*download/);
++});
++
++test("informativa: dichiara la bozza del contratto, chi la vede e che non si conserva; e la migrazione non conserva niente", () => {
++  const t = JSON.stringify(INFORMATIVA);
++  assert.match(t, /bozza con i dati dell'affitto: i nomi delle due parti, l'immobile/); assert.match(t, /la vedono solo le due parti e noi non la conserviamo/); assert.match(t, /bozza di prova, senza valore legale/);
++  assert.ok(!/create table|insert into/i.test(sql.replace(/--[^\n]*/g, "")), "la migrazione salva qualcosa");
++});
++
++test("informativa: finché il modello è provvisorio dice che è una bozza di prova; con uno validato va rivista", () => {
++  const t = JSON.stringify(INFORMATIVA); const validati = Object.values(reg.MODELLI_CONTRATTO).filter((m) => m.origine === "validato");
++  if (validati.length === 0) assert.match(t, /Per ora è una bozza di prova, senza valore legale/);
++  else assert.ok(!/Per ora è una bozza di prova/.test(t), `c'è un modello validato (${validati.map((m) => m.id).join(", ")}) ma il testo dice che è di prova`);
++});
+diff --git a/scripts/test-mappe.mjs b/scripts/test-mappe.mjs
+index 9279738..beb8ee6 100644
+--- a/scripts/test-mappe.mjs
++++ b/scripts/test-mappe.mjs
+@@ -161,11 +161,28 @@ test("chiamate: ogni chiamata a una funzione degli indirizzi porta esattamente i
+ 
+ test("privacy: nessun codice dell'app legge la tabella degli indirizzi direttamente", () => {
+   for (const f of filiDiCodice()) assert.ok(!/indirizzi_immobili/.test(fs.readFileSync(f, "utf8")), `${path.relative(radice, f)} nomina la tabella degli indirizzi`);
+-  for (const f of fs.readdirSync(path.join(radice, "supabase", "migrations")).filter((x) => /^\d{4}_.*\.sql$/.test(x) && x !== "0024_indirizzi.sql")) {
+-    assert.ok(!/indirizzi_immobili/.test(fs.readFileSync(path.join(radice, "supabase", "migrations", f), "utf8")), `${f} nomina la tabella degli indirizzi`);
++});
++
++// Le migrazioni che LEGGONO l'indirizzo, ciascuna dentro una funzione che controlla chi chiama. Aggiungerne una
++// è una scelta da fare con consapevolezza: l'indirizzo preciso lo vede solo chi ha un match accettato.
++const MIGRAZIONI_CHE_LEGGONO_L_INDIRIZZO = ["0027_dati_contratto.sql"];
++
++test("privacy: nessuna migrazione, a parte la 0024, apre la tabella degli indirizzi (permessi, regole, modifiche)", () => {
++  const dir = path.join(radice, "supabase", "migrations");
++  for (const f of fs.readdirSync(dir).filter((x) => /^\d{4}_.*\.sql$/.test(x) && x !== "0024_indirizzi.sql")) {
++    const c = fs.readFileSync(path.join(dir, f), "utf8").replace(/--[^\n]*/g, "");
++    if (!/indirizzi_immobili/.test(c)) continue;
++    assert.ok(MIGRAZIONI_CHE_LEGGONO_L_INDIRIZZO.includes(f), `${f} nomina la tabella degli indirizzi e non è nell'elenco di quelle che la leggono in modo controllato`);
++    for (const vietato of [/grant\s[^;]*indirizzi_immobili/i, /create\s+policy[^;]*indirizzi_immobili/i, /alter\s+table\s+(if\s+exists\s+)?indirizzi_immobili/i, /insert\s+into\s+indirizzi_immobili/i, /update\s+indirizzi_immobili/i, /delete\s+from\s+indirizzi_immobili/i, /drop\s+(table|policy)[^;]*indirizzi_immobili/i, /disable\s+row\s+level/i]) assert.ok(!vietato.test(c), `${f} apre o modifica la tabella degli indirizzi (${vietato})`);
++    // la lettura sta dentro una funzione che gira con i permessi del proprietario del database e controlla chi chiama
++    assert.match(c, /security definer/i, `${f}: la lettura non è dentro una funzione security definer`); assert.match(c, /auth\.uid\(\)/, `${f}: la funzione non controlla chi chiama`);
+   }
+ });
+ 
++test("privacy: l'elenco delle migrazioni che leggono l'indirizzo non contiene file inesistenti", () => {
++  for (const f of MIGRAZIONI_CHE_LEGGONO_L_INDIRIZZO) assert.ok(fs.existsSync(path.join(radice, "supabase", "migrations", f)), f);
++});
++
+ // ------------------------------------------------------------
+ // Il fornitore provvisorio
+ // ------------------------------------------------------------
+diff --git a/src/app/(app)/contratto/[id]/page.tsx b/src/app/(app)/contratto/[id]/page.tsx
+new file mode 100644
+index 0000000..f711bdd
+--- /dev/null
++++ b/src/app/(app)/contratto/[id]/page.tsx
+@@ -0,0 +1,99 @@
++import Link from "next/link";
++import { notFound } from "next/navigation";
++import { createClient } from "@/lib/supabase/server";
++import { PageContainer } from "@/components/ui/PageContainer";
++import { componiContratto } from "@/lib/contratto";
++import { datiDaRiga } from "@/lib/contratto/dati";
++import { documentoSemplificato, AVVISO_CARATTERI_SEMPLIFICATI } from "@/lib/contratto/testo-pdf";
++import type { DocumentoContratto, RigaContratto } from "@/lib/contratto/tipi";
++
++const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
++
++/**
++ * La bozza del contratto, per le due parti. Si compone al momento dai dati dell'affitto e non
++ * si salva. Finché il modello è quello di prova lo dice in cima: non ha valore legale e non va firmata.
++ */
++export default async function ContrattoPage({ params }: { params: Promise<{ id: string }> }) {
++  const { id } = await params;
++  if (!UUID.test(id)) notFound();
++
++  const supabase = await createClient();
++  const { data } = await supabase.rpc("dati_contratto", { p_contratto: id });
++  const dati = datiDaRiga((Array.isArray(data) ? data[0] : null) as Partial<RigaContratto> | null);
++  // per chi non è una delle due parti la funzione non restituisce niente: la pagina non dice nemmeno che il contratto esiste
++  if (!dati) notFound();
++
++  const indietro = dati.ioSono === "locatore" ? "/gestione-affitti" : "/gestione";
++
++  let documento: DocumentoContratto | null = null;
++  try {
++    documento = componiContratto(dati);
++  } catch {
++    documento = null;
++  }
++
++  return (
++    <PageContainer wide>
++      <p>
++        <Link href={indietro} className="redo-link">
++          ← Contratti
++        </Link>
++      </p>
++
++      {!documento ? (
++        <div className="note-box is-no" role="alert">
++          Il modello di contratto non è configurato correttamente. Avvisa chi gestisce l&apos;app.
++        </div>
++      ) : (
++        <>
++          <h1 className="screen-title">{documento.titolo}</h1>
++          {documento.sottotitolo && <p className="screen-sub">{documento.sottotitolo}</p>}
++
++          {documento.avvisi.map((a, i) => (
++            <div key={i} className={`note-box${documento.bozza && i === 0 ? " is-no" : ""}`} style={{ marginBottom: 10 }}>
++              {i === 0 ? <b>{a}</b> : a}
++            </div>
++          ))}
++
++          {documento.daIndicare.length > 0 && (
++            <div className="note-box" style={{ marginBottom: 14 }}>
++              <b>Da completare:</b> {documento.daIndicare.join(", ")}.
++            </div>
++          )}
++
++          <a href={`/contratto/${id}/pdf`} className="opp-cta" download style={{ display: "inline-block", marginBottom: 20 }}>
++            Scarica il PDF
++          </a>
++          {documentoSemplificato(documento) && (
++            <p className="field-note" style={{ marginTop: -8 }}>
++              {AVVISO_CARATTERI_SEMPLIFICATI}
++            </p>
++          )}
++
++          {documento.sezioni.map((s) => (
++            <section key={s.titolo} className="contratto-sezione" style={{ marginBottom: 18 }}>
++              <h2 className="pref-label" style={{ margin: "0 0 6px 0" }}>
++                <span>{s.titolo}</span>
++              </h2>
++              {s.paragrafi.map((p, i) => (
++                <p key={i} style={{ margin: "0 0 6px 0" }}>
++                  {p}
++                </p>
++              ))}
++            </section>
++          ))}
++
++          <div className="contratto-firme" style={{ display: "flex", gap: 24, marginTop: 24 }}>
++            {documento.firme.map((f) => (
++              <div key={f.ruolo} style={{ flex: 1 }}>
++                <b>{f.ruolo}</b>
++                <div style={{ borderBottom: "1px solid rgba(16,21,26,0.5)", height: 36 }} />
++                <small>{f.nome ?? ""}</small>
++              </div>
++            ))}
++          </div>
++        </>
++      )}
++    </PageContainer>
++  );
++}
+diff --git a/src/app/(app)/contratto/[id]/pdf/route.ts b/src/app/(app)/contratto/[id]/pdf/route.ts
+new file mode 100644
+index 0000000..f919edd
+--- /dev/null
++++ b/src/app/(app)/contratto/[id]/pdf/route.ts
+@@ -0,0 +1,62 @@
++import { createClient } from "@/lib/supabase/server";
++import { INFORMATIVA } from "@/content/informativa";
++import { haAccettatoInformativa, versioniAccettabili } from "@/lib/informativa";
++import { componiContratto } from "@/lib/contratto";
++import { datiDaRiga } from "@/lib/contratto/dati";
++import { generaPdf } from "@/lib/contratto/pdf";
++import type { RigaContratto } from "@/lib/contratto/tipi";
++
++/**
++ * Scarica il PDF della bozza del contratto. Lo possono scaricare solo le due parti (lo decide
++ * la funzione del database, non questo codice) e solo dopo aver accettato l'informativa, come
++ * per le pagine dell'app. Il PDF si compone al momento e NON si salva da nessuna parte.
++ *
++ * Il nome del file non contiene nomi di persone: solo l'inizio dell'identificativo.
++ */
++export const dynamic = "force-dynamic";
++
++const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
++
++function testo(stato: number, messaggio: string): Response {
++  return new Response(messaggio, { status: stato, headers: { "Cache-Control": "private, no-store", "Content-Type": "text/plain; charset=utf-8" } });
++}
++
++export async function GET(_richiesta: Request, { params }: { params: Promise<{ id: string }> }): Promise<Response> {
++  const { id } = await params;
++  if (!UUID.test(id)) return testo(404, "Contratto non trovato.");
++
++  const supabase = await createClient();
++  const {
++    data: { user },
++  } = await supabase.auth.getUser();
++  if (!user) return testo(401, "Non autenticato.");
++
++  if (!(await haAccettatoInformativa(supabase, user.id, versioniAccettabili(INFORMATIVA)))) {
++    return testo(403, "Accetta l'informativa per continuare.");
++  }
++
++  // la funzione risponde solo alle due parti di un contratto con candidatura accettata: per chiunque altro, nessuna riga
++  const { data, error } = await supabase.rpc("dati_contratto", { p_contratto: id });
++  if (error) return testo(500, "Non è stato possibile preparare il documento.");
++
++  const dati = datiDaRiga((Array.isArray(data) ? data[0] : null) as Partial<RigaContratto> | null);
++  if (!dati) return testo(404, "Contratto non trovato.");
++
++  let documento;
++  try {
++    documento = componiContratto(dati);
++  } catch {
++    return testo(500, "Il modello di contratto non è configurato correttamente.");
++  }
++
++  const bytes = await generaPdf(documento);
++  return new Response(bytes as unknown as BodyInit, {
++    status: 200,
++    headers: {
++      "Content-Type": "application/pdf",
++      "Content-Disposition": `attachment; filename="${documento.bozza ? "contratto-bozza" : "contratto"}-${id.slice(0, 8)}.pdf"`,
++      "Cache-Control": "private, no-store",
++      "X-Content-Type-Options": "nosniff",
++    },
++  });
++}
+diff --git a/src/app/(app)/gestione-affitti/GestioneAffittiClient.tsx b/src/app/(app)/gestione-affitti/GestioneAffittiClient.tsx
+index b732576..685aec5 100644
+--- a/src/app/(app)/gestione-affitti/GestioneAffittiClient.tsx
++++ b/src/app/(app)/gestione-affitti/GestioneAffittiClient.tsx
+@@ -1,5 +1,6 @@
+ "use client";
+ 
++import { BozzaContratto } from "@/components/BozzaContratto";
+ import { useActionState, useEffect, useState } from "react";
+ import { Sheet } from "@/components/Sheet";
+ import type {
+@@ -153,6 +154,7 @@ export function GestioneAffittiClient({
+         onClose={() => setSelezionato(null)}
+         title={`${selezionato?.nome ?? ""} ${selezionato?.cognome ?? ""}`}
+       >
++        {selezionato && <BozzaContratto contrattoId={selezionato.id} />}
+         {selezionato && (
+           <ContrattoForm
+             action={aggiornaContratto}
+diff --git a/src/app/(app)/gestione/GestioneClient.tsx b/src/app/(app)/gestione/GestioneClient.tsx
+index 877ae40..2df259a 100644
+--- a/src/app/(app)/gestione/GestioneClient.tsx
++++ b/src/app/(app)/gestione/GestioneClient.tsx
+@@ -4,6 +4,7 @@ import { useState } from "react";
+ import { Sheet } from "@/components/Sheet";
+ import type { ContrattoConAnnuncio } from "@/lib/types";
+ import { LinkUtenze } from "@/components/LinkUtenze";
++import { BozzaContratto } from "@/components/BozzaContratto";
+ import { SOTTOTITOLO_UTENZE } from "@/lib/utenze";
+ import {
+   NESSUN_CONTRATTO_IN_CORSO,
+@@ -150,6 +151,7 @@ export function GestioneClient({
+               label="Data firma"
+               value={formatData(selezionato.data_firma)}
+             />
++            <BozzaContratto contrattoId={selezionato.id} />
+           </>
+         )}
+       </Sheet>
+diff --git a/src/components/BozzaContratto.tsx b/src/components/BozzaContratto.tsx
+new file mode 100644
+index 0000000..d9b873d
+--- /dev/null
++++ b/src/components/BozzaContratto.tsx
+@@ -0,0 +1,26 @@
++import Link from "next/link";
++
++/**
++ * Nei pannelli dei contratti: «Vedi la bozza» e «Scarica il PDF». Il PDF è un collegamento normale
++ * (si scarica, non si apre dentro l'app). Finché il modello è quello di prova lo dice.
++ */
++export function BozzaContratto({ contrattoId }: { contrattoId: string }) {
++  return (
++    <div className="bozza-contratto" style={{ margin: "14px 0 18px 0" }}>
++      <div className="pref-label" style={{ margin: "0 0 4px 0" }}>
++        <span>Documento</span>
++      </div>
++      <p className="field-note" style={{ margin: "0 0 8px 0" }}>
++        Una bozza di prova con i dati di questo affitto. Non ha valore legale.
++      </p>
++      <div style={{ display: "flex", gap: 16 }}>
++        <Link href={`/contratto/${contrattoId}`} className="redo-link">
++          Vedi la bozza
++        </Link>
++        <a href={`/contratto/${contrattoId}/pdf`} className="redo-link" download>
++          Scarica il PDF
++        </a>
++      </div>
++    </div>
++  );
++}
+diff --git a/src/content/informativa.ts b/src/content/informativa.ts
+index e16ba28..3c0c0e7 100644
+--- a/src/content/informativa.ts
++++ b/src/content/informativa.ts
+@@ -28,7 +28,7 @@ export const INFORMATIVA = {
+    * controllo che fa il database (migrazione 0017): un test fallisce se
+    * questa stringa non lo supera.
+    */
+-  versione: "2026-10-provvisoria-11",
++  versione: "2026-10-provvisoria-12",
+   /**
+    * Versioni precedenti che chi le ha accettate NON deve riaccettare.
+    *
+@@ -53,6 +53,7 @@ export const INFORMATIVA = {
+     "2026-10-provvisoria-8",
+     "2026-10-provvisoria-9",
+     "2026-10-provvisoria-10",
++    "2026-10-provvisoria-11",
+   ] as readonly string[],
+   provvisoria: true,
+   titolo: "Informativa sulla privacy",
+@@ -105,6 +106,7 @@ export const INFORMATIVA = {
+         "Se ritiri una candidatura mentre è ancora in attesa, il proprietario non la vede più: non legge né il tuo profilo né le recensioni su di te, e riceve solo una notifica con il titolo dell'annuncio. La candidatura resta nel tuo elenco e non puoi candidarti di nuovo allo stesso annuncio.",
+         "I messaggi li leggono solo le due persone, dopo che la candidatura è stata accettata. L'app ricorda quali messaggi hai già letto, solo per mostrarti quanti ne restano da leggere: non lo mostra all'altra persona.",
+         "L'indirizzo preciso di un immobile lo vedono solo il proprietario e le persone con cui ha un match accettato su quell'immobile: agli altri si mostra soltanto la zona.",
++        "Dal contratto di un affitto puoi vedere e scaricare in PDF una bozza con i dati dell'affitto: i nomi delle due parti, l'immobile (con l'indirizzo, se c'è), il canone, la durata e le date. La bozza la compone l'app al momento, la vedono solo le due parti e noi non la conserviamo. Per ora è una bozza di prova, senza valore legale.",
+         "I preferiti e gli annunci che scarti li vede solo chi li sceglie: il proprietario non sa quali annunci hai salvato o scartato.",
+         "Le visite: il proprietario indica i giorni e gli orari in cui è disponibile per un suo immobile. Li vedono solo le persone che hanno un match accettato su quell'immobile; chi non lo ha non vede nemmeno quali orari ci sono. Chi prenota vede la propria visita, e il proprietario vede nome e cognome di chi ha prenotato, per le visite degli ultimi 30 giorni.",
+         "Nella chat, l'app evidenzia i messaggi che parlano di pagamenti sospetti (per esempio un IBAN, una caparra o un anticipo) e ti avvisa prima di inviarne uno così, per aiutarti a riconoscere una truffa. È un controllo automatico che fa parte della visualizzazione della chat: non salviamo il risultato e non lo comunichiamo a nessuno, e non impedisce mai di inviare un messaggio.",
+diff --git a/src/lib/contratto/dati.ts b/src/lib/contratto/dati.ts
+new file mode 100644
+index 0000000..ed37b7d
+--- /dev/null
++++ b/src/lib/contratto/dati.ts
+@@ -0,0 +1,101 @@
++/**
++ * Dai dati del database ai dati del contratto: pulizia e formattazione. Logica pura.
++ * Ciò che manca resta `null` e il modello lo scrive «[da indicare]»: un dato che non
++ * abbiamo non si inventa mai, in un documento che le parti potrebbero firmare.
++ */
++import type { DatiContratto, RigaContratto } from "./tipi";
++
++export const DA_INDICARE = "[da indicare]";
++
++/** Spazi ridotti a uno, ai lati niente, e nessun carattere di controllo. */
++export function pulisciTesto(x: unknown): string {
++  if (typeof x !== "string") return "";
++  return x.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029\ufeff]/g, " ").replace(/\s+/g, " ").trim();
++}
++
++/** «Nome Cognome», o `null` se mancano entrambi. */
++export function nomeCompleto(nome: unknown, cognome: unknown): string | null {
++  const s = [pulisciTesto(nome), pulisciTesto(cognome)].filter(Boolean).join(" ");
++  return s === "" ? null : s;
++}
++
++const FORMATO_DATA = new Intl.DateTimeFormat("it-IT", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
++
++/** «2026-11-01» → «1 novembre 2026». Una data che non esiste (30 febbraio) o non scritta così vale `null`. */
++export function formattaDataIso(iso: unknown): string | null {
++  if (typeof iso !== "string") return null;
++  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
++  if (!m) return null;
++  const [a, me, g] = [Number(m[1]), Number(m[2]), Number(m[3])];
++  const d = new Date(Date.UTC(a, me - 1, g));
++  if (d.getUTCFullYear() !== a || d.getUTCMonth() !== me - 1 || d.getUTCDate() !== g) return null;
++  return FORMATO_DATA.format(d);
++}
++
++/** Un numero intero positivo, o `null`. */
++export function interoPositivo(x: unknown): number | null {
++  return typeof x === "number" && Number.isInteger(x) && x > 0 ? x : null;
++}
++
++function numeroOnull(x: unknown): number | null {
++  if (typeof x === "number" && Number.isFinite(x)) return x;
++  if (typeof x === "string" && x.trim() !== "" && Number.isFinite(Number(x))) return Number(x);
++  return null;
++}
++
++/**
++ * Quanto può essere lungo ciascun testo. Un nome o un titolo di migliaia di caratteri non è un dato
++ * vero ed è un modo per rallentare la generazione del documento a chi lo scarica (il titolo di un
++ * annuncio lo scrive il proprietario, il PDF lo genera l'inquilino). Si abbrevia, e il documento lo dice.
++ */
++export const LIMITI_TESTO = { nome: 100, cognome: 100, titolo: 200, zona: 100, via: 150, civico: 20, cap: 10, citta: 80, classe: 10 } as const;
++
++/** Il testo, pulito e tagliato a `max` caratteri (con «…» in fondo se si è tagliato). */
++export function limita(x: unknown, max: number): { testo: string; troncato: boolean } {
++  const t = pulisciTesto(x);
++  const caratteri = [...t]; // per punti di codice: non si taglia un carattere a metà
++  return caratteri.length > max ? { testo: caratteri.slice(0, max - 1).join("") + "…", troncato: true } : { testo: t, troncato: false };
++}
++
++/** Da una riga del database ai dati del contratto; `null` se la riga non è un contratto. */
++export function datiDaRiga(r: Partial<RigaContratto> | null | undefined): DatiContratto | null {
++  if (!r || typeof r.contratto_id !== "string" || r.contratto_id === "") return null;
++
++  let troncato = false;
++  const l = (x: unknown, max: number): string => { const o = limita(x, max); if (o.troncato) troncato = true; return o.testo; };
++
++  const via = l(r.via, LIMITI_TESTO.via);
++  const civico = l(r.civico, LIMITI_TESTO.civico);
++  const cap = l(r.cap, LIMITI_TESTO.cap);
++  const citta = l(r.citta, LIMITI_TESTO.citta);
++  const locatoreNome = l(r.locatore_nome, LIMITI_TESTO.nome);
++  const locatoreCognome = l(r.locatore_cognome, LIMITI_TESTO.cognome);
++  const conduttoreNome = l(r.conduttore_nome, LIMITI_TESTO.nome);
++  const conduttoreCognome = l(r.conduttore_cognome, LIMITI_TESTO.cognome);
++  const titolo = l(r.titolo, LIMITI_TESTO.titolo);
++  const zona = l(r.zona, LIMITI_TESTO.zona);
++  const classe = l(r.classe_energetica, LIMITI_TESTO.classe);
++
++  return {
++    id: r.contratto_id,
++    stato: pulisciTesto(r.stato),
++    locatore: { nome: locatoreNome || null, cognome: locatoreCognome || null },
++    conduttore: { nome: conduttoreNome || null, cognome: conduttoreCognome || null },
++    immobile: {
++      titolo: titolo || null,
++      zona: zona || null,
++      locali: interoPositivo(r.locali),
++      mq: interoPositivo(r.mq),
++      classeEnergetica: classe || null,
++      epGlobale: numeroOnull(r.ep_globale),
++      // l'indirizzo si usa solo se c'è tutto: un pezzo di indirizzo in un contratto è peggio di nessuno
++      indirizzo: via && civico && cap && citta ? { via, civico, cap, citta } : null,
++    },
++    canone: interoPositivo(r.canone),
++    durataMesi: interoPositivo(r.durata_mesi),
++    dataInizio: typeof r.data_inizio === "string" && formattaDataIso(r.data_inizio) ? r.data_inizio : null,
++    dataFirma: typeof r.data_firma === "string" && formattaDataIso(r.data_firma) ? r.data_firma : null,
++    ioSono: r.io_sono === "locatore" ? "locatore" : "conduttore",
++    troncato,
++  };
++}
+diff --git a/src/lib/contratto/index.ts b/src/lib/contratto/index.ts
+new file mode 100644
+index 0000000..9cce1af
+--- /dev/null
++++ b/src/lib/contratto/index.ts
+@@ -0,0 +1,56 @@
++/**
++ * Il solo punto in cui si decide QUALE modello di contratto si usa.
++ *
++ * PER METTERE UN MODELLO VALIDATO DA UN LEGALE (punto 4)
++ *   1. si scrive un file in questa cartella che rispetta `ModelloContratto` (vedi tipi.ts),
++ *      con `origine: "validato"` e `validazione: { da, data }` (chi lo ha validato e quando);
++ *   2. lo si registra qui sotto in `MODELLI_CONTRATTO`;
++ *   3. si imposta CONTRATTO_MODELLO con il suo `id`.
++ * Solo allora la filigrana «bozza di prova» sparisce dal PDF: la decide questo registro,
++ * non il modello, quindi un modello non può dichiararsi validato da solo. Un modello
++ * «validato» senza `validazione` non si registra: `componiContratto` lancia un errore.
++ * I test del contratto (scripts/test-contratto.mjs) girano su ogni modello registrato.
++ */
++import { modelloProvvisorio } from "./modello-provvisorio";
++import type { DatiContratto, DocumentoContratto, ModelloContratto } from "./tipi";
++
++export const MODELLI_CONTRATTO: Readonly<Record<string, ModelloContratto>> = {
++  [modelloProvvisorio.id]: modelloProvvisorio,
++};
++
++export const MODELLO_CONTRATTO_PREDEFINITO = modelloProvvisorio.id;
++
++/** Un nome sbagliato è un errore di configurazione e si dice, non si ripiega in silenzio. */
++export function modelloContratto(nome?: string | null): ModelloContratto {
++  const scelto = (nome ?? process.env.CONTRATTO_MODELLO ?? "").trim() || MODELLO_CONTRATTO_PREDEFINITO;
++  const m = Object.prototype.hasOwnProperty.call(MODELLI_CONTRATTO, scelto) ? MODELLI_CONTRATTO[scelto] : undefined;
++  if (!m) throw new Error(`Modello di contratto sconosciuto: «${scelto}». Quelli disponibili: ${Object.keys(MODELLI_CONTRATTO).join(", ")}.`);
++  return m;
++}
++
++/** I difetti di un modello che si vuole registrare: l'elenco vuoto vuol dire che va bene. */
++export function difettiDelModello(m: ModelloContratto): string[] {
++  const d: string[] = [];
++  if (!/^[a-z][a-z0-9_-]*$/.test(m.id)) d.push("l'identificativo non è valido");
++  if (!m.versione || !String(m.versione).trim()) d.push("manca la versione");
++  if (m.origine !== "provvisorio" && m.origine !== "validato") d.push("l'origine non è ammessa");
++  if (m.origine === "validato") {
++    if (!m.validazione || !m.validazione.da?.trim() || !m.validazione.data?.trim()) d.push("un modello validato deve dire da chi e quando è stato validato");
++  }
++  return d;
++}
++
++/**
++ * Compone il documento. Il «bozza» lo decide QUI: è vero per ogni modello non validato, e
++ * un modello non può cambiarlo. Un modello con difetti non si usa.
++ */
++export function componiContratto(dati: DatiContratto, nome?: string | null, modello?: ModelloContratto): DocumentoContratto {
++  const m = modello ?? modelloContratto(nome);
++  const difetti = difettiDelModello(m);
++  if (difetti.length > 0) throw new Error(`Modello di contratto «${m.id}» non utilizzabile: ${difetti.join("; ")}.`);
++
++  const d = m.genera(dati);
++  return { ...d, modello: { id: m.id, versione: m.versione, origine: m.origine }, bozza: m.origine !== "validato" };
++}
++
++export type { DatiContratto, DocumentoContratto, ModelloContratto, RigaContratto } from "./tipi";
+diff --git a/src/lib/contratto/modello-provvisorio.ts b/src/lib/contratto/modello-provvisorio.ts
+new file mode 100644
+index 0000000..b61f535
+--- /dev/null
++++ b/src/lib/contratto/modello-provvisorio.ts
+@@ -0,0 +1,104 @@
++/**
++ * Il modello di contratto PROVVISORIO: una BOZZA DI PROVA senza valore legale.
++ *
++ * Serve a costruire e provare tutto il percorso (comporre il documento dai dati
++ * dell'affitto, mostrarlo, scaricarlo in PDF) prima di avere un modello validato da un
++ * legale (punto 4). Per questo il testo è volutamente MINIMO e DESCRITTIVO: non contiene
++ * clausole né richiami di legge, perché scriverli non spetta a questo file. Quello che
++ * non sappiamo resta «[da indicare]»; non si inventa mai.
++ *
++ * Non va firmato e non va usato come contratto: lo dice in cima, in ogni pagina e con
++ * una filigrana sul PDF.
++ */
++import { DA_INDICARE, formattaDataIso, nomeCompleto } from "./dati";
++import type { DatiContratto, ModelloContratto, Sezione } from "./tipi";
++
++export const TESTO_BOZZA =
++  "BOZZA DI PROVA. Questo documento è generato da MatchAmI con un modello di prova: non è un contratto valido, non ha valore legale e non va firmato.";
++export const TESTO_ABBREVIATO = "Alcuni testi erano molto lunghi e sono stati abbreviati con «…»: controlla i dati.";
++export const TESTO_DA_COMPLETARE =
++  "Le parti indicate come «[da indicare]» vanno completate, e il testo delle clausole va sostituito da un modello verificato da un professionista prima di qualunque uso.";
++
++const euro = new Intl.NumberFormat("it-IT", { maximumFractionDigits: 0 });
++const euro2 = new Intl.NumberFormat("it-IT", { maximumFractionDigits: 2 });
++
++export const modelloProvvisorio: ModelloContratto = {
++  id: "provvisorio",
++  versione: "1",
++  origine: "provvisorio",
++
++  genera(dati: DatiContratto) {
++    const mancanti = new Set<string>();
++    /** il valore, o «[da indicare]» (e si ricorda cosa manca) */
++    const v = (valore: string | null, etichetta: string): string => {
++      if (valore !== null && valore !== "") return valore;
++      mancanti.add(etichetta);
++      return DA_INDICARE;
++    };
++    /** un dato che non raccogliamo: c'è sempre da indicarlo */
++    const sempre = (etichetta: string): string => v(null, etichetta);
++
++    const locatore = v(nomeCompleto(dati.locatore.nome, dati.locatore.cognome), "nome del locatore");
++    const conduttore = v(nomeCompleto(dati.conduttore.nome, dati.conduttore.cognome), "nome del conduttore");
++
++    const i = dati.immobile;
++    const indirizzo = i.indirizzo ? `${i.indirizzo.via} ${i.indirizzo.civico}, ${i.indirizzo.cap} ${i.indirizzo.citta}` : null;
++    const caratteristiche = [
++      `${v(i.locali !== null ? String(i.locali) : null, "numero di locali")} locali`,
++      `${v(i.mq !== null ? String(i.mq) : null, "superficie")} mq`,
++    ].join(", ");
++
++    // «mq» e non «m²»: l'apice non si vede in tutti i visualizzatori di PDF
++    const classe = i.classeEnergetica
++      ? `${i.classeEnergetica}${i.epGlobale !== null ? `, indice di prestazione energetica ${euro2.format(i.epGlobale)} kWh/mq all'anno` : ""}`
++      : v(null, "classe energetica");
++
++    const durata = v(dati.durataMesi !== null ? `${dati.durataMesi} ${dati.durataMesi === 1 ? "mese" : "mesi"}` : null, "durata");
++    const inizio = v(formattaDataIso(dati.dataInizio), "data di inizio");
++    const canone = v(dati.canone !== null ? `${euro.format(dati.canone)} euro` : null, "canone mensile");
++
++    const sezioni: Sezione[] = [
++      {
++        titolo: "1. Le parti",
++        paragrafi: [
++          `Locatore: ${locatore}, codice fiscale ${sempre("codice fiscale del locatore")}, residente in ${sempre("residenza del locatore")}.`,
++          `Conduttore: ${conduttore}, codice fiscale ${sempre("codice fiscale del conduttore")}, residente in ${sempre("residenza del conduttore")}.`,
++        ],
++      },
++      {
++        titolo: "2. L'immobile",
++        paragrafi: [
++          `Il locatore concede in locazione al conduttore, per uso abitativo, l'immobile «${v(i.titolo, "titolo dell'immobile")}», situato in ${v(indirizzo, "indirizzo dell'immobile")}${i.zona ? ` (zona: ${i.zona})` : ""}, di ${caratteristiche}.`,
++          `Classe energetica: ${classe}.`,
++        ],
++      },
++      {
++        titolo: "3. Durata",
++        paragrafi: [`La locazione ha durata di ${durata}, a partire dal ${inizio}.`],
++      },
++      {
++        titolo: "4. Canone",
++        paragrafi: [
++          `Il canone è di ${canone} al mese.`,
++          `Modalità e scadenza di pagamento: ${sempre("modalità e scadenza di pagamento")}.`,
++        ],
++      },
++      { titolo: "5. Deposito cauzionale", paragrafi: [`Importo e modalità: ${sempre("deposito cauzionale")}.`] },
++      { titolo: "6. Utenze e spese", paragrafi: [`Ripartizione: ${sempre("utenze e spese")}.`] },
++      { titolo: "7. Registrazione e altre condizioni", paragrafi: [`${sempre("registrazione e altre condizioni")}.`] },
++      { titolo: "8. Luogo e data", paragrafi: [`Luogo e data della firma: ${sempre("luogo e data della firma")}.`] },
++    ];
++
++    return {
++      titolo: "Bozza di contratto di locazione ad uso abitativo",
++      sottotitolo: "Modello di prova",
++      avvisi: [TESTO_BOZZA, TESTO_DA_COMPLETARE, ...(dati.troncato ? [TESTO_ABBREVIATO] : [])],
++      sezioni,
++      firme: [
++        { ruolo: "Il locatore", nome: nomeCompleto(dati.locatore.nome, dati.locatore.cognome) },
++        { ruolo: "Il conduttore", nome: nomeCompleto(dati.conduttore.nome, dati.conduttore.cognome) },
++      ],
++      daIndicare: [...mancanti],
++    };
++  },
++};
+diff --git a/src/lib/contratto/pdf.ts b/src/lib/contratto/pdf.ts
+new file mode 100644
+index 0000000..cdc770e
+--- /dev/null
++++ b/src/lib/contratto/pdf.ts
+@@ -0,0 +1,177 @@
++/**
++ * Dal documento del contratto a un PDF. La parte di IMPAGINAZIONE è pura (`impagina`, si prova
++ * senza librerie); la scrittura usa pdf-lib con i font standard, in un solo file, così
++ * sostituire la libreria non tocca nient'altro.
++ *
++ * Una BOZZA porta su ogni pagina una filigrana diagonale «BOZZA DI PROVA» e una riga a piè di
++ * pagina. Solo un modello registrato come validato la toglie (lo decide `componiContratto`).
++ *
++ * Il PDF si genera al momento e non si salva da nessuna parte. I metadati non contengono nomi
++ * di persone: solo il titolo del documento.
++ */
++import { PDFDocument, StandardFonts, degrees, rgb, type PDFFont } from "pdf-lib";
++import type { DocumentoContratto } from "./tipi";
++import { AVVISO_CARATTERI_SEMPLIFICATI, documentoSemplificato, sanitizzaPerPdf, spezzaInRighe, type Misura } from "./testo-pdf";
++
++export const PAGINA = { larghezza: 595.28, altezza: 841.89 } as const;
++export const MARGINE = { sinistra: 56, destra: 56, alto: 64, basso: 64 } as const;
++export const TESTO_FILIGRANA = "BOZZA DI PROVA";
++
++export type RigaPdf = { testo: string; x: number; y: number; grandezza: number; grassetto: boolean; colore: "nero" | "grigio" | "rosso" };
++export type RettangoloPdf = { x: number; y: number; larghezza: number; altezza: number };
++export type PaginaPdf = { righe: RigaPdf[]; rettangoli: RettangoloPdf[]; linee: { x1: number; x2: number; y: number }[] };
++
++const CORPO = 11;
++const INTERLINEA = 16;
++const LARGHEZZA_UTILE = PAGINA.larghezza - MARGINE.sinistra - MARGINE.destra;
++
++/**
++ * Dispone il documento in pagine: righe di testo con la loro posizione. Pura: riceve una funzione
++ * che misura il testo. Garantisce che nessuna riga esca dai margini e che un titolo di sezione non
++ * resti solo in fondo a una pagina.
++ */
++export function impagina(doc: DocumentoContratto, misura: Misura): PaginaPdf[] {
++  const nuova = (): PaginaPdf => ({ righe: [], rettangoli: [], linee: [] });
++  const pagine: PaginaPdf[] = [nuova()];
++  let y = PAGINA.altezza - MARGINE.alto;
++
++  const corrente = () => pagine[pagine.length - 1];
++  const nuovaPagina = () => { pagine.push(nuova()); y = PAGINA.altezza - MARGINE.alto; };
++  const assicura = (altezza: number) => { if (y - altezza < MARGINE.basso) nuovaPagina(); };
++
++  const scrivi = (testo: string, grandezza: number, grassetto: boolean, colore: RigaPdf["colore"] = "nero", rientro = 0, interlinea = Math.round(grandezza * 1.45)) => {
++    for (const riga of spezzaInRighe(testo, LARGHEZZA_UTILE - rientro, grandezza, grassetto, misura)) {
++      assicura(interlinea);
++      y -= interlinea;
++      corrente().righe.push({ testo: riga, x: MARGINE.sinistra + rientro, y, grandezza, grassetto, colore });
++    }
++  };
++
++  // titolo
++  scrivi(doc.titolo, 17, true);
++  if (doc.sottotitolo) scrivi(doc.sottotitolo, 11, false, "grigio");
++  y -= 10;
++
++  // avvisi, in un riquadro (se ci sono); se un nome non si scrive tale e quale, lo si dice
++  const avvisi = documentoSemplificato(doc) ? [...doc.avvisi, AVVISO_CARATTERI_SEMPLIFICATI] : doc.avvisi;
++  if (avvisi.length > 0) {
++    const interno = 8;
++    const righe = avvisi.flatMap((a, i) => [...spezzaInRighe(a, LARGHEZZA_UTILE - interno * 2, 10, i === 0, misura).map((t) => ({ t, g: i === 0 })), ...(i < avvisi.length - 1 ? [{ t: "", g: false }] : [])]);
++    const h = righe.length * 14 + interno * 2;
++    assicura(h);
++    corrente().rettangoli.push({ x: MARGINE.sinistra, y: y - h, larghezza: LARGHEZZA_UTILE, altezza: h });
++    let yy = y - interno;
++    for (const r of righe) {
++      yy -= 14;
++      if (r.t) corrente().righe.push({ testo: r.t, x: MARGINE.sinistra + interno, y: yy, grandezza: 10, grassetto: r.g, colore: r.g ? "rosso" : "nero" });
++    }
++    y -= h + 14;
++  }
++
++  // sezioni
++  for (const s of doc.sezioni) {
++    assicura(14 * 1.45 + INTERLINEA * 2); // il titolo non resta solo in fondo alla pagina
++    y -= 6;
++    scrivi(s.titolo, 12.5, true);
++    for (const p of s.paragrafi) {
++      scrivi(p, CORPO, false, "nero", 0, INTERLINEA);
++      y -= 4;
++    }
++  }
++
++  // firme: due colonne, con la riga sopra il nome
++  assicura(120);
++  y -= 24;
++  const colonna = (LARGHEZZA_UTILE - 30) / 2;
++  const yFirma = y - 50;
++  doc.firme.slice(0, 2).forEach((f, i) => {
++    const x = MARGINE.sinistra + i * (colonna + 30);
++    corrente().righe.push({ testo: sanitizzaPerPdf(f.ruolo), x, y: y - 8, grandezza: CORPO, grassetto: true, colore: "nero" });
++    corrente().linee.push({ x1: x, x2: x + colonna, y: yFirma });
++    const nome = f.nome ? spezzaInRighe(f.nome, colonna, 10, false, misura)[0] ?? "" : "";
++    if (nome) corrente().righe.push({ testo: nome, x, y: yFirma - 14, grandezza: 10, grassetto: false, colore: "grigio" });
++  });
++  y = yFirma - 20;
++
++  return pagine;
++}
++
++/** Quanto sta a piè di pagina: la riga di origine, e per una bozza l'avvertenza. */
++export function piePagina(doc: DocumentoContratto, numero: number, totale: number): { sinistra: string; destra: string } {
++  const origine = `MatchAmI · modello ${doc.modello.id} v${doc.modello.versione}${doc.bozza ? " · bozza di prova, nessun valore legale" : ""}`;
++  return { sinistra: sanitizzaPerPdf(origine), destra: `Pagina ${numero} di ${totale}` };
++}
++
++/**
++ * Dove e quanto grande scrivere la filigrana perché stia SEMPRE dentro la pagina. Il testo è
++ * ruotato di 45° e centrato: la sua ombra su ogni asse è (larghezza + 0,75 · corpo) · cos 45°.
++ * Pura: riceve la larghezza del testo a corpo 100.
++ */
++export function posizioneFiligrana(larghezzaA100: number): { x: number; y: number; corpo: number; angoli: { x: number; y: number }[] } {
++  const margine = 60;
++  const disponibile = Math.min(PAGINA.larghezza, PAGINA.altezza) - margine;
++  const k = larghezzaA100 / 100; // larghezza per unità di corpo
++  const corpo = Math.min(70, disponibile / (Math.SQRT1_2 * (k + 0.75)));
++  const larg = k * corpo;
++  const c = Math.SQRT1_2; // cos 45° = sin 45°
++  const cx = PAGINA.larghezza / 2;
++  const cy = PAGINA.altezza / 2;
++  const x = cx - (larg / 2) * c + (corpo / 3) * c;
++  const y = cy - (larg / 2) * c - (corpo / 3) * c;
++  // i quattro angoli del rettangolo del testo (larghezza × altezza ≈ 0,75 · corpo), dopo la rotazione
++  const alt = corpo * 0.75;
++  const punto = (u: number, v: number) => ({ x: x + u * c - v * c, y: y + u * c + v * c });
++  return { x, y, corpo, angoli: [punto(0, 0), punto(larg, 0), punto(larg, alt), punto(0, alt)] };
++}
++
++const COLORI = { nero: rgb(0.06, 0.08, 0.1), grigio: rgb(0.35, 0.4, 0.44), rosso: rgb(0.62, 0.15, 0.12) };
++
++/**
++ * Il PDF. `data` è la data di creazione: si passa da fuori così il risultato si può provare.
++ * Lancia solo per errori veri della libreria: ogni testo è già reso scrivibile.
++ */
++export async function generaPdf(doc: DocumentoContratto, opzioni: { data?: Date } = {}): Promise<Uint8Array> {
++  const pdf = await PDFDocument.create();
++  const normale: PDFFont = await pdf.embedFont(StandardFonts.Helvetica);
++  const grassetto: PDFFont = await pdf.embedFont(StandardFonts.HelveticaBold);
++
++  const misura: Misura = (t, g, b) => (b ? grassetto : normale).widthOfTextAtSize(t, g);
++  const pagine = impagina(doc, misura);
++
++  const data = opzioni.data ?? new Date();
++  pdf.setTitle(sanitizzaPerPdf(doc.titolo));
++  pdf.setProducer("MatchAmI");
++  pdf.setCreator("MatchAmI");
++  pdf.setCreationDate(data);
++  pdf.setModificationDate(data);
++  pdf.setLanguage("it-IT");
++
++  pagine.forEach((p, n) => {
++    const pagina = pdf.addPage([PAGINA.larghezza, PAGINA.altezza]);
++
++    // la filigrana va PRIMA: il testo ci sta sopra
++    if (doc.bozza) {
++      const f = posizioneFiligrana(grassetto.widthOfTextAtSize(TESTO_FILIGRANA, 100));
++      pagina.drawText(TESTO_FILIGRANA, {
++        x: f.x,
++        y: f.y,
++        size: f.corpo,
++        font: grassetto,
++        color: rgb(0.8, 0.8, 0.8),
++        opacity: 0.45,
++        rotate: degrees(45),
++      });
++    }
++
++    for (const r of p.rettangoli) pagina.drawRectangle({ x: r.x, y: r.y, width: r.larghezza, height: r.altezza, color: rgb(0.99, 0.95, 0.86), borderColor: rgb(0.85, 0.7, 0.4), borderWidth: 0.8 });
++    for (const l of p.linee) pagina.drawLine({ start: { x: l.x1, y: l.y }, end: { x: l.x2, y: l.y }, thickness: 0.7, color: COLORI.nero });
++    for (const r of p.righe) pagina.drawText(r.testo, { x: r.x, y: r.y, size: r.grandezza, font: r.grassetto ? grassetto : normale, color: COLORI[r.colore] });
++
++    const pie = piePagina(doc, n + 1, pagine.length);
++    pagina.drawText(pie.sinistra, { x: MARGINE.sinistra, y: 34, size: 8, font: normale, color: COLORI.grigio });
++    const larg = normale.widthOfTextAtSize(pie.destra, 8);
++    pagina.drawText(pie.destra, { x: PAGINA.larghezza - MARGINE.destra - larg, y: 34, size: 8, font: normale, color: COLORI.grigio });
++  });
++
++  return pdf.save();
++}
+diff --git a/src/lib/contratto/testo-pdf.ts b/src/lib/contratto/testo-pdf.ts
+new file mode 100644
+index 0000000..93c955f
+--- /dev/null
++++ b/src/lib/contratto/testo-pdf.ts
+@@ -0,0 +1,126 @@
++/**
++ * Preparare un testo per un PDF con i font standard (Helvetica): pulizia dei caratteri e a capo.
++ * Logica pura, senza librerie: si prova con `npm test`.
++ *
++ * I font standard di un PDF conoscono solo i caratteri di Windows-1252 (le lettere accentate
++ * italiane, l'euro, le virgolette, il trattino lungo, ma non per esempio il polacco «Ł», il
++ * cirillico o gli emoji). Un carattere che il font non ha FA FALLIRE la scrittura: i nomi
++ * delle persone arrivano da fuori, quindi qualunque testo va reso scrivibile prima.
++ */
++
++/** I caratteri oltre Latin-1 che Windows-1252 ha nella fascia 0x80–0x9F. */
++const EXTRA_CP1252 = new Set<number>([
++  0x20ac, 0x201a, 0x0192, 0x201e, 0x2026, 0x2020, 0x2021, 0x02c6, 0x2030, 0x0160, 0x2039, 0x0152, 0x017d,
++  0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2013, 0x2014, 0x02dc, 0x2122, 0x0161, 0x203a, 0x0153, 0x017e, 0x0178,
++]);
++
++/** Il carattere esiste in Windows-1252? (spazio compreso; i caratteri di controllo no) */
++export function inCp1252(c: number): boolean {
++  return (c >= 0x20 && c <= 0x7e) || (c >= 0xa0 && c <= 0xff) || EXTRA_CP1252.has(c);
++}
++
++/** Sostituzioni leggibili per caratteri simili che il font non ha. */
++const SOSTITUZIONI: Record<string, string> = {
++  "\u2212": "-", // segno meno
++  "\u2010": "-", "\u2011": "-", "\u2012": "-", // trattini
++  "\u2192": "->", "\u2190": "<-",
++  "\u00ad": "", // trattino morbido
++  "\u0141": "L", "\u0142": "l", // Ł ł
++  "\u0110": "D", "\u0111": "d", // Đ đ
++  // gli apici: nel font standard esistono, ma alcuni visualizzatori non li disegnano («55 m ») e
++  // in un documento che indica la superficie sarebbe un difetto vero: meglio la cifra semplice
++  "\u00b2": "2", "\u00b3": "3", "\u00b9": "1",
++};
++
++/**
++ * Rende scrivibile un testo: toglie i caratteri di controllo e invisibili, sostituisce quelli
++ * simili, toglie gli accenti a ciò che il font non ha (così «Ł» diventa «L»), e per il resto
++ * scrive «?». Mai un errore, e mai un carattere che il font non conosca.
++ */
++export function sanitizzaPerPdf(testo: unknown): string {
++  if (typeof testo !== "string") return "";
++  let fuori = "";
++  for (const ch of testo.normalize("NFC")) {
++    const c = ch.codePointAt(0)!;
++    if (c === 0x0a || c === 0x0d || c === 0x09) { fuori += " "; continue; }
++    if (c < 0x20 || (c >= 0x7f && c <= 0x9f) || (c >= 0x200b && c <= 0x200f) || c === 0x2028 || c === 0x2029 || c === 0xfeff) continue;
++    if (c === 0xa0) { fuori += " "; continue; } // lo spazio che non va a capo: un semplice spazio
++    if (Object.prototype.hasOwnProperty.call(SOSTITUZIONI, ch)) { fuori += SOSTITUZIONI[ch]; continue; }
++    if (inCp1252(c)) { fuori += ch; continue; }
++    // senza accento: «ā» -> «a». Se nemmeno la base c'è, un punto interrogativo.
++    const base = ch.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
++    fuori += [...base].every((x) => inCp1252(x.codePointAt(0)!)) && base !== "" ? base : "?";
++  }
++  return fuori;
++}
++
++export type Misura = (testo: string, grandezza: number, grassetto: boolean) => number;
++
++/**
++ * Una riga non contiene mai più di tanti caratteri: nemmeno la lettera più stretta, in un corpo
++ * leggibile, ne farebbe stare di più su una pagina A4. Serve a non misurare mai più di così in
++ * una volta, e quindi a non rallentare con un testo enorme.
++ */
++export const MASSIMO_CARATTERI_PER_RIGA = 400;
++
++/**
++ * Spezza un testo in righe che stiano in `larghezza`. Va a capo tra le parole; una parola più
++ * lunga di una riga (un indirizzo, un nome senza spazi) si spezza dove serve, invece di uscire
++ * dalla pagina. Il tempo cresce con la lunghezza del testo, non con il suo quadrato: il taglio di
++ * una parola lunga si cerca con una ricerca binaria su un tratto limitato. Mai una riga vuota in
++ * mezzo, mai un ciclo infinito.
++ */
++export function spezzaInRighe(testo: string, larghezza: number, grandezza: number, grassetto: boolean, misura: Misura): string[] {
++  const parole = sanitizzaPerPdf(testo).split(" ").filter((p) => p !== "");
++  const righe: string[] = [];
++  let corrente = "";
++
++  const sta = (t: string) => t.length <= MASSIMO_CARATTERI_PER_RIGA && misura(t, grandezza, grassetto) <= larghezza;
++
++  for (const parola of parole) {
++    let resto = parola;
++    // una parola troppo lunga si spezza in pezzi che ci stiano
++    while (!sta(resto)) {
++      // il pezzo più lungo che sta in una riga: la larghezza cresce con la lunghezza, quindi si cerca a metà
++      let basso = 1;
++      let alto = Math.min(resto.length - 1, MASSIMO_CARATTERI_PER_RIGA);
++      let n = 1; // anche una sola lettera, se nemmeno quella ci sta: si va avanti comunque
++      while (basso <= alto) {
++        const meta = (basso + alto) >> 1;
++        if (sta(resto.slice(0, meta))) { n = meta; basso = meta + 1; } else alto = meta - 1;
++      }
++      if (corrente) { righe.push(corrente); corrente = ""; }
++      righe.push(resto.slice(0, n));
++      resto = resto.slice(n);
++      if (resto === "") break;
++    }
++    if (resto === "") continue;
++
++    const prova = corrente ? `${corrente} ${resto}` : resto;
++    if (sta(prova)) corrente = prova;
++    else { righe.push(corrente); corrente = resto; }
++  }
++  if (corrente) righe.push(corrente);
++  return righe;
++}
++
++export const AVVISO_CARATTERI_SEMPLIFICATI =
++  "Alcuni caratteri dei nomi (per esempio certe lettere polacche o turche) non esistono nel carattere usato dal PDF e sono stati semplificati: controlla i nomi.";
++
++/**
++ * Il testo, una volta reso scrivibile, è diverso da com'era (a parte spazi e a capo)? Vuol dire
++ * che un carattere è stato semplificato o sostituito: un nome come «Łukasz» diventa «Lukasz».
++ */
++export function perdeCaratteri(testo: unknown): boolean {
++  if (typeof testo !== "string") return false;
++  const originale = testo.normalize("NFC").replace(/[\s\u00a0]+/g, " ").trim();
++  // i caratteri di controllo e invisibili che sanitizzaPerPdf toglie non sono una perdita
++  const pulito = originale.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029\ufeff\u00ad]/g, "");
++  return sanitizzaPerPdf(pulito).replace(/ +/g, " ").trim() !== pulito;
++}
++
++/** Il documento contiene un testo che il PDF non riesce a scrivere così com'è? */
++export function documentoSemplificato(doc: { titolo: string; avvisi: string[]; sezioni: { titolo: string; paragrafi: string[] }[]; firme: { ruolo: string; nome: string | null }[] }): boolean {
++  const testi = [doc.titolo, ...doc.avvisi, ...doc.sezioni.flatMap((s) => [s.titolo, ...s.paragrafi]), ...doc.firme.flatMap((f) => [f.ruolo, f.nome ?? ""])];
++  return testi.some(perdeCaratteri);
++}
+diff --git a/src/lib/contratto/tipi.ts b/src/lib/contratto/tipi.ts
+new file mode 100644
+index 0000000..fea492b
+--- /dev/null
++++ b/src/lib/contratto/tipi.ts
+@@ -0,0 +1,91 @@
++/**
++ * Il contratto di locazione: i tipi comuni a ogni modello. Il resto dell'app parla
++ * SOLO con questi tipi; quale modello sia (la bozza di prova, o uno validato da un
++ * legale) lo sa soltanto `index.ts`. Scegliere un modello vuol dire scrivere un file che
++ * rispetta `ModelloContratto` e registrarlo là: niente altro cambia.
++ */
++
++/** Una riga come la restituisce la funzione `dati_contratto` del database (tutto può mancare). */
++export type RigaContratto = {
++  contratto_id: string;
++  stato: string;
++  canone: number | null;
++  durata_mesi: number | null;
++  data_inizio: string | null;
++  data_firma: string | null;
++  titolo: string | null;
++  zona: string | null;
++  locali: number | null;
++  mq: number | null;
++  classe_energetica: string | null;
++  ep_globale: number | string | null;
++  via: string | null;
++  civico: string | null;
++  cap: string | null;
++  citta: string | null;
++  locatore_nome: string | null;
++  locatore_cognome: string | null;
++  conduttore_nome: string | null;
++  conduttore_cognome: string | null;
++  io_sono: string;
++};
++
++export type Parte = { nome: string | null; cognome: string | null };
++
++/** I dati dell'affitto, già puliti. Ciò che non c'è è `null`: non si inventa mai. */
++export type DatiContratto = {
++  id: string;
++  stato: string;
++  locatore: Parte;
++  conduttore: Parte;
++  immobile: {
++    titolo: string | null;
++    zona: string | null;
++    locali: number | null;
++    mq: number | null;
++    classeEnergetica: string | null;
++    epGlobale: number | null;
++    indirizzo: { via: string; civico: string; cap: string; citta: string } | null;
++  };
++  canone: number | null;
++  durataMesi: number | null;
++  /** AAAA-MM-GG */
++  dataInizio: string | null;
++  dataFirma: string | null;
++  ioSono: "locatore" | "conduttore";
++  /** almeno un testo era troppo lungo ed è stato abbreviato: il documento lo dice */
++  troncato: boolean;
++};
++
++export type Sezione = { titolo: string; paragrafi: string[] };
++
++export type DocumentoContratto = {
++  titolo: string;
++  sottotitolo: string | null;
++  /** quale modello lo ha generato */
++  modello: { id: string; versione: string; origine: OrigineModello };
++  /** in cima al documento: per esempio «bozza di prova, nessun valore legale» */
++  avvisi: string[];
++  sezioni: Sezione[];
++  firme: { ruolo: string; nome: string | null }[];
++  /** i campi che nessuno ha ancora compilato, per dirlo a chi legge */
++  daIndicare: string[];
++  /**
++   * Il documento è una BOZZA: lo decide il registro (`componiContratto`), non il modello, e
++   * vale `true` per ogni modello che non sia stato registrato come validato da un legale.
++   */
++  bozza: boolean;
++};
++
++export type OrigineModello = "provvisorio" | "validato";
++
++export interface ModelloContratto {
++  /** il nome con cui si sceglie nella configurazione (CONTRATTO_MODELLO) */
++  readonly id: string;
++  readonly versione: string;
++  readonly origine: OrigineModello;
++  /** Solo per un modello VALIDATO: chi lo ha validato e quando. Senza, non si può registrare. */
++  readonly validazione?: { da: string; data: string };
++  /** Il documento. Funzione pura: nessuna richiesta, nessun accesso al database. */
++  genera(dati: DatiContratto): Omit<DocumentoContratto, "modello" | "bozza">;
++}
+diff --git a/supabase/migrations/0027_dati_contratto.sql b/supabase/migrations/0027_dati_contratto.sql
+new file mode 100644
+index 0000000..7114dbb
+--- /dev/null
++++ b/supabase/migrations/0027_dati_contratto.sql
+@@ -0,0 +1,93 @@
++-- ============================================================
++-- MatchAmI — i dati per generare il contratto
++--
++-- La bozza del contratto (pagina e PDF) si compone dai dati dell'affitto: chi sono le
++-- due parti, quale immobile, canone, durata, date. Questi dati stanno in tabelle con
++-- regole di lettura diverse (il profilo dell'altra parte non è leggibile da chiunque,
++-- l'indirizzo solo con un match accettato), quindi li dà UNA funzione che controlla chi
++-- chiama, invece di aprire quelle tabelle.
++--
++-- CHI LEGGE: il proprietario dell'immobile e l'inquilino della candidatura di quel
++-- contratto, e solo se la candidatura è ACCETTATA. Per chiunque altro non c'è niente:
++-- nemmeno si capisce se il contratto esiste.
++--
++-- COSA NON C'È, perché non lo raccogliamo: codici fiscali, residenze, documenti
++-- d'identità, deposito, modalità di pagamento, utenze, registrazione. Nella bozza
++-- restano «[da indicare]»: non si inventano mai.
++--
++-- Non crea tabelle e non salva niente: la bozza si compone al momento e non si conserva.
++--
++-- ORDINE: esegui questa migrazione PRIMA del push del codice.
++-- ============================================================
++
++create or replace function public.dati_contratto(p_contratto uuid)
++returns table (
++  contratto_id        uuid,
++  stato               stato_contratto,
++  canone              integer,
++  durata_mesi         smallint,
++  data_inizio         date,
++  data_firma          date,
++  titolo              text,
++  zona                text,
++  locali              smallint,
++  mq                  smallint,
++  classe_energetica   text,
++  ep_globale          numeric,
++  via                 text,
++  civico              text,
++  cap                 text,
++  citta               text,
++  locatore_nome       text,
++  locatore_cognome    text,
++  conduttore_nome     text,
++  conduttore_cognome  text,
++  io_sono             text
++)
++language sql
++stable
++security definer
++set search_path = public
++as $$
++  select c.id,
++         c.stato,
++         c.canone,
++         c.durata_mesi,
++         c.data_inizio,
++         c.data_firma,
++         l.titolo,
++         l.zona,
++         l.locali,
++         l.mq,
++         l.classe_energetica,
++         l.ep_globale,
++         a.via,
++         a.civico,
++         a.cap,
++         a.citta,
++         po.nome,
++         po.cognome,
++         pt.nome,
++         pt.cognome,
++         case when l.owner_id = auth.uid() then 'locatore' else 'conduttore' end
++    from contratti c
++    join candidature k on k.id = c.candidatura_id
++    join listings l on l.id = k.listing_id
++    join profiles po on po.id = l.owner_id
++    join profiles pt on pt.id = k.tenant_id
++    left join indirizzi_immobili a on a.listing_id = l.id
++   where auth.uid() is not null
++     and c.id = p_contratto
++     and k.status = 'accettata'
++     and (k.tenant_id = auth.uid() or l.owner_id = auth.uid());
++$$;
++
++revoke all on function public.dati_contratto(uuid) from public, anon;
++grant execute on function public.dati_contratto(uuid) to authenticated;
++
++-- ------------------------------------------------------------
++-- Verifica
++-- ------------------------------------------------------------
++
++select routine_name from information_schema.routines
++where routine_name = 'dati_contratto';   -- 1 riga
+-- 
+2.43.0
+

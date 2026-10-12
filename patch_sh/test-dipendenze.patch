@@ -1,0 +1,237 @@
+From 26c08c35e119bd26d0743e34024deaa32f759df4 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 12 Oct 2026 09:50:30 +0000
+Subject: [PATCH] test(dipendenze): npm test dice in chiaro quando manca una
+ libreria
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+SEGNALATO su Windows: dopo aver applicato la patch del contratto 'scripts/test-contratto.mjs'
+falliva come file intero (error: 'test failed', 560 ms) senza eseguire nessun test,
+mentre gli altri 662 passavano.
+
+Causa (riprodotta togliendo pdf-lib da node_modules: stesso quadro): test-contratto è
+il PRIMO test che importa una libreria esterna (pdf-lib), con un import fisso. Se la
+libreria non è installata (non si è eseguito 'npm ci' dopo 'git am') il file crolla al
+caricamento, e il riepilogo di 'node --test' mostra solo 'test failed', non il
+vero errore (Cannot find package 'pdf-lib'). Un difetto di come avevo costruito i test:
+un messaggio che non dice cosa fare.
+
+- scripts/controlla-dipendenze.mjs: confronta node_modules con package.json (manca
+  un pacchetto; una versione esatta diversa da quella richiesta, come un
+  aggiornamento dimenticato) e package-lock.json con package.json, e lo dice in
+  italiano con il comando da eseguire, compreso l'avviso sui permessi di Windows
+- 'pretest': gira PRIMA di npm test, si ferma con codice 1 e non esegue nessun test
+- scripts/test-dipendenze.mjs, primo dell'elenco: 12 test (tutto allineato, pacchetto
+  mancante, con ambito, versione diversa, intervallo non confrontato, più problemi
+  insieme, lock non allineato, file mancanti, pretest collegato) e una guardia: ogni
+  libreria importata da un test deve essere in package.json
+
+Verificato: senza pdf-lib npm test esce con 1, mostra il messaggio e non esegue test;
+con Next vecchio dice 'next è alla versione 16.3.4, ma ne serve la 16.3.8'. 739 test.
+---
+ package.json                     |  3 +-
+ scripts/controlla-dipendenze.mjs | 73 ++++++++++++++++++++++++
+ scripts/test-dipendenze.mjs      | 95 ++++++++++++++++++++++++++++++++
+ 3 files changed, 170 insertions(+), 1 deletion(-)
+ create mode 100644 scripts/controlla-dipendenze.mjs
+ create mode 100644 scripts/test-dipendenze.mjs
+
+diff --git a/package.json b/package.json
+index b3815c6..f94dfe0 100644
+--- a/package.json
++++ b/package.json
+@@ -7,7 +7,8 @@
+     "build": "next build",
+     "start": "next start",
+     "lint": "eslint",
+-    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-candidati.mjs"
++    "pretest": "node scripts/controlla-dipendenze.mjs",
++    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/controlla-dipendenze.mjs b/scripts/controlla-dipendenze.mjs
+new file mode 100644
+index 0000000..c1883fd
+--- /dev/null
++++ b/scripts/controlla-dipendenze.mjs
+@@ -0,0 +1,73 @@
++/**
++ * Le dipendenze installate corrispondono a package.json?
++ *
++ * Dopo aver applicato una patch che aggiunge o aggiorna una libreria bisogna eseguire
++ * `npm ci`. Se ci si dimentica, i test che usano quella libreria falliscono con un
++ * messaggio incomprensibile («test failed», senza dire perché). Questo controllo gira
++ * PRIMA dei test (`pretest`) e dice in chiaro cosa manca e cosa fare.
++ *
++ * Si può eseguire da solo:   node scripts/controlla-dipendenze.mjs
++ */
++import fs from "node:fs";
++import path from "node:path";
++import { fileURLToPath, pathToFileURL } from "node:url";
++
++const radice = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
++
++/** Una versione esatta (senza ^, ~, intervalli): solo quelle si possono confrontare con certezza. */
++const ESATTA = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
++
++export const ISTRUZIONI = "Esegui:  npm ci   e poi rilancia i test. (Se npm dà un errore di permessi su Windows, chiudi prima il server di sviluppo e l'editor.)";
++
++/** I problemi trovati, in italiano. L'elenco vuoto vuol dire che è tutto allineato. */
++export function controlla(dir = radice) {
++  const problemi = [];
++  const file = (...p) => path.join(dir, ...p);
++
++  if (!fs.existsSync(file("package.json"))) return ["manca package.json"];
++  const pkg = JSON.parse(fs.readFileSync(file("package.json"), "utf8"));
++  const richieste = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
++
++  for (const [nome, richiesta] of Object.entries(richieste)) {
++    // un pacchetto con ambito (@pdf-lib/xxx) sta in node_modules/@pdf-lib/xxx
++    const manifesto = file("node_modules", ...nome.split("/"), "package.json");
++    if (!fs.existsSync(manifesto)) {
++      problemi.push(`manca ${nome} (richiesta ${richiesta})`);
++      continue;
++    }
++    const installata = JSON.parse(fs.readFileSync(manifesto, "utf8")).version;
++    if (ESATTA.test(richiesta) && installata !== richiesta) {
++      problemi.push(`${nome} è alla versione ${installata}, ma ne serve la ${richiesta}`);
++    }
++  }
++
++  // il lock deve dire le stesse cose di package.json, altrimenti `npm ci` si rifiuta di installare
++  if (!fs.existsSync(file("package-lock.json"))) {
++    problemi.push("manca package-lock.json");
++  } else {
++    const radiceLock = JSON.parse(fs.readFileSync(file("package-lock.json"), "utf8")).packages?.[""] ?? {};
++    for (const gruppo of ["dependencies", "devDependencies"]) {
++      const a = pkg[gruppo] ?? {};
++      const b = radiceLock[gruppo] ?? {};
++      for (const nome of new Set([...Object.keys(a), ...Object.keys(b)])) {
++        if (a[nome] !== b[nome]) {
++          problemi.push(`package-lock.json non è allineato a package.json per ${nome} (${a[nome] ?? "assente"} contro ${b[nome] ?? "assente"}): serve npm install`);
++        }
++      }
++    }
++  }
++
++  return problemi;
++}
++
++// eseguito da solo (come `pretest`)
++if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
++  const problemi = controlla();
++  if (problemi.length > 0) {
++    console.error("\n✖ Le dipendenze installate non corrispondono a package.json:");
++    for (const p of problemi) console.error("   - " + p);
++    console.error("\n" + ISTRUZIONI + "\n");
++    process.exit(1);
++  }
++  console.log("Dipendenze allineate a package.json.");
++}
+diff --git a/scripts/test-dipendenze.mjs b/scripts/test-dipendenze.mjs
+new file mode 100644
+index 0000000..3d72785
+--- /dev/null
++++ b/scripts/test-dipendenze.mjs
+@@ -0,0 +1,95 @@
++/**
++ * Test del controllo delle dipendenze (scripts/controlla-dipendenze.mjs). Si lancia con:   npm test
++ *
++ * Il primo test dice se QUESTO computer è allineato: se non lo è, fallisce con un messaggio che spiega
++ * cosa manca e cosa fare, invece di lasciare che altri test crollino con «test failed».
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import fs from "node:fs";
++import os from "node:os";
++import path from "node:path";
++import { fileURLToPath } from "node:url";
++import { controlla, ISTRUZIONI } from "./controlla-dipendenze.mjs";
++
++const radice = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
++
++test("le dipendenze installate corrispondono a package.json (se questo test fallisce: npm ci)", () => {
++  const problemi = controlla(radice);
++  assert.deepEqual(problemi, [], `\n  ${problemi.join("\n  ")}\n\n  ${ISTRUZIONI}\n`);
++});
++
++// ---- il controllo sa riconoscere i problemi: si prova su una cartella finta ----
++function cartella(pkg, { lock = null, installati = {} } = {}) {
++  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dip-"));
++  fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify(pkg));
++  const l = lock ?? { packages: { "": { dependencies: pkg.dependencies ?? {}, devDependencies: pkg.devDependencies ?? {} } } };
++  fs.writeFileSync(path.join(dir, "package-lock.json"), JSON.stringify(l));
++  for (const [nome, versione] of Object.entries(installati)) {
++    const d = path.join(dir, "node_modules", ...nome.split("/"));
++    fs.mkdirSync(d, { recursive: true });
++    fs.writeFileSync(path.join(d, "package.json"), JSON.stringify({ name: nome, version: versione }));
++  }
++  return dir;
++}
++const pulisci = (dir) => fs.rmSync(dir, { recursive: true, force: true });
++
++test("tutto allineato: nessun problema, anche con pacchetti con ambito", () => {
++  const d = cartella({ dependencies: { "pdf-lib": "1.17.1", next: "16.3.8" }, devDependencies: { "@types/node": "^20", typescript: "5.9.3" } }, { installati: { "pdf-lib": "1.17.1", next: "16.3.8", "@types/node": "20.1.0", typescript: "5.9.3" } });
++  try { assert.deepEqual(controlla(d), []); } finally { pulisci(d); }
++});
++
++test("un pacchetto che manca si dice per nome, con la versione richiesta", () => {
++  const d = cartella({ dependencies: { "pdf-lib": "1.17.1", next: "16.3.8" } }, { installati: { next: "16.3.8" } });
++  try { assert.deepEqual(controlla(d), ["manca pdf-lib (richiesta 1.17.1)"]); } finally { pulisci(d); }
++});
++
++test("una versione esatta diversa da quella installata si dice con entrambe (era il caso di un aggiornamento dimenticato)", () => {
++  const d = cartella({ dependencies: { next: "16.3.8" } }, { installati: { next: "16.3.4" } });
++  try { assert.deepEqual(controlla(d), ["next è alla versione 16.3.4, ma ne serve la 16.3.8"]); } finally { pulisci(d); }
++});
++
++test("un intervallo (^, ~) non si confronta: non si può sapere quale versione esatta si volesse", () => {
++  const d = cartella({ dependencies: { react: "^19.0.0" } }, { installati: { react: "19.2.1" } });
++  try { assert.deepEqual(controlla(d), []); } finally { pulisci(d); }
++});
++
++test("un pacchetto con ambito che manca si riconosce (@pdf-lib/standard-fonts)", () => {
++  const d = cartella({ dependencies: { "@pdf-lib/standard-fonts": "1.0.0" } }, { installati: {} });
++  try { assert.deepEqual(controlla(d), ["manca @pdf-lib/standard-fonts (richiesta 1.0.0)"]); } finally { pulisci(d); }
++});
++
++test("più problemi si dicono tutti insieme, non uno alla volta", () => {
++  const d = cartella({ dependencies: { "pdf-lib": "1.17.1", next: "16.3.8" }, devDependencies: { jest: "29.0.0" } }, { installati: { next: "16.3.4" } });
++  try { const p = controlla(d); assert.equal(p.length, 3, p.join(" | ")); } finally { pulisci(d); }
++});
++
++test("il lock non allineato a package.json si dice, e dice quale comando serve", () => {
++  const d = cartella({ dependencies: { "pdf-lib": "1.17.1" } }, { lock: { packages: { "": { dependencies: {} } } }, installati: { "pdf-lib": "1.17.1" } });
++  try { const p = controlla(d); assert.equal(p.length, 1); assert.match(p[0], /package-lock\.json non è allineato.*pdf-lib.*1\.17\.1 contro assente.*npm install/); } finally { pulisci(d); }
++  const e = cartella({ dependencies: { next: "16.3.8" } }, { lock: { packages: { "": { dependencies: { next: "16.3.4" } } } }, installati: { next: "16.3.8" } });
++  try { assert.match(controlla(e)[0], /next \(16\.3\.8 contro 16\.3\.4\)/); } finally { pulisci(e); }
++});
++
++test("senza package-lock o senza package.json lo dice, senza lanciare errori", () => {
++  const d = fs.mkdtempSync(path.join(os.tmpdir(), "dip-")); try { assert.deepEqual(controlla(d), ["manca package.json"]); fs.writeFileSync(path.join(d, "package.json"), "{}"); assert.deepEqual(controlla(d), ["manca package-lock.json"]); } finally { pulisci(d); }
++});
++
++test("le istruzioni dicono il comando, e avvertono del caso tipico di Windows (permessi)", () => { assert.match(ISTRUZIONI, /npm ci/); assert.match(ISTRUZIONI, /Windows/); });
++
++test("npm test controlla le dipendenze PRIMA di eseguire i test (pretest), e questo file è il primo dell'elenco", () => {
++  const pkg = JSON.parse(fs.readFileSync(path.join(radice, "package.json"), "utf8"));
++  assert.equal(pkg.scripts.pretest, "node scripts/controlla-dipendenze.mjs");
++  assert.match(pkg.scripts.test, /^node --test scripts\/test-dipendenze\.mjs /, "il test delle dipendenze deve essere il primo");
++});
++
++test("ogni libreria esterna importata da un test è dichiarata in package.json (altrimenti il test crolla su un computer che non l'ha)", () => {
++  const pkg = JSON.parse(fs.readFileSync(path.join(radice, "package.json"), "utf8")); const dichiarate = new Set([...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.devDependencies ?? {})]);
++  for (const f of fs.readdirSync(path.join(radice, "scripts")).filter((x) => /\.mjs$/.test(x))) {
++    const c = fs.readFileSync(path.join(radice, "scripts", f), "utf8");
++    for (const m of c.matchAll(/^import[^"'\n]*from\s+["']([^"'.][^"']*)["']/gm)) {
++      if (m[1].startsWith("node:")) continue; const nome = m[1].startsWith("@") ? m[1].split("/").slice(0, 2).join("/") : m[1].split("/")[0];
++      assert.ok(dichiarate.has(nome), `scripts/${f} importa «${nome}», che non è in package.json`);
++    }
++  }
++});
+-- 
+2.43.0
+

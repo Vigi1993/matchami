@@ -1,0 +1,1404 @@
+From e768ed0bd7a77f41340dd8d3e8b53d68d725e0f8 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 12 Oct 2026 08:12:14 +0000
+Subject: [PATCH] feat(annunci): classe energetica e dati obbligatori;
+ consiglio sul prezzo con quotazioni di prova
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RICHIEDE LA MIGRAZIONE 0026 PRIMA DEL PUSH.
+
+PUNTO 37 — DATI OBBLIGATORI DELL'ANNUNCIO
+- due colonne vere sull'annuncio: classe energetica (A4..G, lista chiusa
+  controllata dal database) e indice di prestazione (kWh/m2 anno, facoltativo,
+  0-999,99). Sono dati PUBBLICI, come zona e prezzo
+- 'obbligatorio' = senza la classe energetica NON si può chiedere la verifica
+  dell'immobile. Lo fa rispettare la funzione richiedi_verifica_immobile (dopo i
+  controlli di stato e PRIMA di quello sui documenti: i dati mancanti si
+  correggono in un minuto, i documenti no). Gli immobili GIÀ verificati non si
+  toccano: restano visibili
+- l'ELENCO dei dati obbligatori è PROVVISORIO e dichiarato tale
+  (ELENCO_DATI_OBBLIGATORI_PROVVISORIO): quali dati imponga la normativa va
+  confermato con un legale. Sta in un solo file, e un test impedisce che l'app e
+  il database chiedano dati diversi
+- modulo dell'annuncio con le dieci classi e l'indice (virgola o punto, arrotonda
+  a due decimali); la scheda per chi cerca mostra 'B · 95,5 kWh/m2 anno' o 'Non
+  indicata'; la schermata di verifica dice cosa manca
+- tenuto fuori: nessuna verifica del certificato presso un registro
+
+PUNTO 36 — CONSIGLIO SUL PREZZO
+- stesso metodo di mappe, utenze ed email: interfaccia unica ProviderQuotazioni,
+  fonte PROVVISORIA dietro, registro con nome sbagliato = errore che lo dice, test
+  del contratto che girano su ogni fonte registrata. Per mettere l'OMI: un file e
+  la registrazione. La fonte riceve SOLO il nome della zona
+- i NUMERI DI PROVA sono inventati e l'app lo dice ogni volta che compaiono
+  ('Quotazioni di prova: non sono dati reali'); anche i coefficienti per la classe
+  energetica sono provvisori (COEFFICIENTI_ENERGIA_PROVVISORI) e il banner compare
+  solo se hanno davvero cambiato il numero
+- il consiglio confronta il canone con la fascia della zona per i metri quadri
+  dati (tolleranza del 5%, bordi esatti provati) e NON promette niente: 'potresti
+  chiedere di più' / 'potresti ricevere meno candidature'; 'è un'indicazione, non
+  una valutazione: il canone lo decidi tu'. Senza dati nessun consiglio, mai uno
+  inventato. Se le quotazioni non si leggono, la pagina si apre lo stesso
+
+Informativa 2026-10-provvisoria-11 (la 10 tra le equivalenti: nessuno deve
+riaccettare): la classe energetica tra i dati dell'annuncio.
+
+Test: 660 in tutto. Migrazione provata su PostgreSQL fedele a Supabase in una
+transazione e rilanciata (valori ammessi ai bordi, chi può modificare, ordine
+dei controlli, annunci verificati intatti). Difetti reintrodotti di proposito: 22
+su 22 presi. Una prova ha richiesto di correggere la MIA attesa (in italiano i
+numeri a quattro cifre non hanno il punto delle migliaia).
+---
+ package.json                                  |   2 +-
+ scripts/test-annunci.mjs                      | 132 +++++++++++++
+ scripts/test-prezzi.mjs                       | 183 ++++++++++++++++++
+ scripts/test-verifica.mjs                     |  28 ++-
+ src/app/(app)/SchedaImmobile.tsx              |   2 +
+ src/app/(app)/immobili/ImmobiliClient.tsx     |  41 ++++
+ src/app/(app)/immobili/actions.ts             |  15 ++
+ src/app/(app)/immobili/page.tsx               |  11 +-
+ src/app/(app)/page.tsx                        |   5 +-
+ src/app/globals.css                           |   8 +
+ src/components/PannelloPrezzo.tsx             |  69 +++++++
+ src/content/informativa.ts                    |   5 +-
+ src/lib/annunci/energia.ts                    |  68 +++++++
+ src/lib/annunci/obbligatori.ts                |  38 ++++
+ src/lib/prezzi/consiglio.ts                   | 103 ++++++++++
+ src/lib/prezzi/index.ts                       |  64 ++++++
+ src/lib/prezzi/provvisorio.ts                 |  40 ++++
+ src/lib/prezzi/tipi.ts                        |  34 ++++
+ src/lib/types.ts                              |   5 +
+ src/lib/verifica.ts                           |   7 +
+ .../0026_dati_obbligatori_annuncio.sql        |  99 ++++++++++
+ 21 files changed, 951 insertions(+), 8 deletions(-)
+ create mode 100644 scripts/test-annunci.mjs
+ create mode 100644 scripts/test-prezzi.mjs
+ create mode 100644 src/components/PannelloPrezzo.tsx
+ create mode 100644 src/lib/annunci/energia.ts
+ create mode 100644 src/lib/annunci/obbligatori.ts
+ create mode 100644 src/lib/prezzi/consiglio.ts
+ create mode 100644 src/lib/prezzi/index.ts
+ create mode 100644 src/lib/prezzi/provvisorio.ts
+ create mode 100644 src/lib/prezzi/tipi.ts
+ create mode 100644 supabase/migrations/0026_dati_obbligatori_annuncio.sql
+
+diff --git a/package.json b/package.json
+index 1f86bdf..9405413 100644
+--- a/package.json
++++ b/package.json
+@@ -7,7 +7,7 @@
+     "build": "next build",
+     "start": "next start",
+     "lint": "eslint",
+-    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-annunci.mjs b/scripts/test-annunci.mjs
+new file mode 100644
+index 0000000..ed27e2d
+--- /dev/null
++++ b/scripts/test-annunci.mjs
+@@ -0,0 +1,132 @@
++/**
++ * Test dei dati obbligatori dell'annuncio e della classe energetica
++ * (src/lib/annunci). Si lancia con:   npm test
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const en = caricaTs(path.join(radice, "src", "lib", "annunci", "energia.ts"));
++const ob = caricaTs(path.join(radice, "src", "lib", "annunci", "obbligatori.ts"));
++const v = caricaTs(path.join(radice, "src", "lib", "verifica.ts"));
++const { INFORMATIVA } = caricaTs(path.join(radice, "src", "content", "informativa.ts"));
++const sql = fs.readFileSync(path.join(radice, "supabase", "migrations", "0026_dati_obbligatori_annuncio.sql"), "utf8");
++const leggi = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8");
++
++// ============================================================ la classe
++test("classi: le dieci, dalla migliore alla peggiore", () => {
++  assert.deepEqual([...en.CLASSI_ENERGETICHE], ["A4", "A3", "A2", "A1", "B", "C", "D", "E", "F", "G"]);
++});
++
++test("classe valida: solo le dieci, scritte esattamente così", () => {
++  for (const c of en.CLASSI_ENERGETICHE) assert.equal(en.classeValida(c), true, c);
++  for (const x of ["a4", "A", "H", "A5", "B+", " B", "B ", "", "AA", "1", null, undefined, 4, {}, ["B"], "B\n", "Ｂ"]) assert.equal(en.classeValida(x), false, JSON.stringify(x));
++});
++
++test("leggere la classe da un modulo: vuota = non indicata; fuori lista = errore", () => {
++  for (const x of ["", "  ", null, undefined]) assert.deepEqual(en.leggiClasse(x), { ok: true, valore: null }, JSON.stringify(x));
++  assert.deepEqual(en.leggiClasse(" C "), { ok: true, valore: "C" }, "gli spazi ai lati si tolgono");
++  for (const x of ["H", "a4", "B+", "A", "DROP TABLE"]) { const r = en.leggiClasse(x); assert.equal(r.ok, false, x); assert.match(r.errore, /non è valida/); }
++});
++
++test("giudizio a parole: ogni classe ha un tono, e la scala è coerente", () => {
++  const t = Object.fromEntries(en.CLASSI_ENERGETICHE.map((c) => [c, en.tonoClasse(c)]));
++  assert.deepEqual(t, { A4: "ottima", A3: "ottima", A2: "ottima", A1: "ottima", B: "buona", C: "buona", D: "media", E: "media", F: "scarsa", G: "scarsa" });
++});
++
++// ============================================================ l'indice
++test("indice: vuoto = non indicato; virgola o punto; arrotonda a due decimali", () => {
++  for (const x of ["", "   ", null, undefined]) assert.deepEqual(en.leggiEp(x), { ok: true, valore: null }, JSON.stringify(x));
++  assert.deepEqual(en.leggiEp("95,5"), { ok: true, valore: 95.5 }); assert.deepEqual(en.leggiEp("95.5"), { ok: true, valore: 95.5 });
++  assert.deepEqual(en.leggiEp("123,456"), { ok: true, valore: 123.46 }); assert.deepEqual(en.leggiEp("0,001"), { ok: true, valore: 0 });
++  assert.deepEqual(en.leggiEp("000012"), { ok: true, valore: 12 }); assert.deepEqual(en.leggiEp(95.5), { ok: true, valore: 95.5 }); assert.deepEqual(en.leggiEp(" 120 "), { ok: true, valore: 120 });
++});
++
++test("indice: i bordi, 0 e 999,99 sì; negativo, 1000 e oltre no", () => {
++  assert.deepEqual(en.leggiEp("0"), { ok: true, valore: 0 }); assert.deepEqual(en.leggiEp("999,99"), { ok: true, valore: 999.99 });
++  for (const x of ["1000", "1000,01", "99999", "-1", "-0,5", "999,995"]) assert.equal(en.leggiEp(x).ok, false, x);
++  assert.match(en.leggiEp("1000").errore, /da 0 a 999,99/);
++});
++
++test("indice: ciò che non è un numero è un errore che dice come scriverlo", () => {
++  for (const x of ["alto", "1e3", "9 5", "95,5,3", ",5", "5,", "٩٥", "95,5 kWh", "NaN", "Infinity", "0x10", "+5", "--5", "5-", "1_000", "<script>"]) { const r = en.leggiEp(x); assert.equal(r.ok, false, x); assert.match(r.errore, /è un numero/); }
++  assert.equal(en.leggiEp("9".repeat(5000)).ok, false, "un testo enorme non si accetta (e non rallenta)");
++});
++
++test("testo mostrato: classe e indice, solo classe, o «Non indicata»", () => {
++  assert.equal(en.testoClasse("B", 95.5), "B · 95,5 kWh/m²·anno"); assert.equal(en.testoClasse("A4", 999.99), "A4 · 999,99 kWh/m²·anno", "il massimo ammesso"); assert.equal(en.testoClasse("G", 120), "G · 120 kWh/m²·anno");
++  assert.equal(en.testoClasse("B"), "B"); assert.equal(en.testoClasse("B", null), "B"); assert.equal(en.testoClasse("B", ""), "B"); assert.equal(en.testoClasse("B", "boh"), "B");
++  assert.equal(en.testoClasse("B", 0), "B · 0 kWh/m²·anno", "lo zero è un valore, non «assente»"); assert.equal(en.testoClasse("B", "95.5"), "B · 95,5 kWh/m²·anno", "un numero arrivato come testo");
++  for (const x of [null, undefined, "", "H", "b"]) assert.equal(en.testoClasse(x, 95.5), "Non indicata", JSON.stringify(x));
++});
++
++// ============================================================ i dati obbligatori
++test("obbligatori: oggi la classe energetica, e l'elenco è dichiarato provvisorio", () => {
++  assert.deepEqual(ob.DATI_OBBLIGATORI.map((d) => d.chiave), ["classe_energetica"]);
++  assert.equal(ob.ELENCO_DATI_OBBLIGATORI_PROVVISORIO, true, "se l'elenco è stato confermato da un legale va tolto il «provvisorio» e aggiornato il punto 37");
++  for (const d of ob.DATI_OBBLIGATORI) { assert.ok(d.etichetta && d.perche && d.frase); assert.ok(!/\b(lui|lei)\b/i.test(d.frase)); }
++});
++
++test("obbligatori: un valore nullo, assente o vuoto vale «manca»; qualunque classe valida no", () => {
++  for (const x of [null, undefined, "", "   "]) assert.equal(ob.datiMancanti({ classe_energetica: x }).length, 1, JSON.stringify(x));
++  assert.equal(ob.datiMancanti({}).length, 1);
++  for (const c of en.CLASSI_ENERGETICHE) assert.equal(ob.datiMancanti({ classe_energetica: c }).length, 0, c);
++});
++
++test("obbligatori: ciò che l'app chiede e ciò che il database fa rispettare coincidono", () => {
++  // ogni dato obbligatorio dell'app deve essere controllato anche dalla funzione del database:
++  // se si aggiunge un dato all'elenco e non alla migrazione, un annuncio incompleto passerebbe
++  const funzione = sql.slice(sql.indexOf("create or replace function public.richiedi_verifica_immobile"));
++  for (const d of ob.DATI_OBBLIGATORI) assert.match(funzione, new RegExp(`v_listing\\.${d.chiave} is null`), `${d.chiave} non è controllato dal database`);
++  // e viceversa: il database non chiede di più di ciò che l'app sa spiegare
++  const controlli = [...funzione.matchAll(/v_listing\.(\w+) is null/g)].map((m) => m[1]);
++  assert.deepEqual(controlli.sort(), ob.DATI_OBBLIGATORI.map((d) => d.chiave).sort());
++});
++
++// ============================================================ coerenza con la migrazione
++test("migrazione: le classi e l'intervallo dell'indice sono quelli dell'app", () => {
++  const classi = sql.match(/classe_energetica in \(([^)]*)\)/)[1].match(/'([^']+)'/g).map((x) => x.replaceAll("'", ""));
++  assert.deepEqual(classi, [...en.CLASSI_ENERGETICHE], "le classi del database e dell'app sono diverse");
++  assert.match(sql, /ep_globale >= 0 and ep_globale <= 999\.99/); assert.equal(en.LIMITI_EP.min, 0); assert.equal(en.LIMITI_EP.max, 999.99); assert.match(sql, /numeric\(6, 2\)/);
++});
++
++test("migrazione: la richiesta di verifica controlla i dati PRIMA dei documenti, dopo lo stato", () => {
++  const f = sql.slice(sql.indexOf("create or replace function public.richiedi_verifica_immobile"));
++  const i = (s) => f.indexOf(s);
++  assert.ok(i("GIA_IN_VERIFICA") < i("DATI_OBBLIGATORI_MANCANTI") && i("DATI_OBBLIGATORI_MANCANTI") < i("DOCUMENTI_MANCANTI"), "l'ordine dei controlli non è quello previsto");
++});
++
++test("errori: ogni codice che la migrazione può sollevare ha una frase sua", () => {
++  const G = v.messaggioErroreVerifica("qualcosa di sconosciuto");
++  const codici = [...new Set([...sql.matchAll(/raise exception '([A-Z_]+)'/g)].map((m) => m[1]))]; assert.ok(codici.includes("DATI_OBBLIGATORI_MANCANTI"));
++  for (const c of codici) { const f = v.messaggioErroreVerifica(`ERROR: ${c} (P0001)`); assert.notEqual(f, G, `${c} non ha un messaggio`); assert.ok(!f.includes(c), c); }
++});
++
++// ============================================================ collegamenti
++test("azioni: creare e aggiornare leggono la classe e l'indice, li controllano e li scrivono", () => {
++  const a = leggi("src", "app", "(app)", "immobili", "actions.ts");
++  assert.equal([...a.matchAll(/leggiClasse\(formData\.get\("classe_energetica"\)\)/g)].length, 2, "la classe va letta in creazione e in aggiornamento");
++  assert.equal([...a.matchAll(/leggiEp\(formData\.get\("ep_globale"\)\)/g)].length, 2);
++  assert.equal([...a.matchAll(/classe_energetica: classe\.valore/g)].length, 2); assert.equal([...a.matchAll(/ep_globale: ep\.valore/g)].length, 2);
++  assert.equal([...a.matchAll(/if \(!classe\.ok\) return \{ error: classe\.errore \}/g)].length, 2); assert.equal([...a.matchAll(/if \(!ep\.ok\) return \{ error: ep\.errore \}/g)].length, 2);
++});
++
++test("letture: la pagina degli immobili e la home leggono i dati, e la scheda li mostra", () => {
++  assert.match(leggi("src", "app", "(app)", "immobili", "page.tsx"), /classe_energetica, ep_globale/);
++  const home = leggi("src", "app", "(app)", "page.tsx"); assert.equal([...home.matchAll(/classe_energetica/g)].length >= 3, true, "la home non legge la classe per le due liste");
++  assert.match(leggi("src", "app", "(app)", "SchedaImmobile.tsx"), /testoClasse\(listing\.classe_energetica, listing\.ep_globale\)/);
++});
++
++test("privacy: la classe è un dato pubblico dell'annuncio, e l'informativa lo dice", () => {
++  assert.match(JSON.stringify(INFORMATIVA), /caratteristiche, classe energetica e foto/);
++  assert.ok(!/classe_energetica/.test(sql.replace(/--[^\n]*/g, "").match(/create policy[^;]*;/g)?.join("") ?? ""), "il dato è pubblico: nessuna policy lo nasconde");
++});
++
++test("la logica pura non ha accesso alla rete né al browser", () => {
++  for (const f of ["energia.ts", "obbligatori.ts"]) {
++    const c = leggi("src", "lib", "annunci", f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
++    for (const vietato of [/\bfetch\(/, /localStorage/, /supabase/i, /console\./, /\bimport\s+(?!type)/]) assert.ok(!vietato.test(c), `${f} usa ${vietato}`);
++  }
++});
+diff --git a/scripts/test-prezzi.mjs b/scripts/test-prezzi.mjs
+new file mode 100644
+index 0000000..0482b16
+--- /dev/null
++++ b/scripts/test-prezzi.mjs
+@@ -0,0 +1,183 @@
++/**
++ * Test del consiglio sul prezzo d'affitto (src/lib/prezzi). Si lancia con:   npm test
++ *
++ * Contengono il CONTRATTO di ogni fonte di quotazioni: girano su tutte quelle
++ * registrate, quindi chi ne aggiunge una vera (OMI) le ritrova pronte.
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const reg = caricaTs(path.join(radice, "src", "lib", "prezzi", "index.ts"));
++const con = caricaTs(path.join(radice, "src", "lib", "prezzi", "consiglio.ts"));
++const prov = caricaTs(path.join(radice, "src", "lib", "prezzi", "provvisorio.ts"));
++const en = caricaTs(path.join(radice, "src", "lib", "annunci", "energia.ts"));
++const leggi = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8");
++const ZONE = [...leggi("src", "lib", "constants.ts").match(/ZONE_MILANO = \[([\s\S]*?)\] as const/)[1].matchAll(/"([^"]+, Milano)"/g)].map((m) => m[1]);
++
++const Q = (o = {}) => ({ min: 20, max: 30, origine: "fornitore", fonte: "Fonte di prova del test", aggiornamento: "2° semestre 2025", ...o });
++
++// ============================================================ il registro e la fonte provvisoria
++test("registro: senza configurazione la fonte provvisoria; un nome sbagliato è un errore che dice quali ci sono", () => {
++  const prima = process.env.QUOTAZIONI_PROVIDER; delete process.env.QUOTAZIONI_PROVIDER;
++  try { for (const x of [undefined, null, "", "  ", "provvisorio"]) assert.equal(reg.fornitoreQuotazioni(x).id, "provvisorio", JSON.stringify(x)); } finally { if (prima !== undefined) process.env.QUOTAZIONI_PROVIDER = prima; }
++  assert.throws(() => reg.fornitoreQuotazioni("omi"), (e) => /«omi»/.test(e.message) && /provvisorio/.test(e.message));
++  for (const x of ["__proto__", "constructor", "toString", "hasOwnProperty"]) assert.throws(() => reg.fornitoreQuotazioni(x), /sconosciuta/, x);
++});
++
++test("registro: la configurazione dell'ambiente si rispetta", () => {
++  const prima = process.env.QUOTAZIONI_PROVIDER; process.env.QUOTAZIONI_PROVIDER = "inesistente";
++  try { assert.throws(() => reg.fornitoreQuotazioni(), /sconosciuta/); } finally { if (prima === undefined) delete process.env.QUOTAZIONI_PROVIDER; else process.env.QUOTAZIONI_PROVIDER = prima; }
++});
++
++for (const [nome, f] of Object.entries(reg.FORNITORI_QUOTAZIONI)) {
++  test(`contratto [${nome}]: identificativo uguale al nome registrato, origine ammessa`, () => { assert.equal(f.id, nome); assert.ok(["provvisoria", "fornitore"].includes(f.origine)); assert.match(f.id, /^[a-z][a-z0-9_-]*$/); });
++
++  test(`contratto [${nome}]: ogni zona dell'app ha una quotazione valida, o nessuna: mai una quotazione rotta`, async () => {
++    assert.ok(ZONE.length >= 13, `zone trovate: ${ZONE.length}`);
++    for (const z of ZONE) {
++      const q = await f.quotazione(z); if (q === null) continue;
++      assert.ok(Number.isFinite(q.min) && Number.isFinite(q.max), z); assert.ok(q.min > 0 && q.max >= q.min, `${z}: ${q.min}–${q.max}`);
++      assert.ok(q.max < 200, `${z}: ${q.max} €/m² al mese è troppo per un affitto`); assert.ok(["provvisoria", "fornitore"].includes(q.origine), z);
++      assert.equal(q.origine, f.origine, "l'origine della quotazione e quella della fonte devono coincidere");
++      assert.ok(typeof q.fonte === "string" && q.fonte.trim().length > 5, `${z}: manca la fonte`); assert.ok(typeof q.aggiornamento === "string" && q.aggiornamento.trim().length > 0, `${z}: manca l'aggiornamento`);
++    }
++  });
++
++  test(`contratto [${nome}]: zone strane non lanciano errori e non inventano una quotazione`, async () => {
++    for (const z of ["", "   ", "Zona che non esiste, Milano", "__proto__", "constructor", "toString", "<script>", "a".repeat(5000), null, undefined, 42, {}]) {
++      let q; await assert.doesNotReject(async () => { q = await f.quotazione(z); }); assert.ok(q === null || (q.min > 0 && q.max >= q.min), JSON.stringify(z));
++      if (f.origine === "provvisoria") assert.equal(q, null, `la fonte di prova non deve conoscere «${String(z).slice(0, 20)}»`);
++    }
++  });
++
++  test(`contratto [${nome}]: la stessa zona dà sempre la stessa risposta`, async () => { for (const z of ZONE.slice(0, 3)) assert.deepEqual(await f.quotazione(z), await f.quotazione(z)); });
++
++  test(`contratto [${nome}]: una fonte di prova lo dice nella fonte; una vera non dice «prova»`, async () => {
++    const q = await f.quotazione(ZONE[0]); if (!q) return;
++    if (f.origine === "provvisoria") assert.match(q.fonte, /prova/i); else assert.ok(!/prova|esempio|test/i.test(q.fonte), `una fonte vera dice «${q.fonte}»`);
++  });
++}
++
++test("fonte provvisoria: ogni zona dell'app ha i suoi numeri, e ogni voce è una zona dell'app", () => {
++  const nomi = ZONE.map((z) => z.replace(/,\s*Milano$/, ""));
++  for (const n of nomi) assert.ok(prov.QUOTAZIONI_DI_PROVA[n], `la zona «${n}» non ha quotazioni di prova`);
++  for (const k of Object.keys(prov.QUOTAZIONI_DI_PROVA)) assert.ok(nomi.includes(k), `«${k}» non è una zona dell'app`);
++});
++
++test("fonte provvisoria: i numeri sono plausibili per Milano (non zero, non assurdi), e Porta Nuova costa più di Certosa", () => {
++  for (const [z, q] of Object.entries(prov.QUOTAZIONI_DI_PROVA)) { assert.ok(q.min >= 8 && q.max <= 60 && q.min < q.max, z); }
++  assert.ok(prov.QUOTAZIONI_DI_PROVA["Porta Nuova"].min > prov.QUOTAZIONI_DI_PROVA.Certosa.max);
++});
++
++test("quotazioniPerZone: restituisce le zone note e salta le altre", async () => {
++  const r = await reg.quotazioniPerZone([...ZONE, "Zona sconosciuta, Milano"]); assert.equal(Object.keys(r).length, ZONE.length); assert.ok(!("Zona sconosciuta, Milano" in r)); assert.deepEqual(await reg.quotazioniPerZone([]), {});
++});
++
++test("quotazioniPerZone: una zona che non si riesce a leggere non impedisce le altre, e una fonte configurata male dà un elenco vuoto (mai un errore)", async () => {
++  const f = reg.FORNITORI_QUOTAZIONI.provvisorio; const originale = f.quotazione;
++  try { f.quotazione = async (z) => { if (z === ZONE[1]) throw new Error("boom"); return originale(z); }; const r = await reg.quotazioniPerZone(ZONE); assert.equal(Object.keys(r).length, ZONE.length - 1); assert.ok(!(ZONE[1] in r)); } finally { f.quotazione = originale; }
++  const prima = process.env.QUOTAZIONI_PROVIDER; process.env.QUOTAZIONI_PROVIDER = "inesistente";
++  try { assert.deepEqual(await reg.quotazioniPerZone(ZONE), {}); } finally { if (prima === undefined) delete process.env.QUOTAZIONI_PROVIDER; else process.env.QUOTAZIONI_PROVIDER = prima; }
++});
++
++// ============================================================ il consiglio
++const cons = (o = {}) => con.consigliaPrezzo({ quotazione: Q(), mq: 50, canone: 1250, classe: null, ...o });
++
++test("in linea: dentro la fascia (20–30 €/m² per 50 m² = 1000–1500), con i numeri nel testo", () => {
++  const c = cons(); assert.equal(c.fascia, "in_linea"); assert.equal(c.minimo, 1000); assert.equal(c.massimo, 1500); assert.equal(c.scostamentoPct, 0);
++  assert.equal(c.testo, "Il canone è in linea con la zona: per 50 m² un affitto tipico sta tra 1000 e 1500 € al mese.");
++});
++
++test("i bordi: il minimo e il massimo sono in linea; con la tolleranza del 5% ancora; oltre no", () => {
++  assert.equal(cons({ canone: 1000 }).fascia, "in_linea"); assert.equal(cons({ canone: 1500 }).fascia, "in_linea");
++  assert.equal(cons({ canone: 950 }).fascia, "in_linea", "esattamente -5%: ancora in linea"); assert.equal(cons({ canone: 949 }).fascia, "sotto");
++  assert.equal(cons({ canone: 1575 }).fascia, "in_linea", "esattamente +5%"); assert.equal(cons({ canone: 1576 }).fascia, "sopra");
++});
++
++test("sotto e sopra: lo scostamento in percentuale e un testo che non promette", () => {
++  const s = cons({ canone: 800 }); assert.equal(s.fascia, "sotto"); assert.equal(s.scostamentoPct, 20); assert.match(s.testo, /sotto la fascia tipica.*potresti chiedere di più/);
++  const o = cons({ canone: 2000 }); assert.equal(o.fascia, "sopra"); assert.equal(o.scostamentoPct, 33); assert.match(o.testo, /sopra la fascia tipica.*potresti ricevere meno candidature/);
++  for (const t of [s.testo, o.testo, cons().testo]) assert.ok(!/garantit|sicur|certo|vincol|obblig|devi\b/i.test(t), `il testo promette o impone: ${t}`);
++});
++
++test("al crescere del canone la fascia va da sotto a in linea a sopra, mai al contrario", () => {
++  const ordine = { sotto: 0, in_linea: 1, sopra: 2 }; let prec = -1;
++  for (let canone = 100; canone <= 4000; canone += 25) { const f = ordine[cons({ canone }).fascia]; assert.ok(f >= prec, `a ${canone} la fascia torna indietro`); prec = f; }
++  assert.equal(prec, 2);
++});
++
++test("la fascia cresce con i metri quadri", () => {
++  const a = cons({ mq: 30 }), b = cons({ mq: 60 }), c = cons({ mq: 120 }); assert.ok(a.minimo < b.minimo && b.minimo < c.minimo && a.massimo < b.massimo && b.massimo < c.massimo); assert.ok(a.minimo <= a.massimo);
++});
++
++test("arrotondamento a 10 euro", () => { const c = cons({ quotazione: Q({ min: 21.37, max: 29.91 }), mq: 47 }); assert.equal(c.minimo % 10, 0); assert.equal(c.massimo % 10, 0); assert.equal(c.minimo, 1000); assert.equal(c.massimo, 1410); });
++
++test("nessun consiglio quando mancano i dati: meglio niente che un consiglio inventato", () => {
++  for (const o of [{ quotazione: null }, { quotazione: undefined }, { mq: null }, { mq: 0 }, { mq: -5 }, { mq: NaN }, { mq: Infinity }, { mq: "50" }, { canone: null }, { canone: 0 }, { canone: -100 }, { canone: NaN }, { canone: "1250" }, { quotazione: Q({ min: 0 }) }, { quotazione: Q({ min: 30, max: 20 }) }, { quotazione: Q({ min: NaN }) }]) assert.equal(cons(o), null, JSON.stringify(o));
++});
++
++test("classe energetica: i coefficienti salgono dalla G alla A, D è neutra, e una classe assente o falsa non cambia niente", () => {
++  const ordine = [...en.CLASSI_ENERGETICHE].reverse(); let prec = 0;
++  for (const c of ordine) { const f = con.fattoreEnergia(c); assert.ok(f >= prec, `${c}: ${f} < ${prec}`); prec = f; }
++  assert.equal(con.fattoreEnergia("D"), 1); assert.ok(con.fattoreEnergia("A4") > 1 && con.fattoreEnergia("G") < 1);
++  for (const x of [null, undefined, "", "H", "a4", 4]) assert.equal(con.fattoreEnergia(x), 1, JSON.stringify(x));
++  assert.deepEqual(Object.keys(con.FATTORI_ENERGIA).sort(), [...en.CLASSI_ENERGETICHE].sort(), "ogni classe ha un coefficiente");
++  for (const [c, f] of Object.entries(con.FATTORI_ENERGIA)) assert.ok(f > 0.5 && f < 1.5, `${c}: ${f} è un coefficiente assurdo`);
++});
++
++test("classe energetica: sposta la fascia e il consiglio la nomina; senza classe o con D non la nomina", () => {
++  const a = cons({ classe: "A4" }), g = cons({ classe: "G" }), d = cons({ classe: "D" }), n = cons({ classe: null });
++  assert.ok(a.minimo > d.minimo && g.minimo < d.minimo); assert.equal(d.minimo, n.minimo);
++  assert.match(a.dettaglio, /classe energetica A4 \(\+6%\)/); assert.match(g.dettaglio, /classe energetica G \(−9%\)/); assert.ok(!/classe energetica/.test(d.dettaglio) && !/classe energetica/.test(n.dettaglio));
++  assert.equal(cons({ canone: 1450, classe: "G" }).fascia, "sopra", "lo stesso canone può essere in linea per una casa efficiente e alto per una che disperde"); assert.equal(cons({ canone: 1450, classe: "A4" }).fascia, "in_linea");
++});
++
++test("provvisorio: si segnala con una fonte di prova; con una fonte vera solo se un coefficiente provvisorio ha cambiato il numero", () => {
++  assert.equal(cons({ quotazione: Q({ origine: "provvisoria" }) }).provvisorio, true);
++  assert.equal(con.COEFFICIENTI_ENERGIA_PROVVISORI, true);
++  assert.equal(cons({ classe: null }).provvisorio, false, "fonte vera e nessun coefficiente in gioco"); assert.equal(cons({ classe: "D" }).provvisorio, false, "D vale 1: il coefficiente non ha cambiato niente");
++  assert.equal(cons({ classe: "B" }).provvisorio, true, "B sposta la fascia con un coefficiente provvisorio");
++});
++
++test("il dettaglio dice da dove vengono i numeri", () => {
++  const c = cons({ quotazione: Q({ fonte: "Agenzia delle Entrate, OMI", aggiornamento: "2° semestre 2025", min: 22, max: 29 }), classe: null });
++  assert.equal(c.dettaglio, "Agenzia delle Entrate, OMI · 22–29 € al m² al mese · 2° semestre 2025");
++});
++
++test("testi: nessuna promessa, nessun genere, e le costanti dicono che è un'indicazione e che i dati sono di prova", () => {
++  assert.match(con.AVVISO_INDICATIVO, /non una valutazione/); assert.match(con.AVVISO_INDICATIVO, /il canone lo decidi tu/); assert.match(con.AVVISO_DATI_DI_PROVA, /non sono dati reali/); assert.match(con.AVVISO_DATI_DI_PROVA, /OMI/);
++  for (const t of [con.AVVISO_INDICATIVO, con.AVVISO_DATI_DI_PROVA, con.SENZA_QUOTAZIONE, con.SENZA_DATI]) assert.ok(!/\b(lui|lei)\b/i.test(t), t);
++});
++
++test("la logica non ha accesso alla rete né al browser, e la fonte non riceve dati dell'annuncio (solo la zona)", () => {
++  for (const f of ["tipi.ts", "provvisorio.ts", "consiglio.ts"]) {
++    const c = leggi("src", "lib", "prezzi", f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
++    for (const vietato of [/\bfetch\(/, /localStorage/, /supabase/i, /console\./, /process\.env/, /\bimport\s+(?!type)(?![^;]*from\s+"\.\.?\/)/]) assert.ok(!vietato.test(c), `${f} usa ${vietato}`);
++  }
++  assert.match(leggi("src", "lib", "prezzi", "tipi.ts"), /quotazione\(zona: string\)/, "la fonte deve ricevere solo la zona");
++});
++
++// ============================================================ collegamenti
++test("collegamenti: la pagina carica le quotazioni di tutte le zone e le passa al modulo, che le mostra", () => {
++  const pagina = leggi("src", "app", "(app)", "immobili", "page.tsx");
++  assert.match(pagina, /await quotazioniPerZone\(ZONE_MILANO\)/); assert.match(pagina, /quotazioni=\{quotazioni\}/);
++  const client = leggi("src", "app", "(app)", "immobili", "ImmobiliClient.tsx");
++  assert.match(client, /action=\{creaImmobile\}\s+quotazioni=\{quotazioni\}/, "il modulo di creazione non riceve le quotazioni");
++  assert.match(client, /action=\{aggiornaImmobile\}\s+immobile=\{selezionato\}\s+quotazioni=\{quotazioni\}/, "il modulo di modifica non riceve le quotazioni");
++  assert.match(client, /<PannelloPrezzo zona=\{zona\} canone=\{prezzo\} mq=\{mq\} classe=\{classe\} quotazioni=\{quotazioni\} \/>/);
++});
++
++test("il pannello non salva niente e non chiama niente: solo calcolo sui dati del modulo", () => {
++  const c = leggi("src", "components", "PannelloPrezzo.tsx").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
++  for (const vietato of [/\bfetch\(/, /supabase/i, /\.rpc\(/, /useEffect/, /useState/, /localStorage/, /console\./, /process\.env/]) assert.ok(!vietato.test(c), `il pannello usa ${vietato}`);
++});
++
++test("il pannello è un'area che si annuncia ai lettori di schermo quando cambia", () => { assert.match(leggi("src", "components", "PannelloPrezzo.tsx"), /role="status" aria-live="polite"/); });
++
++test("la pagina non rompe se le quotazioni non si leggono: usa un registro che non lancia errori", () => {
++  const i = leggi("src", "lib", "prezzi", "index.ts"); const corpo = i.slice(i.indexOf("export async function quotazioniPerZone"));
++  assert.match(corpo, /catch \{\s*return \{\};/); assert.match(corpo, /catch \{\s*\/\/ una zona che non si riesce a leggere/);
++});
+diff --git a/scripts/test-verifica.mjs b/scripts/test-verifica.mjs
+index 0cee9d0..b34cdf5 100644
+--- a/scripts/test-verifica.mjs
++++ b/scripts/test-verifica.mjs
+@@ -14,7 +14,7 @@ const {
+   DIMENSIONE_MAX_BYTE,
+ } = v;
+ 
+-const imm = (o = {}) => ({ id: "L1", titolo: "Casa", zona: "Isola", stato: "non_avviata", note: null, nProprieta: 0, ...o });
++const imm = (o = {}) => ({ id: "L1", titolo: "Casa", zona: "Isola", stato: "non_avviata", note: null, nProprieta: 0, classeEnergetica: "C", ...o });
+ 
+ // ---------------- stati ----------------
+ test("stato: ogni stato dice a che punto si è, con un tono diverso", () => {
+@@ -129,3 +129,29 @@ test("errori: ogni codice del database ha una frase, e mai il testo tecnico", ()
+   assert.ok(!messaggioErroreVerifica("errore sconosciuto con dettagli interni").includes("dettagli interni"));
+   assert.match(messaggioErroreVerifica(null), /Riprova/);
+ });
++
++// ------------------------------------------------------------
++// I dati obbligatori dell'annuncio: la classe energetica
++// ------------------------------------------------------------
++
++test("manca la classe energetica: lo dice, e non si può inviare", () => {
++  const senza = imm({ nProprieta: 1, classeEnergetica: null });
++  const m = cosaManca(true, senza);
++  assert.equal(m.length, 1); assert.match(m[0], /classe energetica/); assert.match(m[0], /scheda dell'annuncio/);
++  assert.equal(puoInviare(true, senza), false);
++  assert.equal(puoInviare(true, imm({ nProprieta: 1, classeEnergetica: "G" })), true, "ogni classe va bene, anche la peggiore");
++});
++
++test("la classe vuota o con soli spazi vale «manca»; undefined anche", () => {
++  for (const c of ["", "   ", null, undefined]) assert.equal(puoInviare(true, imm({ nProprieta: 1, classeEnergetica: c })), false, JSON.stringify(c));
++});
++
++test("tutto ciò che manca si dice insieme, nell'ordine: identità, proprietà, classe", () => {
++  const m = cosaManca(false, imm({ nProprieta: 0, classeEnergetica: null }));
++  assert.equal(m.length, 3); assert.match(m[0], /identità/); assert.match(m[1], /proprietà/); assert.match(m[2], /classe energetica/);
++});
++
++test("il messaggio del database per i dati mancanti è una frase, non un codice", () => {
++  const f = messaggioErroreVerifica("ERROR: DATI_OBBLIGATORI_MANCANTI (P0001)");
++  assert.match(f, /classe energetica/); assert.ok(!/DATI_OBBLIGATORI|P0001/.test(f));
++});
+diff --git a/src/app/(app)/SchedaImmobile.tsx b/src/app/(app)/SchedaImmobile.tsx
+index dc900bf..b83d672 100644
+--- a/src/app/(app)/SchedaImmobile.tsx
++++ b/src/app/(app)/SchedaImmobile.tsx
+@@ -1,5 +1,6 @@
+ "use client";
+ 
++import { testoClasse } from "@/lib/annunci/energia";
+ import { Sheet } from "@/components/Sheet";
+ import { ATTR_VOCAB } from "@/lib/constants";
+ import type { ListingConMatch } from "@/lib/types";
+@@ -69,6 +70,7 @@ export function SchedaImmobile({
+         etichetta="Superficie"
+         valore={listing.mq ? `${listing.mq} m²` : "Non indicata"}
+       />
++      <Riga etichetta="Classe energetica" valore={testoClasse(listing.classe_energetica, listing.ep_globale)} />
+       {listing.locali && listing.mq && (
+         <Riga
+           etichetta="Media per locale"
+diff --git a/src/app/(app)/immobili/ImmobiliClient.tsx b/src/app/(app)/immobili/ImmobiliClient.tsx
+index 37e71ea..f8f6d3c 100644
+--- a/src/app/(app)/immobili/ImmobiliClient.tsx
++++ b/src/app/(app)/immobili/ImmobiliClient.tsx
+@@ -15,6 +15,9 @@ import { CriteriCandidati } from "@/components/CriteriCandidati";
+ import { descriviStato } from "@/lib/verifica";
+ import { PageContainer } from "@/components/ui/PageContainer";
+ import { Chip } from "@/components/ui/Chip";
++import { CLASSI_ENERGETICHE } from "@/lib/annunci/energia";
++import { PannelloPrezzo } from "@/components/PannelloPrezzo";
++import type { RisultatoQuotazione } from "@/lib/prezzi";
+ import { Field } from "@/components/ui/Field";
+ import { Stepper } from "@/components/ui/Stepper";
+ import { createClient } from "@/lib/supabase/client";
+@@ -34,12 +37,15 @@ export function ImmobiliClient({
+   immobili,
+   visite = [],
+   indirizzi = {},
++  quotazioni = {},
+ }: {
+   immobili: ImmobileDettaglio[];
+   /** i posti liberi e le prenotazioni di tutti i miei immobili */
+   visite?: VisitaProprietario[];
+   /** gli indirizzi dei miei immobili, per identificativo */
+   indirizzi?: Record<string, IndirizzoConVista>;
++  /** le quotazioni per zona, per il consiglio sul prezzo */
++  quotazioni?: Record<string, RisultatoQuotazione>;
+ }) {
+   const [nuovoAperto, setNuovoAperto] = useState(false);
+   const [selezionato, setSelezionato] = useState<ImmobileDettaglio | null>(
+@@ -125,6 +131,7 @@ export function ImmobiliClient({
+       >
+         <ImmobileForm
+           action={creaImmobile}
++          quotazioni={quotazioni}
+           onSaved={() => setNuovoAperto(false)}
+         />
+       </Sheet>
+@@ -141,6 +148,7 @@ export function ImmobiliClient({
+             <ImmobileForm
+               action={aggiornaImmobile}
+               immobile={selezionato}
++              quotazioni={quotazioni}
+               onSaved={() => setSelezionato(null)}
+             />
+           </>
+@@ -153,10 +161,12 @@ export function ImmobiliClient({
+ function ImmobileForm({
+   action,
+   immobile,
++  quotazioni,
+   onSaved,
+ }: {
+   action: (prevState: SaveState, formData: FormData) => Promise<SaveState>;
+   immobile?: ImmobileDettaglio;
++  quotazioni: Record<string, RisultatoQuotazione>;
+   onSaved: () => void;
+ }) {
+   const [state, formAction, pending] = useActionState(action, null);
+@@ -167,6 +177,8 @@ function ImmobileForm({
+   const [prezzo, setPrezzo] = useState(immobile?.prezzo ?? 1200);
+   const [locali, setLocali] = useState(immobile?.locali ?? 2);
+   const [mq, setMq] = useState(immobile?.mq ?? 50);
++  const [classe, setClasse] = useState<string>(immobile?.classe_energetica ?? "");
++  const [ep, setEp] = useState<string>(immobile?.ep_globale != null ? String(immobile.ep_globale).replace(".", ",") : "");
+   const [attributi, setAttributi] = useState<Record<string, boolean>>(
+     immobile?.attributi ?? {}
+   );
+@@ -273,6 +285,8 @@ function ImmobileForm({
+       <input type="hidden" name="prezzo" value={prezzo} />
+       <input type="hidden" name="locali" value={locali} />
+       <input type="hidden" name="mq" value={mq} />
++      <input type="hidden" name="classe_energetica" value={classe} />
++      <input type="hidden" name="ep_globale" value={ep} />
+       <input type="hidden" name="attributi" value={JSON.stringify(attributi)} />
+       <input type="hidden" name="pubblicato" value={String(pubblicato)} />
+       <input type="hidden" name="foto" value={JSON.stringify(foto)} />
+@@ -330,6 +344,33 @@ function ImmobileForm({
+         <Stepper value={mq} onChange={setMq} min={15} max={250} step={5} suffix=" m²" />
+       </Field>
+ 
++      <Field label="Classe energetica (APE) · obbligatoria per la verifica">
++        <div className="flex flex-wrap gap-2">
++          {CLASSI_ENERGETICHE.map((c) => (
++            <Chip key={c} label={c} active={classe === c} onClick={() => setClasse(classe === c ? "" : c)} />
++          ))}
++        </div>
++        {!classe && (
++          <p className="field-note" style={{ margin: "8px 0 0 0" }}>
++            Senza la classe energetica non puoi chiedere la verifica dell&apos;immobile.
++          </p>
++        )}
++        <input
++          value={ep}
++          onChange={(e) => setEp(e.target.value)}
++          inputMode="decimal"
++          maxLength={7}
++          placeholder="Indice di prestazione, in kWh/m²·anno (facoltativo)"
++          aria-label="Indice di prestazione energetica, in kWh al metro quadro all'anno"
++          className="contract-input"
++          style={{ marginTop: 10 }}
++        />
++      </Field>
++
++      <Field label="Consiglio sul prezzo">
++        <PannelloPrezzo zona={zona} canone={prezzo} mq={mq} classe={classe} quotazioni={quotazioni} />
++      </Field>
++
+       <Field label="Foto dell'annuncio">
+         <div className={`doc-upload ${foto.length > 0 ? "filled" : ""}`}>
+           {foto.length === 0 ? (
+diff --git a/src/app/(app)/immobili/actions.ts b/src/app/(app)/immobili/actions.ts
+index 1156024..3c96f73 100644
+--- a/src/app/(app)/immobili/actions.ts
++++ b/src/app/(app)/immobili/actions.ts
+@@ -1,5 +1,6 @@
+ "use server";
+ 
++import { leggiClasse, leggiEp } from "@/lib/annunci/energia";
+ import { revalidatePath } from "next/cache";
+ import { createClient } from "@/lib/supabase/server";
+ import { normalizzaCriteri, righeDaCriteri } from "@/lib/match";
+@@ -83,6 +84,11 @@ export async function creaImmobile(
+   const foto = parseFoto(formData.get("foto"));
+   const criteri = normalizzaCriteri(formData.get("criteri"));
+ 
++  const classe = leggiClasse(formData.get("classe_energetica"));
++  if (!classe.ok) return { error: classe.errore };
++  const ep = leggiEp(formData.get("ep_globale"));
++  if (!ep.ok) return { error: ep.errore };
++
+   const { data: listing, error } = await supabase
+     .from("listings")
+     .insert({
+@@ -95,6 +101,8 @@ export async function creaImmobile(
+       mq,
+       attributi,
+       pubblicato,
++      classe_energetica: classe.valore,
++      ep_globale: ep.valore,
+     })
+     .select("id")
+     .single();
+@@ -146,6 +154,11 @@ export async function aggiornaImmobile(
+   const foto = parseFoto(formData.get("foto"));
+   const criteri = normalizzaCriteri(formData.get("criteri"));
+ 
++  const classe = leggiClasse(formData.get("classe_energetica"));
++  if (!classe.ok) return { error: classe.errore };
++  const ep = leggiEp(formData.get("ep_globale"));
++  if (!ep.ok) return { error: ep.errore };
++
+   const { error } = await supabase
+     .from("listings")
+     .update({
+@@ -157,6 +170,8 @@ export async function aggiornaImmobile(
+       mq,
+       attributi,
+       pubblicato,
++      classe_energetica: classe.valore,
++      ep_globale: ep.valore,
+       updated_at: new Date().toISOString(),
+     })
+     .eq("id", id)
+diff --git a/src/app/(app)/immobili/page.tsx b/src/app/(app)/immobili/page.tsx
+index f9bf7ba..bd67e4d 100644
+--- a/src/app/(app)/immobili/page.tsx
++++ b/src/app/(app)/immobili/page.tsx
+@@ -3,6 +3,8 @@ import { ImmobiliClient } from "./ImmobiliClient";
+ import type { ImmobileDettaglio } from "@/lib/types";
+ import type { VisitaProprietario } from "@/lib/visite";
+ import { conVista } from "@/lib/mappe";
++import { quotazioniPerZone } from "@/lib/prezzi";
++import { ZONE_MILANO } from "@/lib/constants";
+ import type { IndirizzoConVista } from "@/lib/mappe/tipi";
+ import { criteriDaRighe } from "@/lib/match";
+ import type { RigaCriterioDb } from "@/lib/match";
+@@ -17,7 +19,7 @@ export default async function ImmobiliPage() {
+     supabase
+       .from("listings")
+       .select(
+-        "id, titolo, descrizione, zona, prezzo, locali, mq, attributi, pubblicato, verifica_stato, verifica_esito_note, listing_photos(url, ordine), listing_criteri(chiave, peso, modo, soglia_pct)"
++        "id, titolo, descrizione, zona, prezzo, locali, mq, attributi, pubblicato, classe_energetica, ep_globale, verifica_stato, verifica_esito_note, listing_photos(url, ordine), listing_criteri(chiave, peso, modo, soglia_pct)"
+       )
+       .eq("owner_id", user!.id)
+       .order("created_at", { ascending: false }),
+@@ -40,6 +42,9 @@ export default async function ImmobiliPage() {
+     nCandidaturePerListing.set(id, (nCandidaturePerListing.get(id) ?? 0) + 1);
+   }
+ 
++  // le quotazioni di tutte le zone, per il consiglio sul prezzo (se non si leggono, il consiglio non compare)
++  const quotazioni = await quotazioniPerZone(ZONE_MILANO);
++
+   const immobili: ImmobileDettaglio[] = (listings ?? []).map((l) => ({
+     id: l.id,
+     titolo: l.titolo,
+@@ -50,6 +55,8 @@ export default async function ImmobiliPage() {
+     mq: l.mq,
+     attributi: (l.attributi as Record<string, boolean>) ?? {},
+     pubblicato: l.pubblicato,
++    classe_energetica: (l.classe_energetica as string | null) ?? null,
++    ep_globale: l.ep_globale === null || l.ep_globale === undefined ? null : Number(l.ep_globale),
+     verifica_stato: l.verifica_stato,
+     verifica_esito_note: l.verifica_esito_note ?? null,
+     foto: [...((l.listing_photos as { url: string; ordine: number }[]) ?? [])]
+@@ -59,5 +66,5 @@ export default async function ImmobiliPage() {
+     nCandidature: nCandidaturePerListing.get(l.id) ?? 0,
+   }));
+ 
+-  return <ImmobiliClient immobili={immobili} visite={(visite ?? []) as VisitaProprietario[]} indirizzi={indirizzi} />;
++  return <ImmobiliClient immobili={immobili} visite={(visite ?? []) as VisitaProprietario[]} indirizzi={indirizzi} quotazioni={quotazioni} />;
+ }
+diff --git a/src/app/(app)/page.tsx b/src/app/(app)/page.tsx
+index 70943d5..b67b0ec 100644
+--- a/src/app/(app)/page.tsx
++++ b/src/app/(app)/page.tsx
+@@ -79,7 +79,7 @@ async function TenantHome({ userId }: { userId: string }) {
+   let query = supabase
+     .from("listings")
+     .select(
+-      "id, titolo, zona, prezzo, locali, mq, descrizione, attributi, listing_photos(url, ordine)"
++      "id, titolo, zona, prezzo, locali, mq, descrizione, attributi, classe_energetica, ep_globale, listing_photos(url, ordine)"
+     )
+     .eq("pubblicato", true);
+ 
+@@ -147,7 +147,7 @@ async function OwnerHome({ userId }: { userId: string }) {
+     const [{ data: miei }, { data: documenti }] = await Promise.all([
+       supabase
+         .from("listings")
+-        .select("id, titolo, zona, verifica_stato, verifica_esito_note")
++        .select("id, titolo, zona, verifica_stato, verifica_esito_note, classe_energetica")
+         .eq("owner_id", userId)
+         .order("created_at", { ascending: false }),
+       supabase.from("documenti_verifica").select("tipo, listing_id").eq("owner_id", userId),
+@@ -170,6 +170,7 @@ async function OwnerHome({ userId }: { userId: string }) {
+       stato: l.verifica_stato as ImmobileVerifica["stato"],
+       note: (l.verifica_esito_note as string | null) ?? null,
+       nProprieta: proprietaPerImmobile.get(l.id as string) ?? 0,
++      classeEnergetica: (l.classe_energetica as string | null) ?? null,
+     }));
+ 
+     return (
+diff --git a/src/app/globals.css b/src/app/globals.css
+index e7eb247..6e5c534 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -3143,3 +3143,11 @@ mark.segnaposto {
+   background: rgba(16, 21, 26, 0.05);
+   border-radius: 12px;
+ }
++
++/* ============================================================
++   Consiglio sul prezzo
++   ============================================================ */
++
++.pannello-prezzo .note-box b {
++  font-weight: 600;
++}
+diff --git a/src/components/PannelloPrezzo.tsx b/src/components/PannelloPrezzo.tsx
+new file mode 100644
+index 0000000..ffab1d9
+--- /dev/null
++++ b/src/components/PannelloPrezzo.tsx
+@@ -0,0 +1,69 @@
++import { classeValida } from "@/lib/annunci/energia";
++import {
++  AVVISO_DATI_DI_PROVA,
++  AVVISO_INDICATIVO,
++  SENZA_DATI,
++  SENZA_QUOTAZIONE,
++  consigliaPrezzo,
++  type Fascia,
++} from "@/lib/prezzi/consiglio";
++import type { RisultatoQuotazione } from "@/lib/prezzi";
++
++const ETICHETTA: Record<Fascia, string> = {
++  in_linea: "In linea con la zona",
++  sotto: "Sotto la zona",
++  sopra: "Sopra la zona",
++};
++
++/**
++ * Il consiglio sul prezzo, mentre il proprietario sceglie il canone. Si aggiorna da
++ * solo con zona, canone, metri quadri e classe energetica. È un'indicazione e lo dice;
++ * se i numeri sono di prova lo dice ogni volta. Non salva niente e non cambia il modulo.
++ */
++export function PannelloPrezzo({
++  zona,
++  canone,
++  mq,
++  classe,
++  quotazioni,
++}: {
++  zona: string;
++  canone: number;
++  mq: number;
++  classe: string;
++  quotazioni: Record<string, RisultatoQuotazione>;
++}) {
++  const quotazione = quotazioni[zona] ?? null;
++
++  if (!quotazione) {
++    return (
++      <p className="field-note" style={{ margin: 0 }} role="status">
++        {SENZA_QUOTAZIONE}
++      </p>
++    );
++  }
++
++  const c = consigliaPrezzo({ quotazione, mq, canone, classe: classeValida(classe) ? classe : null });
++  if (!c) {
++    return (
++      <p className="field-note" style={{ margin: 0 }} role="status">
++        {SENZA_DATI}
++      </p>
++    );
++  }
++
++  return (
++    <div className="pannello-prezzo" role="status" aria-live="polite">
++      <div className="note-box" style={{ marginTop: 0 }}>
++        <b>{ETICHETTA[c.fascia]}.</b> {c.testo}
++      </div>
++      <p className="field-note" style={{ margin: "8px 0 0 0" }}>
++        {c.dettaglio}
++      </p>
++      <p className="field-note" style={{ margin: "4px 0 0 0" }}>
++        {AVVISO_INDICATIVO}
++        {c.provvisorio ? ` ${AVVISO_DATI_DI_PROVA}` : ""}
++      </p>
++    </div>
++  );
++}
+diff --git a/src/content/informativa.ts b/src/content/informativa.ts
+index bd1b41f..e16ba28 100644
+--- a/src/content/informativa.ts
++++ b/src/content/informativa.ts
+@@ -28,7 +28,7 @@ export const INFORMATIVA = {
+    * controllo che fa il database (migrazione 0017): un test fallisce se
+    * questa stringa non lo supera.
+    */
+-  versione: "2026-10-provvisoria-10",
++  versione: "2026-10-provvisoria-11",
+   /**
+    * Versioni precedenti che chi le ha accettate NON deve riaccettare.
+    *
+@@ -52,6 +52,7 @@ export const INFORMATIVA = {
+     "2026-10-provvisoria-7",
+     "2026-10-provvisoria-8",
+     "2026-10-provvisoria-9",
++    "2026-10-provvisoria-10",
+   ] as readonly string[],
+   provvisoria: true,
+   titolo: "Informativa sulla privacy",
+@@ -76,7 +77,7 @@ export const INFORMATIVA = {
+       elenco: [
+         "Account: email, password (conservata come impronta, non in chiaro), nome, cognome e ruolo, inquilino o proprietario.",
+         "Se sei inquilino: lavoro, reddito tuo e del tuo nucleo, garante, fideiussione, protesti (li dichiari tu e non vengono verificati), animali, composizione del nucleo, numero di figli, presentazione, foto del profilo, le tue preferenze di ricerca (budget, zone, locali, metri, caratteristiche) e gli annunci che salvi tra i preferiti o che scarti.",
+-        "Se sei proprietario: tipo di proprietario, numero di immobili, obiettivo; gli annunci con titolo, descrizione, zona, prezzo, caratteristiche e foto; l'indirizzo preciso, se lo indichi, e la posizione sulla mappa che se ne ricava; i criteri che chiedi ai candidati.",
++        "Se sei proprietario: tipo di proprietario, numero di immobili, obiettivo; gli annunci con titolo, descrizione, zona, prezzo, caratteristiche, classe energetica e foto; l'indirizzo preciso, se lo indichi, e la posizione sulla mappa che se ne ricava; i criteri che chiedi ai candidati.",
+         "Per le verifiche: il documento d'identità e la prova di proprietà dell'immobile (proprietari); se sei inquilino e chiedi di verificare il reddito, un documento d'identità e una prova del reddito (una busta paga, la CU o la dichiarazione dei redditi); e i contratti di affitto caricati per dichiarare un affitto. Non chiediamo lo stato di famiglia.",
+         "Mentre usi l'app: candidature, messaggi, visite (giorno e ora, e chi le ha prenotate), contratti, recensioni, richieste di conferma di un affitto e inviti. Inoltre le notifiche sulle novità del tuo account, e le email che le riassumono (la tua impostazione, la data dell'ultimo invio e un registro di data, esito e numero di notifiche, senza contenuto né indirizzi, per 90 giorni) (per esempio l'esito di una verifica o la risposta a una candidatura): contengono il tipo di evento e, al massimo, il titolo di un annuncio e, per le visite, il giorno e l'ora; mai nomi di persone.",
+         "Dati di un'altra persona: se inviti il tuo proprietario, scrivi il suo nome e, se vuoi, la sua email.",
+diff --git a/src/lib/annunci/energia.ts b/src/lib/annunci/energia.ts
+new file mode 100644
+index 0000000..d57b39b
+--- /dev/null
++++ b/src/lib/annunci/energia.ts
+@@ -0,0 +1,68 @@
++/**
++ * La classe energetica (APE) di un immobile: i valori ammessi, la lettura
++ * dell'indice di prestazione e il testo da mostrare. Logica pura, senza database.
++ * Le regole sono quelle della migrazione 0026: un test le tiene allineate.
++ */
++
++/** Dalla migliore alla peggiore. */
++export const CLASSI_ENERGETICHE = ["A4", "A3", "A2", "A1", "B", "C", "D", "E", "F", "G"] as const;
++export type ClasseEnergetica = (typeof CLASSI_ENERGETICHE)[number];
++
++export function classeValida(x: unknown): x is ClasseEnergetica {
++  return typeof x === "string" && (CLASSI_ENERGETICHE as readonly string[]).includes(x);
++}
++
++/** kWh/m²·anno. Lo stesso intervallo del database. */
++export const LIMITI_EP = { min: 0, max: 999.99 } as const;
++
++export type EsitoEp = { ok: true; valore: number | null } | { ok: false; errore: string };
++
++/**
++ * Legge l'indice di prestazione energetica scritto da una persona: vuoto vuol dire «non
++ * indicato»; si accetta la virgola come separatore decimale; si arrotonda a due decimali.
++ */
++export function leggiEp(input: unknown): EsitoEp {
++  if (input === null || input === undefined) return { ok: true, valore: null };
++  const testo = String(input).trim();
++  if (testo === "") return { ok: true, valore: null };
++
++  // solo cifre con un separatore decimale: niente notazioni scientifiche, spazi dentro o segni
++  if (!/^[0-9]+([.,][0-9]+)?$/.test(testo)) {
++    return { ok: false, errore: "L'indice di prestazione energetica è un numero, per esempio 95,5." };
++  }
++  const n = Math.round(Number(testo.replace(",", ".")) * 100) / 100;
++  if (!Number.isFinite(n) || n < LIMITI_EP.min || n > LIMITI_EP.max) {
++    return { ok: false, errore: `L'indice di prestazione energetica va da ${LIMITI_EP.min} a ${String(LIMITI_EP.max).replace(".", ",")} kWh/m²·anno.` };
++  }
++  return { ok: true, valore: n };
++}
++
++export type EsitoClasse = { ok: true; valore: ClasseEnergetica | null } | { ok: false; errore: string };
++
++/** Legge la classe da un modulo: vuota = non indicata. Qualunque altra cosa non nella lista è un errore. */
++export function leggiClasse(input: unknown): EsitoClasse {
++  if (input === null || input === undefined) return { ok: true, valore: null };
++  const testo = String(input).trim();
++  if (testo === "") return { ok: true, valore: null };
++  if (!classeValida(testo)) return { ok: false, errore: "La classe energetica non è valida." };
++  return { ok: true, valore: testo };
++}
++
++export type TonoClasse = "ottima" | "buona" | "media" | "scarsa";
++
++/** Un giudizio a parole, per colorare e per chi non conosce la scala. */
++export function tonoClasse(c: ClasseEnergetica): TonoClasse {
++  if (c === "A4" || c === "A3" || c === "A2" || c === "A1") return "ottima";
++  if (c === "B" || c === "C") return "buona";
++  if (c === "D" || c === "E") return "media";
++  return "scarsa";
++}
++
++const FORMATO_EP = new Intl.NumberFormat("it-IT", { maximumFractionDigits: 2 });
++
++/** «B · 95,5 kWh/m²·anno», «B», o «Non indicata». */
++export function testoClasse(classe: unknown, ep?: unknown): string {
++  if (!classeValida(classe)) return "Non indicata";
++  const n = typeof ep === "number" && Number.isFinite(ep) ? ep : typeof ep === "string" && ep.trim() !== "" && Number.isFinite(Number(ep)) ? Number(ep) : null;
++  return n === null ? classe : `${classe} · ${FORMATO_EP.format(n)} kWh/m²·anno`;
++}
+diff --git a/src/lib/annunci/obbligatori.ts b/src/lib/annunci/obbligatori.ts
+new file mode 100644
+index 0000000..6283f5f
+--- /dev/null
++++ b/src/lib/annunci/obbligatori.ts
+@@ -0,0 +1,38 @@
++/**
++ * I dati OBBLIGATORI di un annuncio. L'ELENCO È PROVVISORIO: quali dati la
++ * normativa imponga di indicare va confermato con un legale (punto 37 degli open
++ * point). Per questo sta in un solo posto, e un test ricorda di rivederlo.
++ *
++ * Cosa significa «obbligatorio» oggi: senza questi dati non si può chiedere la
++ * verifica dell'immobile (lo fa rispettare il database, migrazione 0026), e quindi
++ * l'annuncio non diventa visibile. Gli immobili già verificati non si toccano.
++ */
++
++export type DatoObbligatorio = {
++  chiave: "classe_energetica";
++  etichetta: string;
++  /** perché si chiede, in una riga */
++  perche: string;
++  /** come si dice a chi deve completarlo, dopo «Per inviare manca:» */
++  frase: string;
++};
++
++/** Finché è `true` l'elenco non è stato confermato da un legale. */
++export const ELENCO_DATI_OBBLIGATORI_PROVVISORIO = true;
++
++export const DATI_OBBLIGATORI: readonly DatoObbligatorio[] = [
++  {
++    chiave: "classe_energetica",
++    etichetta: "Classe energetica (APE)",
++    perche: "Va indicata nell'annuncio.",
++    frase: "la classe energetica dell'immobile (si indica dalla scheda dell'annuncio, in Annunci)",
++  },
++];
++
++/** I dati obbligatori che mancano. Un valore nullo, assente o vuoto vale «manca». */
++export function datiMancanti(annuncio: { classe_energetica?: unknown }): DatoObbligatorio[] {
++  return DATI_OBBLIGATORI.filter((d) => {
++    const v = (annuncio as Record<string, unknown>)[d.chiave];
++    return v === null || v === undefined || (typeof v === "string" && v.trim() === "");
++  });
++}
+diff --git a/src/lib/prezzi/consiglio.ts b/src/lib/prezzi/consiglio.ts
+new file mode 100644
+index 0000000..c95fe2e
+--- /dev/null
++++ b/src/lib/prezzi/consiglio.ts
+@@ -0,0 +1,103 @@
++/**
++ * Il consiglio sul prezzo: dato il canone che un proprietario sta scegliendo, dice se
++ * è in linea con la zona. Logica pura, senza database né rete.
++ *
++ * È INDICATIVO e lo dice. Non promette niente (né «affitti prima», né «guadagni di
++ * più»): confronta con una quotazione e basta. Tiene conto della classe energetica con
++ * dei coefficienti PROVVISORI: che una casa efficiente valga di più di una che
++ * disperde è ragionevole, ma di quanto lo deve dire una fonte vera, non questo file.
++ */
++import { classeValida, type ClasseEnergetica } from "../annunci/energia";
++import type { RisultatoQuotazione } from "./tipi";
++
++/** Finché è `true` i coefficienti per la classe energetica sono di prova. */
++export const COEFFICIENTI_ENERGIA_PROVVISORI = true;
++
++/** Quanto sale o scende la fascia di prezzo in base alla classe energetica. PROVVISORI. */
++export const FATTORI_ENERGIA: Readonly<Record<ClasseEnergetica, number>> = {
++  A4: 1.06, A3: 1.06, A2: 1.06, A1: 1.06,
++  B: 1.04,
++  C: 1.02,
++  D: 1,
++  E: 0.97,
++  F: 0.94,
++  G: 0.91,
++};
++
++/** Quanto sotto il minimo o sopra il massimo si resta ancora «in linea». */
++export const TOLLERANZA = 0.05;
++
++export type Fascia = "sotto" | "in_linea" | "sopra";
++
++export type Consiglio = {
++  fascia: Fascia;
++  /** i canoni tipici per QUESTA casa, in euro al mese, arrotondati a 10 */
++  minimo: number;
++  massimo: number;
++  /** il coefficiente applicato per la classe energetica (1 se non indicata) */
++  fattoreEnergia: number;
++  /** di quanto il canone sta fuori dalla fascia, in percentuale (0 se in linea) */
++  scostamentoPct: number;
++  /** la frase principale */
++  testo: string;
++  /** da dove vengono i numeri */
++  dettaglio: string;
++  /** i numeri vengono da dati di prova, o da coefficienti provvisori che hanno cambiato il risultato */
++  provvisorio: boolean;
++};
++
++const FORMATO = new Intl.NumberFormat("it-IT", { maximumFractionDigits: 0 });
++const euro = (n: number) => FORMATO.format(n);
++const arrotonda10 = (n: number) => Math.round(n / 10) * 10;
++
++export function fattoreEnergia(classe: unknown): number {
++  return classeValida(classe) ? FATTORI_ENERGIA[classe] : 1;
++}
++
++/**
++ * Il consiglio, o `null` se mancano i dati per darne uno (canone, metri quadri o
++ * quotazione): meglio nessun consiglio di un consiglio inventato.
++ */
++export function consigliaPrezzo(dati: {
++  quotazione: RisultatoQuotazione | null | undefined;
++  mq: number | null | undefined;
++  canone: number | null | undefined;
++  classe?: unknown;
++}): Consiglio | null {
++  const { quotazione: q, mq, canone } = dati;
++  if (!q || !(q.min > 0) || !(q.max >= q.min)) return null;
++  if (typeof mq !== "number" || !Number.isFinite(mq) || mq <= 0) return null;
++  if (typeof canone !== "number" || !Number.isFinite(canone) || canone <= 0) return null;
++
++  const f = fattoreEnergia(dati.classe);
++  const minimo = arrotonda10(q.min * mq * f);
++  const massimo = arrotonda10(q.max * mq * f);
++
++  let fascia: Fascia = "in_linea";
++  let scostamentoPct = 0;
++  if (canone < minimo * (1 - TOLLERANZA)) {
++    fascia = "sotto";
++    scostamentoPct = Math.round(((minimo - canone) / minimo) * 100);
++  } else if (canone > massimo * (1 + TOLLERANZA)) {
++    fascia = "sopra";
++    scostamentoPct = Math.round(((canone - massimo) / massimo) * 100);
++  }
++
++  const intervallo = `tra ${euro(minimo)} e ${euro(massimo)} € al mese`;
++  const testo =
++    fascia === "in_linea"
++      ? `Il canone è in linea con la zona: per ${mq} m² un affitto tipico sta ${intervallo}.`
++      : fascia === "sotto"
++        ? `Il canone è sotto la fascia tipica della zona (${intervallo} per ${mq} m²): potresti chiedere di più.`
++        : `Il canone è sopra la fascia tipica della zona (${intervallo} per ${mq} m²): potresti ricevere meno candidature.`;
++
++  const energia = classeValida(dati.classe) && f !== 1 ? ` · classe energetica ${dati.classe} (${f > 1 ? "+" : "−"}${Math.round(Math.abs(f - 1) * 100)}%)` : "";
++  const dettaglio = `${q.fonte} · ${euro(q.min)}–${euro(q.max)} € al m² al mese · ${q.aggiornamento}${energia}`;
++
++  return { fascia, minimo, massimo, fattoreEnergia: f, scostamentoPct, testo, dettaglio, provvisorio: q.origine === "provvisoria" || (COEFFICIENTI_ENERGIA_PROVVISORI && f !== 1) };
++}
++
++export const AVVISO_INDICATIVO = "È un'indicazione, non una valutazione: il canone lo decidi tu.";
++export const AVVISO_DATI_DI_PROVA = "Quotazioni di prova: non sono dati reali. Serviranno quelle dell'Agenzia delle Entrate (OMI).";
++export const SENZA_QUOTAZIONE = "Per questa zona non ho ancora una quotazione.";
++export const SENZA_DATI = "Indica canone e metri quadri per vedere il consiglio sul prezzo.";
+diff --git a/src/lib/prezzi/index.ts b/src/lib/prezzi/index.ts
+new file mode 100644
+index 0000000..55efd44
+--- /dev/null
++++ b/src/lib/prezzi/index.ts
+@@ -0,0 +1,64 @@
++/**
++ * Il solo punto in cui si decide QUALE fonte di quotazioni si usa.
++ *
++ * PER METTERE LE QUOTAZIONI OMI (o un'altra fonte vera)
++ *   1. si scrive un file in questa cartella che rispetta `ProviderQuotazioni` (vedi
++ *      tipi.ts) e restituisce `origine: "fornitore"`, con `fonte` e `aggiornamento`
++ *      veri (per esempio «Agenzia delle Entrate, OMI» e «2° semestre 2025»);
++ *   2. lo si registra qui sotto in `FORNITORI_QUOTAZIONI`;
++ *   3. si imposta QUOTAZIONI_PROVIDER con il suo `id`;
++ *   4. si controlla la corrispondenza tra le zone dell'app e le zone OMI (le zone OMI
++ *      sono più fini e hanno codici propri): oggi una zona dell'app è un nome, e una
++ *      zona OMI può coprirne più di una, o viceversa;
++ *   5. si sostituiscono i coefficienti per la classe energetica (FATTORI_ENERGIA in
++ *      consiglio.ts) con valori che abbiano una fonte, e si mette a `false`
++ *      COEFFICIENTI_ENERGIA_PROVVISORI.
++ * I test del contratto (scripts/test-prezzi.mjs) girano su ogni fonte registrata.
++ * Il fornitore riceve SOLO il nome della zona: se ne servisse di più (un indirizzo),
++ * sarebbe un dato in uscita verso un terzo e andrebbe rivista l'informativa.
++ */
++import { fornitoreProvvisorio } from "./provvisorio";
++import type { ProviderQuotazioni, RisultatoQuotazione } from "./tipi";
++
++export const FORNITORI_QUOTAZIONI: Readonly<Record<string, ProviderQuotazioni>> = {
++  [fornitoreProvvisorio.id]: fornitoreProvvisorio,
++};
++
++export const FORNITORE_QUOTAZIONI_PREDEFINITO = fornitoreProvvisorio.id;
++
++/** Un nome sbagliato è un errore di configurazione e si dice, non si ripiega in silenzio. */
++export function fornitoreQuotazioni(nome?: string | null): ProviderQuotazioni {
++  const scelto = (nome ?? process.env.QUOTAZIONI_PROVIDER ?? "").trim() || FORNITORE_QUOTAZIONI_PREDEFINITO;
++  const f = Object.prototype.hasOwnProperty.call(FORNITORI_QUOTAZIONI, scelto) ? FORNITORI_QUOTAZIONI[scelto] : undefined;
++  if (!f) throw new Error(`Fonte di quotazioni sconosciuta: «${scelto}». Quelle disponibili: ${Object.keys(FORNITORI_QUOTAZIONI).join(", ")}.`);
++  return f;
++}
++
++/**
++ * Le quotazioni di un elenco di zone, per la schermata. Se la fonte non è configurata
++ * bene o un'interrogazione fallisce si restituisce quello che si è riusciti a leggere:
++ * il consiglio sul prezzo è un di più, e un errore qui non deve impedire di
++ * pubblicare un annuncio.
++ */
++export async function quotazioniPerZone(zone: readonly string[]): Promise<Record<string, RisultatoQuotazione>> {
++  let fonte: ProviderQuotazioni;
++  try {
++    fonte = fornitoreQuotazioni();
++  } catch {
++    return {};
++  }
++  const risultati: Record<string, RisultatoQuotazione> = {};
++  await Promise.all(
++    zone.map(async (z) => {
++      try {
++        const q = await fonte.quotazione(z);
++        if (q) risultati[z] = q;
++      } catch {
++        // una zona che non si riesce a leggere resta senza consiglio
++      }
++    })
++  );
++  return risultati;
++}
++
++export type { ProviderQuotazioni, Quotazione, RisultatoQuotazione, OrigineQuotazione } from "./tipi";
+diff --git a/src/lib/prezzi/provvisorio.ts b/src/lib/prezzi/provvisorio.ts
+new file mode 100644
+index 0000000..7ee45ab
+--- /dev/null
++++ b/src/lib/prezzi/provvisorio.ts
+@@ -0,0 +1,40 @@
++/**
++ * La fonte di quotazioni PROVVISORIA. I NUMERI SONO DI PROVA: inventati, plausibili ma
++ * non reali. Servono a costruire e provare tutto il percorso (il consiglio che il
++ * proprietario vede mentre sceglie il canone) prima di avere i dati veri
++ * dell'Agenzia delle Entrate (OMI). Nessuno li deve prendere per veri: ogni volta che
++ * compaiono, l'app lo dice (`fonte`).
++ */
++import type { ProviderQuotazioni, Quotazione, RisultatoQuotazione } from "./tipi";
++
++/** Euro/m² al mese, per zona (il nome senza «, Milano»). DATI DI PROVA. */
++export const QUOTAZIONI_DI_PROVA: Readonly<Record<string, Quotazione>> = {
++  Navigli: { min: 22, max: 29 },
++  Isola: { min: 23, max: 30 },
++  "Porta Romana": { min: 21, max: 28 },
++  "Città Studi": { min: 19, max: 25 },
++  Bicocca: { min: 17, max: 22 },
++  "Porta Nuova": { min: 25, max: 33 },
++  "Porta Venezia": { min: 22, max: 29 },
++  Sempione: { min: 21, max: 28 },
++  Ticinese: { min: 22, max: 29 },
++  Loreto: { min: 18, max: 24 },
++  NoLo: { min: 17, max: 22 },
++  Certosa: { min: 16, max: 21 },
++  Lambrate: { min: 17, max: 22 },
++};
++
++export const FONTE_DI_PROVA = "Quotazioni di prova: non sono dati reali";
++
++export const fornitoreProvvisorio: ProviderQuotazioni = {
++  id: "provvisorio",
++  origine: "provvisoria",
++  async quotazione(zona: string): Promise<RisultatoQuotazione | null> {
++    if (typeof zona !== "string") return null;
++    const nome = zona.replace(/,\s*Milano\s*$/i, "").trim();
++    // proprietà PROPRIA: «__proto__» o «constructor» esistono in ogni oggetto e non sono zone
++    if (!Object.prototype.hasOwnProperty.call(QUOTAZIONI_DI_PROVA, nome)) return null;
++    const q = QUOTAZIONI_DI_PROVA[nome];
++    return { min: q.min, max: q.max, origine: "provvisoria", fonte: FONTE_DI_PROVA, aggiornamento: "dati di prova" };
++  },
++};
+diff --git a/src/lib/prezzi/tipi.ts b/src/lib/prezzi/tipi.ts
+new file mode 100644
+index 0000000..920d230
+--- /dev/null
++++ b/src/lib/prezzi/tipi.ts
+@@ -0,0 +1,34 @@
++/**
++ * Le quotazioni degli affitti: i tipi comuni a ogni fonte. Il resto dell'app parla
++ * SOLO con questi tipi; quale fonte sia (i dati dell'Agenzia delle Entrate, OMI, o i
++ * dati di prova) lo sa soltanto `index.ts`. Scegliere una fonte vuol dire scrivere un
++ * file che rispetta `ProviderQuotazioni` e registrarlo là: niente altro cambia.
++ */
++
++/** Euro al metro quadro al MESE, per un'abitazione civile in stato normale. */
++export type Quotazione = {
++  min: number;
++  max: number;
++};
++
++export type OrigineQuotazione = "provvisoria" | "fornitore";
++
++export type RisultatoQuotazione = Quotazione & {
++  origine: OrigineQuotazione;
++  /** da dove vengono i numeri, in una riga, da mostrare a chi li legge */
++  fonte: string;
++  /** a quando si riferiscono (per esempio «2° semestre 2025») */
++  aggiornamento: string;
++};
++
++export interface ProviderQuotazioni {
++  /** il nome con cui si sceglie nella configurazione (QUOTAZIONI_PROVIDER) */
++  readonly id: string;
++  readonly origine: OrigineQuotazione;
++  /**
++   * La quotazione di una zona (il nome com'è nell'app, per esempio «Isola, Milano»), o
++   * `null` se non la conosce. NON deve lanciare errori e riceve solo la zona: nessun
++   * dato dell'annuncio o di chi lo scrive.
++   */
++  quotazione(zona: string): Promise<RisultatoQuotazione | null>;
++}
+diff --git a/src/lib/types.ts b/src/lib/types.ts
+index dd5b657..7925788 100644
+--- a/src/lib/types.ts
++++ b/src/lib/types.ts
+@@ -56,6 +56,9 @@ export type ImmobileDettaglio = {
+   mq: number | null;
+   attributi: Record<string, boolean>;
+   pubblicato: boolean;
++  /** classe energetica (APE) e indice di prestazione: dati pubblici dell'annuncio */
++  classe_energetica?: string | null;
++  ep_globale?: number | null;
+   /** galleria dell'annuncio, già ordinata */
+   foto: string[];
+   /** stato della verifica dell'immobile e, se respinto, il motivo */
+@@ -149,6 +152,8 @@ export type ListingConFoto = {
+   descrizione: string | null;
+   /** caratteristiche dell'immobile, chiavi di ATTR_VOCAB */
+   attributi: Record<string, boolean> | null;
++  classe_energetica?: string | null;
++  ep_globale?: number | null;
+   listing_photos: { url: string; ordine: number }[];
+ };
+ 
+diff --git a/src/lib/verifica.ts b/src/lib/verifica.ts
+index fe80ac1..7d7a991 100644
+--- a/src/lib/verifica.ts
++++ b/src/lib/verifica.ts
+@@ -6,6 +6,8 @@
+  * per dire subito alla persona cosa non va.
+  */
+ 
++import { datiMancanti } from "./annunci/obbligatori";
++
+ export type StatoImmobile = "non_avviata" | "in_verifica" | "verificato";
+ 
+ export type ImmobileVerifica = {
+@@ -17,6 +19,8 @@ export type ImmobileVerifica = {
+   note: string | null;
+   /** quante prove di proprietà ha già caricato per questo immobile */
+   nProprieta: number;
++  /** la classe energetica indicata nell'annuncio: senza, non si può chiedere la verifica */
++  classeEnergetica: string | null;
+ };
+ 
+ export type DescrizioneStato = {
+@@ -59,6 +63,8 @@ export function cosaManca(haIdentita: boolean, immobile: ImmobileVerifica): stri
+   const manca: string[] = [];
+   if (!haIdentita) manca.push("il tuo documento d'identità");
+   if (immobile.nProprieta === 0) manca.push("una prova di proprietà dell'immobile (visura o atto)");
++  // i dati obbligatori dell'annuncio (l'elenco è in lib/annunci/obbligatori.ts)
++  for (const d of datiMancanti({ classe_energetica: immobile.classeEnergetica })) manca.push(d.frase);
+   return manca;
+ }
+ 
+@@ -148,6 +154,7 @@ const MESSAGGI: Record<string, string> = {
+   IMMOBILE_NON_TUO: "Questo immobile non risulta tuo.",
+   GIA_VERIFICATO: "Questo immobile è già verificato.",
+   GIA_IN_VERIFICA: "Questo immobile è già in verifica.",
++  DATI_OBBLIGATORI_MANCANTI: "Per chiedere la verifica indica prima la classe energetica dell'immobile, dalla scheda dell'annuncio.",
+   DOCUMENTI_MANCANTI:
+     "Mancano dei documenti: servono il tuo documento d'identità e una prova di proprietà dell'immobile.",
+   NON_STAFF: "Non hai i permessi per farlo.",
+diff --git a/supabase/migrations/0026_dati_obbligatori_annuncio.sql b/supabase/migrations/0026_dati_obbligatori_annuncio.sql
+new file mode 100644
+index 0000000..c57ee5e
+--- /dev/null
++++ b/supabase/migrations/0026_dati_obbligatori_annuncio.sql
+@@ -0,0 +1,99 @@
++-- ============================================================
++-- MatchAmI — dati obbligatori dell'annuncio: la classe energetica
++--
++-- Un annuncio di affitto deve dichiarare la classe energetica (APE) e
++-- l'indice di prestazione energetica: lo chiede la normativa, e QUALI dati
++-- siano obbligatori va CONFERMATO CON UN LEGALE (punto 37). Per questo l'elenco
++-- vive in un solo file dell'app (src/lib/annunci/obbligatori.ts), dichiarato
++-- provvisorio, e il database fa rispettare soltanto ciò che oggi è deciso:
++--   - la classe energetica ha una lista chiusa di valori, controllata qui;
++--   - senza la classe energetica NON si può chiedere la verifica dell'immobile.
++--
++-- Gli immobili GIÀ verificati non si toccano: restano visibili. Il controllo
++-- vale per le richieste di verifica nuove.
++--
++-- I due dati sono PUBBLICI, come la zona e il prezzo: chi vede l'annuncio li vede.
++--
++-- ORDINE: esegui questa migrazione PRIMA del push del codice.
++-- ============================================================
++
++-- ------------------------------------------------------------
++-- 1. I dati
++-- ------------------------------------------------------------
++
++alter table listings add column if not exists classe_energetica text;
++alter table listings add column if not exists ep_globale numeric(6, 2);
++
++alter table listings drop constraint if exists listings_classe_energetica_check;
++alter table listings add constraint listings_classe_energetica_check
++  check (classe_energetica is null or classe_energetica in ('A4', 'A3', 'A2', 'A1', 'B', 'C', 'D', 'E', 'F', 'G'));
++
++-- kWh/m²·anno: da 0 a 999,99 (un valore oltre è quasi sempre un errore di battitura)
++alter table listings drop constraint if exists listings_ep_globale_check;
++alter table listings add constraint listings_ep_globale_check
++  check (ep_globale is null or (ep_globale >= 0 and ep_globale <= 999.99));
++
++-- ------------------------------------------------------------
++-- 2. La richiesta di verifica chiede i dati obbligatori
++--
++-- Stessa funzione della 0012, con un controllo in più, dopo quelli sullo stato e
++-- PRIMA di quello sui documenti: i dati mancanti si correggono in un minuto, i
++-- documenti no, e chi non ha né gli uni né gli altri deve sapere da dove cominciare.
++-- ------------------------------------------------------------
++
++create or replace function public.richiedi_verifica_immobile(p_listing uuid)
++returns void
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_listing listings;
++begin
++  if auth.uid() is null then
++    raise exception 'NON_AUTENTICATO';
++  end if;
++
++  select * into v_listing from listings where id = p_listing and owner_id = auth.uid();
++  if not found then
++    raise exception 'IMMOBILE_NON_TUO';
++  end if;
++  if v_listing.verifica_stato = 'verificato' then
++    raise exception 'GIA_VERIFICATO';
++  end if;
++  if v_listing.verifica_stato = 'in_verifica' then
++    raise exception 'GIA_IN_VERIFICA';
++  end if;
++
++  -- i dati obbligatori dell'annuncio
++  if v_listing.classe_energetica is null then
++    raise exception 'DATI_OBBLIGATORI_MANCANTI';
++  end if;
++
++  if not exists (
++       select 1 from documenti_verifica
++        where owner_id = auth.uid() and tipo = 'identita')
++     or not exists (
++       select 1 from documenti_verifica
++        where owner_id = auth.uid() and tipo = 'proprieta' and listing_id = p_listing)
++  then
++    raise exception 'DOCUMENTI_MANCANTI';
++  end if;
++
++  update listings
++     set verifica_stato = 'in_verifica',
++         verifica_inviata_at = now(),
++         verifica_esito_note = null
++   where id = p_listing;
++end;
++$$;
++
++-- ------------------------------------------------------------
++-- Verifica
++-- ------------------------------------------------------------
++
++select count(*) as colonne_nuove from information_schema.columns
++where table_name = 'listings' and column_name in ('classe_energetica', 'ep_globale');   -- 2
++
++-- gli annunci già presenti non cambiano: restano senza classe finché il proprietario non la indica
++select count(*) as annunci_senza_classe from listings where classe_energetica is null;
+-- 
+2.43.0
+
