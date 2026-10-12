@@ -1,5 +1,6 @@
 "use client";
 
+import { testoClasse } from "@/lib/annunci/energia";
 import { Sheet } from "@/components/Sheet";
 import { ATTR_VOCAB } from "@/lib/constants";
 import type { ListingConMatch } from "@/lib/types";
@@ -69,6 +70,7 @@ export function SchedaImmobile({
         etichetta="Superficie"
         valore={listing.mq ? `${listing.mq} m²` : "Non indicata"}
       />
+      <Riga etichetta="Classe energetica" valore={testoClasse(listing.classe_energetica, listing.ep_globale)} />
       {listing.locali && listing.mq && (
         <Riga
           etichetta="Media per locale"

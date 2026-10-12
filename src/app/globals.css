@@ -3143,3 +3143,11 @@ mark.segnaposto {
   background: rgba(16, 21, 26, 0.05);
   border-radius: 12px;
 }
+
+/* ============================================================
+   Consiglio sul prezzo
+   ============================================================ */
+
+.pannello-prezzo .note-box b {
+  font-weight: 600;
+}

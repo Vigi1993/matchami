@@ -79,7 +79,7 @@ async function TenantHome({ userId }: { userId: string }) {
   let query = supabase
     .from("listings")
     .select(
-      "id, titolo, zona, prezzo, locali, mq, descrizione, attributi, listing_photos(url, ordine)"
+      "id, titolo, zona, prezzo, locali, mq, descrizione, attributi, classe_energetica, ep_globale, listing_photos(url, ordine)"
     )
     .eq("pubblicato", true);
 
@@ -147,7 +147,7 @@ async function OwnerHome({ userId }: { userId: string }) {
     const [{ data: miei }, { data: documenti }] = await Promise.all([
       supabase
         .from("listings")
-        .select("id, titolo, zona, verifica_stato, verifica_esito_note")
+        .select("id, titolo, zona, verifica_stato, verifica_esito_note, classe_energetica")
         .eq("owner_id", userId)
         .order("created_at", { ascending: false }),
       supabase.from("documenti_verifica").select("tipo, listing_id").eq("owner_id", userId),
@@ -170,6 +170,7 @@ async function OwnerHome({ userId }: { userId: string }) {
       stato: l.verifica_stato as ImmobileVerifica["stato"],
       note: (l.verifica_esito_note as string | null) ?? null,
       nProprieta: proprietaPerImmobile.get(l.id as string) ?? 0,
+      classeEnergetica: (l.classe_energetica as string | null) ?? null,
     }));
 
     return (

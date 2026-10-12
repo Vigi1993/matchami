@@ -6,6 +6,8 @@
  * per dire subito alla persona cosa non va.
  */
 
+import { datiMancanti } from "./annunci/obbligatori";
+
 export type StatoImmobile = "non_avviata" | "in_verifica" | "verificato";
 
 export type ImmobileVerifica = {
@@ -17,6 +19,8 @@ export type ImmobileVerifica = {
   note: string | null;
   /** quante prove di proprietà ha già caricato per questo immobile */
   nProprieta: number;
+  /** la classe energetica indicata nell'annuncio: senza, non si può chiedere la verifica */
+  classeEnergetica: string | null;
 };
 
 export type DescrizioneStato = {
@@ -59,6 +63,8 @@ export function cosaManca(haIdentita: boolean, immobile: ImmobileVerifica): stri
   const manca: string[] = [];
   if (!haIdentita) manca.push("il tuo documento d'identità");
   if (immobile.nProprieta === 0) manca.push("una prova di proprietà dell'immobile (visura o atto)");
+  // i dati obbligatori dell'annuncio (l'elenco è in lib/annunci/obbligatori.ts)
+  for (const d of datiMancanti({ classe_energetica: immobile.classeEnergetica })) manca.push(d.frase);
   return manca;
 }
 
@@ -148,6 +154,7 @@ const MESSAGGI: Record<string, string> = {
   IMMOBILE_NON_TUO: "Questo immobile non risulta tuo.",
   GIA_VERIFICATO: "Questo immobile è già verificato.",
   GIA_IN_VERIFICA: "Questo immobile è già in verifica.",
+  DATI_OBBLIGATORI_MANCANTI: "Per chiedere la verifica indica prima la classe energetica dell'immobile, dalla scheda dell'annuncio.",
   DOCUMENTI_MANCANTI:
     "Mancano dei documenti: servono il tuo documento d'identità e una prova di proprietà dell'immobile.",
   NON_STAFF: "Non hai i permessi per farlo.",

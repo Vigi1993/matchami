@@ -56,6 +56,9 @@ export type ImmobileDettaglio = {
   mq: number | null;
   attributi: Record<string, boolean>;
   pubblicato: boolean;
+  /** classe energetica (APE) e indice di prestazione: dati pubblici dell'annuncio */
+  classe_energetica?: string | null;
+  ep_globale?: number | null;
   /** galleria dell'annuncio, già ordinata */
   foto: string[];
   /** stato della verifica dell'immobile e, se respinto, il motivo */
@@ -149,6 +152,8 @@ export type ListingConFoto = {
   descrizione: string | null;
   /** caratteristiche dell'immobile, chiavi di ATTR_VOCAB */
   attributi: Record<string, boolean> | null;
+  classe_energetica?: string | null;
+  ep_globale?: number | null;
   listing_photos: { url: string; ordine: number }[];
 };
 

@@ -15,6 +15,9 @@ import { CriteriCandidati } from "@/components/CriteriCandidati";
 import { descriviStato } from "@/lib/verifica";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { Chip } from "@/components/ui/Chip";
+import { CLASSI_ENERGETICHE } from "@/lib/annunci/energia";
+import { PannelloPrezzo } from "@/components/PannelloPrezzo";
+import type { RisultatoQuotazione } from "@/lib/prezzi";
 import { Field } from "@/components/ui/Field";
 import { Stepper } from "@/components/ui/Stepper";
 import { createClient } from "@/lib/supabase/client";
@@ -34,12 +37,15 @@ export function ImmobiliClient({
   immobili,
   visite = [],
   indirizzi = {},
+  quotazioni = {},
 }: {
   immobili: ImmobileDettaglio[];
   /** i posti liberi e le prenotazioni di tutti i miei immobili */
   visite?: VisitaProprietario[];
   /** gli indirizzi dei miei immobili, per identificativo */
   indirizzi?: Record<string, IndirizzoConVista>;
+  /** le quotazioni per zona, per il consiglio sul prezzo */
+  quotazioni?: Record<string, RisultatoQuotazione>;
 }) {
   const [nuovoAperto, setNuovoAperto] = useState(false);
   const [selezionato, setSelezionato] = useState<ImmobileDettaglio | null>(
@@ -125,6 +131,7 @@ export function ImmobiliClient({
       >
         <ImmobileForm
           action={creaImmobile}
+          quotazioni={quotazioni}
           onSaved={() => setNuovoAperto(false)}
         />
       </Sheet>
@@ -141,6 +148,7 @@ export function ImmobiliClient({
             <ImmobileForm
               action={aggiornaImmobile}
               immobile={selezionato}
+              quotazioni={quotazioni}
               onSaved={() => setSelezionato(null)}
             />
           </>
@@ -153,10 +161,12 @@ export function ImmobiliClient({
 function ImmobileForm({
   action,
   immobile,
+  quotazioni,
   onSaved,
 }: {
   action: (prevState: SaveState, formData: FormData) => Promise<SaveState>;
   immobile?: ImmobileDettaglio;
+  quotazioni: Record<string, RisultatoQuotazione>;
   onSaved: () => void;
 }) {
   const [state, formAction, pending] = useActionState(action, null);
@@ -167,6 +177,8 @@ function ImmobileForm({
   const [prezzo, setPrezzo] = useState(immobile?.prezzo ?? 1200);
   const [locali, setLocali] = useState(immobile?.locali ?? 2);
   const [mq, setMq] = useState(immobile?.mq ?? 50);
+  const [classe, setClasse] = useState<string>(immobile?.classe_energetica ?? "");
+  const [ep, setEp] = useState<string>(immobile?.ep_globale != null ? String(immobile.ep_globale).replace(".", ",") : "");
   const [attributi, setAttributi] = useState<Record<string, boolean>>(
     immobile?.attributi ?? {}
   );
@@ -273,6 +285,8 @@ function ImmobileForm({
       <input type="hidden" name="prezzo" value={prezzo} />
       <input type="hidden" name="locali" value={locali} />
       <input type="hidden" name="mq" value={mq} />
+      <input type="hidden" name="classe_energetica" value={classe} />
+      <input type="hidden" name="ep_globale" value={ep} />
       <input type="hidden" name="attributi" value={JSON.stringify(attributi)} />
       <input type="hidden" name="pubblicato" value={String(pubblicato)} />
       <input type="hidden" name="foto" value={JSON.stringify(foto)} />
@@ -328,6 +342,33 @@ function ImmobileForm({
 
       <Field label="Metratura">
         <Stepper value={mq} onChange={setMq} min={15} max={250} step={5} suffix=" m²" />
+      </Field>
+
+      <Field label="Classe energetica (APE) · obbligatoria per la verifica">
+        <div className="flex flex-wrap gap-2">
+          {CLASSI_ENERGETICHE.map((c) => (
+            <Chip key={c} label={c} active={classe === c} onClick={() => setClasse(classe === c ? "" : c)} />
+          ))}
+        </div>
+        {!classe && (
+          <p className="field-note" style={{ margin: "8px 0 0 0" }}>
+            Senza la classe energetica non puoi chiedere la verifica dell&apos;immobile.
+          </p>
+        )}
+        <input
+          value={ep}
+          onChange={(e) => setEp(e.target.value)}
+          inputMode="decimal"
+          maxLength={7}
+          placeholder="Indice di prestazione, in kWh/m²·anno (facoltativo)"
+          aria-label="Indice di prestazione energetica, in kWh al metro quadro all'anno"
+          className="contract-input"
+          style={{ marginTop: 10 }}
+        />
+      </Field>
+
+      <Field label="Consiglio sul prezzo">
+        <PannelloPrezzo zona={zona} canone={prezzo} mq={mq} classe={classe} quotazioni={quotazioni} />
       </Field>
 
       <Field label="Foto dell'annuncio">

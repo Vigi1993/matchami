@@ -1,5 +1,6 @@
 "use server";
 
+import { leggiClasse, leggiEp } from "@/lib/annunci/energia";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { normalizzaCriteri, righeDaCriteri } from "@/lib/match";
@@ -83,6 +84,11 @@ export async function creaImmobile(
   const foto = parseFoto(formData.get("foto"));
   const criteri = normalizzaCriteri(formData.get("criteri"));
 
+  const classe = leggiClasse(formData.get("classe_energetica"));
+  if (!classe.ok) return { error: classe.errore };
+  const ep = leggiEp(formData.get("ep_globale"));
+  if (!ep.ok) return { error: ep.errore };
+
   const { data: listing, error } = await supabase
     .from("listings")
     .insert({
@@ -95,6 +101,8 @@ export async function creaImmobile(
       mq,
       attributi,
       pubblicato,
+      classe_energetica: classe.valore,
+      ep_globale: ep.valore,
     })
     .select("id")
     .single();
@@ -146,6 +154,11 @@ export async function aggiornaImmobile(
   const foto = parseFoto(formData.get("foto"));
   const criteri = normalizzaCriteri(formData.get("criteri"));
 
+  const classe = leggiClasse(formData.get("classe_energetica"));
+  if (!classe.ok) return { error: classe.errore };
+  const ep = leggiEp(formData.get("ep_globale"));
+  if (!ep.ok) return { error: ep.errore };
+
   const { error } = await supabase
     .from("listings")
     .update({
@@ -157,6 +170,8 @@ export async function aggiornaImmobile(
       mq,
       attributi,
       pubblicato,
+      classe_energetica: classe.valore,
+      ep_globale: ep.valore,
       updated_at: new Date().toISOString(),
     })
     .eq("id", id)

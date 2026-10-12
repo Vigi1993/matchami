@@ -14,7 +14,7 @@ const {
   DIMENSIONE_MAX_BYTE,
 } = v;
 
-const imm = (o = {}) => ({ id: "L1", titolo: "Casa", zona: "Isola", stato: "non_avviata", note: null, nProprieta: 0, ...o });
+const imm = (o = {}) => ({ id: "L1", titolo: "Casa", zona: "Isola", stato: "non_avviata", note: null, nProprieta: 0, classeEnergetica: "C", ...o });
 
 // ---------------- stati ----------------
 test("stato: ogni stato dice a che punto si è, con un tono diverso", () => {
@@ -128,4 +128,30 @@ test("errori: ogni codice del database ha una frase, e mai il testo tecnico", ()
   assert.match(messaggioErroreVerifica("errore sconosciuto con dettagli interni"), /Riprova/);
   assert.ok(!messaggioErroreVerifica("errore sconosciuto con dettagli interni").includes("dettagli interni"));
   assert.match(messaggioErroreVerifica(null), /Riprova/);
+});
+
+// ------------------------------------------------------------
+// I dati obbligatori dell'annuncio: la classe energetica
+// ------------------------------------------------------------
+
+test("manca la classe energetica: lo dice, e non si può inviare", () => {
+  const senza = imm({ nProprieta: 1, classeEnergetica: null });
+  const m = cosaManca(true, senza);
+  assert.equal(m.length, 1); assert.match(m[0], /classe energetica/); assert.match(m[0], /scheda dell'annuncio/);
+  assert.equal(puoInviare(true, senza), false);
+  assert.equal(puoInviare(true, imm({ nProprieta: 1, classeEnergetica: "G" })), true, "ogni classe va bene, anche la peggiore");
+});
+
+test("la classe vuota o con soli spazi vale «manca»; undefined anche", () => {
+  for (const c of ["", "   ", null, undefined]) assert.equal(puoInviare(true, imm({ nProprieta: 1, classeEnergetica: c })), false, JSON.stringify(c));
+});
+
+test("tutto ciò che manca si dice insieme, nell'ordine: identità, proprietà, classe", () => {
+  const m = cosaManca(false, imm({ nProprieta: 0, classeEnergetica: null }));
+  assert.equal(m.length, 3); assert.match(m[0], /identità/); assert.match(m[1], /proprietà/); assert.match(m[2], /classe energetica/);
+});
+
+test("il messaggio del database per i dati mancanti è una frase, non un codice", () => {
+  const f = messaggioErroreVerifica("ERROR: DATI_OBBLIGATORI_MANCANTI (P0001)");
+  assert.match(f, /classe energetica/); assert.ok(!/DATI_OBBLIGATORI|P0001/.test(f));
 });
