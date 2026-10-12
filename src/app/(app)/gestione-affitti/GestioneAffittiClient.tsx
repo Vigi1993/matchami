@@ -1,5 +1,6 @@
 "use client";
 
+import { BozzaContratto } from "@/components/BozzaContratto";
 import { useActionState, useEffect, useState } from "react";
 import { Sheet } from "@/components/Sheet";
 import type {
@@ -153,6 +154,7 @@ export function GestioneAffittiClient({
         onClose={() => setSelezionato(null)}
         title={`${selezionato?.nome ?? ""} ${selezionato?.cognome ?? ""}`}
       >
+        {selezionato && <BozzaContratto contrattoId={selezionato.id} />}
         {selezionato && (
           <ContrattoForm
             action={aggiornaContratto}

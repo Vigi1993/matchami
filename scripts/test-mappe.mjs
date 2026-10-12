@@ -161,9 +161,26 @@ test("chiamate: ogni chiamata a una funzione degli indirizzi porta esattamente i
 
 test("privacy: nessun codice dell'app legge la tabella degli indirizzi direttamente", () => {
   for (const f of filiDiCodice()) assert.ok(!/indirizzi_immobili/.test(fs.readFileSync(f, "utf8")), `${path.relative(radice, f)} nomina la tabella degli indirizzi`);
-  for (const f of fs.readdirSync(path.join(radice, "supabase", "migrations")).filter((x) => /^\d{4}_.*\.sql$/.test(x) && x !== "0024_indirizzi.sql")) {
-    assert.ok(!/indirizzi_immobili/.test(fs.readFileSync(path.join(radice, "supabase", "migrations", f), "utf8")), `${f} nomina la tabella degli indirizzi`);
+});
+
+// Le migrazioni che LEGGONO l'indirizzo, ciascuna dentro una funzione che controlla chi chiama. Aggiungerne una
+// è una scelta da fare con consapevolezza: l'indirizzo preciso lo vede solo chi ha un match accettato.
+const MIGRAZIONI_CHE_LEGGONO_L_INDIRIZZO = ["0027_dati_contratto.sql"];
+
+test("privacy: nessuna migrazione, a parte la 0024, apre la tabella degli indirizzi (permessi, regole, modifiche)", () => {
+  const dir = path.join(radice, "supabase", "migrations");
+  for (const f of fs.readdirSync(dir).filter((x) => /^\d{4}_.*\.sql$/.test(x) && x !== "0024_indirizzi.sql")) {
+    const c = fs.readFileSync(path.join(dir, f), "utf8").replace(/--[^\n]*/g, "");
+    if (!/indirizzi_immobili/.test(c)) continue;
+    assert.ok(MIGRAZIONI_CHE_LEGGONO_L_INDIRIZZO.includes(f), `${f} nomina la tabella degli indirizzi e non è nell'elenco di quelle che la leggono in modo controllato`);
+    for (const vietato of [/grant\s[^;]*indirizzi_immobili/i, /create\s+policy[^;]*indirizzi_immobili/i, /alter\s+table\s+(if\s+exists\s+)?indirizzi_immobili/i, /insert\s+into\s+indirizzi_immobili/i, /update\s+indirizzi_immobili/i, /delete\s+from\s+indirizzi_immobili/i, /drop\s+(table|policy)[^;]*indirizzi_immobili/i, /disable\s+row\s+level/i]) assert.ok(!vietato.test(c), `${f} apre o modifica la tabella degli indirizzi (${vietato})`);
+    // la lettura sta dentro una funzione che gira con i permessi del proprietario del database e controlla chi chiama
+    assert.match(c, /security definer/i, `${f}: la lettura non è dentro una funzione security definer`); assert.match(c, /auth\.uid\(\)/, `${f}: la funzione non controlla chi chiama`);
   }
+});
+
+test("privacy: l'elenco delle migrazioni che leggono l'indirizzo non contiene file inesistenti", () => {
+  for (const f of MIGRAZIONI_CHE_LEGGONO_L_INDIRIZZO) assert.ok(fs.existsSync(path.join(radice, "supabase", "migrations", f)), f);
 });
 
 // ------------------------------------------------------------

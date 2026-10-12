@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Sheet } from "@/components/Sheet";
 import type { ContrattoConAnnuncio } from "@/lib/types";
 import { LinkUtenze } from "@/components/LinkUtenze";
+import { BozzaContratto } from "@/components/BozzaContratto";
 import { SOTTOTITOLO_UTENZE } from "@/lib/utenze";
 import {
   NESSUN_CONTRATTO_IN_CORSO,
@@ -150,6 +151,7 @@ export function GestioneClient({
               label="Data firma"
               value={formatData(selezionato.data_firma)}
             />
+            <BozzaContratto contrattoId={selezionato.id} />
           </>
         )}
       </Sheet>

@@ -28,7 +28,7 @@ export const INFORMATIVA = {
    * controllo che fa il database (migrazione 0017): un test fallisce se
    * questa stringa non lo supera.
    */
-  versione: "2026-10-provvisoria-11",
+  versione: "2026-10-provvisoria-12",
   /**
    * Versioni precedenti che chi le ha accettate NON deve riaccettare.
    *
@@ -53,6 +53,7 @@ export const INFORMATIVA = {
     "2026-10-provvisoria-8",
     "2026-10-provvisoria-9",
     "2026-10-provvisoria-10",
+    "2026-10-provvisoria-11",
   ] as readonly string[],
   provvisoria: true,
   titolo: "Informativa sulla privacy",
@@ -105,6 +106,7 @@ export const INFORMATIVA = {
         "Se ritiri una candidatura mentre è ancora in attesa, il proprietario non la vede più: non legge né il tuo profilo né le recensioni su di te, e riceve solo una notifica con il titolo dell'annuncio. La candidatura resta nel tuo elenco e non puoi candidarti di nuovo allo stesso annuncio.",
         "I messaggi li leggono solo le due persone, dopo che la candidatura è stata accettata. L'app ricorda quali messaggi hai già letto, solo per mostrarti quanti ne restano da leggere: non lo mostra all'altra persona.",
         "L'indirizzo preciso di un immobile lo vedono solo il proprietario e le persone con cui ha un match accettato su quell'immobile: agli altri si mostra soltanto la zona.",
+        "Dal contratto di un affitto puoi vedere e scaricare in PDF una bozza con i dati dell'affitto: i nomi delle due parti, l'immobile (con l'indirizzo, se c'è), il canone, la durata e le date. La bozza la compone l'app al momento, la vedono solo le due parti e noi non la conserviamo. Per ora è una bozza di prova, senza valore legale.",
         "I preferiti e gli annunci che scarti li vede solo chi li sceglie: il proprietario non sa quali annunci hai salvato o scartato.",
         "Le visite: il proprietario indica i giorni e gli orari in cui è disponibile per un suo immobile. Li vedono solo le persone che hanno un match accettato su quell'immobile; chi non lo ha non vede nemmeno quali orari ci sono. Chi prenota vede la propria visita, e il proprietario vede nome e cognome di chi ha prenotato, per le visite degli ultimi 30 giorni.",
         "Nella chat, l'app evidenzia i messaggi che parlano di pagamenti sospetti (per esempio un IBAN, una caparra o un anticipo) e ti avvisa prima di inviarne uno così, per aiutarti a riconoscere una truffa. È un controllo automatico che fa parte della visualizzazione della chat: non salviamo il risultato e non lo comunichiamo a nessuno, e non impedisce mai di inviare un messaggio.",
