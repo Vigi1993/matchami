@@ -4,6 +4,7 @@ import { RapportiPanel } from "@/components/RapportiPanel";
 import { caricaRapportiMiei } from "@/lib/rapporti-server";
 import type { CandidaturaSenzaContratto, ContrattoProprietario } from "@/lib/types";
 import { raggruppaPerContratto, type DocumentoContratto } from "@/lib/documenti-contratto";
+import { caricaFirme } from "@/lib/firma/carica";
 
 export default async function GestioneAffittiPage() {
   const supabase = await createClient();
@@ -101,10 +102,14 @@ export default async function GestioneAffittiPage() {
   // I documenti di TUTTI i miei contratti, in una chiamata sola (mai il percorso dei file)
   const { data: documenti } = await supabase.rpc("documenti_dei_miei_contratti");
 
+  // Le firme di prova, con l'impronta del documento di oggi per i contratti che ne hanno
+  const firme = await caricaFirme(supabase);
+
   return (
     <GestioneAffittiClient
       candidatureSenzaContratto={candidatureSenzaContratto}
       contratti={contrattiCompleti}
+      firme={firme}
       documenti={raggruppaPerContratto((documenti ?? []) as DocumentoContratto[])}
       rapportiPanel={
         <RapportiPanel

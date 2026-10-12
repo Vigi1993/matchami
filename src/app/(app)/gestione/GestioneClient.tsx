@@ -6,6 +6,8 @@ import type { ContrattoConAnnuncio } from "@/lib/types";
 import { LinkUtenze } from "@/components/LinkUtenze";
 import { BozzaContratto } from "@/components/BozzaContratto";
 import { ArchivioContratto } from "@/components/ArchivioContratto";
+import { FirmaContratto } from "@/components/FirmaContratto";
+import type { FirmeDelContratto } from "@/lib/firma/carica";
 import type { DocumentoContratto } from "@/lib/documenti-contratto";
 import { SOTTOTITOLO_UTENZE } from "@/lib/utenze";
 import {
@@ -29,8 +31,11 @@ function formatData(d: string | null): string {
 export function GestioneClient({
   contratti,
   documenti = {},
+  firme = {},
 }: {
   contratti: ContrattoConAnnuncio[];
+  /** le firme di prova dei miei contratti, per identificativo del contratto */
+  firme?: Record<string, FirmeDelContratto>;
   /** i documenti dei miei contratti, per identificativo del contratto */
   documenti?: Record<string, DocumentoContratto[]>;
 }) {
@@ -157,6 +162,12 @@ export function GestioneClient({
               value={formatData(selezionato.data_firma)}
             />
             <BozzaContratto contrattoId={selezionato.id} />
+            <FirmaContratto
+              contrattoId={selezionato.id}
+              statoContratto={selezionato.stato}
+              firme={firme[selezionato.id]?.firme ?? []}
+              improntaAttuale={firme[selezionato.id]?.improntaAttuale ?? null}
+            />
             <ArchivioContratto contrattoId={selezionato.id} documenti={documenti[selezionato.id] ?? []} />
           </>
         )}

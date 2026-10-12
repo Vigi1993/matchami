@@ -2,6 +2,8 @@
 
 import { BozzaContratto } from "@/components/BozzaContratto";
 import { ArchivioContratto } from "@/components/ArchivioContratto";
+import { FirmaContratto } from "@/components/FirmaContratto";
+import type { FirmeDelContratto } from "@/lib/firma/carica";
 import type { DocumentoContratto } from "@/lib/documenti-contratto";
 import { useActionState, useEffect, useState } from "react";
 import { Sheet } from "@/components/Sheet";
@@ -29,6 +31,7 @@ export function GestioneAffittiClient({
   contratti,
   rapportiPanel,
   documenti = {},
+  firme = {},
 }: {
   candidatureSenzaContratto: CandidaturaSenzaContratto[];
   contratti: ContrattoProprietario[];
@@ -36,6 +39,8 @@ export function GestioneAffittiClient({
   rapportiPanel: React.ReactNode;
   /** i documenti dei miei contratti, per identificativo del contratto */
   documenti?: Record<string, DocumentoContratto[]>;
+  /** le firme di prova dei miei contratti, per identificativo del contratto */
+  firme?: Record<string, FirmeDelContratto>;
 }) {
   const [nuovaDa, setNuovaDa] = useState<CandidaturaSenzaContratto | null>(
     null
@@ -160,6 +165,14 @@ export function GestioneAffittiClient({
         title={`${selezionato?.nome ?? ""} ${selezionato?.cognome ?? ""}`}
       >
         {selezionato && <BozzaContratto contrattoId={selezionato.id} />}
+        {selezionato && (
+          <FirmaContratto
+            contrattoId={selezionato.id}
+            statoContratto={selezionato.stato}
+            firme={firme[selezionato.id]?.firme ?? []}
+            improntaAttuale={firme[selezionato.id]?.improntaAttuale ?? null}
+          />
+        )}
         {selezionato && <ArchivioContratto contrattoId={selezionato.id} documenti={documenti[selezionato.id] ?? []} />}
         {selezionato && (
           <ContrattoForm

@@ -385,10 +385,11 @@ function filiDiCodice(dir = path.join(radice, "src")) {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => { if (e.name.startsWith("__")) return []; const p = path.join(dir, e.name); return e.isDirectory() ? filiDiCodice(p) : /\.(ts|tsx)$/.test(e.name) ? [p] : []; });
 }
 
-test("chiamate: la funzione dei dati del contratto si chiama con il suo parametro, e solo dalla pagina e dal PDF", () => {
+test("chiamate: la funzione dei dati del contratto si chiama con il suo parametro, e solo dai posti previsti", () => {
   const trovate = [];
   for (const f of filiDiCodice()) { const c = fs.readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, ""); for (const m of c.matchAll(/"dati_contratto"\s*(?:,\s*\{([^}]*)\}|\))/g)) { assert.deepEqual([...(m[1] ?? "").matchAll(/\b(p_\w+)\s*:/g)].map((x) => x[1]), ["p_contratto"], f); trovate.push(path.relative(radice, f).replaceAll("\\", "/")); } }
-  assert.deepEqual(trovate.sort(), ["src/app/(app)/contratto/[id]/page.tsx", "src/app/(app)/contratto/[id]/pdf/route.ts"]);
+  // la pagina e il PDF; e, per la firma, l'azione che calcola l'impronta e il caricamento che dice se una firma è superata
+  assert.deepEqual(trovate.sort(), ["src/app/(app)/contratto/[id]/page.tsx", "src/app/(app)/contratto/[id]/pdf/route.ts", "src/app/(app)/contratto/firma-actions.ts", "src/lib/firma/carica.ts"]);
 });
 
 test("il PDF si scarica solo dopo aver controllato chi sei e l'informativa, e prima di leggere i dati", () => {

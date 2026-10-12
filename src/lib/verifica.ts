@@ -199,6 +199,13 @@ const MESSAGGI: Record<string, string> = {
   INQUILINO_INESISTENTE: "Inquilino non trovato.",
   // decisioni sulle candidature
   CANDIDATURA_NON_TUA: "Questa candidatura non risulta tua.",
+  // firma di prova del contratto
+  FIRMA_CONTRATTO_NON_TUO: "Non puoi firmare questo contratto.",
+  FIRMA_CONTRATTO_NON_IN_FIRMA: "Il contratto si può firmare solo quando è «in firma».",
+  FIRMA_IMPRONTA_NON_VALIDA: "Non è stato possibile preparare il documento da firmare. Riprova.",
+  FIRMA_MODELLO_NON_VALIDO: "Non è stato possibile preparare il documento da firmare. Riprova.",
+  FIRMA_NON_TROVATA: "Non hai una firma di prova da ritirare.",
+  FIRMA_GIA_REGISTRATA: "La tua firma è già registrata e da qui non si può cambiare.",
   // documenti del contratto
   CONTRATTO_NON_TUO: "Non puoi aggiungere documenti a questo contratto.",
   TIPO_DOCUMENTO_NON_VALIDO: "Scegli che tipo di documento è.",

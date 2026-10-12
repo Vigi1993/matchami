@@ -28,7 +28,7 @@ export const INFORMATIVA = {
    * controllo che fa il database (migrazione 0017): un test fallisce se
    * questa stringa non lo supera.
    */
-  versione: "2026-10-provvisoria-13",
+  versione: "2026-10-provvisoria-14",
   /**
    * Versioni precedenti che chi le ha accettate NON deve riaccettare.
    *
@@ -55,6 +55,7 @@ export const INFORMATIVA = {
     "2026-10-provvisoria-10",
     "2026-10-provvisoria-11",
     "2026-10-provvisoria-12",
+    "2026-10-provvisoria-13",
   ] as readonly string[],
   provvisoria: true,
   titolo: "Informativa sulla privacy",
@@ -108,6 +109,7 @@ export const INFORMATIVA = {
         "I messaggi li leggono solo le due persone, dopo che la candidatura è stata accettata. L'app ricorda quali messaggi hai già letto, solo per mostrarti quanti ne restano da leggere: non lo mostra all'altra persona.",
         "L'indirizzo preciso di un immobile lo vedono solo il proprietario e le persone con cui ha un match accettato su quell'immobile: agli altri si mostra soltanto la zona.",
         "Dal contratto di un affitto puoi vedere e scaricare in PDF una bozza con i dati dell'affitto: i nomi delle due parti, l'immobile (con l'indirizzo, se c'è), il canone, la durata e le date. La bozza la compone l'app al momento, la vedono solo le due parti e noi non la conserviamo. Per ora è una bozza di prova, senza valore legale.",
+        "Le due parti di un contratto «in firma» possono registrare una firma di prova: conserviamo chi ha firmato (il proprietario o l'inquilino), quando, e un'impronta del testo firmato, così da vedere se il contratto è cambiato dopo; non conserviamo immagini di firme né dati del dispositivo. La vedono solo le due parti, e ognuno può ritirare la propria. Per ora la firma è di prova: non ha valore legale e non rende il contratto «firmato».",
         "Ogni contratto ha un archivio di documenti (certificato energetico, planimetria, ricevute, registrazione e altri documenti). I file che carichi li vedono le due parti del contratto, e tu puoi eliminare solo i tuoi. Sono PDF o immagini fino a 10 MB, al massimo 30 per contratto, in un archivio privato: di ogni documento conserviamo il tipo, il nome del file, la dimensione, la data e quale delle due parti l'ha caricato. Quando elimini un documento, il contratto o il tuo account, i file vengono tolti dall'archivio. Non ne analizziamo il contenuto.",
         "I preferiti e gli annunci che scarti li vede solo chi li sceglie: il proprietario non sa quali annunci hai salvato o scartato.",
         "Le visite: il proprietario indica i giorni e gli orari in cui è disponibile per un suo immobile. Li vedono solo le persone che hanno un match accettato su quell'immobile; chi non lo ha non vede nemmeno quali orari ci sono. Chi prenota vede la propria visita, e il proprietario vede nome e cognome di chi ha prenotato, per le visite degli ultimi 30 giorni.",
