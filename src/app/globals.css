@@ -3313,3 +3313,127 @@ mark.segnaposto {
 .pannello-prezzo .note-box b {
   font-weight: 600;
 }
+
+/* ---- scheda di ricerca: luoghi, intervalli e caratteristiche ---- */
+.luogo-ac {
+  position: relative;
+}
+.luogo-ac-input {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(16, 21, 26, 0.18);
+  background: #fff;
+  font: inherit;
+  font-size: 15px;
+  color: var(--ink);
+}
+.luogo-ac-input:focus-visible {
+  outline: 2px solid var(--moss);
+  outline-offset: 1px;
+}
+.luogo-ac-lista {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  right: 0;
+  margin: 4px 0 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 260px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid rgba(16, 21, 26, 0.14);
+  border-radius: 14px;
+  box-shadow: 0 12px 28px rgba(16, 21, 26, 0.18);
+}
+.luogo-ac-lista li {
+  display: flex;
+  flex-direction: column;
+  padding: 9px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  color: var(--ink);
+}
+.luogo-ac-lista li span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.luogo-ac-lista li.attivo {
+  background: rgba(62, 107, 87, 0.12);
+}
+.da-a {
+  display: flex;
+  gap: 14px;
+}
+.da-a > div {
+  flex: 1;
+}
+.da-a-et {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.carta-caratteristica {
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: #fff;
+  border: 1px solid rgba(16, 21, 26, 0.1);
+}
+.carta-caratteristica-testa {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  color: var(--ink);
+}
+.importanza {
+  margin-top: 10px;
+}
+.piano-menu-riga {
+  display: flex;
+  gap: 12px;
+}
+.piano-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  font-size: 12px;
+  color: var(--body-soft);
+}
+.piano-menu select,
+.piano-menu input {
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(16, 21, 26, 0.18);
+  background: #fff;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+}
+.home-intro .hi-ricerca-testo .hi-nascoste {
+  color: var(--gold);
+}
+
+/* contatori affiancati («Da» e «A»): ognuno sta nella sua metà, e un pulsante spento si vede spento */
+.da-a > div {
+  min-width: 0;
+}
+.da-a .stepper {
+  gap: 6px;
+}
+.da-a .stepper .val {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+}
+.stepper button:disabled,
+.chip:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

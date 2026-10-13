@@ -4,7 +4,8 @@ import { OwnerHomeClient } from "./OwnerHomeClient";
 import { VerificaHome } from "./VerificaHome";
 import type { ImmobileVerifica } from "@/lib/verifica";
 import { computeAffidabilita } from "@/lib/affidabilita";
-import { haCriteriDiRicerca, preparaMazzo, profiloRicercaDaRighe } from "@/lib/match";
+import { campiMatchDaRiga, haCriteriDiRicerca, preparaMazzo, profiloRicercaDaRighe } from "@/lib/match";
+import { mappaLuoghi, type Luogo } from "@/lib/luoghi";
 import type { ProfiloRicerca } from "@/lib/match";
 import type { TenantProfile, ListingConMatch, ListingProprietario } from "@/lib/types";
 import { idsNascosti } from "@/lib/scelte";
@@ -40,10 +41,10 @@ async function TenantHome({ userId }: { userId: string }) {
     { data: nascostiRighe },
   ] = await Promise.all([
     supabase.from("tenant_profiles").select("*").eq("profile_id", userId).single(),
-    supabase.from("tenant_zone_interesse").select("zona").eq("tenant_id", userId),
+    supabase.from("tenant_zone_interesse").select("zona, luogo_id").eq("tenant_id", userId),
     supabase
       .from("tenant_interessi")
-      .select("attributo_key, peso")
+      .select("attributo_key, peso, valore, necessaria")
       .eq("tenant_id", userId),
     supabase.from("recensioni").select("voto").eq("tenant_id", userId),
     supabase.from("candidature").select("listing_id").eq("tenant_id", userId),
@@ -79,7 +80,7 @@ async function TenantHome({ userId }: { userId: string }) {
   let query = supabase
     .from("listings")
     .select(
-      "id, titolo, zona, prezzo, locali, mq, descrizione, attributi, classe_energetica, ep_globale, listing_photos(url, ordine)"
+      "id, titolo, zona, prezzo, locali, mq, descrizione, attributi, classe_energetica, ep_globale, luogo_id, tipologia, bagni, piano, riscaldamento, tipo_contratto, disponibile_dal, listing_photos(url, ordine)"
     )
     .eq("pubblicato", true);
 
@@ -109,7 +110,14 @@ async function TenantHome({ userId }: { userId: string }) {
     interessiRows
   );
 
-  const { mazzo, esclusi } = preparaMazzo(listingsOrdinati, profiloRicerca);
+  // I luoghi (poche decine di righe): servono per sapere in quale quartiere, città e provincia sta ogni annuncio, e per il
+  // completamento automatico della ricerca.
+  const { data: luoghiRighe } = await supabase.from("luoghi").select("id, livello, nome, sigla, parent_id");
+  const luoghi = (luoghiRighe ?? []) as Luogo[];
+  const mappa = mappaLuoghi(luoghi);
+  const annunci = listingsOrdinati.map((l) => ({ ...l, ...campiMatchDaRiga(l, mappa) }));
+
+  const { mazzo, esclusiPerBudget, nascostiPerNecessarie } = preparaMazzo(annunci, profiloRicerca);
 
   // Se il mazzo è vuoto, bisogna dire PERCHÉ: nessun annuncio, o li ha già scelti tutti.
   let nascosti = 0;
@@ -126,7 +134,9 @@ async function TenantHome({ userId }: { userId: string }) {
     <HomeClient
       affidabilita={affidabilita}
       listings={mazzo as unknown as ListingConMatch[]}
-      esclusi={esclusi}
+      esclusi={esclusiPerBudget}
+      nascostiPerNecessarie={nascostiPerNecessarie}
+      luoghi={luoghi}
       mostraMatch={haCriteriDiRicerca(profiloRicerca)}
       nascosti={nascosti}
       ricerca={profiloRicerca}

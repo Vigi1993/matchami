@@ -21,6 +21,8 @@ import { SaveButton } from "@/components/ui/SaveButton";
 import { RicercaSheet } from "@/components/RicercaSheet";
 import { SchedaAffidabilita } from "@/components/SchedaAffidabilita";
 import type { SezioneProfilo } from "@/lib/home";
+import type { Luogo } from "@/lib/luoghi";
+import type { ProfiloRicerca } from "@/lib/match";
 import { PrivacySheet } from "@/components/PrivacySheet";
 import { FaqSheet } from "@/components/FaqSheet";
 import { AvatarUpload } from "@/components/AvatarUpload";
@@ -51,8 +53,10 @@ type Props = {
   email: string | null;
   tenant: TenantProfile;
   inviti: Invito[];
-  zoneIniziali: string[];
-  interessiIniziali: Record<string, number>;
+  /** la ricerca com'è salvata */
+  ricerca: ProfiloRicerca;
+  /** i luoghi che si possono cercare */
+  luoghi: Luogo[];
   mediaRecensioni: number | null;
   numeroRecensioni: number;
   consensoMarketingIniziale: boolean;
@@ -71,8 +75,8 @@ export function ProfiloClient({
   inviti,
   affittiPanel,
   verificaPanel,
-  zoneIniziali,
-  interessiIniziali,
+  ricerca,
+  luoghi,
   mediaRecensioni,
   numeroRecensioni,
   consensoMarketingIniziale,
@@ -105,7 +109,7 @@ export function ProfiloClient({
   });
 
   const completezza = computeProfileCompleteness({
-    hasZone: zoneIniziali.length > 0,
+    hasZone: (ricerca.luoghi?.length ?? 0) > 0 || ricerca.zone.length > 0,
     professione: tenant.professione,
     reddito_mensile: tenant.reddito_mensile,
     reddito_nucleo: tenant.reddito_nucleo,
@@ -282,9 +286,8 @@ export function ProfiloClient({
       <RicercaSheet
         open={sheetAperta === "ricerca"}
         onClose={() => setSheetAperta(null)}
-        tenant={tenant}
-        zoneIniziali={zoneIniziali}
-        interessiIniziali={interessiIniziali}
+        ricerca={ricerca}
+        luoghi={luoghi}
       />
 
       {/* ---- Sheet: Invita il proprietario ---- */}

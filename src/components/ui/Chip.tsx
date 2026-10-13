@@ -11,6 +11,7 @@ export function Chip({
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={active}
       className={`chip ${active ? "on" : ""}`}
     >
       {label}

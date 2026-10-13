@@ -4,7 +4,8 @@
  */
 import type { ProfiloRicerca } from "@/lib/match";
 
-type RicercaMinima = Pick<ProfiloRicerca, "budgetMax" | "localiMin" | "mqMin" | "zone">;
+type RicercaMinima = Pick<ProfiloRicerca, "budgetMax" | "localiMin" | "mqMin" | "zone"> &
+  Partial<Pick<ProfiloRicerca, "budgetMin" | "localiMax" | "mqMax" | "tipologia" | "criteri">>;
 
 /** Le sezioni del Profilo che si possono aprire da un collegamento (?apri=...). */
 export const SEZIONI_PROFILO_APRIBILI = ["affidabilita", "dati", "ricerca", "invito", "affitti", "verifica"] as const;
@@ -23,14 +24,30 @@ export function sezionePerVoce(id: string): SezioneProfilo {
   return "dati";
 }
 
-/** La ricerca in poche parole: budget, taglio e zone. Vuota se non c'è nessun criterio. */
+/** Un intervallo in poche parole: «Da 2 locali», «2–3 locali», «Fino a 3 locali». */
+function intervallo(min: number | null | undefined, max: number | null | undefined, unita: (n: number) => string, tra: (a: number, b: number) => string): string | null {
+  if (min && max) return min === max ? unita(min) : tra(min, max);
+  if (min) return `Da ${unita(min)}`;
+  if (max) return `Fino a ${unita(max)}`;
+  return null;
+}
+
+/** La ricerca in poche parole: tipologia, budget, taglio, zone e quante caratteristiche sono necessarie. Vuota senza criteri. */
 export function vociRicerca(p: RicercaMinima): string[] {
   const voci: string[] = [];
-  if (p.budgetMax) voci.push(`Fino a €${p.budgetMax.toLocaleString("it-IT")}`);
-  if (p.localiMin) voci.push(p.localiMin === 1 ? "Da 1 locale" : `Da ${p.localiMin} locali`);
-  if (p.mqMin) voci.push(`Da ${p.mqMin} m²`);
+  const e = (n: number) => `€${n.toLocaleString("it-IT")}`;
+  if (p.tipologia === "villa") voci.push("Villa");
+  if (p.budgetMin && p.budgetMax) voci.push(`${e(p.budgetMin)} – ${e(p.budgetMax)}`);
+  else if (p.budgetMax) voci.push(`Fino a ${e(p.budgetMax)}`);
+  else if (p.budgetMin) voci.push(`Da ${e(p.budgetMin)}`);
+  const locali = intervallo(p.localiMin, p.localiMax, (n) => (n === 1 ? "1 locale" : `${n} locali`), (a, b) => `${a}–${b} locali`);
+  if (locali) voci.push(locali);
+  const mq = intervallo(p.mqMin, p.mqMax, (n) => `${n} m²`, (a, b) => `${a}–${b} m²`);
+  if (mq) voci.push(mq);
   const zone = [...new Set((p.zone ?? []).map((z) => z.split(",")[0].trim()).filter(Boolean))];
   if (zone.length > 0) voci.push(zone.length <= 3 ? zone.join(", ") : `${zone.slice(0, 2).join(", ")} +${zone.length - 2}`);
+  const necessarie = (p.criteri ?? []).filter((c) => c.necessaria).length;
+  if (necessarie > 0) voci.push(necessarie === 1 ? "1 necessaria" : `${necessarie} necessarie`);
   return voci;
 }
 
@@ -38,9 +55,24 @@ export function vociRicerca(p: RicercaMinima): string[] {
  * Cambia se cambia un parametro della ricerca (e non per l'ordine delle zone). La Home congela il mazzo alla
  * prima visualizzazione: quando questa chiave cambia, il mazzo si ricomincia con quello nuovo.
  */
-export function chiaveRicerca(p: Pick<ProfiloRicerca, "budgetMax" | "localiMin" | "mqMin" | "zone" | "interessi">): string {
+export function chiaveRicerca(
+  p: Pick<ProfiloRicerca, "budgetMax" | "localiMin" | "mqMin" | "zone" | "interessi"> & Partial<Pick<ProfiloRicerca, "budgetMin" | "localiMax" | "mqMax" | "tipologia" | "luoghi" | "criteri">>
+): string {
   const interessi = Object.entries(p.interessi ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  return JSON.stringify([p.budgetMax ?? null, p.localiMin ?? null, p.mqMin ?? null, [...new Set(p.zone ?? [])].sort(), interessi]);
+  const criteri = [...(p.criteri ?? [])].sort((a, b) => (a.chiave < b.chiave ? -1 : a.chiave > b.chiave ? 1 : 0));
+  return JSON.stringify([
+    p.budgetMax ?? null,
+    p.localiMin ?? null,
+    p.mqMin ?? null,
+    [...new Set(p.zone ?? [])].sort(),
+    interessi,
+    p.budgetMin ?? null,
+    p.localiMax ?? null,
+    p.mqMax ?? null,
+    p.tipologia ?? null,
+    [...new Set(p.luoghi ?? [])].sort(),
+    criteri,
+  ]);
 }
 
 /** Il testo grande e quello piccolo del pannello sulle case. */
@@ -60,4 +92,10 @@ export function conteggioCase(i: { mostraMatch: boolean; inRicerca: number; oltr
 /** Il suggerimento sotto la card: le foto si cambiano toccando i lati; i dettagli hanno il loro pulsante. */
 export function suggerimentoCard(numeroFoto: number): string {
   return numeroFoto > 1 ? "Tocca ai lati per le foto" : "Trascina per scegliere";
+}
+
+/** «3 case nascoste: non hanno le caratteristiche necessarie». `null` se non ce ne sono. */
+export function testoNascoste(n: number): string | null {
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n === 1 ? "1 casa nascosta: non ha le caratteristiche necessarie" : `${n} case nascoste: non hanno le caratteristiche necessarie`;
 }

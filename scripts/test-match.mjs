@@ -394,7 +394,7 @@ test("preparaMazzo: i primi `inRicerca` annunci sono davvero quelli in ricerca",
 });
 
 test("preparaMazzo: mazzo vuoto e tutti esclusi", () => {
-  assert.deepEqual(preparaMazzo([], profilo()), { mazzo: [], inRicerca: 0, esclusi: 0, nascostiPerNecessarie: 0 });
+  assert.deepEqual(preparaMazzo([], profilo()), { mazzo: [], inRicerca: 0, esclusi: 0, esclusiPerBudget: 0, nascostiPerNecessarie: 0 });
   const r = preparaMazzo([riga("a", { prezzo: 9000 }), riga("b", { prezzo: 8000 })], profilo());
   assert.equal(r.mazzo.length, 0);
   assert.equal(r.esclusi, 2);

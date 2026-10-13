@@ -5,6 +5,8 @@ import { RapportiPanel } from "@/components/RapportiPanel";
 import { caricaRapportiMiei } from "@/lib/rapporti-server";
 import { ProfiloClient } from "./ProfiloClient";
 import { sezioneProfilo } from "@/lib/home";
+import { profiloRicercaDaRighe } from "@/lib/match";
+import type { Luogo } from "@/lib/luoghi";
 import { OwnerProfiloClient } from "./OwnerProfiloClient";
 import type { TenantProfile, OwnerProfile, Invito } from "@/lib/types";
 
@@ -56,10 +58,10 @@ export default async function ProfiloPage({ searchParams }: { searchParams: Prom
     { data: documentiRows },
   ] = await Promise.all([
     supabase.from("tenant_profiles").select("*").eq("profile_id", user!.id).single(),
-    supabase.from("tenant_zone_interesse").select("zona").eq("tenant_id", user!.id),
+    supabase.from("tenant_zone_interesse").select("zona, luogo_id").eq("tenant_id", user!.id),
     supabase
       .from("tenant_interessi")
-      .select("attributo_key, peso")
+      .select("attributo_key, peso, valore, necessaria")
       .eq("tenant_id", user!.id),
     supabase.from("recensioni").select("voto").eq("tenant_id", user!.id),
     supabase
@@ -76,10 +78,9 @@ export default async function ProfiloPage({ searchParams }: { searchParams: Prom
 
   const rapporti = await caricaRapportiMiei(supabase, user!.id);
 
-  const zoneIniziali = (zoneRows ?? []).map((r) => r.zona as string);
-  const interessiIniziali = Object.fromEntries(
-    (interessiRows ?? []).map((r) => [r.attributo_key as string, r.peso as number])
-  );
+  // La ricerca com'è salvata, e i luoghi che si possono cercare (per il completamento automatico)
+  const ricerca = profiloRicercaDaRighe(tenant, zoneRows, interessiRows);
+  const { data: luoghiRighe } = await supabase.from("luoghi").select("id, livello, nome, sigla, parent_id");
   const numeroRecensioni = recensioni?.length ?? 0;
   const mediaRecensioni =
     numeroRecensioni > 0
@@ -119,8 +120,8 @@ export default async function ProfiloPage({ searchParams }: { searchParams: Prom
           documenti={(documentiRows ?? []) as DocumentoInquilino[]}
         />
       }
-      zoneIniziali={zoneIniziali}
-      interessiIniziali={interessiIniziali}
+      ricerca={ricerca}
+      luoghi={(luoghiRighe ?? []) as Luogo[]}
       mediaRecensioni={mediaRecensioni}
       numeroRecensioni={numeroRecensioni}
       consensoMarketingIniziale={profile?.consenso_marketing ?? false}

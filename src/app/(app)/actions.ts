@@ -4,9 +4,11 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import {
   calcolaMatchInquilino,
+  campiMatchDaRiga,
   haCriteriDiRicerca,
   profiloRicercaDaRighe,
 } from "@/lib/match";
+import { mappaLuoghi, type Luogo } from "@/lib/luoghi";
 
 export async function candidati(listingId: string) {
   const supabase = await createClient();
@@ -21,30 +23,32 @@ export async function candidati(listingId: string) {
   // parte comunque, senza percentuale.
   let matchPct: number | null = null;
   try {
-    const [{ data: annuncio }, { data: tenant }, { data: zone }, { data: interessi }] =
+    const [{ data: annuncio }, { data: tenant }, { data: zone }, { data: interessi }, { data: luoghiRighe }] =
       await Promise.all([
         supabase
           .from("listings")
-          .select("prezzo, zona, locali, mq, attributi")
+          .select("prezzo, zona, locali, mq, attributi, luogo_id, tipologia, bagni, piano, riscaldamento, tipo_contratto, disponibile_dal, classe_energetica")
           .eq("id", listingId)
           .single(),
         supabase
           .from("tenant_profiles")
-          .select("budget_max, locali_min, mq_min")
+          .select("budget_max, locali_min, mq_min, budget_min, locali_max, mq_max, tipologia")
           .eq("profile_id", user.id)
           .single(),
-        supabase.from("tenant_zone_interesse").select("zona").eq("tenant_id", user.id),
+        supabase.from("tenant_zone_interesse").select("zona, luogo_id").eq("tenant_id", user.id),
         supabase
           .from("tenant_interessi")
-          .select("attributo_key, peso")
+          .select("attributo_key, peso, valore, necessaria")
           .eq("tenant_id", user.id),
+        supabase.from("luoghi").select("id, livello, nome, sigla, parent_id"),
       ]);
 
     if (annuncio && tenant) {
       const profilo = profiloRicercaDaRighe(tenant, zone, interessi);
       // senza criteri impostati ogni casa fa 99: non è un'informazione
       if (haCriteriDiRicerca(profilo)) {
-        matchPct = calcolaMatchInquilino(annuncio, profilo).punteggio;
+        const mappa = mappaLuoghi((luoghiRighe ?? []) as Luogo[]);
+        matchPct = calcolaMatchInquilino({ ...annuncio, ...campiMatchDaRiga(annuncio, mappa) }, profilo).punteggio;
       }
     }
   } catch {

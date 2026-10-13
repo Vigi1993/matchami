@@ -99,6 +99,8 @@ export type Mazzo<T> = {
   inRicerca: number;
   /** annunci tolti perché oltre la tolleranza sul budget, o per un criterio necessario, o per la tipologia */
   esclusi: number;
+  /** di quelli, quanti sono oltre la tolleranza sul budget (il numero che la Home dice «oltre il 10% del tuo budget») */
+  esclusiPerBudget: number;
   /** di quelli, quanti non rispettano una caratteristica NECESSARIA (la Home lo dice) */
   nascostiPerNecessarie: number;
 };
@@ -144,6 +146,7 @@ export function preparaMazzo<T extends AnnuncioPerMatch>(
     mazzo,
     inRicerca: mazzo.filter((v) => v.match.fascia === "in_ricerca").length,
     esclusi: voci.length - mazzo.length,
+    esclusiPerBudget: voci.filter((v) => v.match.fascia === "escluso" && v.match.motiviEsclusione.includes("budget")).length,
     nascostiPerNecessarie: voci.filter((v) => v.match.fascia === "escluso" && v.match.motiviEsclusione.includes("necessaria")).length,
   };
 }

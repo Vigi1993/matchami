@@ -6,7 +6,8 @@ import type { AffidabilitaResult } from "@/lib/affidabilita";
 import type { ListingConMatch } from "@/lib/types";
 import { TOLLERANZA_BUDGET, statoMazzo } from "@/lib/match";
 import type { ProfiloRicerca } from "@/lib/match";
-import { chiaveRicerca as chiaveDellaRicerca, conteggioCase, suggerimentoCard, vociRicerca } from "@/lib/home";
+import { chiaveRicerca as chiaveDellaRicerca, conteggioCase, suggerimentoCard, testoNascoste, vociRicerca } from "@/lib/home";
+import type { Luogo } from "@/lib/luoghi";
 import { Sheet } from "@/components/Sheet";
 import { RicercaSheet } from "@/components/RicercaSheet";
 import { SchedaAffidabilita } from "@/components/SchedaAffidabilita";
@@ -46,10 +47,16 @@ export function HomeClient({
   mostraMatch,
   nascosti = 0,
   ricerca,
+  luoghi,
+  nascostiPerNecessarie = 0,
 }: {
   affidabilita: AffidabilitaResult;
   /** la ricerca impostata: budget, taglio, zone e caratteristiche */
   ricerca: ProfiloRicerca;
+  /** i luoghi che si possono cercare (provincia, città, quartiere) */
+  luoghi: Luogo[];
+  /** quante case non compaiono perché non hanno una caratteristica che hai segnato come necessaria */
+  nascostiPerNecessarie?: number;
   /** il mazzo già ordinato: prima gli annunci in ricerca, poi gli altri */
   listings: ListingConMatch[];
   /** annunci tolti perché oltre la tolleranza sul budget */
@@ -304,6 +311,7 @@ export function HomeClient({
           <div className="hi-ricerca-testo">
             <b>{testoCase.principale}</b>
             {testoCase.secondario && <span>{testoCase.secondario}</span>}
+            {testoNascoste(nascostiPerNecessarie) && <span className="hi-nascoste">{testoNascoste(nascostiPerNecessarie)}</span>}
           </div>
           <button type="button" className="hi-modifica" onClick={() => setSchedaRicerca(true)}>
             {mostraMatch ? "Modifica ricerca" : "Imposta la ricerca"}
@@ -322,14 +330,18 @@ export function HomeClient({
             <h2>
               {nascosti > 0
                 ? TITOLO_TUTTI_SCELTI
-                : esclusi > 0
+                : nascostiPerNecessarie > 0
+                  ? "Nessuna casa con le tue caratteristiche necessarie"
+                  : esclusi > 0
                   ? "Nessuna casa nel tuo budget"
                   : "Nessun annuncio per la tua ricerca"}
             </h2>
             <p>
               {nascosti > 0
                 ? TESTO_DOVE_SONO
-                : esclusi > 0
+                : nascostiPerNecessarie > 0
+                  ? `Ho nascosto ${nascostiPerNecessarie} ${nascostiPerNecessarie === 1 ? "casa" : "case"} perché non ${nascostiPerNecessarie === 1 ? "ha" : "hanno"} le caratteristiche che hai segnato come necessarie. Puoi renderne opzionale qualcuna da «Modifica ricerca».`
+                  : esclusi > 0
                 ? `Ci sono ${esclusi} ${esclusi === 1 ? "casa" : "case"} oltre il ${tolleranzaPct}% del tuo budget, che non ti mostriamo. Se vuoi vederle, alza il budget da «Modifica ricerca».`
                 : "Appena ci saranno immobili pubblicati che rientrano nei tuoi criteri, li vedrai qui. Nel frattempo puoi aggiornare i criteri da «Modifica ricerca»."}
             </p>
@@ -351,6 +363,7 @@ export function HomeClient({
             <p>
               Torna più tardi: ne arrivano di nuovi appena vengono pubblicati.{" "}
               {TESTO_DOVE_SONO}
+              {nascostiPerNecessarie > 0 && ` ${testoNascoste(nascostiPerNecessarie)}.`}
               {esclusi > 0 &&
                 ` Altre ${esclusi} ${esclusi === 1 ? "casa è" : "case sono"} oltre il ${tolleranzaPct}% del tuo budget e non te ${esclusi === 1 ? "la" : "le"} mostriamo: se vuoi vederle, aggiorna il budget in Profilo.`}
             </p>
@@ -553,9 +566,8 @@ export function HomeClient({
         <RicercaSheet
           open
           onClose={() => setSchedaRicerca(false)}
-          tenant={{ budget_max: ricerca.budgetMax, locali_min: ricerca.localiMin, mq_min: ricerca.mqMin }}
-          zoneIniziali={ricerca.zone}
-          interessiIniziali={ricerca.interessi}
+          ricerca={ricerca}
+          luoghi={luoghi}
           onSalvata={() => {
             setSchedaRicerca(false);
             setAvviso({ errore: false, testo: "Ricerca aggiornata." });
