@@ -4,10 +4,11 @@ import { createClient } from "@/lib/supabase/server";
 import { RapportiPanel } from "@/components/RapportiPanel";
 import { caricaRapportiMiei } from "@/lib/rapporti-server";
 import { ProfiloClient } from "./ProfiloClient";
+import { sezioneProfilo } from "@/lib/home";
 import { OwnerProfiloClient } from "./OwnerProfiloClient";
 import type { TenantProfile, OwnerProfile, Invito } from "@/lib/types";
 
-export default async function ProfiloPage() {
+export default async function ProfiloPage({ searchParams }: { searchParams: Promise<{ apri?: string | string[] }> }) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -90,6 +91,7 @@ export default async function ProfiloPage() {
 
   return (
     <ProfiloClient
+      aperturaIniziale={sezioneProfilo((await searchParams).apri)}
       nonLette={nonLette}
       preferiti={typeof numeroPreferiti === "number" ? numeroPreferiti : 0}
       nome={profile?.nome ?? null}

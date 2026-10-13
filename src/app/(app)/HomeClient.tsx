@@ -1,10 +1,15 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { AffidabilitaResult } from "@/lib/affidabilita";
 import type { ListingConMatch } from "@/lib/types";
 import { TOLLERANZA_BUDGET, statoMazzo } from "@/lib/match";
+import type { ProfiloRicerca } from "@/lib/match";
+import { chiaveRicerca as chiaveDellaRicerca, conteggioCase, suggerimentoCard, vociRicerca } from "@/lib/home";
+import { Sheet } from "@/components/Sheet";
+import { RicercaSheet } from "@/components/RicercaSheet";
+import { SchedaAffidabilita } from "@/components/SchedaAffidabilita";
 import { candidati } from "./actions";
 import { createClient } from "@/lib/supabase/client";
 import { messaggioErroreVerifica } from "@/lib/verifica";
@@ -40,8 +45,11 @@ export function HomeClient({
   esclusi,
   mostraMatch,
   nascosti = 0,
+  ricerca,
 }: {
   affidabilita: AffidabilitaResult;
+  /** la ricerca impostata: budget, taglio, zone e caratteristiche */
+  ricerca: ProfiloRicerca;
   /** il mazzo già ordinato: prima gli annunci in ricerca, poi gli altri */
   listings: ListingConMatch[];
   /** annunci tolti perché oltre la tolleranza sul budget */
@@ -55,7 +63,7 @@ export function HomeClient({
   // la pagina viene rigenerata dal server senza l'annuncio appena scelto:
   // se il deck seguisse quella lista, il suo indice salterebbe una casa e
   // il punto del separatore si sposterebbe a metà sessione.
-  const [mazzo] = useState(listings);
+  const [mazzo, setMazzo] = useState(listings);
   const [index, setIndex] = useState(0);
   const [separatoreVisto, setSeparatoreVisto] = useState(false);
   const [candidatureInviate, setCandidatureInviate] = useState<Set<string>>(
@@ -72,10 +80,25 @@ export function HomeClient({
   const [drag, setDrag] = useState({ x: 0, y: 0, dragging: false });
   const [exiting, setExiting] = useState<"left" | "right" | null>(null);
   const startPos = useRef({ x: 0, y: 0 });
-  // Il tocco è partito dal pulsante "dettagli"? Serve saperlo al
-  // rilascio: con la cattura del puntatore il click del pulsante può
-  // non scattare, e senza questo il tocco finirebbe nella zona foto.
-  const daPulsante = useRef(false);
+  const router = useRouter();
+  const [schedaPunteggio, setSchedaPunteggio] = useState(false);
+  const [schedaRicerca, setSchedaRicerca] = useState(false);
+
+  // Quando la ricerca CAMBIA (l'ha modificata la persona da qui) il mazzo si ricomincia con quello nuovo, in ordine.
+  // Per ogni altro motivo resta congelato. È il modo previsto da React per adattare lo stato a una proprietà che cambia.
+  const chiaveRicerca = chiaveDellaRicerca(ricerca);
+  const [chiaveVista, setChiaveVista] = useState(chiaveRicerca);
+  if (chiaveRicerca !== chiaveVista) {
+    setChiaveVista(chiaveRicerca);
+    setMazzo(listings);
+    setIndex(0);
+    setSeparatoreVisto(false);
+    setStoria([]);
+    setFotoIdx(0);
+    setSchedaAperta(false);
+    setExiting(null);
+    setDrag({ x: 0, y: 0, dragging: false });
+  }
 
   const attuale = mazzo[index];
 
@@ -177,8 +200,10 @@ export function HomeClient({
 
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     if (exiting) return;
+    // I pulsanti dentro la card (i dettagli) si toccano da soli: niente trascinamento e niente cattura del puntatore.
+    // Con la cattura il clic finisce sulla card, e il dito non può aprire nulla.
+    if ((e.target as HTMLElement).closest("button, a")) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    daPulsante.current = !!(e.target as HTMLElement).closest(".card-dettagli");
     startPos.current = { x: e.clientX, y: e.clientY };
     setDrag({ x: 0, y: 0, dragging: true });
   }
@@ -204,21 +229,16 @@ export function HomeClient({
       return;
     }
 
-    // Spostamento minimo: è stato un tocco. Dove si è toccato decide
-    // cosa fare — i lati scorrono le foto, il centro apre la scheda.
+    // Spostamento minimo: è stato un tocco. I lati scorrono le foto; il centro non fa niente
+    // (i dettagli si aprono dal pulsante «Tutte le foto e i dettagli»).
     if (
       Math.abs(drag.x) < SOGLIA_TOCCO &&
       Math.abs(drag.y) < SOGLIA_TOCCO
     ) {
-      if (daPulsante.current) {
-        setSchedaAperta(true);
-      } else {
-        const rect = e.currentTarget.getBoundingClientRect();
-        const posizione = (e.clientX - rect.left) / rect.width;
-        if (posizione < 0.32) fotoPrecedente();
-        else if (posizione > 0.68) fotoSuccessiva();
-        else setSchedaAperta(true);
-      }
+      const rect = e.currentTarget.getBoundingClientRect();
+      const posizione = (e.clientX - rect.left) / rect.width;
+      if (posizione < 0.32) fotoPrecedente();
+      else if (posizione > 0.68) fotoSuccessiva();
     }
 
     setDrag({ x: 0, y: 0, dragging: false });
@@ -242,6 +262,8 @@ export function HomeClient({
   const likeOpacity = Math.min(Math.max(drag.x / SOGLIA_SWIPE, 0), 1);
   const nopeOpacity = Math.min(Math.max(-drag.x / SOGLIA_SWIPE, 0), 1);
 
+  const testoCase = conteggioCase({ mostraMatch, inRicerca, oltre, totale: mazzo.length });
+  const riassuntoRicerca = vociRicerca(ricerca);
   const foto = attuale?.listing_photos ?? [];
   const numeroFoto = foto.length;
   const fotoCorrente = foto[Math.min(fotoIdx, Math.max(numeroFoto - 1, 0))]?.url;
@@ -261,37 +283,33 @@ export function HomeClient({
         )}
       </div>
 
-      {/* ---- Riquadro affidabilità + case in linea ---- */}
+      {/* ---- In alto: il punteggio (si tocca per vedere da cosa è fatto) e le case della ricerca ---- */}
       <div className="home-intro">
-        <div className="hi-top">
-          <div className="hi-score">
-            <div className="hi-score-num">{affidabilita.punteggio}</div>
-            <div className="hi-score-label">
-              Affidabilità
-              <br />
-              <b style={{ color: "var(--paper)" }}>{affidabilita.label}</b>
-            </div>
+        <button
+          type="button"
+          className="hi-punteggio"
+          onClick={() => setSchedaPunteggio(true)}
+          aria-label={`Affidabilità ${affidabilita.punteggio} su 100, ${affidabilita.label}. Scopri come si calcola`}
+        >
+          <AnelloPunteggio punteggio={affidabilita.punteggio} />
+          <span className="hi-punteggio-testo">
+            <span className="hi-punteggio-titolo">La tua affidabilità</span>
+            <b>{affidabilita.label}</b>
+          </span>
+          <span className="hi-punteggio-cta" aria-hidden>
+            Come si calcola ›
+          </span>
+        </button>
+        <div className="hi-ricerca">
+          <div className="hi-ricerca-testo">
+            <b>{testoCase.principale}</b>
+            {testoCase.secondario && <span>{testoCase.secondario}</span>}
           </div>
-          <div className="hi-count">
-            {mostraMatch ? (
-              <>
-                <b>{inRicerca}</b>
-                {inRicerca === 1 ? "casa in linea" : "case in linea"}
-                <br />
-                {oltre > 0 ? `+ ${oltre} oltre la ricerca` : "con la tua ricerca"}
-              </>
-            ) : (
-              <>
-                <b>{mazzo.length}</b>
-                {mazzo.length === 1 ? "casa disponibile" : "case disponibili"}
-                <br />
-                <Link href="/profilo" className="hi-link">
-                  Imposta la ricerca
-                </Link>
-              </>
-            )}
-          </div>
+          <button type="button" className="hi-modifica" onClick={() => setSchedaRicerca(true)}>
+            {mostraMatch ? "Modifica ricerca" : "Imposta la ricerca"}
+          </button>
         </div>
+        {mostraMatch && riassuntoRicerca.length > 0 && <div className="hi-riassunto">{riassuntoRicerca.join(" · ")}</div>}
       </div>
 
       <div className="deck">
@@ -312,9 +330,14 @@ export function HomeClient({
               {nascosti > 0
                 ? TESTO_DOVE_SONO
                 : esclusi > 0
-                ? `Ci sono ${esclusi} ${esclusi === 1 ? "casa" : "case"} oltre il ${tolleranzaPct}% del tuo budget, che non ti mostriamo. Se vuoi vederle, aggiorna il budget in Profilo → La tua ricerca.`
-                : "Appena ci saranno immobili pubblicati che rientrano nei tuoi criteri, li vedrai qui. Nel frattempo puoi aggiornare i criteri in Profilo → La tua ricerca."}
+                ? `Ci sono ${esclusi} ${esclusi === 1 ? "casa" : "case"} oltre il ${tolleranzaPct}% del tuo budget, che non ti mostriamo. Se vuoi vederle, alza il budget da «Modifica ricerca».`
+                : "Appena ci saranno immobili pubblicati che rientrano nei tuoi criteri, li vedrai qui. Nel frattempo puoi aggiornare i criteri da «Modifica ricerca»."}
             </p>
+            {nascosti === 0 && (
+              <button type="button" className="opp-cta" onClick={() => setSchedaRicerca(true)}>
+                Modifica la ricerca
+              </button>
+            )}
           </div>
         )}
 
@@ -361,9 +384,9 @@ export function HomeClient({
             >
               Vedi le altre case
             </button>
-            <Link href="/profilo" className="link-quiet">
+            <button type="button" className="link-quiet" onClick={() => setSchedaRicerca(true)}>
               Modifica la tua ricerca
-            </Link>
+            </button>
             {puoAnnullare && (
               <button type="button" className="link-quiet" onClick={annulla}>
                 Annulla l&apos;ultima scelta
@@ -462,8 +485,7 @@ export function HomeClient({
               <button
                 type="button"
                 className="card-dettagli"
-                // l'apertura è gestita al rilascio del puntatore sulla card
-                tabIndex={-1}
+                onClick={() => setSchedaAperta(true)}
               >
                 <IconInfo />
                 Tutte le foto e i dettagli
@@ -471,12 +493,7 @@ export function HomeClient({
             </div>
 
             <div className="swipe-hint">
-              <IconChevronSu className="w-5 h-5 fill-none stroke-current stroke-2" />
-              <span>
-                {numeroFoto > 1
-                  ? "Tocca ai lati per le foto, al centro per i dettagli"
-                  : "Tocca per i dettagli, trascina per scegliere"}
-              </span>
+              <span>{suggerimentoCard(numeroFoto)}</span>
             </div>
           </div>
         )}
@@ -520,6 +537,32 @@ export function HomeClient({
         </div>
       )}
 
+      <Sheet open={schedaPunteggio} onClose={() => setSchedaPunteggio(false)} title="Il tuo voto di affidabilità">
+        <SchedaAffidabilita
+          affidabilita={affidabilita}
+          onApri={(sezione) => {
+            setSchedaPunteggio(false);
+            router.push(`/profilo?apri=${sezione}`);
+          }}
+        />
+      </Sheet>
+
+      {/* Montata solo quando è aperta: ogni apertura parte dai valori di adesso, e quando i dati nuovi arrivano
+          non viene smontata prima di aver detto «salvato». */}
+      {schedaRicerca && (
+        <RicercaSheet
+          open
+          onClose={() => setSchedaRicerca(false)}
+          tenant={{ budget_max: ricerca.budgetMax, locali_min: ricerca.localiMin, mq_min: ricerca.mqMin }}
+          zoneIniziali={ricerca.zone}
+          interessiIniziali={ricerca.interessi}
+          onSalvata={() => {
+            setSchedaRicerca(false);
+            setAvviso({ errore: false, testo: "Ricerca aggiornata." });
+          }}
+        />
+      )}
+
       <SchedaImmobile
         listing={schedaAperta ? attuale : null}
         mostraMatch={mostraMatch}
@@ -542,6 +585,22 @@ export function HomeClient({
         </div>
       )}
     </div>
+  );
+}
+
+/** Il punteggio come numero dentro un anello che si riempie (da 0 a 100). */
+function AnelloPunteggio({ punteggio }: { punteggio: number }) {
+  const r = 27;
+  const c = 2 * Math.PI * r;
+  const pieno = (Math.max(0, Math.min(100, punteggio)) / 100) * c;
+  return (
+    <svg className="hi-anello" viewBox="0 0 64 64" aria-hidden>
+      <circle cx="32" cy="32" r={r} className="hi-anello-fondo" />
+      <circle cx="32" cy="32" r={r} className="hi-anello-pieno" strokeDasharray={`${pieno} ${c}`} transform="rotate(-90 32 32)" />
+      <text x="32" y="33" className="hi-anello-num" textAnchor="middle" dominantBaseline="central">
+        {punteggio}
+      </text>
+    </svg>
   );
 }
 

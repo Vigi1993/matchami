@@ -139,5 +139,6 @@ export async function updateRicerca(
   }
 
   revalidatePath("/profilo");
+  revalidatePath("/"); // la Home ricalcola il mazzo con la ricerca nuova
   return { ok: true };
 }

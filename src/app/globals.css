@@ -980,48 +980,210 @@ input[type="range"]::-moz-range-thumb {
   background: var(--ink);
   color: var(--paper);
   border-radius: 18px;
-  padding: 12px 14px;
+  padding: 6px 14px 11px;
   box-shadow: 0 14px 30px rgba(0, 0, 0, 0.35);
 }
-.home-intro .hi-top {
+/* il punteggio: si tocca per vedere da cosa è fatto */
+.home-intro .hi-punteggio {
+  -webkit-appearance: none;
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 4px 0 7px;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.home-intro .hi-punteggio:focus-visible,
+.home-intro .hi-modifica:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 3px;
+  border-radius: 12px;
+}
+.home-intro .hi-anello {
+  width: 54px;
+  height: 54px;
+  flex: none;
+}
+.home-intro .hi-anello-fondo {
+  fill: none;
+  stroke: rgba(247, 244, 236, 0.14);
+  stroke-width: 5;
+}
+.home-intro .hi-anello-pieno {
+  fill: none;
+  stroke: var(--gold);
+  stroke-width: 5;
+  stroke-linecap: round;
+}
+.home-intro .hi-anello-num {
+  fill: var(--gold);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 24px;
+}
+.home-intro .hi-punteggio-testo {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.home-intro .hi-punteggio-titolo {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: rgba(247, 244, 236, 0.7);
+}
+.home-intro .hi-punteggio-testo b {
+  font-family: var(--font-display);
+  font-size: 18px;
+  line-height: 1.2;
+  color: var(--paper);
+}
+.home-intro .hi-punteggio-cta {
+  flex: none;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--gold);
+  white-space: nowrap;
+}
+/* le case della ricerca, e il pulsante per cambiarla */
+.home-intro .hi-ricerca {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
 }
-.home-intro .hi-score {
+.home-intro .hi-ricerca-testo {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
 }
-.home-intro .hi-score-num {
-  font-family: var(--font-display);
-  font-weight: 700;
-  font-size: 19px;
-  color: var(--gold);
+.home-intro .hi-ricerca-testo b {
+  font-size: 13px;
+  color: var(--paper);
 }
-.home-intro .hi-score-label {
+.home-intro .hi-ricerca-testo span {
   font-size: 11px;
   color: rgba(247, 244, 236, 0.75);
-  line-height: 1.3;
 }
-.home-intro .hi-count {
-  font-size: 11px;
-  color: var(--paper);
-  text-align: right;
-  line-height: 1.3;
+.home-intro .hi-riassunto {
+  margin-top: 6px;
+  font-size: 10.5px;
+  color: rgba(247, 244, 236, 0.6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.home-intro .hi-count b {
+.home-intro .hi-modifica {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: none;
+  padding: 8px 13px;
+  border-radius: 999px;
+  background: rgba(201, 161, 90, 0.16);
+  border: 1px solid var(--gold);
+  color: var(--gold);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* la scheda «da cosa è fatto il punteggio» */
+.aff-totale {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 4px 0 12px;
+}
+.aff-totale b {
   font-family: var(--font-display);
-  font-size: 15px;
-  color: var(--paper);
+  font-size: 46px;
+  line-height: 1;
+  color: var(--ink);
+}
+.aff-totale span {
+  font-size: 16px;
+  color: var(--muted);
+}
+.aff-totale em {
+  margin-left: auto;
+  font-style: normal;
+  font-weight: 700;
+  color: var(--moss);
+}
+.aff-voci {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+.aff-voce {
+  padding: 9px 0;
+  border-bottom: 1px solid rgba(16, 21, 26, 0.09);
+}
+.aff-voce-riga {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--ink);
+}
+.aff-voce small,
+.aff-voce .aff-azione {
   display: block;
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--body-soft);
+}
+.aff-voce .aff-azione {
+  color: var(--moss);
+  text-decoration: underline;
+  text-align: left;
+}
+.aff-punti {
+  flex: none;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: rgba(16, 21, 26, 0.06);
+  color: var(--ink);
+}
+.aff-voce.is-ottenuta .aff-punti {
+  background: rgba(62, 107, 87, 0.14);
+  color: var(--moss);
+}
+.aff-voce.is-negativa .aff-punti {
+  background: rgba(201, 105, 78, 0.16);
+  color: var(--clay);
+}
+.aff-voce.is-mancante .aff-punti {
+  background: transparent;
+  border: 1px dashed var(--muted);
+  color: var(--body-soft);
+  font-weight: 600;
+}
+.aff-possibile {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--body-text);
 }
 
 .deck {
   position: absolute;
   inset: 0;
-  top: 108px;
+  top: 232px;
 }
 .card {
   position: absolute;
@@ -1089,7 +1251,7 @@ input[type="range"]::-moz-range-thumb {
   position: absolute;
   left: 20px;
   right: 20px;
-  bottom: 104px;
+  bottom: 122px;
   z-index: 25;
   color: var(--paper);
   pointer-events: none;
@@ -1219,7 +1381,7 @@ input[type="range"]::-moz-range-thumb {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 70px;
+  bottom: 92px;
   z-index: 25;
   display: flex;
   flex-direction: column;
@@ -1817,7 +1979,7 @@ input[type="range"]::-moz-range-thumb {
      Resta una pila di card da sfogliare (il trascinamento funziona
      anche col mouse), ma diventa un pannello centrato. */
   .deck {
-    inset: 150px auto 130px 50%;
+    inset: 232px auto 130px 50%;
     width: 460px;
     transform: translateX(-50%);
   }

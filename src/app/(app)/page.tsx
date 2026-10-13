@@ -129,6 +129,7 @@ async function TenantHome({ userId }: { userId: string }) {
       esclusi={esclusi}
       mostraMatch={haCriteriDiRicerca(profiloRicerca)}
       nascosti={nascosti}
+      ricerca={profiloRicerca}
     />
   );
 }

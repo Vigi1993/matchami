@@ -5,18 +5,22 @@ import { RigaPreferiti } from "@/components/RigaPreferiti";
 import { rigaProfilo } from "@/lib/verifica-inquilino";
 import { useActionState, useState } from "react";
 import { Sheet } from "@/components/Sheet";
-import { LAVORO_VOCAB, ATTR_VOCAB, ZONE_MILANO } from "@/lib/constants";
+import { LAVORO_VOCAB } from "@/lib/constants";
 import {
   computeAffidabilita,
   computeProfileCompleteness,
 } from "@/lib/affidabilita";
 import type { TenantProfile, Invito } from "@/lib/types";
-import { updateDatiPersonali, updateRicerca, type SaveState } from "./actions";
+import { updateDatiPersonali, type SaveState } from "./actions";
 import { logout } from "@/app/login/actions";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { Chip } from "@/components/ui/Chip";
 import { Field } from "@/components/ui/Field";
 import { Stepper } from "@/components/ui/Stepper";
+import { SaveButton } from "@/components/ui/SaveButton";
+import { RicercaSheet } from "@/components/RicercaSheet";
+import { SchedaAffidabilita } from "@/components/SchedaAffidabilita";
+import type { SezioneProfilo } from "@/lib/home";
 import { PrivacySheet } from "@/components/PrivacySheet";
 import { FaqSheet } from "@/components/FaqSheet";
 import { AvatarUpload } from "@/components/AvatarUpload";
@@ -53,6 +57,8 @@ type Props = {
   numeroRecensioni: number;
   consensoMarketingIniziale: boolean;
   consensoTerziIniziale: boolean;
+  /** la scheda da aprire subito (da un collegamento con ?apri=...), se è tra quelle ammesse */
+  aperturaIniziale?: SezioneProfilo | null;
 };
 
 export function ProfiloClient({
@@ -71,6 +77,7 @@ export function ProfiloClient({
   numeroRecensioni,
   consensoMarketingIniziale,
   consensoTerziIniziale,
+  aperturaIniziale = null,
 }: Props) {
   const [sheetAperta, setSheetAperta] = useState<
     | "affidabilita"
@@ -83,7 +90,7 @@ export function ProfiloClient({
     | "privacy"
     | "faq"
     | null
-  >(null);
+  >(aperturaIniziale);
 
   const rigaVerifica = rigaProfilo(tenant.verifica_stato, tenant.verifica_esito_note);
   const affidabilita = computeAffidabilita({
@@ -255,33 +262,13 @@ export function ProfiloClient({
         {verificaPanel}
       </Sheet>
 
-      {/* ---- Sheet: Affidabilità (sola lettura) ---- */}
+      {/* ---- Sheet: Affidabilità: da cosa è fatto il punteggio ---- */}
       <Sheet
         open={sheetAperta === "affidabilita"}
         onClose={() => setSheetAperta(null)}
         title="Il tuo voto di affidabilità"
       >
-        <p className="sheet-sub">
-          Nasce dallo storico dei tuoi affitti su MatchAmI e dalle verifiche
-          sul tuo stato economico. I proprietari lo vedono quando valutano una
-          tua candidatura.
-        </p>
-        <div className="stat-grid" style={{ gridTemplateColumns: "1fr" }}>
-          <div className="stat-card">
-            <div className="v">{affidabilita.punteggio}/100</div>
-            <div className="l">{affidabilita.label}</div>
-          </div>
-        </div>
-        <div className="pref-label">
-          <span>Verifiche sullo stato economico</span>
-        </div>
-        <div className="match-checklist">
-          {affidabilita.checks.map((c) => (
-            <span key={c.label} className={c.ok ? "ok" : "no"}>
-              {c.label}
-            </span>
-          ))}
-        </div>
+        <SchedaAffidabilita affidabilita={affidabilita} onApri={(sezione) => setSheetAperta(sezione)} />
       </Sheet>
 
       {/* ---- Sheet: I tuoi dati ---- */}
@@ -369,19 +356,6 @@ function Row({
         <p>{subtitle}</p>
         <span className="pv-readmore">{cta}</span>
       </div>
-    </button>
-  );
-}
-
-function SaveButton({ pending }: { pending: boolean }) {
-  return (
-    <button
-      type="submit"
-      disabled={pending}
-      className="opp-cta"
-      style={{ marginTop: 6 }}
-    >
-      {pending ? "Salvataggio..." : "Salva"}
     </button>
   );
 }
@@ -558,145 +532,6 @@ function DatiPersonaliSheet({
             rows={4}
             className="ob-textarea"
           />
-        </Field>
-
-        {state?.error && <p className="note-error">{state.error}</p>}
-        {state?.ok && <p className="note-saved">Salvato — puoi chiudere.</p>}
-        <SaveButton pending={pending} />
-      </form>
-    </Sheet>
-  );
-}
-
-function RicercaSheet({
-  open,
-  onClose,
-  tenant,
-  zoneIniziali,
-  interessiIniziali,
-}: {
-  open: boolean;
-  onClose: () => void;
-  tenant: TenantProfile;
-  zoneIniziali: string[];
-  interessiIniziali: Record<string, number>;
-}) {
-  const [state, formAction, pending] = useActionState<SaveState, FormData>(
-    updateRicerca,
-    null
-  );
-
-  const [budget, setBudget] = useState(tenant.budget_max ?? 1300);
-  const [locali, setLocali] = useState(tenant.locali_min ?? 2);
-  const [mq, setMq] = useState(tenant.mq_min ?? 50);
-  const [zone, setZone] = useState<string[]>(zoneIniziali);
-  const [interessi, setInteressi] =
-    useState<Record<string, number>>(interessiIniziali);
-
-  function toggleZona(z: string) {
-    setZone((prev) =>
-      prev.includes(z) ? prev.filter((x) => x !== z) : [...prev, z]
-    );
-  }
-
-  function toggleInteresse(key: string) {
-    setInteressi((prev) => {
-      const next = { ...prev };
-      if (next[key]) delete next[key];
-      else next[key] = 5;
-      return next;
-    });
-  }
-
-  return (
-    <Sheet open={open} onClose={onClose} title="La tua ricerca">
-      <p className="sheet-sub">
-        Le tue richieste possono cambiare nel tempo: aggiornale qui quando
-        vuoi, il % di match si ricalcola subito.
-      </p>
-      <form action={formAction}>
-        <input type="hidden" name="budget_max" value={budget} />
-        <input type="hidden" name="locali_min" value={locali} />
-        <input type="hidden" name="mq_min" value={mq} />
-        <input type="hidden" name="zone" value={JSON.stringify(zone)} />
-        <input
-          type="hidden"
-          name="interessi"
-          value={JSON.stringify(interessi)}
-        />
-
-        <Field label={`Budget massimo · €${budget.toLocaleString("it-IT")}`}>
-          <input
-            type="range"
-            min={900}
-            max={2200}
-            step={50}
-            value={budget}
-            onChange={(e) => setBudget(Number(e.target.value))}
-            className="w-full"
-          />
-        </Field>
-
-        <Field label="Zone preferite">
-          <div className="chip-row">
-            {ZONE_MILANO.map((z) => (
-              <Chip
-                key={z}
-                label={z.split(",")[0]}
-                active={zone.includes(z)}
-                onClick={() => toggleZona(z)}
-              />
-            ))}
-          </div>
-        </Field>
-
-        <Field label="Locali minimi">
-          <Stepper value={locali} onChange={setLocali} min={1} max={6} />
-        </Field>
-
-        <Field label="Metratura minima">
-          <Stepper value={mq} onChange={setMq} min={20} max={160} step={5} suffix=" m²" />
-        </Field>
-
-        <Field label="Caratteristiche che ti interessano">
-          <div className="chip-row" style={{ marginBottom: 14 }}>
-            {ATTR_VOCAB.map((a) => (
-              <Chip
-                key={a.key}
-                label={a.label}
-                active={!!interessi[a.key]}
-                onClick={() => toggleInteresse(a.key)}
-              />
-            ))}
-          </div>
-          <div className="flex flex-col gap-3">
-            {Object.entries(interessi).map(([key, peso]) => {
-              const attr = ATTR_VOCAB.find((a) => a.key === key);
-              if (!attr) return null;
-              return (
-                <div key={key}>
-                  <div className="pref-label" style={{ marginBottom: 4 }}>
-                    <span>
-                      {attr.label} · {peso}/10
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min={1}
-                    max={10}
-                    value={peso}
-                    onChange={(e) =>
-                      setInteressi((prev) => ({
-                        ...prev,
-                        [key]: Number(e.target.value),
-                      }))
-                    }
-                    className="w-full"
-                  />
-                </div>
-              );
-            })}
-          </div>
         </Field>
 
         {state?.error && <p className="note-error">{state.error}</p>}
