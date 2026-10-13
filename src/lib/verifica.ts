@@ -199,6 +199,15 @@ const MESSAGGI: Record<string, string> = {
   INQUILINO_INESISTENTE: "Inquilino non trovato.",
   // decisioni sulle candidature
   CANDIDATURA_NON_TUA: "Questa candidatura non risulta tua.",
+  // parametri di ricerca
+  RICERCA_NON_VALIDA: "I criteri di ricerca non sono validi. Controlla i valori e riprova.",
+  TIPOLOGIA_NON_DISPONIBILE: "Per ora si possono cercare solo appartamenti e ville.",
+  INTERVALLO_NON_VALIDO: "Il minimo non può essere più alto del massimo.",
+  LUOGO_NON_VALIDO: "Uno dei luoghi scelti non esiste.",
+  TROPPI_LUOGHI: "Puoi scegliere al massimo 20 luoghi.",
+  CRITERIO_NON_VALIDO: "Una delle caratteristiche non è valida. Controlla i valori e riprova.",
+  TROPPI_CRITERI: "Hai scelto troppe caratteristiche.",
+  NON_SEI_UN_INQUILINO: "La ricerca la può impostare solo un inquilino.",
   // firma di prova del contratto
   FIRMA_CONTRATTO_NON_TUO: "Non puoi firmare questo contratto.",
   FIRMA_CONTRATTO_NON_IN_FIRMA: "Il contratto si può firmare solo quando è «in firma».",

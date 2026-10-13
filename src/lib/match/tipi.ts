@@ -23,15 +23,52 @@ export type EtichettaMatch =
 // Inquilino → casa
 // ------------------------------------------------------------
 
+export type Tipologia = "appartamento" | "villa" | "posto_letto";
+
+/** Le caratteristiche che hanno un VALORE (le altre sono sì/no). */
+export type ChiaveConValore = "bagni" | "piano" | "riscaldamento" | "contratto" | "ingresso" | "classeEnergetica";
+
+/** Il valore di un criterio: quale campo serve dipende dalla chiave (vedi criteri-ricerca.ts). */
+export type ValoreCriterio = {
+  min?: number | null;
+  max?: number | null;
+  tipi?: string[];
+  /** data, AAAA-MM-GG */
+  entro?: string;
+  classe?: string;
+};
+
+/**
+ * Una caratteristica cercata. `necessaria`: se la casa non la rispetta SPARISCE dal mazzo. Altrimenti è
+ * `opzionale` e pesa sul punteggio (`peso` da 1 a 10).
+ */
+export type CriterioRicerca = {
+  chiave: string;
+  necessaria: boolean;
+  peso: number;
+  valore: ValoreCriterio | null;
+};
+
 /** I criteri di ricerca dell'inquilino. `null` = nessuna preferenza. */
 export type ProfiloRicerca = {
   budgetMax: number | null;
   localiMin: number | null;
   mqMin: number | null;
-  /** vuoto = nessuna preferenza di zona */
+  /** vuoto = nessuna preferenza di zona (le etichette, es. «Isola, Milano») */
   zone: string[];
-  /** chiave caratteristica → peso da 1 a 10 */
+  /** chiave caratteristica → peso da 1 a 10 (le sole opzionali sì/no: serve a chi non conosce i criteri nuovi) */
   interessi: Record<string, number>;
+
+  // ---- parametri aggiunti: tutti facoltativi, chi non li conosce non cambia comportamento ----
+  budgetMin?: number | null;
+  localiMax?: number | null;
+  mqMax?: number | null;
+  /** cosa si cerca; senza valore = nessun filtro */
+  tipologia?: Tipologia | null;
+  /** i luoghi scelti (provincia, città o quartiere): gli identificativi */
+  luoghi?: string[];
+  /** tutte le caratteristiche, necessarie e opzionali. Se c'è, `interessi` non si legge */
+  criteri?: CriterioRicerca[];
 };
 
 export type AnnuncioPerMatch = {
@@ -40,7 +77,23 @@ export type AnnuncioPerMatch = {
   locali: number | null;
   mq: number | null;
   attributi: Record<string, boolean> | null;
+
+  // ---- dati aggiunti: tutti facoltativi ----
+  tipologia?: Tipologia | null;
+  /** l'identificativo del luogo dell'annuncio e di tutti quelli che lo contengono (quartiere, città, provincia) */
+  antenati?: string[];
+  bagni?: number | null;
+  /** 0 = piano terra, -1 = seminterrato */
+  piano?: number | null;
+  riscaldamento?: string | null;
+  tipoContratto?: string | null;
+  /** data, AAAA-MM-GG */
+  disponibileDal?: string | null;
+  classeEnergetica?: string | null;
 };
+
+/** Perché una casa non compare nel mazzo. */
+export type MotivoEsclusione = "budget" | "tipologia" | "necessaria";
 
 /**
  * - `in_ricerca`: rispetta tutti i criteri.
@@ -65,6 +118,8 @@ export type RisultatoInquilino = {
   motivi: string[];
   /** Dati che mancano nell'annuncio e rendono il punteggio meno preciso. */
   avvisi: string[];
+  /** Se la fascia è `escluso`: per quali ragioni (può essere più d'una). Vuoto altrimenti. */
+  motiviEsclusione: MotivoEsclusione[];
 };
 
 // ------------------------------------------------------------

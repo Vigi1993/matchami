@@ -58,6 +58,11 @@ export const PENALITA = {
   localiSotto: 0.2,
   /** per i m²: punti = peso * rapporto - peso * questo valore */
   mqSottoDetrazione: 0.2,
+  /** sotto il budget MINIMO: frazione dei punti del budget (SEGNAPOSTO: la scelta è vostra) */
+  budgetSottoMinimo: 0.5,
+  /** sopra il massimo di locali o di metratura: frazione dei punti (SEGNAPOSTO) */
+  localiSopra: 0.5,
+  mqSopra: 0.5,
 } as const;
 
 /**

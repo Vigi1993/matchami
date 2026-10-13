@@ -394,7 +394,7 @@ test("preparaMazzo: i primi `inRicerca` annunci sono davvero quelli in ricerca",
 });
 
 test("preparaMazzo: mazzo vuoto e tutti esclusi", () => {
-  assert.deepEqual(preparaMazzo([], profilo()), { mazzo: [], inRicerca: 0, esclusi: 0 });
+  assert.deepEqual(preparaMazzo([], profilo()), { mazzo: [], inRicerca: 0, esclusi: 0, nascostiPerNecessarie: 0 });
   const r = preparaMazzo([riga("a", { prezzo: 9000 }), riga("b", { prezzo: 8000 })], profilo());
   assert.equal(r.mazzo.length, 0);
   assert.equal(r.esclusi, 2);
@@ -645,6 +645,10 @@ test("profiloRicercaDaRighe: 0 e vuoto valgono 'nessuna preferenza'", () => {
     [{ zona: "Isola, Milano" }],
     [{ attributo_key: "balcone", peso: 8 }]
   );
-  assert.deepEqual(p, { budgetMax: null, localiMin: null, mqMin: 60, zone: ["Isola, Milano"], interessi: { balcone: 8 } });
+  // i campi di sempre
+  assert.deepEqual({ budgetMax: p.budgetMax, localiMin: p.localiMin, mqMin: p.mqMin, zone: p.zone, interessi: p.interessi }, { budgetMax: null, localiMin: null, mqMin: 60, zone: ["Isola, Milano"], interessi: { balcone: 8 } });
+  // quelli aggiunti con i parametri nuovi: tutti neutri finché la persona non li imposta
+  assert.deepEqual({ budgetMin: p.budgetMin, localiMax: p.localiMax, mqMax: p.mqMax, tipologia: p.tipologia, luoghi: p.luoghi }, { budgetMin: null, localiMax: null, mqMax: null, tipologia: null, luoghi: [] });
+  assert.deepEqual(p.criteri, [{ chiave: "balcone", necessaria: false, peso: 8, valore: null }]);
   assert.equal(profiloRicercaDaRighe({ budget_max: null, locali_min: null, mq_min: null }, null, undefined).zone.length, 0);
 });

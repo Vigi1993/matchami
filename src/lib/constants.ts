@@ -17,6 +17,7 @@ export const ATTR_VOCAB = [
   { key: "boxAuto", label: "Box auto / posto auto" },
   { key: "cantina", label: "Cantina / ripostiglio" },
   { key: "arredato", label: "Arredato" },
+  { key: "animaliAmmessi", label: "Animali ammessi" },
 ] as const;
 
 // Punto di partenza: finché non ci sono ancora annunci veri nel database,
@@ -47,4 +48,26 @@ export const TAG_RECENSIONE = [
   "Rispettoso del vicinato",
   "Segnala subito i problemi",
   "Rinnoverei il contratto",
+] as const;
+
+/** Cosa si cerca (e cosa si affitta). Il posto letto è previsto ma non ancora disponibile. */
+export const TIPOLOGIE = [
+  { id: "appartamento", label: "Appartamento", disponibile: true },
+  { id: "villa", label: "Villa", disponibile: true },
+  { id: "posto_letto", label: "Posto letto", disponibile: false },
+] as const;
+
+/** I tipi di contratto di locazione ad uso abitativo che un proprietario può proporre. */
+export const TIPI_CONTRATTO = [
+  { id: "libero_4_4", label: "4+4 libero" },
+  { id: "concordato_3_2", label: "3+2 concordato" },
+  { id: "transitorio", label: "Transitorio" },
+  { id: "studenti", label: "Studenti universitari" },
+] as const;
+
+export const RISCALDAMENTI = [
+  { id: "autonomo", label: "Autonomo" },
+  { id: "centralizzato", label: "Centralizzato" },
+  { id: "teleriscaldamento", label: "Teleriscaldamento" },
+  { id: "pompa_di_calore", label: "Pompa di calore" },
 ] as const;

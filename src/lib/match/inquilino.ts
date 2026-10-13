@@ -1,4 +1,3 @@
-import { ATTR_VOCAB } from "../constants";
 import {
   CURVA_BUDGET,
   PENALITA,
@@ -8,9 +7,11 @@ import {
   TOLLERANZA_BUDGET,
 } from "./config";
 import { etichettaPer, euro, limita } from "./comuni";
+import { criteriDaInteressi, normalizzaCriteriRicerca, valutaCriterio } from "./criteri-ricerca";
 import type {
   AnnuncioPerMatch,
   Fascia,
+  MotivoEsclusione,
   ProfiloRicerca,
   RisultatoInquilino,
   VoceCriterio,
@@ -34,17 +35,25 @@ const EPS = 1e-9;
  *  - dato mancante nell'ANNUNCIO (locali, metratura): punti neutri e un
  *    avviso, senza cambiare fascia. L'inquilino non può compilare
  *    l'annuncio e non va punito;
- *  - caratteristica non spuntata nell'annuncio: considerata assente.
+ *  - caratteristica sì/no non spuntata nell'annuncio: considerata assente.
  *    Non si distingue "assente" da "non compilata" perché il database
- *    non conserva la differenza.
+ *    non conserva la differenza;
+ *  - caratteristica CON VALORE (bagni, piano…) che l'annuncio non indica:
+ *    punti neutri e un avviso; se era NECESSARIA la casa resta ma "oltre
+ *    la ricerca", segnata (mai data per buona, mai nascosta per una
+ *    dimenticanza del proprietario).
+ *
+ * Una caratteristica NECESSARIA che l'annuncio non rispetta lo fa
+ * SPARIRE dal mazzo (fascia `escluso`, motivo `necessaria`). Anche una
+ * tipologia diversa da quella cercata lo esclude.
  */
 export function calcolaMatchInquilino(
   annuncio: AnnuncioPerMatch,
   profilo: ProfiloRicerca
 ): RisultatoInquilino {
-  const interessi = profilo.interessi ?? {};
-  const chiaviInteressi = Object.keys(interessi);
-  const haCaratteristiche = chiaviInteressi.length > 0;
+  // Se c'è l'elenco nuovo è l'unico che si legge; altrimenti i vecchi interessi, tutti opzionali e sì/no.
+  const caratteristiche = profilo.criteri !== undefined ? normalizzaCriteriRicerca(profilo.criteri) : criteriDaInteressi(profilo.interessi);
+  const haCaratteristiche = caratteristiche.some((c) => !c.necessaria);
   const W = haCaratteristiche
     ? PESI_INQUILINO
     : PESI_INQUILINO_SENZA_CARATTERISTICHE;
@@ -56,10 +65,36 @@ export function calcolaMatchInquilino(
   const criteri: VoceCriterio[] = [];
   const motivi: string[] = [];
   const avvisi: string[] = [];
+  const motiviEsclusione: MotivoEsclusione[] = [];
+  const escludi = (m: MotivoEsclusione) => {
+    escluso = true;
+    if (!motiviEsclusione.includes(m)) motiviEsclusione.push(m);
+  };
+
+  // ---------------- Tipologia: un filtro netto ----------------
+  if (profilo.tipologia != null && (annuncio.tipologia ?? "appartamento") !== profilo.tipologia) escludi("tipologia");
 
   // ---------------- Budget ----------------
-  if (profilo.budgetMax === null) {
+  const bMin = profilo.budgetMin ?? null;
+  const etichettaBudget =
+    profilo.budgetMax === null
+      ? bMin === null
+        ? "Budget"
+        : `Budget da ${euro(bMin)}`
+      : bMin === null
+        ? `Budget ${euro(profilo.budgetMax)}`
+        : `Budget ${euro(bMin)} – ${euro(profilo.budgetMax)}`;
+  if (profilo.budgetMax === null && bMin === null) {
     punti += W.budget;
+  } else if (bMin !== null && annuncio.prezzo < bMin) {
+    // sotto il minimo: la casa resta, ma oltre la ricerca
+    punti += W.budget * PENALITA.budgetSottoMinimo;
+    fuoriRicerca = true;
+    motivi.push("Sotto il tuo budget minimo");
+    criteri.push({ chiave: "budget", etichetta: etichettaBudget, stato: "no", dettaglio: `${euro(annuncio.prezzo)} al mese` });
+  } else if (profilo.budgetMax === null) {
+    punti += W.budget;
+    criteri.push({ chiave: "budget", etichetta: etichettaBudget, stato: "ok", dettaglio: `${euro(annuncio.prezzo)} al mese` });
   } else {
     const B = profilo.budgetMax;
     const p = annuncio.prezzo;
@@ -80,22 +115,33 @@ export function calcolaMatchInquilino(
         fuoriRicerca = true;
         motivi.push(`Oltre il tuo budget del ${pct}%`);
       } else {
-        escluso = true;
+        escludi("budget");
       }
     }
 
     criteri.push({
       chiave: "budget",
-      etichetta: `Budget ${euro(B)}`,
+      etichetta: etichettaBudget,
       stato: p <= B ? "ok" : "no",
       dettaglio: `${euro(p)} al mese`,
     });
   }
 
   // ---------------- Zona ----------------
-  if (profilo.zone.length === 0) {
+  const luoghiScelti = profilo.luoghi ?? [];
+  const antenatiAnnuncio = annuncio.antenati ?? [];
+  if (luoghiScelti.length > 0 && antenatiAnnuncio.length === 0 && profilo.zone.length === 0) {
+    // si cerca in certi luoghi ma l'annuncio non è collegato a nessun luogo: non si può dire né sì né no
+    punti += W.zona * PUNTI_DATO_MANCANTE;
+    avvisi.push("Zona dell'annuncio non riconosciuta");
+    criteri.push({ chiave: "zona", etichetta: "Zona preferita", stato: "non_indicato" });
+  } else if (luoghiScelti.length === 0 && profilo.zone.length === 0) {
     punti += W.zona;
-  } else if (profilo.zone.includes(annuncio.zona)) {
+  } else if (
+    luoghiScelti.length > 0 && antenatiAnnuncio.length > 0
+      ? luoghiScelti.some((id) => antenatiAnnuncio.includes(id))
+      : profilo.zone.includes(annuncio.zona)
+  ) {
     punti += W.zona;
     criteri.push({ chiave: "zona", etichetta: "Zona preferita", stato: "ok" });
   } else {
@@ -111,96 +157,85 @@ export function calcolaMatchInquilino(
   }
 
   // ---------------- Locali ----------------
-  if (profilo.localiMin === null) {
+  const lMin = profilo.localiMin;
+  const lMax = profilo.localiMax ?? null;
+  const etichettaLocali =
+    lMax === null ? `${lMin}+ locali` : lMin === null ? `fino a ${lMax} locali` : lMin === lMax ? `${lMin} locali` : `${lMin}–${lMax} locali`;
+  if (lMin === null && lMax === null) {
     punti += W.locali;
   } else if (annuncio.locali === null) {
     punti += W.locali * PUNTI_DATO_MANCANTE;
     avvisi.push("Numero di locali non indicato dal proprietario");
-    criteri.push({
-      chiave: "locali",
-      etichetta: `${profilo.localiMin}+ locali`,
-      stato: "non_indicato",
-    });
-  } else if (annuncio.locali >= profilo.localiMin) {
-    punti += W.locali;
-    criteri.push({
-      chiave: "locali",
-      etichetta: `${profilo.localiMin}+ locali`,
-      stato: "ok",
-    });
-  } else {
+    criteri.push({ chiave: "locali", etichetta: etichettaLocali, stato: "non_indicato" });
+  } else if (lMin !== null && annuncio.locali < lMin) {
     punti += W.locali * PENALITA.localiSotto;
     fuoriRicerca = true;
     motivi.push("Meno locali del tuo minimo");
-    criteri.push({
-      chiave: "locali",
-      etichetta: `${profilo.localiMin}+ locali`,
-      stato: "no",
-      dettaglio: `${annuncio.locali} locali`,
-    });
+    criteri.push({ chiave: "locali", etichetta: etichettaLocali, stato: "no", dettaglio: `${annuncio.locali} locali` });
+  } else if (lMax !== null && annuncio.locali > lMax) {
+    punti += W.locali * PENALITA.localiSopra;
+    fuoriRicerca = true;
+    motivi.push("Più locali del tuo massimo");
+    criteri.push({ chiave: "locali", etichetta: etichettaLocali, stato: "no", dettaglio: `${annuncio.locali} locali` });
+  } else {
+    punti += W.locali;
+    criteri.push({ chiave: "locali", etichetta: etichettaLocali, stato: "ok" });
   }
 
   // ---------------- Metratura ----------------
-  if (profilo.mqMin === null) {
+  const qMin = profilo.mqMin;
+  const qMax = profilo.mqMax ?? null;
+  const etichettaMq = qMax === null ? `${qMin}+ m²` : qMin === null ? `fino a ${qMax} m²` : `${qMin}–${qMax} m²`;
+  if (qMin === null && qMax === null) {
     punti += W.mq;
   } else if (annuncio.mq === null) {
     punti += W.mq * PUNTI_DATO_MANCANTE;
     avvisi.push("Metratura non indicata dal proprietario");
-    criteri.push({
-      chiave: "mq",
-      etichetta: `${profilo.mqMin}+ m²`,
-      stato: "non_indicato",
-    });
-  } else if (annuncio.mq >= profilo.mqMin) {
-    punti += W.mq;
-    criteri.push({
-      chiave: "mq",
-      etichetta: `${profilo.mqMin}+ m²`,
-      stato: "ok",
-    });
-  } else {
-    const rapporto = annuncio.mq / profilo.mqMin;
-    punti += Math.max(
-      0,
-      W.mq * rapporto - W.mq * PENALITA.mqSottoDetrazione
-    );
+    criteri.push({ chiave: "mq", etichetta: etichettaMq, stato: "non_indicato" });
+  } else if (qMin !== null && annuncio.mq < qMin) {
+    const rapporto = annuncio.mq / qMin;
+    punti += Math.max(0, W.mq * rapporto - W.mq * PENALITA.mqSottoDetrazione);
     fuoriRicerca = true;
     motivi.push("Sotto la tua metratura minima");
-    criteri.push({
-      chiave: "mq",
-      etichetta: `${profilo.mqMin}+ m²`,
-      stato: "no",
-      dettaglio: `${annuncio.mq} m²`,
-    });
+    criteri.push({ chiave: "mq", etichetta: etichettaMq, stato: "no", dettaglio: `${annuncio.mq} m²` });
+  } else if (qMax !== null && annuncio.mq > qMax) {
+    punti += W.mq * PENALITA.mqSopra;
+    fuoriRicerca = true;
+    motivi.push("Sopra la tua metratura massima");
+    criteri.push({ chiave: "mq", etichetta: etichettaMq, stato: "no", dettaglio: `${annuncio.mq} m²` });
+  } else {
+    punti += W.mq;
+    criteri.push({ chiave: "mq", etichetta: etichettaMq, stato: "ok" });
   }
 
   // ---------------- Caratteristiche ----------------
-  if (haCaratteristiche) {
-    const attributi = annuncio.attributi ?? {};
-    const totale = chiaviInteressi.reduce((s, k) => s + interessi[k], 0);
-    let ottenuto = 0;
-
-    // prima nell'ordine del vocabolario, poi eventuali chiavi sconosciute
-    const ordinate = [
-      ...ATTR_VOCAB.map((a) => a.key as string).filter((k) =>
-        chiaviInteressi.includes(k)
-      ),
-      ...chiaviInteressi.filter(
-        (k) => !ATTR_VOCAB.some((a) => (a.key as string) === k)
-      ),
-    ];
-
-    for (const k of ordinate) {
-      const presente = !!attributi[k];
-      if (presente) ottenuto += interessi[k];
-      criteri.push({
-        chiave: k,
-        etichetta: ATTR_VOCAB.find((a) => a.key === k)?.label ?? k,
-        stato: presente ? "ok" : "no",
-      });
+  // Le necessarie non danno punti: sono un cancello (non rispettata = la casa sparisce). Le opzionali pesano.
+  const totalePesi = caratteristiche.filter((c) => !c.necessaria).reduce((somma, c) => somma + c.peso, 0);
+  let ottenuto = 0;
+  for (const c of caratteristiche) {
+    const v = valutaCriterio(c, annuncio);
+    criteri.push({
+      chiave: c.chiave,
+      etichetta: v.etichetta,
+      stato: v.stato,
+      ...(v.dettaglio ? { dettaglio: v.dettaglio } : {}),
+      ...(c.necessaria ? { obbligatorio: true } : {}),
+    });
+    if (c.necessaria) {
+      if (v.stato === "no") escludi("necessaria");
+      else if (v.stato === "non_indicato") {
+        // il proprietario non l'ha indicato: non si nasconde la casa, ma non si dà per buona
+        fuoriRicerca = true;
+        motivi.push(`${v.etichetta}: non indicato dal proprietario`);
+        avvisi.push(`${v.etichetta}: dato non indicato dal proprietario`);
+      }
+    } else if (v.stato === "ok") ottenuto += c.peso;
+    else if (v.stato === "non_indicato") {
+      ottenuto += c.peso * PUNTI_DATO_MANCANTE;
+      avvisi.push(`${v.etichetta}: dato non indicato dal proprietario`);
     }
-    if (totale > 0) punti += W.caratteristiche * (ottenuto / totale);
   }
+  if (haCaratteristiche && totalePesi > 0) punti += W.caratteristiche * (ottenuto / totalePesi);
 
   const punteggio = limita(punti);
   const fascia: Fascia = escluso
@@ -217,6 +252,7 @@ export function calcolaMatchInquilino(
     criteri,
     motivi,
     avvisi,
+    motiviEsclusione,
   };
 }
 
