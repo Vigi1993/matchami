@@ -192,12 +192,14 @@ export type VoceCandidato = {
   match: RisultatoProprietario;
   /** punteggio di affidabilità, solo per gli spareggi (D4) */
   affidabilita: number | null;
+  /** le recensioni, a parità di tutto il resto: prima la media più alta, poi chi ne ha di più */
+  recensioni?: { numero: number; media: number | null } | null;
 };
 
 /**
  * Ordine dei candidati di un annuncio: prima chi soddisfa tutti i
- * criteri obbligatori, poi per percentuale decrescente, e a parità per
- * affidabilità decrescente.
+ * criteri obbligatori, poi per percentuale decrescente, a parità per
+ * affidabilità decrescente e, ancora a parità, per recensioni.
  *
  * L'affidabilità qui NON entra nella percentuale: è una proprietà della
  * persona, uguale per ogni casa, e si usa solo per decidere tra pari.
@@ -212,7 +214,13 @@ export function confrontaCandidati(
   const pb = b.match.punteggio ?? -1;
   if (pa !== pb) return pb - pa;
 
-  return (b.affidabilita ?? -1) - (a.affidabilita ?? -1);
+  if ((a.affidabilita ?? -1) !== (b.affidabilita ?? -1)) return (b.affidabilita ?? -1) - (a.affidabilita ?? -1);
+
+  // ultimo spareggio: le recensioni (stelle a parte dal punteggio)
+  const ma = a.recensioni?.media ?? -1;
+  const mb = b.recensioni?.media ?? -1;
+  if (ma !== mb) return mb - ma;
+  return (b.recensioni?.numero ?? 0) - (a.recensioni?.numero ?? 0);
 }
 
 export function ordinaCandidati<T extends VoceCandidato>(voci: T[]): T[] {

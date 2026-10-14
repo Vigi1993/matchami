@@ -3,6 +3,9 @@
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { AffidabilitaResult } from "@/lib/affidabilita";
+import type { RiepilogoRecensioni } from "@/lib/recensioni";
+import type { TenantProfile } from "@/lib/types";
+import { DatiPersonaliSheet } from "@/components/DatiPersonaliSheet";
 import type { ListingConMatch } from "@/lib/types";
 import { TOLLERANZA_BUDGET, statoMazzo } from "@/lib/match";
 import type { ProfiloRicerca } from "@/lib/match";
@@ -42,6 +45,8 @@ const SOGLIA_TOCCO = 8; // sotto questo spostamento è un tocco, non un trascina
 
 export function HomeClient({
   affidabilita,
+  recensioni,
+  tenant,
   listings,
   esclusi,
   mostraMatch,
@@ -51,6 +56,10 @@ export function HomeClient({
   nascostiPerNecessarie = 0,
 }: {
   affidabilita: AffidabilitaResult;
+  /** le recensioni dei proprietari, a parte dal punteggio */
+  recensioni: RiepilogoRecensioni;
+  /** i dati dell'inquilino (per la scheda «Modifica dati») */
+  tenant: TenantProfile;
   /** la ricerca impostata: budget, taglio, zone e caratteristiche */
   ricerca: ProfiloRicerca;
   /** i luoghi che si possono cercare (provincia, città, quartiere) */
@@ -89,6 +98,7 @@ export function HomeClient({
   const startPos = useRef({ x: 0, y: 0 });
   const router = useRouter();
   const [schedaPunteggio, setSchedaPunteggio] = useState(false);
+  const [schedaDati, setSchedaDati] = useState(false);
   const [schedaRicerca, setSchedaRicerca] = useState(false);
 
   // Quando la ricerca CAMBIA (l'ha modificata la persona da qui) il mazzo si ricomincia con quello nuovo, in ordine.
@@ -292,21 +302,21 @@ export function HomeClient({
 
       {/* ---- In alto: il punteggio (si tocca per vedere da cosa è fatto) e le case della ricerca ---- */}
       <div className="home-intro">
-        <button
-          type="button"
-          className="hi-punteggio"
-          onClick={() => setSchedaPunteggio(true)}
-          aria-label={`Affidabilità ${affidabilita.punteggio} su 100, ${affidabilita.label}. Scopri come si calcola`}
-        >
+        <div className="hi-punteggio" role="group" aria-label={`Affidabilità ${affidabilita.punteggio} su 100, ${affidabilita.label}`}>
           <AnelloPunteggio punteggio={affidabilita.punteggio} />
           <span className="hi-punteggio-testo">
             <span className="hi-punteggio-titolo">La tua affidabilità</span>
             <b>{affidabilita.label}</b>
           </span>
-          <span className="hi-punteggio-cta" aria-hidden>
-            Come si calcola ›
+          <span className="hi-punteggio-azioni">
+            <button type="button" className="hi-azione" onClick={() => setSchedaPunteggio(true)}>
+              Come si calcola
+            </button>
+            <button type="button" className="hi-azione" onClick={() => setSchedaDati(true)}>
+              Modifica dati
+            </button>
           </span>
-        </button>
+        </div>
         <div className="hi-ricerca">
           <div className="hi-ricerca-testo">
             <b>{testoCase.principale}</b>
@@ -553,12 +563,28 @@ export function HomeClient({
       <Sheet open={schedaPunteggio} onClose={() => setSchedaPunteggio(false)} title="Il tuo voto di affidabilità">
         <SchedaAffidabilita
           affidabilita={affidabilita}
+          recensioni={recensioni}
           onApri={(sezione) => {
             setSchedaPunteggio(false);
-            router.push(`/profilo?apri=${sezione}`);
+            // i dati si cambiano qui; la verifica del reddito ha la sua pagina (carica i documenti)
+            if (sezione === "dati") setSchedaDati(true);
+            else router.push("/profilo?apri=verifica");
           }}
         />
       </Sheet>
+
+      {/* Come la ricerca: montata solo quando è aperta, così ogni apertura parte dai dati di adesso. */}
+      {schedaDati && (
+        <DatiPersonaliSheet
+          open
+          onClose={() => setSchedaDati(false)}
+          tenant={tenant}
+          onSalvata={() => {
+            setSchedaDati(false);
+            setAvviso({ errore: false, testo: "Dati aggiornati." });
+          }}
+        />
+      )}
 
       {/* Montata solo quando è aperta: ogni apertura parte dai valori di adesso, e quando i dati nuovi arrivano
           non viene smontata prima di aver detto «salvato». */}

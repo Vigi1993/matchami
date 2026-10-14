@@ -584,8 +584,7 @@ test("senza reddito del nucleo il criterio sul reddito risulta 'non indicato'", 
     criteri: [{ chiave: "redditoCanone", peso: 5, modo: "obbligatorio" }],
     canone: 900,
     profilo: profiloDb({ reddito_nucleo: 0 }),
-    mediaRecensioni: null,
-    numeroRecensioni: 0,
+    recensioni: { numero: 0, media: null },
   }).match;
   assert.equal(r.criteri[0].stato, "non_indicato");
   assert.equal(r.bloccato, true);
@@ -602,7 +601,7 @@ test("completezza del profilo personale: otto campi, nessuna zona, e animali e n
 
 test("valutaCandidato: affidabilità accanto al match, mai dentro", () => {
   const criteri = [{ chiave: "garante", peso: 5, modo: "preferenziale" }];
-  const base = { criteri, canone: 1000, mediaRecensioni: null, numeroRecensioni: 0 };
+  const base = { criteri, canone: 1000, recensioni: { numero: 0, media: null } };
   const senza = valutaCandidato({ ...base, profilo: profiloDb({ verificato: false }) });
   const con = valutaCandidato({ ...base, profilo: profiloDb({ verificato: true }) });
 
@@ -615,8 +614,7 @@ test("il canone reale dell'annuncio decide il criterio sul reddito", () => {
     criteri: [{ chiave: "redditoCanone", peso: 5, modo: "preferenziale" }],
     canone,
     profilo: profiloDb({ reddito_nucleo: 3000 }),
-    mediaRecensioni: null,
-    numeroRecensioni: 0,
+    recensioni: { numero: 0, media: null },
   }).match.criteri[0].stato;
   assert.equal(val(900), "ok");   // 30%
   assert.equal(val(1500), "no");  // 50%
@@ -625,7 +623,7 @@ test("il canone reale dell'annuncio decide il criterio sul reddito", () => {
 test("leggiFotografia: accetta quella salvata, rifiuta forme rovinate", () => {
   const v = valutaCandidato({
     criteri: [{ chiave: "garante", peso: 5, modo: "obbligatorio" }],
-    canone: 1000, profilo: profiloDb(), mediaRecensioni: null, numeroRecensioni: 0,
+    canone: 1000, profilo: profiloDb(), recensioni: { numero: 0, media: null },
   });
   // come esce dal database: serializzata e riletta. JSON toglie le chiavi
   // `undefined`, quindi il confronto è con la versione già serializzata.

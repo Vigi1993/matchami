@@ -1,31 +1,26 @@
 "use client";
 
+import { useState } from "react";
 import { RigaNovita } from "@/components/RigaNovita";
+import { DatiPersonaliSheet } from "@/components/DatiPersonaliSheet";
 import { RigaPreferiti } from "@/components/RigaPreferiti";
 import { rigaProfilo } from "@/lib/verifica-inquilino";
-import { useActionState, useState } from "react";
 import { Sheet } from "@/components/Sheet";
-import { LAVORO_VOCAB } from "@/lib/constants";
 import {
   computeAffidabilita,
   computeProfileCompleteness,
 } from "@/lib/affidabilita";
 import type { TenantProfile, Invito } from "@/lib/types";
-import { updateDatiPersonali, type SaveState } from "./actions";
 import { logout } from "@/app/login/actions";
 import { PageContainer } from "@/components/ui/PageContainer";
-import { Chip } from "@/components/ui/Chip";
-import { Field } from "@/components/ui/Field";
-import { Stepper } from "@/components/ui/Stepper";
-import { SaveButton } from "@/components/ui/SaveButton";
 import { RicercaSheet } from "@/components/RicercaSheet";
 import { SchedaAffidabilita } from "@/components/SchedaAffidabilita";
+import { testoRecensioni, type RiepilogoRecensioni } from "@/lib/recensioni";
 import type { SezioneProfilo } from "@/lib/home";
 import type { Luogo } from "@/lib/luoghi";
 import type { ProfiloRicerca } from "@/lib/match";
 import { PrivacySheet } from "@/components/PrivacySheet";
 import { FaqSheet } from "@/components/FaqSheet";
-import { AvatarUpload } from "@/components/AvatarUpload";
 import { AccountSheet } from "@/components/AccountSheet";
 import { InvitaProprietarioSheet } from "@/components/InvitaProprietarioSheet";
 import {
@@ -57,8 +52,8 @@ type Props = {
   ricerca: ProfiloRicerca;
   /** i luoghi che si possono cercare */
   luoghi: Luogo[];
-  mediaRecensioni: number | null;
-  numeroRecensioni: number;
+  /** le recensioni dei proprietari: la media e quante sono (a parte dal punteggio) */
+  recensioni: RiepilogoRecensioni;
   consensoMarketingIniziale: boolean;
   consensoTerziIniziale: boolean;
   /** la scheda da aprire subito (da un collegamento con ?apri=...), se è tra quelle ammesse */
@@ -77,8 +72,7 @@ export function ProfiloClient({
   verificaPanel,
   ricerca,
   luoghi,
-  mediaRecensioni,
-  numeroRecensioni,
+  recensioni,
   consensoMarketingIniziale,
   consensoTerziIniziale,
   aperturaIniziale = null,
@@ -102,10 +96,6 @@ export function ProfiloClient({
     protestato: tenant.protestato,
     garante: tenant.garante,
     fideiussione: tenant.fideiussione,
-    professione: tenant.professione,
-    reddito_mensile: tenant.reddito_mensile,
-    mediaRecensioni,
-    numeroRecensioni,
   });
 
   const completezza = computeProfileCompleteness({
@@ -143,11 +133,7 @@ export function ProfiloClient({
         color="var(--gold)"
         icon={<IconStella className="fill-white stroke-none" />}
         title={`${affidabilita.punteggio}/100 · Affidabilità ${affidabilita.label}`}
-        subtitle={
-          affidabilita.hasRecensioni
-            ? "Basato su recensioni dei precedenti affitti e verifiche sul tuo stato economico."
-            : "Nessuna recensione ancora: il punteggio si basa per ora solo sulle verifiche economiche."
-        }
+        subtitle={`Reddito verificato, protesti e garante. Recensioni, a parte: ${testoRecensioni(recensioni)}.`}
         cta="Vedi il dettaglio"
         onClick={() => setSheetAperta("affidabilita")}
       />
@@ -272,7 +258,7 @@ export function ProfiloClient({
         onClose={() => setSheetAperta(null)}
         title="Il tuo voto di affidabilità"
       >
-        <SchedaAffidabilita affidabilita={affidabilita} onApri={(sezione) => setSheetAperta(sezione)} />
+        <SchedaAffidabilita affidabilita={affidabilita} recensioni={recensioni} onApri={(sezione) => setSheetAperta(sezione)} />
       </Sheet>
 
       {/* ---- Sheet: I tuoi dati ---- */}
@@ -360,187 +346,5 @@ function Row({
         <span className="pv-readmore">{cta}</span>
       </div>
     </button>
-  );
-}
-
-function DatiPersonaliSheet({
-  open,
-  onClose,
-  tenant,
-}: {
-  open: boolean;
-  onClose: () => void;
-  tenant: TenantProfile;
-}) {
-  const [state, formAction, pending] = useActionState<SaveState, FormData>(
-    updateDatiPersonali,
-    null
-  );
-
-  const [professione, setProfessione] = useState(tenant.professione ?? "");
-  const [reddito, setReddito] = useState(tenant.reddito_mensile ?? 0);
-  const [redditoNucleo, setRedditoNucleo] = useState(tenant.reddito_nucleo ?? 0);
-  const [garante, setGarante] = useState<boolean | null>(tenant.garante);
-  const [protestato, setProtestato] = useState<boolean | null>(
-    tenant.protestato
-  );
-  const [fideiussione, setFideiussione] = useState<boolean | null>(
-    tenant.fideiussione
-  );
-  const [nucleo, setNucleo] = useState(tenant.nucleo ?? "");
-  const [figli, setFigli] = useState(tenant.figli);
-  const [redditiNucleo, setRedditiNucleo] = useState(tenant.redditi_nucleo);
-  const [animali, setAnimali] = useState<boolean | null>(tenant.animali);
-  const [presentazione, setPresentazione] = useState(
-    tenant.presentazione ?? ""
-  );
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(
-    tenant.avatar_url
-  );
-
-  return (
-    <Sheet open={open} onClose={onClose} title="I tuoi dati">
-      <p className="sheet-sub">
-        Queste informazioni aiutano i proprietari a valutare la tua
-        candidatura.
-      </p>
-      <form action={formAction}>
-        <input type="hidden" name="professione" value={professione} />
-        <input type="hidden" name="reddito_mensile" value={reddito} />
-        <input type="hidden" name="reddito_nucleo" value={redditoNucleo} />
-        <input type="hidden" name="garante" value={String(garante)} />
-        <input type="hidden" name="protestato" value={String(protestato)} />
-        <input
-          type="hidden"
-          name="fideiussione"
-          value={String(fideiussione)}
-        />
-        <input type="hidden" name="nucleo" value={nucleo} />
-        <input type="hidden" name="figli" value={figli} />
-        <input type="hidden" name="redditi_nucleo" value={redditiNucleo} />
-        <input type="hidden" name="animali" value={String(animali)} />
-        <input type="hidden" name="avatar_url" value={avatarUrl ?? ""} />
-
-        <Field label="La tua foto">
-          <AvatarUpload value={avatarUrl} onChange={setAvatarUrl} />
-        </Field>
-
-        <Field label="Situazione lavorativa">
-          <div className="chip-row">
-            {LAVORO_VOCAB.map((v) => (
-              <Chip
-                key={v}
-                label={v}
-                active={professione === v}
-                onClick={() => setProfessione(v)}
-              />
-            ))}
-          </div>
-        </Field>
-
-        <Field label={`Reddito netto mensile · €${reddito.toLocaleString("it-IT")}`}>
-          <input
-            type="range"
-            min={0}
-            max={8000}
-            step={50}
-            value={reddito}
-            onChange={(e) => setReddito(Number(e.target.value))}
-            className="w-full"
-          />
-        </Field>
-
-        <Field label="Hai un garante disponibile?">
-          <div className="chip-row">
-            <Chip label="Sì" active={garante === true} onClick={() => setGarante(true)} />
-            <Chip label="No" active={garante === false} onClick={() => setGarante(false)} />
-          </div>
-        </Field>
-
-        <Field label="Hai protesti o segnalazioni in centrale rischi?">
-          <div className="chip-row">
-            <Chip label="No" active={protestato === false} onClick={() => setProtestato(false)} />
-            <Chip label="Sì" active={protestato === true} onClick={() => setProtestato(true)} />
-          </div>
-        </Field>
-
-        <Field label="Disponibile a firmare una fideiussione?">
-          <div className="chip-row">
-            <Chip label="Sì" active={fideiussione === true} onClick={() => setFideiussione(true)} />
-            <Chip label="No" active={fideiussione === false} onClick={() => setFideiussione(false)} />
-          </div>
-        </Field>
-
-        <Field label="Nucleo familiare">
-          <div className="chip-row">
-            <Chip label="Single" active={nucleo === "single"} onClick={() => setNucleo("single")} />
-            <Chip label="Coppia" active={nucleo === "coppia"} onClick={() => setNucleo("coppia")} />
-          </div>
-        </Field>
-
-        <Field label="Figli a carico">
-          <Stepper value={figli} onChange={setFigli} min={0} max={8} />
-        </Field>
-
-        <Field label="Persone con reddito nel nucleo familiare">
-          <Stepper value={redditiNucleo} onChange={setRedditiNucleo} min={1} max={6} />
-        </Field>
-
-        <Field
-          label={
-            redditoNucleo > 0
-              ? `Reddito netto mensile di tutto il nucleo · €${redditoNucleo.toLocaleString("it-IT")}`
-              : "Reddito netto mensile di tutto il nucleo · non indicato"
-          }
-        >
-          <input
-            type="range"
-            min={0}
-            max={15000}
-            step={50}
-            value={redditoNucleo}
-            onChange={(e) => setRedditoNucleo(Number(e.target.value))}
-            className="w-full"
-          />
-          <p className="field-note">
-            La somma dei redditi di tutte le persone che vivono nella casa. I
-            proprietari lo usano per capire quanto pesa l&apos;affitto sul
-            vostro bilancio.
-          </p>
-          {reddito > 0 && redditoNucleo === 0 && (
-            <button
-              type="button"
-              className="redo-link"
-              style={{ marginTop: 8 }}
-              onClick={() => setRedditoNucleo(reddito)}
-            >
-              Vivo da solo: uso €{reddito.toLocaleString("it-IT")}
-            </button>
-          )}
-        </Field>
-
-        <Field label="Animali domestici?">
-          <div className="chip-row">
-            <Chip label="Sì" active={animali === true} onClick={() => setAnimali(true)} />
-            <Chip label="No" active={animali === false} onClick={() => setAnimali(false)} />
-          </div>
-        </Field>
-
-        <Field label="Presentati ai proprietari">
-          <textarea
-            name="presentazione"
-            value={presentazione}
-            onChange={(e) => setPresentazione(e.target.value)}
-            placeholder="Es. Coppia di professionisti, non fumatori, cerchiamo casa per fine mese..."
-            rows={4}
-            className="ob-textarea"
-          />
-        </Field>
-
-        {state?.error && <p className="note-error">{state.error}</p>}
-        {state?.ok && <p className="note-saved">Salvato — puoi chiudere.</p>}
-        <SaveButton pending={pending} />
-      </form>
-    </Sheet>
   );
 }

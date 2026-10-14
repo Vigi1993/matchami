@@ -1,4 +1,5 @@
 import { computeAffidabilita } from "../affidabilita";
+import { leggiRiepilogo, type RiepilogoRecensioni } from "../recensioni";
 import { calcolaMatchProprietario } from "./proprietario";
 import type {
   CriterioRichiesto,
@@ -71,6 +72,11 @@ export type ValutazioneCandidato = {
   match: RisultatoProprietario;
   /** punteggio di affidabilità della persona, valido per ogni casa */
   affidabilita: number;
+  /**
+   * le recensioni dei proprietari, a parte dal punteggio. Mancano nelle fotografie scattate prima che esistessero
+   * separate: chi le legge deve gestire l'assenza.
+   */
+  recensioni?: RiepilogoRecensioni;
 };
 
 /**
@@ -83,8 +89,7 @@ export function valutaCandidato(input: {
   /** il canone dell'annuncio */
   canone: number;
   profilo: ProfiloCandidato;
-  mediaRecensioni: number | null;
-  numeroRecensioni: number;
+  recensioni: RiepilogoRecensioni;
 }): ValutazioneCandidato {
   const { profilo } = input;
 
@@ -93,10 +98,6 @@ export function valutaCandidato(input: {
     protestato: profilo.protestato,
     garante: profilo.garante,
     fideiussione: profilo.fideiussione,
-    professione: profilo.professione,
-    reddito_mensile: profilo.reddito_mensile,
-    mediaRecensioni: input.mediaRecensioni,
-    numeroRecensioni: input.numeroRecensioni,
   }).punteggio;
 
   return {
@@ -106,6 +107,7 @@ export function valutaCandidato(input: {
       input.canone
     ),
     affidabilita,
+    recensioni: input.recensioni,
   };
 }
 
@@ -131,5 +133,7 @@ export function leggiFotografia(grezzo: unknown): ValutazioneCandidato | null {
   ) {
     return null;
   }
-  return { match: match as RisultatoProprietario, affidabilita };
+  // le recensioni sono facoltative (le fotografie vecchie non le hanno); se la forma non è giusta si ignorano
+  const recensioni = leggiRiepilogo((grezzo as Record<string, unknown>).recensioni);
+  return { match: match as RisultatoProprietario, affidabilita, ...(recensioni ? { recensioni } : {}) };
 }

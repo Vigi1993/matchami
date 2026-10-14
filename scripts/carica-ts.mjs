@@ -21,9 +21,12 @@ export function caricaTs(file) {
 
   const sorgente = fs.readFileSync(assoluto, "utf8");
   const { outputText } = ts.transpileModule(sorgente, {
+    fileName: assoluto,
     compilerOptions: {
       module: ts.ModuleKind.CommonJS,
       target: ts.ScriptTarget.ES2020,
+      // i componenti (.tsx) si disegnano con il runtime di React
+      jsx: ts.JsxEmit.ReactJSX,
     },
   });
 
@@ -31,10 +34,16 @@ export function caricaTs(file) {
   cache.set(assoluto, modulo);
 
   const richiedi = (spec) => {
-    if (!spec.startsWith(".")) return require(spec);
-    let p = path.resolve(path.dirname(assoluto), spec);
-    if (fs.existsSync(p + ".ts")) p += ".ts";
-    else if (fs.existsSync(path.join(p, "index.ts"))) p = path.join(p, "index.ts");
+    // l'alias @/ è la cartella src (come nel progetto)
+    const interno = spec.startsWith(".") || spec.startsWith("@/");
+    if (!interno) return require(spec);
+    let p = spec.startsWith("@/") ? path.join(radice, "src", spec.slice(2)) : path.resolve(path.dirname(assoluto), spec);
+    for (const estensione of [".ts", ".tsx"]) {
+      if (fs.existsSync(p + estensione)) return caricaTs(p + estensione);
+    }
+    for (const indice of ["index.ts", "index.tsx"]) {
+      if (fs.existsSync(path.join(p, indice))) return caricaTs(path.join(p, indice));
+    }
     return caricaTs(p);
   };
 

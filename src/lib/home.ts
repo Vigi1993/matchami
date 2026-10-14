@@ -17,12 +17,6 @@ export function sezioneProfilo(valore: unknown): SezioneProfilo | null {
   return typeof v === "string" && (SEZIONI_PROFILO_APRIBILI as readonly string[]).includes(v) ? (v as SezioneProfilo) : null;
 }
 
-/** Dove si va per completare una voce del punteggio. */
-export function sezionePerVoce(id: string): SezioneProfilo {
-  if (id === "verifica") return "verifica";
-  if (id === "recensioni") return "invito";
-  return "dati";
-}
 
 /** Un intervallo in poche parole: «Da 2 locali», «2–3 locali», «Fino a 3 locali». */
 function intervallo(min: number | null | undefined, max: number | null | undefined, unita: (n: number) => string, tra: (a: number, b: number) => string): string | null {

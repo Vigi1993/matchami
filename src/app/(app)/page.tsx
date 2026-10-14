@@ -4,6 +4,7 @@ import { OwnerHomeClient } from "./OwnerHomeClient";
 import { VerificaHome } from "./VerificaHome";
 import type { ImmobileVerifica } from "@/lib/verifica";
 import { computeAffidabilita } from "@/lib/affidabilita";
+import { riepilogoRecensioni } from "@/lib/recensioni";
 import { campiMatchDaRiga, haCriteriDiRicerca, preparaMazzo, profiloRicercaDaRighe } from "@/lib/match";
 import { mappaLuoghi, type Luogo } from "@/lib/luoghi";
 import type { ProfiloRicerca } from "@/lib/match";
@@ -53,11 +54,8 @@ async function TenantHome({ userId }: { userId: string }) {
     supabase.rpc("annunci_nascosti"),
   ]);
 
-  const numeroRecensioni = recensioni?.length ?? 0;
-  const mediaRecensioni =
-    numeroRecensioni > 0
-      ? recensioni!.reduce((s, r) => s + (r.voto as number), 0) / numeroRecensioni
-      : null;
+  // Le recensioni dei proprietari stanno a parte dal punteggio di affidabilità: si mostrano accanto.
+  const riepilogo = riepilogoRecensioni((recensioni ?? []).map((r) => r.voto));
 
   const tenantProfile = tenant as TenantProfile;
 
@@ -66,10 +64,6 @@ async function TenantHome({ userId }: { userId: string }) {
     protestato: tenantProfile.protestato,
     garante: tenantProfile.garante,
     fideiussione: tenantProfile.fideiussione,
-    professione: tenantProfile.professione,
-    reddito_mensile: tenantProfile.reddito_mensile,
-    mediaRecensioni,
-    numeroRecensioni,
   });
 
   // ---- Tutti gli annunci pubblicati che l'inquilino non ha già scelto ----
@@ -133,6 +127,8 @@ async function TenantHome({ userId }: { userId: string }) {
   return (
     <HomeClient
       affidabilita={affidabilita}
+      recensioni={riepilogo}
+      tenant={tenantProfile}
       listings={mazzo as unknown as ListingConMatch[]}
       esclusi={esclusiPerBudget}
       nascostiPerNecessarie={nascostiPerNecessarie}

@@ -1,5 +1,6 @@
 "use server";
 
+import { riepilogoRecensioni } from "@/lib/recensioni";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { criteriDaRighe, valutaCandidato } from "@/lib/match";
@@ -63,8 +64,7 @@ export async function valutaCandidatura(
           criteri: criteriDaRighe(righeCriteri as RigaCriterioDb[] | null),
           canone: listing.prezzo,
           profilo: profiloDaVista(vista),
-          mediaRecensioni: voti.length > 0 ? voti.reduce((a, b) => a + b, 0) / voti.length : null,
-          numeroRecensioni: voti.length,
+          recensioni: riepilogoRecensioni(voti),
         });
       }
     }

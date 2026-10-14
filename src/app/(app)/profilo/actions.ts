@@ -65,6 +65,7 @@ export async function updateDatiPersonali(
   if (error) return { error: error.message };
 
   revalidatePath("/profilo");
+  revalidatePath("/"); // la Home ricalcola il punteggio di affidabilità
   return { ok: true };
 }
 

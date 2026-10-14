@@ -1,3 +1,4 @@
+import { riepilogoRecensioni } from "@/lib/recensioni";
 import { VerificaRedditoPanel } from "@/components/VerificaRedditoPanel";
 import type { DocumentoInquilino } from "@/lib/verifica-inquilino";
 import { createClient } from "@/lib/supabase/server";
@@ -81,11 +82,8 @@ export default async function ProfiloPage({ searchParams }: { searchParams: Prom
   // La ricerca com'è salvata, e i luoghi che si possono cercare (per il completamento automatico)
   const ricerca = profiloRicercaDaRighe(tenant, zoneRows, interessiRows);
   const { data: luoghiRighe } = await supabase.from("luoghi").select("id, livello, nome, sigla, parent_id");
-  const numeroRecensioni = recensioni?.length ?? 0;
-  const mediaRecensioni =
-    numeroRecensioni > 0
-      ? recensioni!.reduce((s, r) => s + (r.voto as number), 0) / numeroRecensioni
-      : null;
+  // le recensioni stanno a parte dal punteggio di affidabilità
+  const riepilogo = riepilogoRecensioni((recensioni ?? []).map((r) => r.voto));
 
   // quanti annunci ha salvato (solo quelli ancora disponibili); se non si legge, zero
   const { data: numeroPreferiti } = await supabase.rpc("numero_preferiti");
@@ -122,8 +120,7 @@ export default async function ProfiloPage({ searchParams }: { searchParams: Prom
       }
       ricerca={ricerca}
       luoghi={(luoghiRighe ?? []) as Luogo[]}
-      mediaRecensioni={mediaRecensioni}
-      numeroRecensioni={numeroRecensioni}
+      recensioni={riepilogo}
       consensoMarketingIniziale={profile?.consenso_marketing ?? false}
       consensoTerziIniziale={profile?.consenso_terzi ?? false}
     />

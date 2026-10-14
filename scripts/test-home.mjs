@@ -8,98 +8,9 @@ import path from "node:path";
 import fs from "node:fs";
 import { caricaTs, radice } from "./carica-ts.mjs";
 
-const af = caricaTs(path.join(radice, "src", "lib", "affidabilita.ts"));
 const hm = caricaTs(path.join(radice, "src", "lib", "home.ts"));
 // con i ritorni a capo di Windows normalizzati
 const leggi = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8").replace(/\r\n/g, "\n");
-
-// ============================================================ il punteggio: nessun numero è cambiato
-/** La formula com'era PRIMA delle voci, riscritta qui a parte: il punteggio non deve essere cambiato per nessuna combinazione. */
-function oracolo(p) {
-  let s = 45;
-  if (p.verificato) s += 20;
-  if (p.protestato === false) s += 15;
-  if (p.protestato === true) s -= 30;
-  if (p.garante === true || p.fideiussione === true) s += 10;
-  if (p.numeroRecensioni > 0 && p.mediaRecensioni !== null) s += Math.round((p.mediaRecensioni - 3) * 6);
-  return Math.max(5, Math.min(99, Math.round(s)));
-}
-const tri = [null, false, true];
-const recensioni = [{ numeroRecensioni: 0, mediaRecensioni: null }, { numeroRecensioni: 1, mediaRecensioni: 1 }, { numeroRecensioni: 1, mediaRecensioni: 2 }, { numeroRecensioni: 2, mediaRecensioni: 2.5 }, { numeroRecensioni: 3, mediaRecensioni: 3 }, { numeroRecensioni: 2, mediaRecensioni: 3.5 }, { numeroRecensioni: 4, mediaRecensioni: 4.25 }, { numeroRecensioni: 5, mediaRecensioni: 5 }, { numeroRecensioni: 2, mediaRecensioni: null }];
-function* tutte() {
-  for (const verificato of [false, true]) for (const protestato of tri) for (const garante of tri) for (const fideiussione of tri) for (const r of recensioni)
-    yield { verificato, protestato, garante, fideiussione, professione: verificato ? "Designer" : null, reddito_mensile: garante ? 2600 : null, ...r };
-}
-
-test("punteggio: identico alla formula di prima per OGNI combinazione (486 casi), e l'etichetta segue le soglie", () => {
-  let n = 0;
-  for (const p of tutte()) {
-    const r = af.computeAffidabilita(p); n++;
-    assert.equal(r.punteggio, oracolo(p), JSON.stringify(p));
-    assert.equal(r.label, r.punteggio >= 85 ? "Eccellente" : r.punteggio >= 70 ? "Molto buona" : r.punteggio >= 50 ? "Buona" : "Da costruire", JSON.stringify(p));
-  }
-  assert.equal(n, 486);
-});
-
-test("voci: la somma dà il punteggio (stesso calcolo, nessuna divergenza possibile), e il limite si dice quando scatta", () => {
-  for (const p of tutte()) {
-    const r = af.computeAffidabilita(p); const somma = r.voci.reduce((s, v) => s + v.punti, 0);
-    assert.equal(somma, r.totaleGrezzo, JSON.stringify(p)); assert.equal(r.punteggio, Math.max(5, Math.min(99, Math.round(r.totaleGrezzo))));
-    assert.equal(r.limite, r.totaleGrezzo > 99 ? "massimo" : r.totaleGrezzo < 5 ? "minimo" : null, `${r.totaleGrezzo}`);
-  }
-});
-
-test("voci: sempre le stesse cinque, nell'ordine, con una coerenza interna tra stato, punti, potenziale e suggerimento", () => {
-  for (const p of tutte()) {
-    const r = af.computeAffidabilita(p); assert.deepEqual(r.voci.map((v) => v.id), ["base", "verifica", "protesti", "garanzia", "recensioni"]);
-    for (const v of r.voci) {
-      assert.ok(Number.isInteger(v.punti) && Number.isInteger(v.potenziale), `${v.id}: punti non interi`); assert.ok(v.etichetta.length > 3);
-      if (v.stato === "mancante") { assert.equal(v.punti, 0, `${v.id} mancante con punti`); assert.ok(v.potenziale > 0, `${v.id} mancante senza potenziale`); assert.equal(typeof v.suggerimento, "string"); }
-      else { assert.equal(v.potenziale, 0, `${v.id} ${v.stato} con potenziale`); assert.equal(v.suggerimento, null, `${v.id} ${v.stato} con suggerimento`); }
-      if (v.stato === "ottenuta") assert.ok(v.punti > 0, `${v.id} ottenuta senza punti`);
-      if (v.stato === "negativa") assert.ok(v.punti < 0, `${v.id} negativa senza punti negativi`);
-    }
-    assert.deepEqual(r.voci[0], { id: "base", etichetta: "Punto di partenza", punti: 45, stato: "neutra", potenziale: 0, suggerimento: null, nota: null });
-  }
-});
-
-test("voci: i punti di ogni voce sono quelli della formula (+20, +15 o −30, +10, e le recensioni da −12 a +12)", () => {
-  const base = { verificato: false, protestato: null, garante: null, fideiussione: null, professione: null, reddito_mensile: null, mediaRecensioni: null, numeroRecensioni: 0 };
-  const v = (o, id) => af.computeAffidabilita({ ...base, ...o }).voci.find((x) => x.id === id);
-  assert.equal(v({ verificato: true }, "verifica").punti, 20); assert.equal(v({}, "verifica").potenziale, 20);
-  assert.equal(v({ protestato: false }, "protesti").punti, 15); assert.equal(v({ protestato: true }, "protesti").punti, -30); assert.equal(v({}, "protesti").potenziale, 15); assert.equal(v({}, "protesti").stato, "mancante");
-  assert.equal(v({ garante: true }, "garanzia").punti, 10); assert.equal(v({ fideiussione: true }, "garanzia").punti, 10); assert.equal(v({ garante: false, fideiussione: false }, "garanzia").stato, "mancante");
-  for (const [media, atteso] of [[1, -12], [2, -6], [3, 0], [4, 6], [5, 12]]) assert.equal(v({ numeroRecensioni: 3, mediaRecensioni: media }, "recensioni").punti, atteso, `media ${media}`);
-  assert.equal(v({}, "recensioni").potenziale, 12, "con tutte a 5 stelle varrebbe +12 (il voto è da 1 a 5)"); assert.equal(v({ numeroRecensioni: 1, mediaRecensioni: 3 }, "recensioni").stato, "neutra");
-  assert.match(v({ numeroRecensioni: 1, mediaRecensioni: 4 }, "recensioni").nota, /^Media 4 su 5, 1 recensione$/); assert.match(v({ numeroRecensioni: 3, mediaRecensioni: 4.5 }, "recensioni").nota, /^Media 4,5 su 5, 3 recensioni$/);
-});
-
-test("il voto delle recensioni è da 1 a 5 nel database (da cui il +12 massimo mostrato)", () => {
-  assert.match(leggi("supabase", "migrations", "0001_init.sql"), /voto smallint not null check \(voto between 1 and 5\)/);
-});
-
-test("limiti: tutto in regola con 5 stelle somma 102 e il punteggio è 99; il peggio somma 3 e il punteggio è 5", () => {
-  const alto = af.computeAffidabilita({ verificato: true, protestato: false, garante: true, fideiussione: false, professione: "x", reddito_mensile: 1, mediaRecensioni: 5, numeroRecensioni: 2 }); assert.equal(alto.totaleGrezzo, 102); assert.equal(alto.punteggio, 99); assert.equal(alto.limite, "massimo");
-  const basso = af.computeAffidabilita({ verificato: false, protestato: true, garante: false, fideiussione: false, professione: null, reddito_mensile: null, mediaRecensioni: 1, numeroRecensioni: 2 }); assert.equal(basso.totaleGrezzo, 3); assert.equal(basso.punteggio, 5); assert.equal(basso.limite, "minimo");
-  assert.equal(af.PUNTI_BASE, 45); assert.equal(af.PUNTEGGIO_MINIMO, 5); assert.equal(af.PUNTEGGIO_MASSIMO, 99);
-});
-
-test("punteggio possibile: mai sotto l'attuale, mai oltre 99, e uguale alla somma con le voci mancanti completate", () => {
-  for (const p of tutte()) {
-    const r = af.computeAffidabilita(p); const possibile = af.punteggioPossibile(r); const guadagno = r.voci.reduce((s, v) => s + (v.stato === "mancante" ? v.potenziale : 0), 0);
-    assert.ok(possibile <= 99 && possibile >= 5, `${possibile}`); assert.equal(possibile, Math.max(5, Math.min(99, Math.round(r.totaleGrezzo + guadagno))));
-    if (r.punteggio < 99 || guadagno === 0) assert.ok(possibile >= r.punteggio, `${possibile} < ${r.punteggio}`);
-  }
-  const tutto = af.computeAffidabilita({ verificato: true, protestato: false, garante: true, fideiussione: false, professione: "x", reddito_mensile: 1, mediaRecensioni: 4, numeroRecensioni: 1 }); assert.equal(af.punteggioPossibile(tutto), tutto.punteggio, "con tutto fatto non c'è niente da guadagnare");
-});
-
-test("i controlli «dati che indichi» sono professione e reddito dichiarato, nei primi due posti (la scheda ne mostra solo quelli)", () => {
-  const con = af.computeAffidabilita({ verificato: false, protestato: null, garante: null, fideiussione: null, professione: "Designer", reddito_mensile: 2600, mediaRecensioni: null, numeroRecensioni: 0 });
-  assert.deepEqual(con.checks.slice(0, 2).map((c) => [c.ok, c.label]), [[true, "Designer"], [true, "Reddito dichiarato €2600/mese".replace("€2600", "€" + (2600).toLocaleString("it-IT"))]]);
-  const senza = af.computeAffidabilita({ verificato: false, protestato: null, garante: null, fideiussione: null, professione: null, reddito_mensile: null, mediaRecensioni: null, numeroRecensioni: 0 });
-  assert.deepEqual(senza.checks.slice(0, 2).map((c) => [c.ok, c.label]), [[false, "Situazione lavorativa da indicare"], [false, "Reddito da indicare"]]);
-  assert.equal(con.checks.length, 5);
-});
 
 // ============================================================ la ricerca e la Home: logica pura
 test("ricerca in una riga: budget, taglio e zone; vuota senza criteri; le zone si accorciano e si contano", () => {
@@ -135,10 +46,10 @@ test("collegamenti al Profilo: solo sezioni ammesse; qualunque altro valore non 
   for (const x of ["", "Verifica", "verifica ", " verifica", "account", "privacy", "faq", "__proto__", "constructor", "toString", "ricerca;x", "../x", "<script>", null, undefined, 5, {}, [], [""]]) assert.equal(hm.sezioneProfilo(x), null, JSON.stringify(x));
 });
 
-test("ogni voce del punteggio porta a una sezione ammessa, e quelle sezioni esistono davvero nel Profilo", () => {
-  const ids = af.computeAffidabilita({ verificato: false, protestato: null, garante: null, fideiussione: null, professione: null, reddito_mensile: null, mediaRecensioni: null, numeroRecensioni: 0 }).voci.map((v) => v.id);
-  for (const id of ids) assert.ok(hm.SEZIONI_PROFILO_APRIBILI.includes(hm.sezionePerVoce(id)), id); assert.deepEqual(["verifica", "protesti", "garanzia", "recensioni"].map(hm.sezionePerVoce), ["verifica", "dati", "dati", "invito"]);
-  const p = leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx"); const unione = p.match(/useState<([\s\S]*?)\n  >\(aperturaIniziale\)/)[1]; for (const s of hm.SEZIONI_PROFILO_APRIBILI) { assert.ok(unione.includes(`"${s}"`), `la sezione «${s}» non è tra quelle del Profilo`); assert.match(p, new RegExp(`open=\\{sheetAperta === "${s}"\\}`), `nessuna scheda per «${s}»`); }
+test("le sezioni del Profilo che si possono aprire da un collegamento esistono davvero nel Profilo", () => {
+  const p = leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx"); const unione = p.match(/useState<([\s\S]*?)\n  >\(aperturaIniziale\)/)[1];
+  for (const s of hm.SEZIONI_PROFILO_APRIBILI) { assert.ok(unione.includes(`"${s}"`), `la sezione «${s}» non è tra quelle del Profilo`); assert.match(p, new RegExp(`open=\\{sheetAperta === "${s}"\\}`), `nessuna scheda per «${s}»`); }
+  assert.ok(typeof hm.sezionePerVoce === "undefined", "sezionePerVoce non serve più: ogni voce dice da sola la sua sezione");
 });
 
 // ============================================================ i collegamenti nel codice
@@ -158,15 +69,25 @@ test("Home: la ricerca si cambia da qui (nessun collegamento al Profilo), la sch
   assert.match(h, /onSalvata=\{\(\) => \{\s+setSchedaRicerca\(false\);\s+setAvviso\(\{ errore: false, testo: "Ricerca aggiornata\." \}\);/);
 });
 
-test("Home: il punteggio è un pulsante con un nome che dice cosa fa e apre la scheda; la pagina passa la ricerca", () => {
-  const h = leggi("src", "app", "(app)", "HomeClient.tsx"); assert.match(h, /className="hi-punteggio"\s+onClick=\{\(\) => setSchedaPunteggio\(true\)\}\s+aria-label=\{`Affidabilità \$\{affidabilita\.punteggio\} su 100, \$\{affidabilita\.label\}\. Scopri come si calcola`\}/);
-  assert.match(h, /router\.push\(`\/profilo\?apri=\$\{sezione\}`\)/); const pg = leggi("src", "app", "(app)", "page.tsx"); assert.match(pg, /ricerca=\{profiloRicerca\}/);
+test("Home: nel pannello dell'affidabilità ci sono DUE pulsanti veri («Come si calcola» e «Modifica dati»); l'anello non è un pulsante", () => {
+  const h = leggi("src", "app", "(app)", "HomeClient.tsx"); const pannello = h.slice(h.indexOf('<div className="hi-punteggio"'), h.indexOf('<div className="hi-ricerca">'));
+  assert.match(pannello, /<div className="hi-punteggio" role="group" aria-label=\{`Affidabilità \$\{affidabilita\.punteggio\} su 100, \$\{affidabilita\.label\}`\}>/);
+  assert.match(pannello, /<button type="button" className="hi-azione" onClick=\{\(\) => setSchedaPunteggio\(true\)\}>\s+Come si calcola\s+<\/button>/); assert.match(pannello, /<button type="button" className="hi-azione" onClick=\{\(\) => setSchedaDati\(true\)\}>\s+Modifica dati\s+<\/button>/);
+  assert.equal([...pannello.matchAll(/<button/g)].length, 2, "ci devono essere due pulsanti e non di più"); assert.ok(!/hi-punteggio-cta/.test(h), "resta la vecchia scritta «Come si calcola ›» dentro un pulsante unico");
+  const pg = leggi("src", "app", "(app)", "page.tsx"); assert.match(pg, /ricerca=\{profiloRicerca\}/); assert.match(pg, /recensioni=\{riepilogo\}\s+tenant=\{tenantProfile\}/);
 });
 
-test("Profilo: usa la scheda di ricerca e quella del punteggio condivise (non ne ha di proprie), e legge ?apri=", () => {
-  const p = leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx"); assert.match(p, /import \{ RicercaSheet \} from "@\/components\/RicercaSheet"/); assert.ok(!/function RicercaSheet/.test(p), "il Profilo ha ancora una scheda di ricerca sua"); assert.ok(!/function SaveButton/.test(p));
-  assert.match(p, /<SchedaAffidabilita affidabilita=\{affidabilita\} onApri=\{\(sezione\) => setSheetAperta\(sezione\)\} \/>/); assert.ok(!/affidabilita\.checks\.map/.test(p), "il Profilo mostra ancora i vecchi controlli");
-  const pg = leggi("src", "app", "(app)", "profilo", "page.tsx"); assert.match(pg, /sezioneProfilo\(\(await searchParams\)\.apri\)/); assert.match(pg, /searchParams: Promise<\{ apri\?: string \| string\[\] \}>/);
+test("Home: «Modifica dati» apre la scheda dei dati qui (stessa del Profilo), montata solo se aperta; salvando si chiude e lo dice; la verifica del reddito resta nel Profilo", () => {
+  const h = leggi("src", "app", "(app)", "HomeClient.tsx"); assert.match(h, /import \{ DatiPersonaliSheet \} from "@\/components\/DatiPersonaliSheet"/);
+  assert.match(h, /\{schedaDati && \(\s+<DatiPersonaliSheet\s+open\s+onClose=\{\(\) => setSchedaDati\(false\)\}\s+tenant=\{tenant\}\s+onSalvata=\{\(\) => \{\s+setSchedaDati\(false\);\s+setAvviso\(\{ errore: false, testo: "Dati aggiornati\." \}\);/);
+  assert.match(h, /if \(sezione === "dati"\) setSchedaDati\(true\);\s+else router\.push\("\/profilo\?apri=verifica"\);/); assert.ok(!/href="\/profilo"/.test(h));
+});
+
+test("Profilo: usa le schede condivise (ricerca, dati, punteggio: nessuna copia), legge ?apri= e passa le recensioni a parte", () => {
+  const p = leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx"); assert.match(p, /import \{ RicercaSheet \} from "@\/components\/RicercaSheet"/); assert.match(p, /import \{ DatiPersonaliSheet \} from "@\/components\/DatiPersonaliSheet"/);
+  assert.ok(!/function RicercaSheet/.test(p) && !/function DatiPersonaliSheet/.test(p) && !/function SaveButton/.test(p), "il Profilo ha ancora una copia di una scheda");
+  assert.match(p, /<SchedaAffidabilita affidabilita=\{affidabilita\} recensioni=\{recensioni\} onApri=\{\(sezione\) => setSheetAperta\(sezione\)\} \/>/); assert.ok(!/hasRecensioni|\.checks/.test(p), "il Profilo usa ancora i campi vecchi");
+  const pg = leggi("src", "app", "(app)", "profilo", "page.tsx"); assert.match(pg, /sezioneProfilo\(\(await searchParams\)\.apri\)/); assert.match(pg, /searchParams: Promise<\{ apri\?: string \| string\[\] \}>/); assert.match(pg, /recensioni=\{riepilogo\}/);
 });
 
 test("scheda di ricerca condivisa: avvisa UNA volta per ogni salvataggio che finisce bene, e il salvataggio aggiorna anche la Home", () => {
@@ -174,9 +95,9 @@ test("scheda di ricerca condivisa: avvisa UNA volta per ogni salvataggio che fin
   const a = leggi("src", "app", "(app)", "profilo", "actions.ts"); const f = a.slice(a.indexOf("export async function updateRicerca")); assert.match(f, /revalidatePath\("\/profilo"\);\s+revalidatePath\("\/"\);/, "la Home non si aggiorna dopo il salvataggio");
 });
 
-test("scheda del punteggio: i punti vengono dalla funzione del punteggio (nessun numero scritto a mano), e il minus è un vero meno", () => {
-  const c = leggi("src", "components", "SchedaAffidabilita.tsx").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, ""); assert.ok(!/[+-]\s?(20|15|10|12|30)\b/.test(c.replace(/\\u2212/g, "")), "un numero di punti scritto a mano"); assert.match(c, /\\u2212\$\{Math\.abs\(v\.punti\)\}/);
-  assert.match(c, /voci\.map\(\(v\) =>/); assert.match(c, /punteggioPossibile\(affidabilita\)/); assert.match(c, /checks\.slice\(0, 2\)/);
+test("scheda del punteggio: i punti vengono dalla funzione del punteggio (nessun numero scritto a mano), con la voce, chi la controlla e le recensioni a parte", () => {
+  const c = leggi("src", "components", "SchedaAffidabilita.tsx").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+  assert.ok(!/\b(60|25|15)\b/.test(c), "un numero di punti scritto a mano"); assert.match(c, /voci\.map\(\(v\) =>/); assert.match(c, /punteggioPossibile\(affidabilita\)/); assert.match(c, /Lo controlla lo staff/); assert.match(c, /Lo dichiari tu/); assert.match(c, /Le recensioni, a parte/); assert.ok(!/checks|limite|totaleGrezzo/.test(c), "usa campi che non esistono più");
 });
 
 test("CSS: il suggerimento sta sopra i pulsanti e la card sopra il suggerimento (prima il testo finiva dietro i pulsanti)", () => {

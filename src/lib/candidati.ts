@@ -1,3 +1,4 @@
+import { riepilogoRecensioni } from "./recensioni";
 import { leggiFotografia, valutaCandidato } from "@/lib/match";
 import type { CriterioRichiesto, ProfiloCandidato } from "@/lib/match";
 import type { CandidaturaRicevuta } from "@/lib/types";
@@ -85,8 +86,7 @@ export function assemblaCandidature(input: {
             criteri: input.criteriPerListing.get(c.listing_id) ?? [],
             canone: c.listings?.prezzo ?? 0,
             profilo: profiloDaVista(v),
-            mediaRecensioni: voti.length > 0 ? voti.reduce((a, b) => a + b, 0) / voti.length : null,
-            numeroRecensioni: voti.length,
+            recensioni: riepilogoRecensioni(voti),
           }),
           congelata: false,
         };

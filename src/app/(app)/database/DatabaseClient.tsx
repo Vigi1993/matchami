@@ -1,5 +1,6 @@
 "use client";
 
+import { stelleTesto, testoRecensioni } from "@/lib/recensioni";
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { Sheet } from "@/components/Sheet";
@@ -243,6 +244,17 @@ export function DatabaseClient({
                 value={`${selezionata.valutazione.affidabilita}/100`}
               />
             )}
+            {/* le recensioni stanno a parte dal punteggio; le valutazioni vecchie non le hanno */}
+            {selezionata.valutazione?.recensioni && (
+              <DettaglioRow
+                label="Recensioni"
+                value={
+                  selezionata.valutazione.recensioni.numero > 0
+                    ? `${stelleTesto(selezionata.valutazione.recensioni.media)} ${testoRecensioni(selezionata.valutazione.recensioni)}`
+                    : testoRecensioni(selezionata.valutazione.recensioni)
+                }
+              />
+            )}
             {selezionata.tenant_profiles?.presentazione && (
               <div style={{ marginTop: 18 }}>
                 <div className="pref-label">
@@ -397,6 +409,7 @@ function SezioneAnnuncio({
           c,
           match: c.valutazione!.match,
           affidabilita: c.valutazione!.affidabilita,
+          recensioni: c.valutazione!.recensioni ?? null,
         }))
       ).map((v) => v.c)
     : attesa;
@@ -484,6 +497,7 @@ function Scheda({
         </div>
         <div className="mc-meta">
           {v ? `Affidabilità ${v.affidabilita}` : ""}
+          {v?.recensioni && v.recensioni.numero > 0 && ` · ★ ${v.recensioni.media?.toLocaleString("it-IT", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} (${v.recensioni.numero})`}
           {v?.match.incompleto && inAttesa && " · dati incompleti"}
           {!inAttesa && v?.match.punteggio != null && ` · compatibilità ${v.match.punteggio}%`}
         </div>

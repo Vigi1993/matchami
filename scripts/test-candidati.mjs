@@ -67,7 +67,7 @@ test("in attesa: il match si ricalcola sui dati attuali, non congelato", () => {
 });
 
 test("decisa con una valutazione registrata: si mostra quella, anche se i dati sono cambiati", () => {
-  const registrata = JSON.parse(JSON.stringify(valutaCandidato({ criteri: criteri.get("L1"), canone: 1500, profilo: profiloDaVista(vista("1", { reddito_nucleo: 2000 })), mediaRecensioni: null, numeroRecensioni: 0 })));
+  const registrata = JSON.parse(JSON.stringify(valutaCandidato({ criteri: criteri.get("L1"), canone: 1500, profilo: profiloDaVista(vista("1", { reddito_nucleo: 2000 })), recensioni: { numero: 0, media: null } })));
   const [r] = assembla([riga("1", { status: "accettata" })], [vista("1", { reddito_nucleo: 9999 })], { valutazioni: [{ candidatura_id: "1", valutazione: registrata }] });
   assert.equal(r.valutazione.congelata, true);
   assert.equal(r.valutazione.match.bloccato, true, "la valutazione registrata aveva il reddito troppo basso");
@@ -75,7 +75,7 @@ test("decisa con una valutazione registrata: si mostra quella, anche se i dati s
 
 test("RIFIUTATA: la vista dà solo il nome, e la valutazione registrata si legge comunque", () => {
   const vuota = vista("1", { professione: null, reddito_mensile: null, reddito_nucleo: null, garante: null, fideiussione: null, protestato: null, verificato: null, presentazione: null, avatar_url: null, animali_compilato: null, nucleo_compilato: null });
-  const registrata = JSON.parse(JSON.stringify(valutaCandidato({ criteri: criteri.get("L1"), canone: 1500, profilo: profiloDaVista(vista("1")), mediaRecensioni: null, numeroRecensioni: 0 })));
+  const registrata = JSON.parse(JSON.stringify(valutaCandidato({ criteri: criteri.get("L1"), canone: 1500, profilo: profiloDaVista(vista("1")), recensioni: { numero: 0, media: null } })));
   const [r] = assembla([riga("1", { status: "rifiutata" })], [vuota], { valutazioni: [{ candidatura_id: "1", valutazione: registrata }] });
   assert.equal(r.nome, "Tina"); assert.equal(r.cognome, "Rossi");
   assert.equal(r.valutazione.congelata, true);
@@ -104,7 +104,7 @@ test("manca la riga della vista (non dovrebbe): niente crollo, nome vuoto", () =
 });
 
 test("la valutazione di una candidatura non finisce mai su un'altra", () => {
-  const a = JSON.parse(JSON.stringify(valutaCandidato({ criteri: criteri.get("L1"), canone: 1500, profilo: profiloDaVista(vista("1", { reddito_nucleo: 1000 })), mediaRecensioni: null, numeroRecensioni: 0 })));
+  const a = JSON.parse(JSON.stringify(valutaCandidato({ criteri: criteri.get("L1"), canone: 1500, profilo: profiloDaVista(vista("1", { reddito_nucleo: 1000 })), recensioni: { numero: 0, media: null } })));
   const risultati = assembla([riga("1", { status: "accettata" }), riga("2", { status: "accettata" })], [vista("1"), vista("2")], { valutazioni: [{ candidatura_id: "1", valutazione: a }] });
   assert.equal(risultati[0].valutazione.congelata, true);
   assert.equal(risultati[1].valutazione.congelata, false, "la seconda non ha valutazione registrata");
@@ -116,10 +116,12 @@ test("l'ordine delle candidature e i loro dati restano quelli di arrivo", () => 
   assert.deepEqual(out.map((x) => [x.id, x.nome]), [["3", "Tre"], ["1", "Uno"], ["2", "Due"]]);
 });
 
-test("l'affidabilità usa le recensioni dell'inquilino giusto", () => {
+test("le recensioni sono quelle dell'inquilino giusto, e NON cambiano il punteggio di affidabilità", () => {
   const voti = new Map([["t1", [5, 5, 5]], ["t2", [1]]]);
   const out = assembla([riga("1"), riga("2")], [vista("1"), vista("2")], { votiPerTenant: voti });
-  assert.ok(out[0].valutazione.affidabilita > out[1].valutazione.affidabilita, `${out[0].valutazione.affidabilita} contro ${out[1].valutazione.affidabilita}`);
+  assert.deepEqual(out[0].valutazione.recensioni, { numero: 3, media: 5 }); assert.deepEqual(out[1].valutazione.recensioni, { numero: 1, media: 1 });
+  assert.equal(out[0].valutazione.affidabilita, out[1].valutazione.affidabilita, "due persone con gli stessi dati hanno lo stesso punteggio, qualunque recensione abbiano");
+  const senza = assembla([riga("1")], [vista("1")]); assert.deepEqual(senza[0].valutazione.recensioni, { numero: 0, media: null });
 });
 
 test("l'output non contiene nessun campo che il proprietario non deve vedere", () => {

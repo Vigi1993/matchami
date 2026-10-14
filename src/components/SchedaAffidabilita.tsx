@@ -1,48 +1,56 @@
-import { PUNTEGGIO_MASSIMO, PUNTEGGIO_MINIMO, PUNTI_BASE, punteggioPossibile, type AffidabilitaResult, type VoceAffidabilita } from "@/lib/affidabilita";
-import { sezionePerVoce, type SezioneProfilo } from "@/lib/home";
+import { punteggioPossibile, PUNTEGGIO_MASSIMO, SOGLIE_ETICHETTA, type AffidabilitaResult } from "@/lib/affidabilita";
+import { stelleTesto, testoRecensioni, type RiepilogoRecensioni } from "@/lib/recensioni";
 
-/** I punti di una voce, come si leggono: «+20», «−30», «45», o «+20 possibili» se manca. */
-export function testoPunti(v: VoceAffidabilita): string {
-  if (v.stato === "mancante") return `+${v.potenziale} possibili`;
-  if (v.id === "base") return String(v.punti);
-  if (v.punti > 0) return `+${v.punti}`;
-  if (v.punti < 0) return `\u2212${Math.abs(v.punti)}`;
-  return "0";
+/** I punti di una voce, come si leggono: «+60» se l'hai presa, «0 su 60» se no. */
+export function testoPunti(v: { presa: boolean; punti: number; massimo: number }): string {
+  return v.presa ? `+${v.punti}` : `0 su ${v.massimo}`;
 }
 
 /**
- * Da cosa è fatto il punteggio di affidabilità, voce per voce. Si mostra nella Home e nel Profilo (stessa scheda,
- * stessi numeri: i punti vengono dalla stessa funzione che calcola il punteggio).
+ * Come si calcola il punteggio di affidabilità: tre voci, quanto valgono e chi le controlla. Poi le recensioni, che
+ * stanno a parte. Si mostra nella Home e nel Profilo (stessa scheda, stessi numeri: i punti vengono dalla stessa
+ * funzione che calcola il punteggio).
  */
-export function SchedaAffidabilita({ affidabilita, onApri }: { affidabilita: AffidabilitaResult; onApri?: (sezione: SezioneProfilo) => void }) {
-  const { punteggio, label, voci, limite, totaleGrezzo, checks } = affidabilita;
+export function SchedaAffidabilita({
+  affidabilita,
+  recensioni,
+  onApri,
+}: {
+  affidabilita: AffidabilitaResult;
+  recensioni: RiepilogoRecensioni;
+  /** si chiama con la sezione da aprire: la verifica del reddito, o i dati personali */
+  onApri?: (sezione: "verifica" | "dati") => void;
+}) {
+  const { punteggio, label, voci } = affidabilita;
   const possibile = punteggioPossibile(affidabilita);
-  // professione e reddito dichiarato sono i primi due controlli: si vedono, ma non entrano nel punteggio
-  const datiIndicati = checks.slice(0, 2);
 
   return (
     <div className="aff-scheda">
       <p className="sheet-sub">
-        È il numero che i proprietari vedono quando valutano una tua candidatura. Parte da {PUNTI_BASE} e cresce con le verifiche.
+        È il numero che i proprietari vedono accanto alla tua candidatura. Va da 0 a {PUNTEGGIO_MASSIMO} e si costruisce con tre voci.
+        Chi non ha ancora niente parte da 0.
       </p>
 
-      <div className="aff-totale" aria-label={`Punteggio ${punteggio} su 100, ${label}`}>
+      <div className="aff-totale" aria-label={`Punteggio ${punteggio} su ${PUNTEGGIO_MASSIMO}, ${label}`}>
         <b>{punteggio}</b>
-        <span>/100</span>
+        <span>/{PUNTEGGIO_MASSIMO}</span>
         <em>{label}</em>
       </div>
 
       <ul className="aff-voci">
         {voci.map((v) => (
-          <li key={v.id} className={`aff-voce is-${v.stato}`}>
+          <li key={v.id} className={`aff-voce ${v.presa ? "is-presa" : "is-non-presa"}`}>
             <div className="aff-voce-riga">
               <span>{v.etichetta}</span>
               <b className="aff-punti">{testoPunti(v)}</b>
             </div>
-            {v.nota && <small>{v.nota}</small>}
-            {v.stato === "mancante" && v.suggerimento &&
+            <span className={`aff-origine is-${v.origine}`}>{v.origine === "verificato" ? "Lo controlla lo staff" : "Lo dichiari tu"}</span>
+            <small>{v.nota}</small>
+            {!v.presa &&
+              v.suggerimento &&
+              v.sezione &&
               (onApri ? (
-                <button type="button" className="redo-link aff-azione" onClick={() => onApri(sezionePerVoce(v.id))}>
+                <button type="button" className="redo-link aff-azione" onClick={() => onApri(v.sezione!)}>
                   {v.suggerimento}
                 </button>
               ) : (
@@ -52,29 +60,28 @@ export function SchedaAffidabilita({ affidabilita, onApri }: { affidabilita: Aff
         ))}
       </ul>
 
-      {limite && (
-        <p className="field-note">
-          La somma delle voci è {totaleGrezzo}: il punteggio va da {PUNTEGGIO_MINIMO} a {PUNTEGGIO_MASSIMO}.
-        </p>
-      )}
       {possibile > punteggio && (
         <p className="aff-possibile">
-          Completando le voci mancanti puoi arrivare a <b>{possibile}</b>.
+          Completando le voci che puoi ottenere arrivi a <b>{possibile}</b>.
         </p>
       )}
+      <p className="field-note" style={{ marginTop: 8 }}>
+        Lo staff controlla solo il reddito. Protesti e garante sono dichiarazioni tue, e restano tali. Da {SOGLIE_ETICHETTA.moltoBuona} punti in su
+        l&apos;etichetta è «Molto buona», da {SOGLIE_ETICHETTA.eccellente} «Eccellente».
+      </p>
 
-      <div className="pref-label" style={{ marginTop: 14 }}>
-        <span>Dati che indichi</span>
+      <div className="pref-label" style={{ marginTop: 16 }}>
+        <span>Le recensioni, a parte</span>
       </div>
       <p className="field-note" style={{ margin: "0 0 6px 0" }}>
-        Non cambiano il punteggio.
+        Non cambiano il punteggio: i proprietari le vedono accanto. Le lascia un proprietario verificato dopo un affitto confermato, con
+        1-5 stelle; qui si mostra la media e quante sono.
       </p>
-      <div className="match-checklist">
-        {datiIndicati.map((c) => (
-          <span key={c.label} className={c.ok ? "ok" : "no"}>
-            {c.label}
-          </span>
-        ))}
+      <div className="aff-recensioni" aria-label={testoRecensioni(recensioni)}>
+        <span aria-hidden="true" className="aff-stelle">
+          {stelleTesto(recensioni.media)}
+        </span>
+        <b>{testoRecensioni(recensioni)}</b>
       </div>
     </div>
   );
