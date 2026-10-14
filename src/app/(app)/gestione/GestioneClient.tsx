@@ -15,20 +15,37 @@ import {
   raggruppaContratti,
 } from "@/lib/contratti";
 import { PageContainer } from "@/components/ui/PageContainer";
-import { IconDocumento } from "@/components/icons";
+import { Row } from "@/components/ui/Row";
+import { InvitaProprietarioSheet } from "@/components/InvitaProprietarioSheet";
+import { IconDocumento, IconPersone } from "@/components/icons";
+import type { Invito } from "@/lib/types";
+import type { SezioneGestione } from "@/lib/gestione";
 
 export function GestioneClient({
   contratti,
   documenti = {},
   firme = {},
+  affittiPanel,
+  inviti = [],
+  nomeInquilino = null,
+  aperturaIniziale = null,
 }: {
   contratti: ContrattoConAnnuncio[];
+  /** gli affitti dichiarati e le richieste di conferma, costruiti dal server */
+  affittiPanel?: React.ReactNode;
+  /** gli inviti mandati ai proprietari */
+  inviti?: Invito[];
+  nomeInquilino?: string | null;
+  /** la scheda da aprire subito (da un collegamento o da una notifica) */
+  aperturaIniziale?: SezioneGestione | null;
   /** le firme di prova dei miei contratti, per identificativo del contratto */
   firme?: Record<string, FirmeDelContratto>;
   /** i documenti dei miei contratti, per identificativo del contratto */
   documenti?: Record<string, DocumentoContratto[]>;
 }) {
   const [bolletteAperto, setBolletteAperto] = useState(false);
+  const [affittiAperto, setAffittiAperto] = useState(aperturaIniziale === "affitti");
+  const [invitoAperto, setInvitoAperto] = useState(aperturaIniziale === "invito");
 
   // I contratti conclusi vanno nello storico: non restano mescolati a quelli in corso.
   const { inCorso, storico } = raggruppaContratti(contratti);
@@ -91,6 +108,27 @@ export function GestioneClient({
         </>
       )}
 
+      {/* ---- Affitti passati e recensioni: prima stavano nel Profilo ---- */}
+      <div className="pref-label" style={{ marginTop: 24 }}>
+        <span>Affitti e recensioni</span>
+      </div>
+      <Row
+        color="var(--moss)"
+        icon={<IconDocumento className="fill-none stroke-white stroke-2" />}
+        title="Dichiara un affitto"
+        subtitle="Hai già affittato una casa? Dichiara l'affitto con il suo contratto: se l'altra persona lo conferma e lo verifichiamo, il proprietario potrà lasciarti una recensione."
+        cta="Dichiara o gestisci gli affitti"
+        onClick={() => setAffittiAperto(true)}
+      />
+      <Row
+        color="var(--gold)"
+        icon={<IconPersone className="fill-none stroke-[var(--ink)] stroke-2" />}
+        title="Invita il tuo proprietario"
+        subtitle="Hai già una casa in affitto? Chiedi al tuo proprietario un commento su com'è andata: la recensione compare accanto al tuo punteggio di affidabilità."
+        cta={inviti.some((i) => i.stato === "inviato") ? "Gestisci gli inviti" : "Manda l'invito"}
+        onClick={() => setInvitoAperto(true)}
+      />
+
       {/* ---- Bollette e utenze ---- */}
       <div className="pref-label" style={{ marginTop: 24 }}>
         <span>Bollette e utenze</span>
@@ -110,6 +148,14 @@ export function GestioneClient({
           <span className="pv-readmore">Vedi i fornitori</span>
         </div>
       </button>
+
+      {/* ---- Sheet: dichiara un affitto ---- */}
+      <Sheet open={affittiAperto} onClose={() => setAffittiAperto(false)} title="I tuoi affitti">
+        {affittiPanel}
+      </Sheet>
+
+      {/* ---- Sheet: invita il proprietario ---- */}
+      <InvitaProprietarioSheet open={invitoAperto} onClose={() => setInvitoAperto(false)} nomeInquilino={nomeInquilino} inviti={inviti} />
 
       {/* ---- Sheet: bollette (demo) ---- */}
       <Sheet

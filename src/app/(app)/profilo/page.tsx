@@ -2,14 +2,13 @@ import { riepilogoRecensioni } from "@/lib/recensioni";
 import { VerificaRedditoPanel } from "@/components/VerificaRedditoPanel";
 import type { DocumentoInquilino } from "@/lib/verifica-inquilino";
 import { createClient } from "@/lib/supabase/server";
-import { RapportiPanel } from "@/components/RapportiPanel";
-import { caricaRapportiMiei } from "@/lib/rapporti-server";
 import { ProfiloClient } from "./ProfiloClient";
 import { sezioneProfilo } from "@/lib/home";
 import { profiloRicercaDaRighe } from "@/lib/match";
 import type { Luogo } from "@/lib/luoghi";
 import { OwnerProfiloClient } from "./OwnerProfiloClient";
-import type { TenantProfile, OwnerProfile, Invito } from "@/lib/types";
+import type { TenantProfile, OwnerProfile } from "@/lib/types";
+import { redirect } from "next/navigation";
 
 export default async function ProfiloPage({ searchParams }: { searchParams: Promise<{ apri?: string | string[] }> }) {
   const supabase = await createClient();
@@ -17,7 +16,7 @@ export default async function ProfiloPage({ searchParams }: { searchParams: Prom
     data: { user },
   } = await supabase.auth.getUser();
 
-  // le novità non lette, per la riga «Novità» in cima al profilo
+  // le novità non lette, per la campanella in cima al profilo (e per la riga «Novità» del proprietario)
   const { count: nonLetteCount } = await supabase
     .from("notifiche")
     .select("id", { count: "exact", head: true })
@@ -50,12 +49,15 @@ export default async function ProfiloPage({ searchParams }: { searchParams: Prom
     );
   }
 
+  // Gli affitti dichiarati e gli inviti al proprietario ora stanno in «Gestione affitto»: i vecchi collegamenti ci portano.
+  const apri = (await searchParams).apri;
+  if (apri === "affitti" || apri === "invito") redirect(`/gestione?apri=${apri}`);
+
   const [
     { data: tenant },
     { data: zoneRows },
     { data: interessiRows },
     { data: recensioni },
-    { data: inviti },
     { data: documentiRows },
   ] = await Promise.all([
     supabase.from("tenant_profiles").select("*").eq("profile_id", user!.id).single(),
@@ -66,18 +68,11 @@ export default async function ProfiloPage({ searchParams }: { searchParams: Prom
       .eq("tenant_id", user!.id),
     supabase.from("recensioni").select("voto").eq("tenant_id", user!.id),
     supabase
-      .from("inviti_proprietario")
-      .select("id, token, nome_proprietario, email_proprietario, indirizzo, periodo, stato, created_at")
-      .eq("tenant_id", user!.id)
-      .order("created_at", { ascending: false }),
-    supabase
       .from("documenti_inquilino")
       .select("id, tipo, percorso, nome_file")
       .eq("tenant_id", user!.id)
       .order("created_at", { ascending: true }),
   ]);
-
-  const rapporti = await caricaRapportiMiei(supabase, user!.id);
 
   // La ricerca com'è salvata, e i luoghi che si possono cercare (per il completamento automatico)
   const ricerca = profiloRicercaDaRighe(tenant, zoneRows, interessiRows);
@@ -97,16 +92,6 @@ export default async function ProfiloPage({ searchParams }: { searchParams: Prom
       cognome={profile?.cognome ?? null}
       email={user!.email ?? null}
       tenant={tenant as TenantProfile}
-      inviti={(inviti ?? []) as Invito[]}
-      affittiPanel={
-        <RapportiPanel
-          ruolo="inquilino"
-          nomeCreatore={rapporti.nome}
-          immobili={[]}
-          richieste={rapporti.richieste}
-          rapporti={rapporti.rapporti}
-        />
-      }
       verificaPanel={
         <VerificaRedditoPanel
           stato={(tenant as TenantProfile).verifica_stato}

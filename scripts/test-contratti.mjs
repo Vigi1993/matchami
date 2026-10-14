@@ -128,7 +128,7 @@ test("modo di presentazione: un solo contratto in corso = tutto visibile; più d
 
 test("pagina: la scheda a comparsa dei contratti non c'è più; i contratti si mostrano con il blocco in pagina, nel modo giusto, e le bollette restano come erano", () => {
   const g = gestione(); assert.ok(!/selezionato|setSelezionato/.test(g), "resta lo stato della scheda a comparsa"); assert.ok(!/<SchedaContratto|function SchedaContratto|onSelect/.test(g), "restano le vecchie schede-elenco che aprivano la scheda");
-  assert.ok(!/title=\{selezionato/.test(g) && !/Sheet: dettaglio contratto/.test(g)); assert.equal([...g.matchAll(/<Sheet\b/g)].length, 1, "deve restare una sola scheda a comparsa: le bollette"); assert.match(g, /title="Bollette e utenze"/);
+  assert.ok(!/title=\{selezionato/.test(g) && !/Sheet: dettaglio contratto/.test(g)); assert.equal([...g.matchAll(/<Sheet\b/g)].length, 2, "restano due schede a comparsa: gli affitti dichiarati e le bollette (nessuna per i contratti)"); assert.match(g, /title="Bollette e utenze"/); assert.match(g, /title="I tuoi affitti"/);
   assert.match(g, /<ContrattoInPagina key=\{c\.id\} c=\{c\} modo=\{modoInCorso\(inCorso\.length\)\} firme=\{firme\[c\.id\]\} documenti=\{documenti\[c\.id\] \?\? \[\]\} \/>/);
   assert.match(g, /<ContrattoInPagina key=\{c\.id\} c=\{c\} modo=\{MODO_STORICO\} firme=\{firme\[c\.id\]\} documenti=\{documenti\[c\.id\] \?\? \[\]\} passato \/>/);
   assert.match(g, /\{inCorso\.length > 1 && \(\s+<div className="pref-label" style=\{\{ marginTop: 12 \}\}>\s+<span>In corso — \{inCorso\.length\}<\/span>/, "con un solo contratto non serve il conteggio");

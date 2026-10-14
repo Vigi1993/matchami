@@ -3677,3 +3677,64 @@ button.contratto-testa:focus-visible {
 .contratto-corpo[hidden] {
   display: none !important;
 }
+
+/* ---- Profilo: nome in alto e campanella delle novità nell'angolo ---- */
+.avatar-row .avatar-testo {
+  flex: 1;
+  min-width: 0;
+}
+.avatar-row .avatar-name {
+  margin: 0;
+}
+.avatar-row .avatar-name,
+.avatar-row .avatar-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.campanella {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: rgba(16, 21, 26, 0.06);
+  -webkit-tap-highlight-color: transparent;
+}
+.campanella:focus-visible {
+  outline: 2px solid var(--moss);
+  outline-offset: 2px;
+}
+.campanella-icona {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.campanella.con-novita {
+  background: rgba(176, 94, 74, 0.14);
+}
+.campanella.con-novita .campanella-icona {
+  stroke: var(--clay);
+}
+.campanella-numero {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 19px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--clay);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.3;
+  text-align: center;
+}

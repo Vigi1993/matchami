@@ -1,10 +1,14 @@
 import { createClient } from "@/lib/supabase/server";
 import { GestioneClient } from "./GestioneClient";
+import { sezioneGestione } from "@/lib/gestione";
 import type { ContrattoConAnnuncio } from "@/lib/types";
 import { raggruppaPerContratto, type DocumentoContratto } from "@/lib/documenti-contratto";
 import { caricaFirme } from "@/lib/firma/carica";
+import { RapportiPanel } from "@/components/RapportiPanel";
+import { caricaRapportiMiei } from "@/lib/rapporti-server";
+import type { Invito } from "@/lib/types";
 
-export default async function GestionePage() {
+export default async function GestionePage({ searchParams }: { searchParams: Promise<{ apri?: string | string[] }> }) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -26,8 +30,31 @@ export default async function GestionePage() {
   // Le firme di prova, con l'impronta del documento di oggi per i contratti che ne hanno
   const firme = await caricaFirme(supabase);
 
+  // Gli affitti dichiarati (con le richieste di conferma) e gli inviti al proprietario: prima stavano nel Profilo
+  const [{ data: inviti }, { data: profilo }, rapporti] = await Promise.all([
+    supabase
+      .from("inviti_proprietario")
+      .select("id, token, nome_proprietario, email_proprietario, indirizzo, periodo, stato, created_at")
+      .eq("tenant_id", user!.id)
+      .order("created_at", { ascending: false }),
+    supabase.from("profiles").select("nome").eq("id", user!.id).single(),
+    caricaRapportiMiei(supabase, user!.id),
+  ]);
+
   return (
     <GestioneClient
+      aperturaIniziale={sezioneGestione((await searchParams).apri)}
+      nomeInquilino={profilo?.nome ?? null}
+      inviti={(inviti ?? []) as Invito[]}
+      affittiPanel={
+        <RapportiPanel
+          ruolo="inquilino"
+          nomeCreatore={rapporti.nome}
+          immobili={[]}
+          richieste={rapporti.richieste}
+          rapporti={rapporti.rapporti}
+        />
+      }
       contratti={(contratti ?? []) as unknown as ContrattoConAnnuncio[]}
       firme={firme}
       documenti={raggruppaPerContratto((documenti ?? []) as DocumentoContratto[])}

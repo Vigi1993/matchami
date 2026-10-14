@@ -1,15 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { RigaNovita } from "@/components/RigaNovita";
+import { CampanellaNovita } from "@/components/CampanellaNovita";
+import { iniziali, nomeCompleto } from "@/lib/persona";
 import { DatiSheet } from "@/components/DatiSheet";
 import { RigaPreferiti } from "@/components/RigaPreferiti";
-import { Sheet } from "@/components/Sheet";
 import {
   computeAffidabilita,
   computeProfileCompleteness,
 } from "@/lib/affidabilita";
-import type { TenantProfile, Invito } from "@/lib/types";
+import type { TenantProfile } from "@/lib/types";
 import { logout } from "@/app/login/actions";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { RicercaSheet } from "@/components/RicercaSheet";
@@ -20,15 +20,12 @@ import type { ProfiloRicerca } from "@/lib/match";
 import { PrivacySheet } from "@/components/PrivacySheet";
 import { FaqSheet } from "@/components/FaqSheet";
 import { AccountSheet } from "@/components/AccountSheet";
-import { InvitaProprietarioSheet } from "@/components/InvitaProprietarioSheet";
 import {
   IconDomanda,
   IconLente,
   IconLucchetto,
-  IconPersone,
   IconScudo,
   IconStella,
-  IconDocumento,
 } from "@/components/icons";
 
 type Props = {
@@ -36,15 +33,12 @@ type Props = {
   nonLette: number;
   /** quanti annunci ha salvato tra i preferiti */
   preferiti?: number;
-  /** gli affitti dichiarati e confermati, costruiti dal server */
-  affittiPanel: React.ReactNode;
   /** il pannello per verificare il reddito con i documenti, costruito dal server */
   verificaPanel: React.ReactNode;
   nome: string | null;
   cognome: string | null;
   email: string | null;
   tenant: TenantProfile;
-  inviti: Invito[];
   /** la ricerca com'è salvata */
   ricerca: ProfiloRicerca;
   /** i luoghi che si possono cercare */
@@ -64,8 +58,6 @@ export function ProfiloClient({
   cognome,
   email,
   tenant,
-  inviti,
-  affittiPanel,
   verificaPanel,
   ricerca,
   luoghi,
@@ -78,8 +70,6 @@ export function ProfiloClient({
     | "affidabilita"
     | "dati"
     | "ricerca"
-    | "invito"
-    | "affitti"
     | "verifica"
     | "account"
     | "privacy"
@@ -108,20 +98,21 @@ export function ProfiloClient({
 
   return (
     <PageContainer>
-      {/* Avatar */}
+      {/* In alto: l'avatar, il nome e la campanella delle novità nell'angolo */}
       <div className="avatar-row">
         <div className="avatar">
           {tenant.avatar_url ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={tenant.avatar_url} alt="" />
           ) : (
-            (nome ?? "?").slice(0, 2).toUpperCase()
+            iniziali(nome, cognome)
           )}
         </div>
-        <div>
-          <div className="avatar-name">Il tuo profilo</div>
-          <div className="avatar-sub">In cerca a Milano</div>
+        <div className="avatar-testo">
+          <h1 className="avatar-name">{nomeCompleto(nome, cognome) || "Il tuo profilo"}</h1>
+          {email && <div className="avatar-sub">{email}</div>}
         </div>
+        <CampanellaNovita nonLette={nonLette} />
       </div>
 
       {/* I tuoi dati e la tua affidabilità: un'unica scheda (punteggio, dati, verifica del reddito) */}
@@ -146,7 +137,6 @@ export function ProfiloClient({
       </div>
 
       <div className="card-grid">
-        <RigaNovita nonLette={nonLette} />
         <RigaPreferiti preferiti={preferiti} />
         {/* La tua ricerca */}
         <Row
@@ -157,28 +147,6 @@ export function ProfiloClient({
           cta="Vedi il dettaglio"
           onClick={() => setSheetAperta("ricerca")}
         />
-
-        <Row
-        color="var(--gold)"
-        icon={<IconPersone className="fill-none stroke-[var(--ink)] stroke-2" />}
-        title="Invita il tuo proprietario"
-        subtitle="Hai già una casa in affitto? Chiedi al tuo proprietario un commento su com'è andata: alza il tuo punteggio di affidabilità."
-        cta={
-          inviti.some((i) => i.stato === "inviato")
-            ? "Gestisci gli inviti"
-            : "Manda l'invito"
-        }
-        onClick={() => setSheetAperta("invito")}
-      />
-
-      <Row
-        color="var(--moss)"
-        icon={<IconDocumento className="fill-none stroke-white stroke-2" />}
-        title="I tuoi affitti"
-        subtitle="Dichiara un affitto con il suo contratto: se la controparte lo conferma e lo verifichiamo, il feedback del proprietario può contare."
-        cta="Gestisci gli affitti"
-        onClick={() => setSheetAperta("affitti")}
-      />
 
       {/* Account */}
         <Row
@@ -234,23 +202,6 @@ export function ProfiloClient({
         ricerca={ricerca}
         luoghi={luoghi}
       />
-
-      {/* ---- Sheet: Invita il proprietario ---- */}
-      <InvitaProprietarioSheet
-        open={sheetAperta === "invito"}
-        onClose={() => setSheetAperta(null)}
-        nomeInquilino={nome}
-        inviti={inviti}
-      />
-
-      {/* ---- Sheet: I tuoi affitti ---- */}
-      <Sheet
-        open={sheetAperta === "affitti"}
-        onClose={() => setSheetAperta(null)}
-        title="I tuoi affitti"
-      >
-        {affittiPanel}
-      </Sheet>
 
       {/* ---- Sheet: Account ---- */}
       <AccountSheet

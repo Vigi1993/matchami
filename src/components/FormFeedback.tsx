@@ -99,9 +99,10 @@ export function FormFeedback({
       <p className="field-note">Facoltativo, scegline quante vuoi.</p>
 
       <p className="field-note" style={{ marginTop: 10, lineHeight: 1.6 }}>
-        Il voto entra nel punteggio di affidabilità, che i proprietari vedono
-        quando valutano una candidatura. Le qualità per ora non sono visibili
-        ad altri. Dopo l&apos;invio il feedback non si può modificare.
+        Il voto, da 1 a 5 stelle, compare tra le recensioni di questa persona,
+        accanto al suo punteggio di affidabilità: lo vedono i proprietari che
+        valutano una sua candidatura. Le qualità per ora non sono visibili ad
+        altri. Dopo l&apos;invio il feedback non si può modificare.
       </p>
 
       {errore && (

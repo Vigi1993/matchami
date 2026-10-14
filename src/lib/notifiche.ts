@@ -142,9 +142,18 @@ export function descriviNotifica(
   }
 }
 
+/**
+ * Le notifiche sugli affitti dichiarati che il database manda a «/profilo» per l'INQUILINO. Gli affitti ora si gestiscono
+ * in «Gestione affitto»: si corregge qui, quando si legge il link, così vale anche per le notifiche già create (quelle del
+ * proprietario hanno già un altro indirizzo e non cambiano).
+ */
+export const TIPI_NOTIFICA_AFFITTI_INQUILINO: readonly string[] = ["affitto_verificato", "affitto_respinto", "rapporto_confermato", "rapporto_rifiutato"];
+export const LINK_AFFITTI_INQUILINO = "/gestione?apri=affitti";
+
 /** Dove porta una notifica. Mai fuori dal sito, qualunque cosa ci sia nei dati. */
-export function linkNotifica(n: Pick<Notifica, "link">): string {
-  return percorsoInterno(n.link, "/");
+export function linkNotifica(n: Pick<Notifica, "link"> & Partial<Pick<Notifica, "tipo">>): string {
+  const percorso = percorsoInterno(n.link, "/");
+  return percorso === "/profilo" && typeof n.tipo === "string" && TIPI_NOTIFICA_AFFITTI_INQUILINO.includes(n.tipo) ? LINK_AFFITTI_INQUILINO : percorso;
 }
 
 /**

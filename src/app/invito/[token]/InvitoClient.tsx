@@ -39,8 +39,8 @@ export function InvitoClient({
           <div className="empty-inline" style={{ paddingTop: 90 }}>
             <h3>Grazie.</h3>
             <p>
-              Il tuo commento è stato registrato e da oggi fa parte del
-              punteggio di affidabilità di {inquilino}.
+              Il tuo commento è stato registrato e da oggi compare tra le
+              recensioni di {inquilino}.
             </p>
             <Link href="/" className="opp-cta" style={{ textAlign: "center" }}>
               Scopri MatchAmI
@@ -57,8 +57,9 @@ export function InvitoClient({
         <h1 className="screen-title">Com&apos;è andata con {inquilino}?</h1>
         <p className="screen-sub">
           {indirizzo ? `${indirizzo}` : `La casa che hai affittato a ${inquilino}`}
-          {periodo ? ` · ${periodo}` : ""}. Il tuo voto entra nel punteggio di
-          affidabilità, che gli altri proprietari vedono quando valutano una
+          {periodo ? ` · ${periodo}` : ""}. Il tuo voto, da 1 a 5 stelle, compare
+          tra le recensioni di {inquilino}, accanto al suo punteggio di
+          affidabilità: lo vedono i proprietari che valutano una sua
           candidatura. Le qualità per ora non sono visibili ad altri.
         </p>
 

@@ -48,13 +48,13 @@ export function InvitaProprietarioSheet({
     <Sheet open={open} onClose={onClose} title="Invita il tuo proprietario">
       <p className="sheet-sub">
         Se hai già una casa in affitto, il tuo proprietario può lasciare un
-        commento su com&apos;è andata con te, e conta sul tuo punteggio di
-        affidabilità. Per tenerlo affidabile, MatchAmI lo accetta solo da
+        commento su com&apos;è andata con te: compare tra le tue recensioni,
+        accanto al tuo punteggio di affidabilità. Per tenerlo affidabile, MatchAmI lo accetta solo da
         proprietari verificati, con un immobile verificato sul portale, e solo
         se esiste un contratto verificato tra voi due. Vale anche per gli
         affitti iniziati fuori da MatchAmI. Il contratto lo dichiari tu da
-        &quot;I tuoi affitti&quot;, nel tuo profilo: il proprietario lo
-        conferma da un link.
+        &quot;Dichiara un affitto&quot;, in Gestione affitto: il proprietario
+        lo conferma da un link.
       </p>
 
       {link ? (

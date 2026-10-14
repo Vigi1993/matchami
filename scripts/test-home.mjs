@@ -42,14 +42,15 @@ test("suggerimento sotto la card: tocca i lati se ci sono più foto, altrimenti 
 });
 
 test("collegamenti al Profilo: solo sezioni ammesse; qualunque altro valore non apre niente", () => {
-  for (const s of ["affidabilita", "dati", "ricerca", "invito", "affitti", "verifica"]) assert.equal(hm.sezioneProfilo(s), s); assert.equal(hm.sezioneProfilo(["verifica", "dati"]), "verifica");
-  for (const x of ["", "Verifica", "verifica ", " verifica", "account", "privacy", "faq", "__proto__", "constructor", "toString", "ricerca;x", "../x", "<script>", null, undefined, 5, {}, [], [""]]) assert.equal(hm.sezioneProfilo(x), null, JSON.stringify(x));
+  for (const s of ["affidabilita", "dati", "ricerca", "verifica"]) assert.equal(hm.sezioneProfilo(s), s); assert.equal(hm.sezioneProfilo(["verifica", "dati"]), "verifica");
+  assert.deepEqual([...hm.SEZIONI_PROFILO_APRIBILI], ["affidabilita", "dati", "ricerca", "verifica"], "invito e affitti ora stanno in Gestione affitto");
+  for (const x of ["invito", "affitti", "", "Verifica", "verifica ", " verifica", "account", "privacy", "faq", "__proto__", "constructor", "toString", "ricerca;x", "../x", "<script>", null, undefined, 5, {}, [], [""]]) assert.equal(hm.sezioneProfilo(x), null, JSON.stringify(x));
 });
 
 test("le sezioni del Profilo che si possono aprire da un collegamento esistono davvero nel Profilo (dati, affidabilità e verifica aprono la stessa scheda)", () => {
   const p = leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx"); const unione = p.match(/useState<([\s\S]*?)\n  >\(aperturaIniziale\)/)[1];
   for (const s of hm.SEZIONI_PROFILO_APRIBILI) assert.ok(unione.includes(`"${s}"`), `la sezione «${s}» non è tra quelle del Profilo`);
-  for (const s of ["ricerca", "invito", "affitti"]) assert.match(p, new RegExp(`open=\\{sheetAperta === "${s}"\\}`), `nessuna scheda per «${s}»`);
+  assert.match(p, /open=\{sheetAperta === "ricerca"\}/, "nessuna scheda per «ricerca»"); assert.ok(!/sheetAperta === "(invito|affitti)"/.test(p), "il Profilo ha ancora le schede degli inviti o degli affitti");
   assert.match(p, /open=\{sheetAperta === "dati" \|\| sheetAperta === "affidabilita" \|\| sheetAperta === "verifica"\}/, "le tre vecchie sezioni devono aprire la scheda unica");
   assert.ok(typeof hm.sezionePerVoce === "undefined", "sezionePerVoce non serve più");
 });

@@ -8,7 +8,7 @@ type RicercaMinima = Pick<ProfiloRicerca, "budgetMax" | "localiMin" | "mqMin" | 
   Partial<Pick<ProfiloRicerca, "budgetMin" | "localiMax" | "mqMax" | "tipologia" | "criteri">>;
 
 /** Le sezioni del Profilo che si possono aprire da un collegamento (?apri=...). */
-export const SEZIONI_PROFILO_APRIBILI = ["affidabilita", "dati", "ricerca", "invito", "affitti", "verifica"] as const;
+export const SEZIONI_PROFILO_APRIBILI = ["affidabilita", "dati", "ricerca", "verifica"] as const;
 export type SezioneProfilo = (typeof SEZIONI_PROFILO_APRIBILI)[number];
 
 /** Il valore di un parametro dell'indirizzo, se è una sezione ammessa: altrimenti niente (mai un valore arbitrario). */
