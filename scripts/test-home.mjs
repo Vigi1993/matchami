@@ -46,10 +46,12 @@ test("collegamenti al Profilo: solo sezioni ammesse; qualunque altro valore non 
   for (const x of ["", "Verifica", "verifica ", " verifica", "account", "privacy", "faq", "__proto__", "constructor", "toString", "ricerca;x", "../x", "<script>", null, undefined, 5, {}, [], [""]]) assert.equal(hm.sezioneProfilo(x), null, JSON.stringify(x));
 });
 
-test("le sezioni del Profilo che si possono aprire da un collegamento esistono davvero nel Profilo", () => {
+test("le sezioni del Profilo che si possono aprire da un collegamento esistono davvero nel Profilo (dati, affidabilità e verifica aprono la stessa scheda)", () => {
   const p = leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx"); const unione = p.match(/useState<([\s\S]*?)\n  >\(aperturaIniziale\)/)[1];
-  for (const s of hm.SEZIONI_PROFILO_APRIBILI) { assert.ok(unione.includes(`"${s}"`), `la sezione «${s}» non è tra quelle del Profilo`); assert.match(p, new RegExp(`open=\\{sheetAperta === "${s}"\\}`), `nessuna scheda per «${s}»`); }
-  assert.ok(typeof hm.sezionePerVoce === "undefined", "sezionePerVoce non serve più: ogni voce dice da sola la sua sezione");
+  for (const s of hm.SEZIONI_PROFILO_APRIBILI) assert.ok(unione.includes(`"${s}"`), `la sezione «${s}» non è tra quelle del Profilo`);
+  for (const s of ["ricerca", "invito", "affitti"]) assert.match(p, new RegExp(`open=\\{sheetAperta === "${s}"\\}`), `nessuna scheda per «${s}»`);
+  assert.match(p, /open=\{sheetAperta === "dati" \|\| sheetAperta === "affidabilita" \|\| sheetAperta === "verifica"\}/, "le tre vecchie sezioni devono aprire la scheda unica");
+  assert.ok(typeof hm.sezionePerVoce === "undefined", "sezionePerVoce non serve più");
 });
 
 // ============================================================ i collegamenti nel codice
@@ -69,24 +71,26 @@ test("Home: la ricerca si cambia da qui (nessun collegamento al Profilo), la sch
   assert.match(h, /onSalvata=\{\(\) => \{\s+setSchedaRicerca\(false\);\s+setAvviso\(\{ errore: false, testo: "Ricerca aggiornata\." \}\);/);
 });
 
-test("Home: nel pannello dell'affidabilità ci sono DUE pulsanti veri («Come si calcola» e «Modifica dati»); l'anello non è un pulsante", () => {
+test("Home: nel pannello dell'affidabilità c'è UN solo pulsante, «Modifica dati»; l'anello non è un pulsante e «Come si calcola» non c'è più", () => {
   const h = leggi("src", "app", "(app)", "HomeClient.tsx"); const pannello = h.slice(h.indexOf('<div className="hi-punteggio"'), h.indexOf('<div className="hi-ricerca">'));
   assert.match(pannello, /<div className="hi-punteggio" role="group" aria-label=\{`Affidabilità \$\{affidabilita\.punteggio\} su 100, \$\{affidabilita\.label\}`\}>/);
-  assert.match(pannello, /<button type="button" className="hi-azione" onClick=\{\(\) => setSchedaPunteggio\(true\)\}>\s+Come si calcola\s+<\/button>/); assert.match(pannello, /<button type="button" className="hi-azione" onClick=\{\(\) => setSchedaDati\(true\)\}>\s+Modifica dati\s+<\/button>/);
-  assert.equal([...pannello.matchAll(/<button/g)].length, 2, "ci devono essere due pulsanti e non di più"); assert.ok(!/hi-punteggio-cta/.test(h), "resta la vecchia scritta «Come si calcola ›» dentro un pulsante unico");
-  const pg = leggi("src", "app", "(app)", "page.tsx"); assert.match(pg, /ricerca=\{profiloRicerca\}/); assert.match(pg, /recensioni=\{riepilogo\}\s+tenant=\{tenantProfile\}/);
+  assert.match(pannello, /<button type="button" className="hi-azione" onClick=\{\(\) => setSchedaDati\(true\)\}>\s+Modifica dati\s+<\/button>/); assert.equal([...pannello.matchAll(/<button/g)].length, 1, "ci deve essere un solo pulsante");
+  assert.ok(!/Come si calcola/.test(h), "resta il vecchio pulsante «Come si calcola»"); assert.ok(!/schedaPunteggio|SchedaAffidabilita|DatiPersonaliSheet/.test(h), "restano pezzi delle schede vecchie");
+  const pg = leggi("src", "app", "(app)", "page.tsx"); assert.match(pg, /ricerca=\{profiloRicerca\}/); assert.match(pg, /recensioni=\{riepilogo\}\s+tenant=\{tenantProfile\}\s+verificaPanel=\{/);
 });
 
-test("Home: «Modifica dati» apre la scheda dei dati qui (stessa del Profilo), montata solo se aperta; salvando si chiude e lo dice; la verifica del reddito resta nel Profilo", () => {
-  const h = leggi("src", "app", "(app)", "HomeClient.tsx"); assert.match(h, /import \{ DatiPersonaliSheet \} from "@\/components\/DatiPersonaliSheet"/);
-  assert.match(h, /\{schedaDati && \(\s+<DatiPersonaliSheet\s+open\s+onClose=\{\(\) => setSchedaDati\(false\)\}\s+tenant=\{tenant\}\s+onSalvata=\{\(\) => \{\s+setSchedaDati\(false\);\s+setAvviso\(\{ errore: false, testo: "Dati aggiornati\." \}\);/);
-  assert.match(h, /if \(sezione === "dati"\) setSchedaDati\(true\);\s+else router\.push\("\/profilo\?apri=verifica"\);/); assert.ok(!/href="\/profilo"/.test(h));
+test("Home: «Modifica dati» apre la scheda unica qui (punteggio, dati, verifica), montata solo se aperta; salvando si chiude e lo dice; niente più rimandi al Profilo", () => {
+  const h = leggi("src", "app", "(app)", "HomeClient.tsx"); assert.match(h, /import \{ DatiSheet \} from "@\/components\/DatiSheet"/);
+  assert.match(h, /\{schedaDati && \(\s+<DatiSheet\s+open\s+onClose=\{\(\) => setSchedaDati\(false\)\}\s+tenant=\{tenant\}\s+affidabilita=\{affidabilita\}\s+recensioni=\{recensioni\}\s+verificaPanel=\{verificaPanel\}\s+onSalvata=\{\(\) => \{\s+setSchedaDati\(false\);\s+setAvviso\(\{ errore: false, testo: "Dati aggiornati\." \}\);/);
+  assert.ok(!/useRouter|router\.push/.test(h), "la Home rimanda ancora altrove"); assert.ok(!/href="\/profilo"/.test(h));
+  const pg = leggi("src", "app", "(app)", "page.tsx"); assert.match(pg, /from\("documenti_inquilino"\)\.select\("id, tipo, percorso, nome_file"\)\.eq\("tenant_id", userId\)/); assert.match(pg, /<VerificaRedditoPanel\s+stato=\{tenantProfile\.verifica_stato\}/);
 });
 
-test("Profilo: usa le schede condivise (ricerca, dati, punteggio: nessuna copia), legge ?apri= e passa le recensioni a parte", () => {
-  const p = leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx"); assert.match(p, /import \{ RicercaSheet \} from "@\/components\/RicercaSheet"/); assert.match(p, /import \{ DatiPersonaliSheet \} from "@\/components\/DatiPersonaliSheet"/);
+test("Profilo: una sola riga e una sola scheda per punteggio, dati e verifica (le altre schede condivise restano), legge ?apri= e passa le recensioni a parte", () => {
+  const p = leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx"); assert.match(p, /import \{ RicercaSheet \} from "@\/components\/RicercaSheet"/); assert.match(p, /import \{ DatiSheet \} from "@\/components\/DatiSheet"/);
   assert.ok(!/function RicercaSheet/.test(p) && !/function DatiPersonaliSheet/.test(p) && !/function SaveButton/.test(p), "il Profilo ha ancora una copia di una scheda");
-  assert.match(p, /<SchedaAffidabilita affidabilita=\{affidabilita\} recensioni=\{recensioni\} onApri=\{\(sezione\) => setSheetAperta\(sezione\)\} \/>/); assert.ok(!/hasRecensioni|\.checks/.test(p), "il Profilo usa ancora i campi vecchi");
+  assert.equal([...p.matchAll(/onClick=\{\(\) => setSheetAperta\("(dati|affidabilita|verifica)"\)\}/g)].length, 1, "ci deve essere una riga sola per punteggio, dati e verifica"); assert.match(p, /onClick=\{\(\) => setSheetAperta\("dati"\)\}/);
+  assert.match(p, /<DatiSheet[\s\S]*?recensioni=\{recensioni\}\s+verificaPanel=\{verificaPanel\}\s+scorriA=\{sheetAperta === "verifica" \? "verifica" : null\}/); assert.ok(!/SchedaAffidabilita|rigaProfilo|hasRecensioni|\.checks/.test(p), "il Profilo usa ancora pezzi vecchi");
   const pg = leggi("src", "app", "(app)", "profilo", "page.tsx"); assert.match(pg, /sezioneProfilo\(\(await searchParams\)\.apri\)/); assert.match(pg, /searchParams: Promise<\{ apri\?: string \| string\[\] \}>/); assert.match(pg, /recensioni=\{riepilogo\}/);
 });
 
@@ -95,9 +99,12 @@ test("scheda di ricerca condivisa: avvisa UNA volta per ogni salvataggio che fin
   const a = leggi("src", "app", "(app)", "profilo", "actions.ts"); const f = a.slice(a.indexOf("export async function updateRicerca")); assert.match(f, /revalidatePath\("\/profilo"\);\s+revalidatePath\("\/"\);/, "la Home non si aggiorna dopo il salvataggio");
 });
 
-test("scheda del punteggio: i punti vengono dalla funzione del punteggio (nessun numero scritto a mano), con la voce, chi la controlla e le recensioni a parte", () => {
-  const c = leggi("src", "components", "SchedaAffidabilita.tsx").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
-  assert.ok(!/\b(60|25|15)\b/.test(c), "un numero di punti scritto a mano"); assert.match(c, /voci\.map\(\(v\) =>/); assert.match(c, /punteggioPossibile\(affidabilita\)/); assert.match(c, /Lo controlla lo staff/); assert.match(c, /Lo dichiari tu/); assert.match(c, /Le recensioni, a parte/); assert.ok(!/checks|limite|totaleGrezzo/.test(c), "usa campi che non esistono più");
+test("scheda unica «I tuoi dati»: l'ordine è punteggio → dati → verifica; l'informativa sta nella stessa scheda e i dati restano in memoria (nascosti, non smontati); si torna indietro con la freccia, Esc o la X", () => {
+  const d = leggi("src", "components", "DatiSheet.tsx"); const ordine = ["<RiepilogoAffidabilita", "Modifica i tuoi dati", "<DatiForm", 'id="dati-verifica"', "{verificaPanel}"].map((x) => d.indexOf(x)); assert.ok(ordine.every((x) => x > 0) && ordine.every((x, i) => i === 0 || x > ordine[i - 1]), "ordine delle parti: " + ordine.join(","));
+  assert.match(d, /<div hidden=\{inInformativa\}>/); assert.match(d, /\{inInformativa && \(\s+<>\s+<button type="button" className="redo-link aff-indietro" onClick=\{\(\) => setVista\("dati"\)\}>\s+‹ Torna ai tuoi dati/);
+  assert.match(d, /onClose=\{inInformativa \? \(\) => setVista\("dati"\) : chiudi\}/); assert.match(d, /const chiudi = \(\) => \{\s+setVista\("dati"\);\s+onClose\(\);/); assert.ok(!/useEffect\(\(\) => \{\s+if \(!open\) setVista/.test(d), "reset dello stato in un effetto");
+  assert.match(d, /onCome=\{\(\) => setVista\("come"\)\} onVai=\{vai\}/); assert.match(d, /title=\{inInformativa \? "Come viene calcolato" : "I tuoi dati"\}/); assert.match(d, /scrollIntoView\(\{ behavior: "smooth", block: "start" \}\)/); assert.match(d, /if \(open && scorriA === "verifica"\) \{\s+const t = setTimeout\(\(\) => vai\("dati-verifica"\), 60\);\s+return \(\) => clearTimeout\(t\);/, "un collegamento alla verifica deve scorrere fino al pannello");
+  assert.ok(!fs.existsSync(path.join(radice, "src", "components", "SchedaAffidabilita.tsx")) && !fs.existsSync(path.join(radice, "src", "components", "DatiPersonaliSheet.tsx")), "restano i file delle schede vecchie");
 });
 
 test("CSS: il suggerimento sta sopra i pulsanti e la card sopra il suggerimento (prima il testo finiva dietro i pulsanti)", () => {

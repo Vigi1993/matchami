@@ -10,6 +10,8 @@ import { mappaLuoghi, type Luogo } from "@/lib/luoghi";
 import type { ProfiloRicerca } from "@/lib/match";
 import type { TenantProfile, ListingConMatch, ListingProprietario } from "@/lib/types";
 import { idsNascosti } from "@/lib/scelte";
+import { VerificaRedditoPanel } from "@/components/VerificaRedditoPanel";
+import type { DocumentoInquilino } from "@/lib/verifica-inquilino";
 
 export default async function Home() {
   const supabase = await createClient();
@@ -40,6 +42,7 @@ async function TenantHome({ userId }: { userId: string }) {
     { data: recensioni },
     { data: giaCandidato },
     { data: nascostiRighe },
+    { data: documentiRows },
   ] = await Promise.all([
     supabase.from("tenant_profiles").select("*").eq("profile_id", userId).single(),
     supabase.from("tenant_zone_interesse").select("zona, luogo_id").eq("tenant_id", userId),
@@ -52,6 +55,8 @@ async function TenantHome({ userId }: { userId: string }) {
     // i preferiti e gli scarti degli ultimi 30 giorni: non si rimettono nel mazzo.
     // Se la lettura non riesce, il mazzo si vede intero: meglio un annuncio in più che nessuno.
     supabase.rpc("annunci_nascosti"),
+    // i documenti della verifica del reddito (per il pannello dentro «I tuoi dati»)
+    supabase.from("documenti_inquilino").select("id, tipo, percorso, nome_file").eq("tenant_id", userId).order("created_at", { ascending: true }),
   ]);
 
   // Le recensioni dei proprietari stanno a parte dal punteggio di affidabilità: si mostrano accanto.
@@ -129,6 +134,14 @@ async function TenantHome({ userId }: { userId: string }) {
       affidabilita={affidabilita}
       recensioni={riepilogo}
       tenant={tenantProfile}
+      verificaPanel={
+        <VerificaRedditoPanel
+          stato={tenantProfile.verifica_stato}
+          nota={tenantProfile.verifica_esito_note}
+          dati={{ professione: tenantProfile.professione, reddito_mensile: tenantProfile.reddito_mensile }}
+          documenti={(documentiRows ?? []) as DocumentoInquilino[]}
+        />
+      }
       listings={mazzo as unknown as ListingConMatch[]}
       esclusi={esclusiPerBudget}
       nascostiPerNecessarie={nascostiPerNecessarie}

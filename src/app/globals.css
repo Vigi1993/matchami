@@ -1215,7 +1215,7 @@ input[type="range"]::-moz-range-thumb {
 .deck {
   position: absolute;
   inset: 0;
-  top: 244px;
+  top: 232px;
 }
 .card {
   position: absolute;
@@ -2011,7 +2011,7 @@ input[type="range"]::-moz-range-thumb {
      Resta una pila di card da sfogliare (il trascinamento funziona
      anche col mouse), ma diventa un pannello centrato. */
   .deck {
-    inset: 244px auto 130px 50%;
+    inset: 232px auto 130px 50%;
     width: 460px;
     transform: translateX(-50%);
   }
@@ -3468,4 +3468,67 @@ mark.segnaposto {
 .chip:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* ---- scheda unica «I tuoi dati»: punteggio in alto, informativa a parte ---- */
+.aff-riepilogo .aff-come {
+  display: block;
+  margin: -4px 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--moss);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-align: left;
+}
+.aff-riepilogo .aff-recensioni {
+  margin-top: 14px;
+  align-items: flex-start;
+}
+.aff-riepilogo .aff-recensioni small {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--body-soft);
+}
+.aff-indietro {
+  display: block;
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.ancora-dati {
+  scroll-margin-top: 12px;
+}
+.come-voci,
+.come-fasce {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+}
+.come-voci li {
+  padding: 9px 0;
+  border-bottom: 1px solid rgba(16, 21, 26, 0.09);
+}
+.come-voci small {
+  display: block;
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--body-soft);
+}
+.come-fasce li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  font-size: 14px;
+  color: var(--ink);
+  border-bottom: 1px dashed rgba(16, 21, 26, 0.12);
+}
+.come-fasce b {
+  flex: none;
+  font-size: 13px;
+  white-space: nowrap;
 }

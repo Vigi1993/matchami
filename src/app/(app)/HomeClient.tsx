@@ -1,19 +1,16 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import type { AffidabilitaResult } from "@/lib/affidabilita";
 import type { RiepilogoRecensioni } from "@/lib/recensioni";
 import type { TenantProfile } from "@/lib/types";
-import { DatiPersonaliSheet } from "@/components/DatiPersonaliSheet";
+import { DatiSheet } from "@/components/DatiSheet";
 import type { ListingConMatch } from "@/lib/types";
 import { TOLLERANZA_BUDGET, statoMazzo } from "@/lib/match";
 import type { ProfiloRicerca } from "@/lib/match";
 import { chiaveRicerca as chiaveDellaRicerca, conteggioCase, suggerimentoCard, testoNascoste, vociRicerca } from "@/lib/home";
 import type { Luogo } from "@/lib/luoghi";
-import { Sheet } from "@/components/Sheet";
 import { RicercaSheet } from "@/components/RicercaSheet";
-import { SchedaAffidabilita } from "@/components/SchedaAffidabilita";
 import { candidati } from "./actions";
 import { createClient } from "@/lib/supabase/client";
 import { messaggioErroreVerifica } from "@/lib/verifica";
@@ -47,6 +44,7 @@ export function HomeClient({
   affidabilita,
   recensioni,
   tenant,
+  verificaPanel,
   listings,
   esclusi,
   mostraMatch,
@@ -60,6 +58,8 @@ export function HomeClient({
   recensioni: RiepilogoRecensioni;
   /** i dati dell'inquilino (per la scheda «Modifica dati») */
   tenant: TenantProfile;
+  /** il pannello per verificare il reddito con i documenti, costruito dal server */
+  verificaPanel: React.ReactNode;
   /** la ricerca impostata: budget, taglio, zone e caratteristiche */
   ricerca: ProfiloRicerca;
   /** i luoghi che si possono cercare (provincia, città, quartiere) */
@@ -96,8 +96,6 @@ export function HomeClient({
   const [drag, setDrag] = useState({ x: 0, y: 0, dragging: false });
   const [exiting, setExiting] = useState<"left" | "right" | null>(null);
   const startPos = useRef({ x: 0, y: 0 });
-  const router = useRouter();
-  const [schedaPunteggio, setSchedaPunteggio] = useState(false);
   const [schedaDati, setSchedaDati] = useState(false);
   const [schedaRicerca, setSchedaRicerca] = useState(false);
 
@@ -309,9 +307,6 @@ export function HomeClient({
             <b>{affidabilita.label}</b>
           </span>
           <span className="hi-punteggio-azioni">
-            <button type="button" className="hi-azione" onClick={() => setSchedaPunteggio(true)}>
-              Come si calcola
-            </button>
             <button type="button" className="hi-azione" onClick={() => setSchedaDati(true)}>
               Modifica dati
             </button>
@@ -560,25 +555,16 @@ export function HomeClient({
         </div>
       )}
 
-      <Sheet open={schedaPunteggio} onClose={() => setSchedaPunteggio(false)} title="Il tuo voto di affidabilità">
-        <SchedaAffidabilita
-          affidabilita={affidabilita}
-          recensioni={recensioni}
-          onApri={(sezione) => {
-            setSchedaPunteggio(false);
-            // i dati si cambiano qui; la verifica del reddito ha la sua pagina (carica i documenti)
-            if (sezione === "dati") setSchedaDati(true);
-            else router.push("/profilo?apri=verifica");
-          }}
-        />
-      </Sheet>
-
-      {/* Come la ricerca: montata solo quando è aperta, così ogni apertura parte dai dati di adesso. */}
+      {/* La scheda unica «I tuoi dati»: punteggio, dati da modificare, verifica del reddito. Come la ricerca, è montata solo
+          quando è aperta: ogni apertura parte dai dati di adesso. */}
       {schedaDati && (
-        <DatiPersonaliSheet
+        <DatiSheet
           open
           onClose={() => setSchedaDati(false)}
           tenant={tenant}
+          affidabilita={affidabilita}
+          recensioni={recensioni}
+          verificaPanel={verificaPanel}
           onSalvata={() => {
             setSchedaDati(false);
             setAvviso({ errore: false, testo: "Dati aggiornati." });

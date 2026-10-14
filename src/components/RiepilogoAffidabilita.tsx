@@ -1,4 +1,4 @@
-import { punteggioPossibile, PUNTEGGIO_MASSIMO, SOGLIE_ETICHETTA, type AffidabilitaResult } from "@/lib/affidabilita";
+import { PUNTEGGIO_MASSIMO, punteggioPossibile, type AffidabilitaResult, type VoceAffidabilita } from "@/lib/affidabilita";
 import { stelleTesto, testoRecensioni, type RiepilogoRecensioni } from "@/lib/recensioni";
 
 /** I punti di una voce, come si leggono: «+60» se l'hai presa, «0 su 60» se no. */
@@ -6,36 +6,44 @@ export function testoPunti(v: { presa: boolean; punti: number; massimo: number }
   return v.presa ? `+${v.punti}` : `0 su ${v.massimo}`;
 }
 
+/** A quale parte della scheda «I tuoi dati» porta il suggerimento di ogni voce. */
+export const ANCORE_VOCI: Record<VoceAffidabilita["id"], string> = {
+  reddito: "dati-verifica",
+  protesti: "dati-protesti",
+  garanzia: "dati-garante",
+};
+
 /**
- * Come si calcola il punteggio di affidabilità: tre voci, quanto valgono e chi le controlla. Poi le recensioni, che
- * stanno a parte. Si mostra nella Home e nel Profilo (stessa scheda, stessi numeri: i punti vengono dalla stessa
- * funzione che calcola il punteggio).
+ * Il punteggio in cima alla scheda «I tuoi dati»: il numero, il link a «come viene calcolato», le tre voci (quanto
+ * valgono, chi le controlla, cosa manca) e le recensioni, che stanno a parte. Non spiega le regole: lo fa la scheda
+ * «Come viene calcolato».
  */
-export function SchedaAffidabilita({
+export function RiepilogoAffidabilita({
   affidabilita,
   recensioni,
-  onApri,
+  onCome,
+  onVai,
 }: {
   affidabilita: AffidabilitaResult;
   recensioni: RiepilogoRecensioni;
-  /** si chiama con la sezione da aprire: la verifica del reddito, o i dati personali */
-  onApri?: (sezione: "verifica" | "dati") => void;
+  /** apre l'informativa su come viene calcolato il punteggio */
+  onCome: () => void;
+  /** scorre alla parte della scheda dove si completa una voce (l'id dell'ancora) */
+  onVai?: (ancora: string) => void;
 }) {
   const { punteggio, label, voci } = affidabilita;
   const possibile = punteggioPossibile(affidabilita);
 
   return (
-    <div className="aff-scheda">
-      <p className="sheet-sub">
-        È il numero che i proprietari vedono accanto alla tua candidatura. Va da 0 a {PUNTEGGIO_MASSIMO} e si costruisce con tre voci.
-        Chi non ha ancora niente parte da 0.
-      </p>
-
+    <div className="aff-riepilogo">
       <div className="aff-totale" aria-label={`Punteggio ${punteggio} su ${PUNTEGGIO_MASSIMO}, ${label}`}>
         <b>{punteggio}</b>
         <span>/{PUNTEGGIO_MASSIMO}</span>
         <em>{label}</em>
       </div>
+      <button type="button" className="redo-link aff-come" onClick={onCome}>
+        Come viene calcolato il punteggio ›
+      </button>
 
       <ul className="aff-voci">
         {voci.map((v) => (
@@ -48,9 +56,8 @@ export function SchedaAffidabilita({
             <small>{v.nota}</small>
             {!v.presa &&
               v.suggerimento &&
-              v.sezione &&
-              (onApri ? (
-                <button type="button" className="redo-link aff-azione" onClick={() => onApri(v.sezione!)}>
+              (onVai ? (
+                <button type="button" className="redo-link aff-azione" onClick={() => onVai(ANCORE_VOCI[v.id])}>
                   {v.suggerimento}
                 </button>
               ) : (
@@ -59,29 +66,20 @@ export function SchedaAffidabilita({
           </li>
         ))}
       </ul>
-
       {possibile > punteggio && (
         <p className="aff-possibile">
           Completando le voci che puoi ottenere arrivi a <b>{possibile}</b>.
         </p>
       )}
-      <p className="field-note" style={{ marginTop: 8 }}>
-        Lo staff controlla solo il reddito. Protesti e garante sono dichiarazioni tue, e restano tali. Da {SOGLIE_ETICHETTA.moltoBuona} punti in su
-        l&apos;etichetta è «Molto buona», da {SOGLIE_ETICHETTA.eccellente} «Eccellente».
-      </p>
 
-      <div className="pref-label" style={{ marginTop: 16 }}>
-        <span>Le recensioni, a parte</span>
-      </div>
-      <p className="field-note" style={{ margin: "0 0 6px 0" }}>
-        Non cambiano il punteggio: i proprietari le vedono accanto. Le lascia un proprietario verificato dopo un affitto confermato, con
-        1-5 stelle; qui si mostra la media e quante sono.
-      </p>
-      <div className="aff-recensioni" aria-label={testoRecensioni(recensioni)}>
+      <div className="aff-recensioni" aria-label={`Recensioni: ${testoRecensioni(recensioni)}`}>
         <span aria-hidden="true" className="aff-stelle">
           {stelleTesto(recensioni.media)}
         </span>
-        <b>{testoRecensioni(recensioni)}</b>
+        <span>
+          <b>{testoRecensioni(recensioni)}</b>
+          <small>Le recensioni stanno a parte: non cambiano il punteggio.</small>
+        </span>
       </div>
     </div>
   );

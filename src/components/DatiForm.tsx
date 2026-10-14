@@ -1,7 +1,6 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useState } from "react";
-import { Sheet } from "@/components/Sheet";
 import { LAVORO_VOCAB } from "@/lib/constants";
 import { PUNTI_AFFIDABILITA } from "@/lib/affidabilita";
 import type { TenantProfile } from "@/lib/types";
@@ -13,17 +12,15 @@ import { SaveButton } from "@/components/ui/SaveButton";
 import { AvatarUpload } from "@/components/AvatarUpload";
 
 /**
- * La scheda «I tuoi dati»: lavoro, reddito, garante, protesti, nucleo e presentazione. Si apre dal Profilo e dalla Home
- * (è la stessa). Alcune di queste risposte valgono nel punteggio di affidabilità: le note sotto ogni domanda lo dicono.
+ * Il modulo dei dati personali: lavoro, reddito, garante, protesti, nucleo e presentazione. Sta dentro la scheda
+ * «I tuoi dati» (DatiSheet), che sulla Home e nel Profilo è la stessa. Alcune risposte valgono nel punteggio di
+ * affidabilità: le note sotto ogni domanda lo dicono. Le domande che il punteggio usa hanno un'ancora (`dati-protesti`,
+ * `dati-garante`) a cui il riepilogo in alto può far scorrere.
  */
-export function DatiPersonaliSheet({
-  open,
-  onClose,
+export function DatiForm({
   tenant,
   onSalvata,
 }: {
-  open: boolean;
-  onClose: () => void;
   tenant: TenantProfile;
   /** chiamata quando un salvataggio finisce bene (la Home la usa per chiudere la scheda e dirlo) */
   onSalvata?: () => void;
@@ -68,7 +65,7 @@ export function DatiPersonaliSheet({
   );
 
   return (
-    <Sheet open={open} onClose={onClose} title="I tuoi dati">
+    <>
       <p className="sheet-sub">
         Queste informazioni aiutano i proprietari a valutare la tua
         candidatura.
@@ -124,6 +121,7 @@ export function DatiPersonaliSheet({
           )}
         </Field>
 
+        <div id="dati-garante" className="ancora-dati" />
         <Field label="Hai un garante disponibile?">
           <div className="chip-row">
             <Chip label="Sì" active={garante === true} onClick={() => setGarante(true)} />
@@ -134,6 +132,7 @@ export function DatiPersonaliSheet({
           </p>
         </Field>
 
+        <div id="dati-protesti" className="ancora-dati" />
         <Field label="Hai protesti o segnalazioni in centrale rischi?">
           <div className="chip-row">
             <Chip label="No" active={protestato === false} onClick={() => setProtestato(false)} />
@@ -221,6 +220,6 @@ export function DatiPersonaliSheet({
         {state?.ok && <p className="note-saved">Salvato — puoi chiudere.</p>}
         <SaveButton pending={pending} />
       </form>
-    </Sheet>
+    </>
   );
 }

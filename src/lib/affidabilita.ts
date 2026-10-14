@@ -60,6 +60,32 @@ export function etichettaPunteggio(punteggio: number): AffidabilitaResult["label
   return "Da costruire";
 }
 
+/** Le fasce di punteggio, con gli estremi: ricavate dalle soglie, così l'informativa non può contraddire la formula. */
+export function fasceAffidabilita(): { label: AffidabilitaResult["label"]; da: number; a: number }[] {
+  const { buona, moltoBuona, eccellente } = SOGLIE_ETICHETTA;
+  return [
+    { label: "Da costruire", da: PUNTEGGIO_MINIMO, a: buona - 1 },
+    { label: "Buona", da: buona, a: moltoBuona - 1 },
+    { label: "Molto buona", da: moltoBuona, a: eccellente - 1 },
+    { label: "Eccellente", da: eccellente, a: PUNTEGGIO_MASSIMO },
+  ];
+}
+
+/** Qualche caso tipico, con il punteggio che dà e l'etichetta (anche questi ricavati dalle regole). */
+export function esempiAffidabilita(): { descrizione: string; punteggio: number; label: AffidabilitaResult["label"] }[] {
+  const casi: [string, AffidabilitaInput][] = [
+    ["Nessun dato", { verificato: false, protestato: null, garante: null, fideiussione: null }],
+    ["Solo le dichiarazioni (nessun protesto, garante)", { verificato: false, protestato: false, garante: true, fideiussione: null }],
+    ["Solo il reddito verificato", { verificato: true, protestato: null, garante: null, fideiussione: null }],
+    ["Reddito verificato e nessun protesto", { verificato: true, protestato: false, garante: null, fideiussione: null }],
+    ["Tutto", { verificato: true, protestato: false, garante: true, fideiussione: null }],
+  ];
+  return casi.map(([descrizione, input]) => {
+    const r = computeAffidabilita(input);
+    return { descrizione, punteggio: r.punteggio, label: r.label };
+  });
+}
+
 export function computeAffidabilita(p: AffidabilitaInput): AffidabilitaResult {
   const { reddito, protesti, garanzia } = PUNTI_AFFIDABILITA;
 

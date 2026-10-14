@@ -2,9 +2,8 @@
 
 import { useState } from "react";
 import { RigaNovita } from "@/components/RigaNovita";
-import { DatiPersonaliSheet } from "@/components/DatiPersonaliSheet";
+import { DatiSheet } from "@/components/DatiSheet";
 import { RigaPreferiti } from "@/components/RigaPreferiti";
-import { rigaProfilo } from "@/lib/verifica-inquilino";
 import { Sheet } from "@/components/Sheet";
 import {
   computeAffidabilita,
@@ -14,7 +13,6 @@ import type { TenantProfile, Invito } from "@/lib/types";
 import { logout } from "@/app/login/actions";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { RicercaSheet } from "@/components/RicercaSheet";
-import { SchedaAffidabilita } from "@/components/SchedaAffidabilita";
 import { testoRecensioni, type RiepilogoRecensioni } from "@/lib/recensioni";
 import type { SezioneProfilo } from "@/lib/home";
 import type { Luogo } from "@/lib/luoghi";
@@ -27,7 +25,6 @@ import {
   IconDomanda,
   IconLente,
   IconLucchetto,
-  IconPersona,
   IconPersone,
   IconScudo,
   IconStella,
@@ -90,7 +87,6 @@ export function ProfiloClient({
     | null
   >(aperturaIniziale);
 
-  const rigaVerifica = rigaProfilo(tenant.verifica_stato, tenant.verifica_esito_note);
   const affidabilita = computeAffidabilita({
     verificato: tenant.verificato,
     protestato: tenant.protestato,
@@ -128,14 +124,14 @@ export function ProfiloClient({
         </div>
       </div>
 
-      {/* Affidabilità */}
+      {/* I tuoi dati e la tua affidabilità: un'unica scheda (punteggio, dati, verifica del reddito) */}
       <Row
         color="var(--gold)"
         icon={<IconStella className="fill-white stroke-none" />}
         title={`${affidabilita.punteggio}/100 · Affidabilità ${affidabilita.label}`}
-        subtitle={`Reddito verificato, protesti e garante. Recensioni, a parte: ${testoRecensioni(recensioni)}.`}
-        cta="Vedi il dettaglio"
-        onClick={() => setSheetAperta("affidabilita")}
+        subtitle={`Il tuo punteggio, i tuoi dati e la verifica del reddito. Recensioni, a parte: ${testoRecensioni(recensioni)}.`}
+        cta="Vedi e modifica i tuoi dati"
+        onClick={() => setSheetAperta("dati")}
       />
 
       {/* Completezza */}
@@ -152,26 +148,6 @@ export function ProfiloClient({
       <div className="card-grid">
         <RigaNovita nonLette={nonLette} />
         <RigaPreferiti preferiti={preferiti} />
-        {/* I tuoi dati */}
-        <Row
-          color="var(--ink)"
-          icon={<IconPersona className="fill-none stroke-white stroke-2" />}
-          title="I tuoi dati"
-          subtitle="Lavoro, reddito, garante, protesti e presentazione: quello che vedono i proprietari."
-          cta="Vedi il dettaglio"
-          onClick={() => setSheetAperta("dati")}
-        />
-
-        {/* Verifica del reddito */}
-        <Row
-          color={tenant.verifica_stato === "verificato" ? "var(--moss)" : "var(--gold)"}
-          icon={<IconScudo className={tenant.verifica_stato === "verificato" ? "fill-white stroke-none" : "fill-[var(--ink)] stroke-none"} />}
-          title={rigaVerifica.titolo}
-          subtitle={rigaVerifica.sottotitolo}
-          cta={rigaVerifica.cta}
-          onClick={() => setSheetAperta("verifica")}
-        />
-
         {/* La tua ricerca */}
         <Row
           color="var(--clay)"
@@ -239,33 +215,16 @@ export function ProfiloClient({
         </button>
       </form>
 
-      {/* ---- Sheet: Verifica del reddito ---- */}
-      <Sheet
-        open={sheetAperta === "verifica"}
-        onClose={() => setSheetAperta(null)}
-        title="Verifica del reddito"
-      >
-        <p className="sheet-sub">
-          Carica un documento d&apos;identità e una prova del reddito. Se li confermiamo, i proprietari
-          vedono «Reddito verificato» e il tuo punteggio di affidabilità sale.
-        </p>
-        {verificaPanel}
-      </Sheet>
-
-      {/* ---- Sheet: Affidabilità: da cosa è fatto il punteggio ---- */}
-      <Sheet
-        open={sheetAperta === "affidabilita"}
-        onClose={() => setSheetAperta(null)}
-        title="Il tuo voto di affidabilità"
-      >
-        <SchedaAffidabilita affidabilita={affidabilita} recensioni={recensioni} onApri={(sezione) => setSheetAperta(sezione)} />
-      </Sheet>
-
-      {/* ---- Sheet: I tuoi dati ---- */}
-      <DatiPersonaliSheet
-        open={sheetAperta === "dati"}
+      {/* ---- Sheet: I tuoi dati (punteggio, dati da modificare, verifica del reddito) ----
+          Le vecchie sezioni «dati», «affidabilita» e «verifica» (collegamenti, notifiche) aprono tutte questa. */}
+      <DatiSheet
+        open={sheetAperta === "dati" || sheetAperta === "affidabilita" || sheetAperta === "verifica"}
         onClose={() => setSheetAperta(null)}
         tenant={tenant}
+        affidabilita={affidabilita}
+        recensioni={recensioni}
+        verificaPanel={verificaPanel}
+        scorriA={sheetAperta === "verifica" ? "verifica" : null}
       />
 
       {/* ---- Sheet: La tua ricerca ---- */}
