@@ -3,12 +3,13 @@
 import {
   useActionState,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useTransition,
 } from "react";
 import { Sheet } from "@/components/Sheet";
-import { ATTR_VOCAB, ZONE_MILANO } from "@/lib/constants";
+import { ATTR_VOCAB, RISCALDAMENTI, TIPI_CONTRATTO } from "@/lib/constants";
 import type { ImmobileDettaglio } from "@/lib/types";
 import type { CriterioRichiesto } from "@/lib/match";
 import { CriteriCandidati } from "@/components/CriteriCandidati";
@@ -20,6 +21,11 @@ import { PannelloPrezzo } from "@/components/PannelloPrezzo";
 import type { RisultatoQuotazione } from "@/lib/prezzi";
 import { Field } from "@/components/ui/Field";
 import { Stepper } from "@/components/ui/Stepper";
+import { StepperOpzionale } from "@/components/ui/StepperOpzionale";
+import { LuogoAutocomplete } from "@/components/LuogoAutocomplete";
+import { etichettaLuogo, mappaLuoghi, type Luogo } from "@/lib/luoghi";
+import { OPZIONI_PIANO_ANNUNCIO } from "@/lib/annunci/dati-immobile";
+import { datiMancanti } from "@/lib/annunci/obbligatori";
 import { createClient } from "@/lib/supabase/client";
 import { IconPalazzo } from "@/components/icons";
 import { VisiteImmobile } from "@/components/VisiteImmobile";
@@ -38,8 +44,11 @@ export function ImmobiliClient({
   visite = [],
   indirizzi = {},
   quotazioni = {},
+  luoghi = [],
 }: {
   immobili: ImmobileDettaglio[];
+  /** i luoghi dove si può mettere un immobile (provincia → città → quartiere) */
+  luoghi?: Luogo[];
   /** i posti liberi e le prenotazioni di tutti i miei immobili */
   visite?: VisitaProprietario[];
   /** gli indirizzi dei miei immobili, per identificativo */
@@ -132,6 +141,7 @@ export function ImmobiliClient({
         <ImmobileForm
           action={creaImmobile}
           quotazioni={quotazioni}
+          luoghi={luoghi}
           onSaved={() => setNuovoAperto(false)}
         />
       </Sheet>
@@ -149,6 +159,7 @@ export function ImmobiliClient({
               action={aggiornaImmobile}
               immobile={selezionato}
               quotazioni={quotazioni}
+              luoghi={luoghi}
               onSaved={() => setSelezionato(null)}
             />
           </>
@@ -162,18 +173,31 @@ function ImmobileForm({
   action,
   immobile,
   quotazioni,
+  luoghi,
   onSaved,
 }: {
   action: (prevState: SaveState, formData: FormData) => Promise<SaveState>;
   immobile?: ImmobileDettaglio;
   quotazioni: Record<string, RisultatoQuotazione>;
+  luoghi: Luogo[];
   onSaved: () => void;
 }) {
   const [state, formAction, pending] = useActionState(action, null);
   const [pendingDelete, startDeleteTransition] = useTransition();
   const [erroreDelete, setErroreDelete] = useState<string | null>(null);
 
-  const [zona, setZona] = useState(immobile?.zona ?? ZONE_MILANO[0]);
+  // Dove si trova: un luogo dell'elenco (la zona scritta ne deriva). Un annuncio vecchio può non averne ancora uno.
+  const mappa = useMemo(() => mappaLuoghi(luoghi), [luoghi]);
+  const [luogoId, setLuogoId] = useState<string | null>(immobile?.luogo_id ?? null);
+  const luogo = luogoId ? mappa.get(luogoId) : undefined;
+  const zona = luogo ? etichettaLuogo(luogo, mappa) : (immobile?.zona ?? "");
+  // I dati che chi cerca può filtrare. Vuoti = «da indicare»: servono tutti per chiedere la verifica.
+  const [tipologia, setTipologia] = useState<"appartamento" | "villa">(immobile?.tipologia === "villa" ? "villa" : "appartamento");
+  const [bagni, setBagni] = useState(immobile?.bagni ?? 0);
+  const [piano, setPiano] = useState(immobile?.piano !== null && immobile?.piano !== undefined ? String(immobile.piano) : "");
+  const [riscaldamento, setRiscaldamento] = useState(immobile?.riscaldamento ?? "");
+  const [contratto, setContratto] = useState(immobile?.tipo_contratto ?? "");
+  const [disponibile, setDisponibile] = useState(immobile?.disponibile_dal ?? "");
   const [prezzo, setPrezzo] = useState(immobile?.prezzo ?? 1200);
   const [locali, setLocali] = useState(immobile?.locali ?? 2);
   const [mq, setMq] = useState(immobile?.mq ?? 50);
@@ -185,6 +209,15 @@ function ImmobileForm({
   const [pubblicato, setPubblicato] = useState(immobile?.pubblicato ?? true);
   const [foto, setFoto] = useState<string[]>(immobile?.foto ?? []);
   const [criteri, setCriteri] = useState<CriterioRichiesto[]>(immobile?.criteri ?? []);
+  const mancanti = datiMancanti({
+    classe_energetica: classe,
+    luogo_id: luogoId,
+    bagni: bagni > 0 ? bagni : null,
+    piano: piano === "" ? null : Number(piano),
+    riscaldamento,
+    tipo_contratto: contratto,
+    disponibile_dal: disponibile,
+  });
   const inputFotoRef = useRef<HTMLInputElement>(null);
   const [caricamentoFoto, setCaricamentoFoto] = useState(false);
   const [erroreFoto, setErroreFoto] = useState<string | null>(null);
@@ -281,7 +314,13 @@ function ImmobileForm({
   return (
     <form action={formAction} className="flex flex-col gap-5">
       {immobile && <input type="hidden" name="id" value={immobile.id} />}
-      <input type="hidden" name="zona" value={zona} />
+      <input type="hidden" name="luogo_id" value={luogoId ?? ""} />
+      <input type="hidden" name="tipologia" value={tipologia} />
+      <input type="hidden" name="bagni" value={bagni > 0 ? bagni : ""} />
+      <input type="hidden" name="piano" value={piano} />
+      <input type="hidden" name="riscaldamento" value={riscaldamento} />
+      <input type="hidden" name="tipo_contratto" value={contratto} />
+      <input type="hidden" name="disponibile_dal" value={disponibile} />
       <input type="hidden" name="prezzo" value={prezzo} />
       <input type="hidden" name="locali" value={locali} />
       <input type="hidden" name="mq" value={mq} />
@@ -311,17 +350,21 @@ function ImmobileForm({
         />
       </Field>
 
-      <Field label="Zona">
-        <div className="flex flex-wrap gap-2">
-          {ZONE_MILANO.map((z) => (
-            <Chip
-              key={z}
-              label={z.split(",")[0]}
-              active={zona === z}
-              onClick={() => setZona(z)}
-            />
-          ))}
-        </div>
+      <Field label="Dove si trova">
+        <LuogoAutocomplete
+          luoghi={luoghi}
+          scelti={luogoId ? [luogoId] : []}
+          onChange={(ids) => setLuogoId(ids[0] ?? null)}
+          singolo
+          livelli={["quartiere", "comune"]}
+          etichetta="Dove si trova l'immobile: città o quartiere"
+          segnaposto="Scrivi la città o il quartiere"
+        />
+        {!luogoId && (
+          <p className="field-note" style={{ margin: "8px 0 0 0" }}>
+            {immobile?.zona ? `Zona attuale: ${immobile.zona}. Scegli dall'elenco per ritrovarla.` : "Scegli la zona dall'elenco: serve per salvare l'annuncio."}
+          </p>
+        )}
       </Field>
 
       <Field label={`Canone mensile · €${prezzo.toLocaleString("it-IT")}`}>
@@ -343,6 +386,60 @@ function ImmobileForm({
       <Field label="Metratura">
         <Stepper value={mq} onChange={setMq} min={15} max={250} step={5} suffix=" m²" />
       </Field>
+
+      <Field label="Tipo di immobile">
+        <div className="chip-row" role="group" aria-label="Tipo di immobile">
+          <Chip label="Appartamento" active={tipologia === "appartamento"} onClick={() => setTipologia("appartamento")} />
+          <Chip label="Villa" active={tipologia === "villa"} onClick={() => setTipologia("villa")} />
+          <button type="button" className="chip" disabled aria-label="Posto letto, presto disponibile">
+            Posto letto · presto
+          </button>
+        </div>
+      </Field>
+
+      <Field label="Bagni · obbligatorio per la verifica">
+        <StepperOpzionale etichetta="Numero di bagni" value={bagni} onChange={setBagni} min={1} max={10} avvio={1} vuoto="Da indicare" />
+      </Field>
+
+      <Field label="Piano · obbligatorio per la verifica">
+        <select value={piano} onChange={(e) => setPiano(e.target.value)} aria-label="Piano" className="contract-input">
+          <option value="">Da indicare</option>
+          {OPZIONI_PIANO_ANNUNCIO.map((o) => (
+            <option key={o.valore} value={o.valore}>
+              {o.etichetta}
+            </option>
+          ))}
+        </select>
+      </Field>
+
+      <Field label="Riscaldamento · obbligatorio per la verifica">
+        <div className="chip-row" role="group" aria-label="Tipo di riscaldamento">
+          {RISCALDAMENTI.map((r) => (
+            <Chip key={r.id} label={r.label} active={riscaldamento === r.id} onClick={() => setRiscaldamento(riscaldamento === r.id ? "" : r.id)} />
+          ))}
+        </div>
+      </Field>
+
+      <Field label="Tipo di contratto proposto · obbligatorio per la verifica">
+        <div className="chip-row" role="group" aria-label="Tipo di contratto proposto">
+          {TIPI_CONTRATTO.map((t) => (
+            <Chip key={t.id} label={t.label} active={contratto === t.id} onClick={() => setContratto(contratto === t.id ? "" : t.id)} />
+          ))}
+        </div>
+      </Field>
+
+      <Field label="Disponibile dal · obbligatorio per la verifica">
+        <div className="flex gap-2 items-center">
+          <input type="date" value={disponibile} onChange={(e) => setDisponibile(e.target.value)} aria-label="Disponibile dal" className="contract-input" style={{ flex: 1 }} />
+          <Chip label="Subito" active={disponibile === new Date().toISOString().slice(0, 10)} onClick={() => setDisponibile(new Date().toISOString().slice(0, 10))} />
+        </div>
+      </Field>
+
+      {mancanti.length > 0 && (
+        <p className="field-note" style={{ margin: "-6px 0 0 0" }}>
+          Per chiedere la verifica dell&apos;immobile manca ancora: {mancanti.map((d) => d.etichetta.toLowerCase()).join(", ")}. Intanto puoi salvare l&apos;annuncio come bozza.
+        </p>
+      )}
 
       <Field label="Classe energetica (APE) · obbligatoria per la verifica">
         <div className="flex flex-wrap gap-2">

@@ -158,7 +158,7 @@ async function OwnerHome({ userId }: { userId: string }) {
     const [{ data: miei }, { data: documenti }] = await Promise.all([
       supabase
         .from("listings")
-        .select("id, titolo, zona, verifica_stato, verifica_esito_note, classe_energetica")
+        .select("id, titolo, zona, verifica_stato, verifica_esito_note, classe_energetica, luogo_id, bagni, piano, riscaldamento, tipo_contratto, disponibile_dal")
         .eq("owner_id", userId)
         .order("created_at", { ascending: false }),
       supabase.from("documenti_verifica").select("tipo, listing_id").eq("owner_id", userId),
@@ -181,7 +181,15 @@ async function OwnerHome({ userId }: { userId: string }) {
       stato: l.verifica_stato as ImmobileVerifica["stato"],
       note: (l.verifica_esito_note as string | null) ?? null,
       nProprieta: proprietaPerImmobile.get(l.id as string) ?? 0,
-      classeEnergetica: (l.classe_energetica as string | null) ?? null,
+      dati: {
+        classe_energetica: (l.classe_energetica as string | null) ?? null,
+        luogo_id: (l.luogo_id as string | null) ?? null,
+        bagni: (l.bagni as number | null) ?? null,
+        piano: (l.piano as number | null) ?? null,
+        riscaldamento: (l.riscaldamento as string | null) ?? null,
+        tipo_contratto: (l.tipo_contratto as string | null) ?? null,
+        disponibile_dal: (l.disponibile_dal as string | null) ?? null,
+      },
     }));
 
     return (

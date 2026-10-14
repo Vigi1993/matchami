@@ -59,6 +59,14 @@ export type ImmobileDettaglio = {
   /** classe energetica (APE) e indice di prestazione: dati pubblici dell'annuncio */
   classe_energetica?: string | null;
   ep_globale?: number | null;
+  /** i dati che chi cerca può filtrare (obbligatori per chiedere la verifica) */
+  luogo_id?: string | null;
+  tipologia?: "appartamento" | "villa" | null;
+  bagni?: number | null;
+  piano?: number | null;
+  riscaldamento?: string | null;
+  tipo_contratto?: string | null;
+  disponibile_dal?: string | null;
   /** galleria dell'annuncio, già ordinata */
   foto: string[];
   /** stato della verifica dell'immobile e, se respinto, il motivo */

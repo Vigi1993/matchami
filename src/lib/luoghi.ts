@@ -76,17 +76,19 @@ const ORDINE_LIVELLO: Record<LivelloLuogo, number> = { comune: 0, provincia: 1, 
 export function cercaLuoghi(
   testo: unknown,
   luoghi: readonly Luogo[] | null | undefined,
-  opzioni: { max?: number; esclusi?: readonly string[] } = {}
+  opzioni: { max?: number; esclusi?: readonly string[]; livelli?: readonly LivelloLuogo[] } = {}
 ): SuggerimentoLuogo[] {
   const parole = normalizza(testo).split(" ").filter(Boolean);
   if (parole.length === 0) return [];
   const mappa = mappaLuoghi(luoghi);
   const esclusi = new Set(opzioni.esclusi ?? []);
+  const livelli = opzioni.livelli ? new Set<LivelloLuogo>(opzioni.livelli) : null;
   const max = Math.max(1, Math.min(20, opzioni.max ?? 8));
   const trovati: SuggerimentoLuogo[] = [];
 
   for (const l of mappa.values()) {
     if (esclusi.has(l.id)) continue;
+    if (livelli && !livelli.has(l.livello)) continue;
     const nome = normalizza(l.nome);
     const contesto = antenati(l.id, mappa)
       .slice(1)

@@ -14,7 +14,9 @@ const {
   DIMENSIONE_MAX_BYTE,
 } = v;
 
-const imm = (o = {}) => ({ id: "L1", titolo: "Casa", zona: "Isola", stato: "non_avviata", note: null, nProprieta: 0, classeEnergetica: "C", ...o });
+const DATI = { classe_energetica: "C", luogo_id: "q1", bagni: 1, piano: 0, riscaldamento: "autonomo", tipo_contratto: "libero_4_4", disponibile_dal: "2026-12-01" };
+const imm = (o = {}) => ({ id: "L1", titolo: "Casa", zona: "Isola", stato: "non_avviata", note: null, nProprieta: 0, dati: DATI, ...o });
+const senzaDato = (chiave, valore = null) => ({ ...DATI, [chiave]: valore });
 
 // ---------------- stati ----------------
 test("stato: ogni stato dice a che punto si è, con un tono diverso", () => {
@@ -135,23 +137,45 @@ test("errori: ogni codice del database ha una frase, e mai il testo tecnico", ()
 // ------------------------------------------------------------
 
 test("manca la classe energetica: lo dice, e non si può inviare", () => {
-  const senza = imm({ nProprieta: 1, classeEnergetica: null });
+  const senza = imm({ nProprieta: 1, dati: senzaDato("classe_energetica") });
   const m = cosaManca(true, senza);
   assert.equal(m.length, 1); assert.match(m[0], /classe energetica/); assert.match(m[0], /scheda dell'annuncio/);
   assert.equal(puoInviare(true, senza), false);
-  assert.equal(puoInviare(true, imm({ nProprieta: 1, classeEnergetica: "G" })), true, "ogni classe va bene, anche la peggiore");
+  assert.equal(puoInviare(true, imm({ nProprieta: 1, dati: senzaDato("classe_energetica", "G") })), true, "ogni classe va bene, anche la peggiore");
 });
 
 test("la classe vuota o con soli spazi vale «manca»; undefined anche", () => {
-  for (const c of ["", "   ", null, undefined]) assert.equal(puoInviare(true, imm({ nProprieta: 1, classeEnergetica: c })), false, JSON.stringify(c));
+  for (const c of ["", "   ", null, undefined]) assert.equal(puoInviare(true, imm({ nProprieta: 1, dati: senzaDato("classe_energetica", c) })), false, JSON.stringify(c));
 });
 
 test("tutto ciò che manca si dice insieme, nell'ordine: identità, proprietà, classe", () => {
-  const m = cosaManca(false, imm({ nProprieta: 0, classeEnergetica: null }));
+  const m = cosaManca(false, imm({ nProprieta: 0, dati: senzaDato("classe_energetica") }));
   assert.equal(m.length, 3); assert.match(m[0], /identità/); assert.match(m[1], /proprietà/); assert.match(m[2], /classe energetica/);
 });
 
 test("il messaggio del database per i dati mancanti è una frase, non un codice", () => {
   const f = messaggioErroreVerifica("ERROR: DATI_OBBLIGATORI_MANCANTI (P0001)");
   assert.match(f, /classe energetica/); assert.ok(!/DATI_OBBLIGATORI|P0001/.test(f));
+});
+
+// ------------------------------------------------------------
+// I dati obbligatori nuovi: luogo, bagni, piano, riscaldamento, contratto, disponibilità
+// ------------------------------------------------------------
+
+test("manca uno qualunque dei dati nuovi: lo dice con parole sue, e non si può inviare", () => {
+  const attese = { luogo_id: /zona/, bagni: /bagni/, piano: /piano/, riscaldamento: /riscaldamento/, tipo_contratto: /contratto/, disponibile_dal: /disponibile/ };
+  for (const [chiave, re] of Object.entries(attese)) { const i = imm({ nProprieta: 1, dati: senzaDato(chiave) }); const m = cosaManca(true, i); assert.equal(m.length, 1, chiave); assert.match(m[0], re, chiave); assert.match(m[0], /scheda dell'annuncio/); assert.equal(puoInviare(true, i), false, chiave); }
+  assert.equal(puoInviare(true, imm({ nProprieta: 1 })), true, "con tutti e sette si può");
+});
+
+test("il piano terra (0) e il seminterrato (-1) NON sono «manca»; il vuoto sì", () => {
+  assert.equal(puoInviare(true, imm({ nProprieta: 1, dati: senzaDato("piano", 0) })), true); assert.equal(puoInviare(true, imm({ nProprieta: 1, dati: senzaDato("piano", -1) })), true); assert.equal(puoInviare(true, imm({ nProprieta: 1, dati: senzaDato("piano", null) })), false); assert.equal(puoInviare(true, imm({ nProprieta: 1, dati: senzaDato("piano", undefined) })), false);
+});
+
+test("tutto ciò che manca si dice insieme: identità, proprietà, poi i dati nell'ordine dell'elenco", () => {
+  const m = cosaManca(false, imm({ nProprieta: 0, dati: {} })); assert.equal(m.length, 9); assert.match(m[0], /identità/); assert.match(m[1], /proprietà/); assert.match(m[2], /classe energetica/); assert.match(m[3], /zona/); assert.match(m[8], /disponibile/);
+});
+
+test("il messaggio del database per i dati mancanti li elenca tutti, in una frase", () => {
+  const f = messaggioErroreVerifica("ERROR: DATI_OBBLIGATORI_MANCANTI (P0001)"); for (const p of ["classe energetica", "zona", "bagni", "piano", "riscaldamento", "tipo di contratto", "disponibilità"]) assert.match(f, new RegExp(p), p);
 });

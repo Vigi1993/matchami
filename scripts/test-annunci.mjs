@@ -63,22 +63,29 @@ test("testo mostrato: classe e indice, solo classe, o «Non indicata»", () => {
 });
 
 // ============================================================ i dati obbligatori
-test("obbligatori: oggi la classe energetica, e l'elenco è dichiarato provvisorio", () => {
-  assert.deepEqual(ob.DATI_OBBLIGATORI.map((d) => d.chiave), ["classe_energetica"]);
+const COMPLETI = { classe_energetica: "C", luogo_id: "q1", bagni: 1, piano: 0, riscaldamento: "autonomo", tipo_contratto: "libero_4_4", disponibile_dal: "2026-12-01" };
+
+test("obbligatori: sette dati (classe energetica, luogo, bagni, piano, riscaldamento, contratto, disponibilità), e l'elenco è dichiarato provvisorio", () => {
+  assert.deepEqual(ob.DATI_OBBLIGATORI.map((d) => d.chiave), ["classe_energetica", "luogo_id", "bagni", "piano", "riscaldamento", "tipo_contratto", "disponibile_dal"]);
   assert.equal(ob.ELENCO_DATI_OBBLIGATORI_PROVVISORIO, true, "se l'elenco è stato confermato da un legale va tolto il «provvisorio» e aggiornato il punto 37");
   for (const d of ob.DATI_OBBLIGATORI) { assert.ok(d.etichetta && d.perche && d.frase); assert.ok(!/\b(lui|lei)\b/i.test(d.frase)); }
 });
 
-test("obbligatori: un valore nullo, assente o vuoto vale «manca»; qualunque classe valida no", () => {
-  for (const x of [null, undefined, "", "   "]) assert.equal(ob.datiMancanti({ classe_energetica: x }).length, 1, JSON.stringify(x));
-  assert.equal(ob.datiMancanti({}).length, 1);
-  for (const c of en.CLASSI_ENERGETICHE) assert.equal(ob.datiMancanti({ classe_energetica: c }).length, 0, c);
+test("obbligatori: un valore nullo, assente o vuoto vale «manca», per ognuno dei sette; lo zero NO (il piano 0 è il piano terra)", () => {
+  assert.deepEqual(ob.datiMancanti(COMPLETI), []); assert.equal(ob.datiMancanti({}).length, 7);
+  for (const chiave of Object.keys(COMPLETI)) for (const x of [null, undefined, "", "   "]) assert.deepEqual(ob.datiMancanti({ ...COMPLETI, [chiave]: x }).map((d) => d.chiave), [chiave], `${chiave}=${JSON.stringify(x)}`);
+  assert.deepEqual(ob.datiMancanti({ ...COMPLETI, piano: 0 }), [], "il piano terra non è «manca»"); assert.deepEqual(ob.datiMancanti({ ...COMPLETI, piano: -1 }), []);
+  for (const c of en.CLASSI_ENERGETICHE) assert.equal(ob.datiMancanti({ ...COMPLETI, classe_energetica: c }).length, 0, c);
+  assert.deepEqual(ob.datiMancanti({ ...COMPLETI, bagni: null, piano: null }).map((d) => d.chiave), ["bagni", "piano"], "tutto ciò che manca si dice insieme, nell'ordine dell'elenco");
 });
 
 test("obbligatori: ciò che l'app chiede e ciò che il database fa rispettare coincidono", () => {
   // ogni dato obbligatorio dell'app deve essere controllato anche dalla funzione del database:
   // se si aggiunge un dato all'elenco e non alla migrazione, un annuncio incompleto passerebbe
-  const funzione = sql.slice(sql.indexOf("create or replace function public.richiedi_verifica_immobile"));
+  // vale la versione PIÙ RECENTE della funzione (le migrazioni successive la riscrivono)
+  const cartella = path.join(radice, "supabase", "migrations"); const ultima = fs.readdirSync(cartella).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort().filter((f) => fs.readFileSync(path.join(cartella, f), "utf8").includes("create or replace function public.richiedi_verifica_immobile")).pop();
+  const testoUltima = fs.readFileSync(path.join(cartella, ultima), "utf8"); assert.equal(ultima, "0031_dati_obbligatori_annuncio_2.sql", "la funzione è stata riscritta di nuovo: aggiorna questo test");
+  const funzione = testoUltima.slice(testoUltima.indexOf("create or replace function public.richiedi_verifica_immobile"));
   for (const d of ob.DATI_OBBLIGATORI) assert.match(funzione, new RegExp(`v_listing\\.${d.chiave} is null`), `${d.chiave} non è controllato dal database`);
   // e viceversa: il database non chiede di più di ciò che l'app sa spiegare
   const controlli = [...funzione.matchAll(/v_listing\.(\w+) is null/g)].map((m) => m[1]);

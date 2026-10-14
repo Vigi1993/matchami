@@ -2,6 +2,8 @@
 
 import { leggiClasse, leggiEp } from "@/lib/annunci/energia";
 import { revalidatePath } from "next/cache";
+import { leggiDatiImmobile } from "@/lib/annunci/dati-immobile";
+import { messaggioErroreVerifica } from "@/lib/verifica";
 import { createClient } from "@/lib/supabase/server";
 import { normalizzaCriteri, righeDaCriteri } from "@/lib/match";
 import type { CriterioRichiesto } from "@/lib/match";
@@ -70,11 +72,16 @@ export async function creaImmobile(
   if (!user) return { error: "Non autenticato." };
 
   const titolo = String(formData.get("titolo") || "").trim();
-  const zona = String(formData.get("zona") || "").trim();
   const prezzo = Number(formData.get("prezzo") || 0);
-  if (!titolo || !zona || !prezzo) {
-    return { error: "Titolo, zona e canone sono obbligatori." };
+  if (!titolo || !prezzo) {
+    return { error: "Titolo e canone sono obbligatori." };
   }
+
+  // I dati che chi cerca può filtrare (luogo, tipologia, bagni, piano…). Si possono lasciare vuoti in una bozza, tranne il
+  // luogo (la zona dell'annuncio ne deriva); per chiedere la verifica servono tutti.
+  const dati = leggiDatiImmobile((chiave) => formData.get(chiave), new Date().toISOString().slice(0, 10));
+  if (!dati.ok) return { error: dati.errore };
+  if (!dati.dati.luogo_id) return { error: "Scegli la zona dall'elenco." };
 
   const descrizione = String(formData.get("descrizione") || "") || null;
   const locali = Number(formData.get("locali") || 0) || null;
@@ -95,7 +102,8 @@ export async function creaImmobile(
       owner_id: user.id,
       titolo,
       descrizione,
-      zona,
+      // la zona scritta la ricava il database dal luogo
+      ...dati.dati,
       prezzo,
       locali,
       mq,
@@ -107,7 +115,7 @@ export async function creaImmobile(
     .select("id")
     .single();
 
-  if (error) return { error: error.message };
+  if (error) return { error: error.message.includes("LUOGO_NON_VALIDO") ? messaggioErroreVerifica(error.message) : error.message };
 
   if (foto.length > 0 && listing) {
     const { error: eFoto } = await supabase.from("listing_photos").insert(
@@ -140,11 +148,16 @@ export async function aggiornaImmobile(
   if (!id) return { error: "Immobile non trovato." };
 
   const titolo = String(formData.get("titolo") || "").trim();
-  const zona = String(formData.get("zona") || "").trim();
   const prezzo = Number(formData.get("prezzo") || 0);
-  if (!titolo || !zona || !prezzo) {
-    return { error: "Titolo, zona e canone sono obbligatori." };
+  if (!titolo || !prezzo) {
+    return { error: "Titolo e canone sono obbligatori." };
   }
+
+  // I dati che chi cerca può filtrare (luogo, tipologia, bagni, piano…). Si possono lasciare vuoti in una bozza, tranne il
+  // luogo (la zona dell'annuncio ne deriva); per chiedere la verifica servono tutti.
+  const dati = leggiDatiImmobile((chiave) => formData.get(chiave), new Date().toISOString().slice(0, 10));
+  if (!dati.ok) return { error: dati.errore };
+  if (!dati.dati.luogo_id) return { error: "Scegli la zona dall'elenco." };
 
   const descrizione = String(formData.get("descrizione") || "") || null;
   const locali = Number(formData.get("locali") || 0) || null;
@@ -164,7 +177,8 @@ export async function aggiornaImmobile(
     .update({
       titolo,
       descrizione,
-      zona,
+      // la zona scritta la ricava il database dal luogo
+      ...dati.dati,
       prezzo,
       locali,
       mq,
@@ -177,7 +191,7 @@ export async function aggiornaImmobile(
     .eq("id", id)
     .eq("owner_id", user.id);
 
-  if (error) return { error: error.message };
+  if (error) return { error: error.message.includes("LUOGO_NON_VALIDO") ? messaggioErroreVerifica(error.message) : error.message };
 
   // Riscriviamo l'intera galleria: l'ordine delle foto è quello in cui
   // il proprietario le ha lasciate nel modulo.

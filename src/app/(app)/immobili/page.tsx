@@ -5,6 +5,7 @@ import type { VisitaProprietario } from "@/lib/visite";
 import { conVista } from "@/lib/mappe";
 import { quotazioniPerZone } from "@/lib/prezzi";
 import { ZONE_MILANO } from "@/lib/constants";
+import type { Luogo } from "@/lib/luoghi";
 import type { IndirizzoConVista } from "@/lib/mappe/tipi";
 import { criteriDaRighe } from "@/lib/match";
 import type { RigaCriterioDb } from "@/lib/match";
@@ -15,11 +16,11 @@ export default async function ImmobiliPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const [{ data: listings }, { data: candidature }, { data: visite }, { data: indirizziRighe }] = await Promise.all([
+  const [{ data: listings }, { data: candidature }, { data: visite }, { data: indirizziRighe }, { data: luoghiRighe }] = await Promise.all([
     supabase
       .from("listings")
       .select(
-        "id, titolo, descrizione, zona, prezzo, locali, mq, attributi, pubblicato, classe_energetica, ep_globale, verifica_stato, verifica_esito_note, listing_photos(url, ordine), listing_criteri(chiave, peso, modo, soglia_pct)"
+        "id, titolo, descrizione, zona, prezzo, locali, mq, attributi, pubblicato, classe_energetica, ep_globale, verifica_stato, verifica_esito_note, luogo_id, tipologia, bagni, piano, riscaldamento, tipo_contratto, disponibile_dal, listing_photos(url, ordine), listing_criteri(chiave, peso, modo, soglia_pct)"
       )
       .eq("owner_id", user!.id)
       .order("created_at", { ascending: false }),
@@ -31,6 +32,8 @@ export default async function ImmobiliPage() {
     supabase.rpc("visite_del_proprietario"),
     // gli indirizzi dei miei immobili, con la posizione sulla mappa
     supabase.rpc("indirizzi_dei_miei_immobili"),
+    // i luoghi dove si può mettere un immobile (provincia → città → quartiere)
+    supabase.from("luoghi").select("id, livello, nome, sigla, parent_id"),
   ]);
 
   const indirizzi: Record<string, IndirizzoConVista> = {};
@@ -57,6 +60,13 @@ export default async function ImmobiliPage() {
     pubblicato: l.pubblicato,
     classe_energetica: (l.classe_energetica as string | null) ?? null,
     ep_globale: l.ep_globale === null || l.ep_globale === undefined ? null : Number(l.ep_globale),
+    luogo_id: (l.luogo_id as string | null) ?? null,
+    tipologia: ((l.tipologia as string | null) === "villa" ? "villa" : "appartamento") as "appartamento" | "villa",
+    bagni: (l.bagni as number | null) ?? null,
+    piano: (l.piano as number | null) ?? null,
+    riscaldamento: (l.riscaldamento as string | null) ?? null,
+    tipo_contratto: (l.tipo_contratto as string | null) ?? null,
+    disponibile_dal: (l.disponibile_dal as string | null) ?? null,
     verifica_stato: l.verifica_stato,
     verifica_esito_note: l.verifica_esito_note ?? null,
     foto: [...((l.listing_photos as { url: string; ordine: number }[]) ?? [])]
@@ -66,5 +76,5 @@ export default async function ImmobiliPage() {
     nCandidature: nCandidaturePerListing.get(l.id) ?? 0,
   }));
 
-  return <ImmobiliClient immobili={immobili} visite={(visite ?? []) as VisitaProprietario[]} indirizzi={indirizzi} quotazioni={quotazioni} />;
+  return <ImmobiliClient immobili={immobili} visite={(visite ?? []) as VisitaProprietario[]} indirizzi={indirizzi} quotazioni={quotazioni} luoghi={(luoghiRighe ?? []) as Luogo[]} />;
 }

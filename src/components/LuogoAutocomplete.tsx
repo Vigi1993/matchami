@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useMemo, useRef, useState } from "react";
-import { cercaLuoghi, etichettaLuogo, mappaLuoghi, MAX_LUOGHI_SCELTI, semplificaScelte, type Luogo } from "@/lib/luoghi";
+import { cercaLuoghi, etichettaLuogo, mappaLuoghi, MAX_LUOGHI_SCELTI, semplificaScelte, type Luogo, type LivelloLuogo } from "@/lib/luoghi";
 
 /**
  * Si scrive il nome di una provincia, di una città o di un quartiere e compaiono i suggerimenti; scegliendo una città
@@ -12,10 +12,20 @@ export function LuogoAutocomplete({
   luoghi,
   scelti,
   onChange,
+  singolo = false,
+  livelli,
+  etichetta = "Dove cerchi: provincia, città o quartiere",
+  segnaposto = "Scrivi una città o un quartiere",
 }: {
   luoghi: Luogo[];
   scelti: string[];
   onChange: (ids: string[]) => void;
+  /** un solo luogo: sceglierne uno sostituisce il precedente (per l'annuncio: l'immobile sta in un posto solo) */
+  singolo?: boolean;
+  /** quali livelli si possono scegliere (per l'annuncio: quartiere o città, non una provincia) */
+  livelli?: readonly LivelloLuogo[];
+  etichetta?: string;
+  segnaposto?: string;
 }) {
   const idLista = useId();
   const contenitore = useRef<HTMLDivElement>(null);
@@ -23,11 +33,11 @@ export function LuogoAutocomplete({
   const [aperto, setAperto] = useState(false);
   const [attivo, setAttivo] = useState(0);
   const mappa = useMemo(() => mappaLuoghi(luoghi), [luoghi]);
-  const suggerimenti = useMemo(() => cercaLuoghi(testo, luoghi, { esclusi: scelti }), [testo, luoghi, scelti]);
-  const pieno = scelti.length >= MAX_LUOGHI_SCELTI;
+  const suggerimenti = useMemo(() => cercaLuoghi(testo, luoghi, { esclusi: scelti, livelli }), [testo, luoghi, scelti, livelli]);
+  const pieno = !singolo && scelti.length >= MAX_LUOGHI_SCELTI;
 
   function scegli(id: string) {
-    onChange(semplificaScelte([...scelti, id], mappa));
+    onChange(singolo ? [id] : semplificaScelte([...scelti, id], mappa));
     setTesto("");
     setAttivo(0);
     setAperto(false);
@@ -79,14 +89,14 @@ export function LuogoAutocomplete({
       <input
         type="text"
         role="combobox"
-        aria-label="Dove cerchi: provincia, città o quartiere"
+        aria-label={etichetta}
         aria-expanded={aperto && suggerimenti.length > 0}
         aria-controls={idLista}
         aria-autocomplete="list"
         aria-activedescendant={aperto && suggerimenti[attivo] ? `${idLista}-${attivo}` : undefined}
         autoComplete="off"
         disabled={pieno}
-        placeholder={pieno ? `Hai scelto ${MAX_LUOGHI_SCELTI} luoghi` : "Scrivi una città o un quartiere"}
+        placeholder={pieno ? `Hai scelto ${MAX_LUOGHI_SCELTI} luoghi` : singolo && scelti.length > 0 ? "Cambia zona" : segnaposto}
         value={testo}
         maxLength={60}
         className="luogo-ac-input"
