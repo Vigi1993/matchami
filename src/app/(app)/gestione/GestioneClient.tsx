@@ -4,29 +4,18 @@ import { useState } from "react";
 import { Sheet } from "@/components/Sheet";
 import type { ContrattoConAnnuncio } from "@/lib/types";
 import { LinkUtenze } from "@/components/LinkUtenze";
-import { BozzaContratto } from "@/components/BozzaContratto";
-import { ArchivioContratto } from "@/components/ArchivioContratto";
-import { FirmaContratto } from "@/components/FirmaContratto";
+import { ContrattoInPagina } from "@/components/ContrattoInPagina";
 import type { FirmeDelContratto } from "@/lib/firma/carica";
 import type { DocumentoContratto } from "@/lib/documenti-contratto";
 import { SOTTOTITOLO_UTENZE } from "@/lib/utenze";
 import {
+  MODO_STORICO,
   NESSUN_CONTRATTO_IN_CORSO,
-  badgeStato,
-  etichettaStato,
+  modoInCorso,
   raggruppaContratti,
 } from "@/lib/contratti";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { IconDocumento } from "@/components/icons";
-
-function formatData(d: string | null): string {
-  if (!d) return "—";
-  return new Date(d).toLocaleDateString("it-IT", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
 
 export function GestioneClient({
   contratti,
@@ -39,9 +28,6 @@ export function GestioneClient({
   /** i documenti dei miei contratti, per identificativo del contratto */
   documenti?: Record<string, DocumentoContratto[]>;
 }) {
-  const [selezionato, setSelezionato] = useState<ContrattoConAnnuncio | null>(
-    null
-  );
   const [bolletteAperto, setBolletteAperto] = useState(false);
 
   // I contratti conclusi vanno nello storico: non restano mescolati a quelli in corso.
@@ -72,12 +58,15 @@ export function GestioneClient({
         <>
           {inCorso.length > 0 ? (
             <>
-              <div className="pref-label" style={{ marginTop: 12 }}>
-                <span>In corso — {inCorso.length}</span>
-              </div>
-              <div className="card-grid">
+              {/* con più contratti in corso si dice quanti sono; con uno solo c'è solo il contratto */}
+              {inCorso.length > 1 && (
+                <div className="pref-label" style={{ marginTop: 12 }}>
+                  <span>In corso — {inCorso.length}</span>
+                </div>
+              )}
+              <div style={{ marginTop: 12 }}>
                 {inCorso.map((c) => (
-                  <SchedaContratto key={c.id} c={c} onSelect={setSelezionato} />
+                  <ContrattoInPagina key={c.id} c={c} modo={modoInCorso(inCorso.length)} firme={firme[c.id]} documenti={documenti[c.id] ?? []} />
                 ))}
               </div>
             </>
@@ -92,9 +81,9 @@ export function GestioneClient({
               <div className="pref-label" style={{ marginTop: 20 }}>
                 <span>Storico — {storico.length}</span>
               </div>
-              <div className="card-grid">
+              <div style={{ marginTop: 12 }}>
                 {storico.map((c) => (
-                  <SchedaContratto key={c.id} c={c} onSelect={setSelezionato} passato />
+                  <ContrattoInPagina key={c.id} c={c} modo={MODO_STORICO} firme={firme[c.id]} documenti={documenti[c.id] ?? []} passato />
                 ))}
               </div>
             </>
@@ -122,57 +111,6 @@ export function GestioneClient({
         </div>
       </button>
 
-      {/* ---- Sheet: dettaglio contratto ---- */}
-      <Sheet
-        open={selezionato !== null}
-        onClose={() => setSelezionato(null)}
-        title={selezionato?.candidature?.listings?.titolo ?? "Contratto"}
-      >
-        {selezionato && (
-          <>
-            <div className="mb-4">
-              <span className={`mc-pct ${badgeStato(selezionato.stato)}`}>
-                {etichettaStato(selezionato.stato)}
-              </span>
-            </div>
-            <DettaglioRow
-              label="Zona"
-              value={selezionato.candidature?.listings?.zona ?? "—"}
-            />
-            <DettaglioRow
-              label="Canone mensile"
-              value={
-                selezionato.canone
-                  ? `€${selezionato.canone.toLocaleString("it-IT")}`
-                  : "—"
-              }
-            />
-            <DettaglioRow
-              label="Durata"
-              value={
-                selezionato.durata_mesi ? `${selezionato.durata_mesi} mesi` : "—"
-              }
-            />
-            <DettaglioRow
-              label="Data inizio"
-              value={formatData(selezionato.data_inizio)}
-            />
-            <DettaglioRow
-              label="Data firma"
-              value={formatData(selezionato.data_firma)}
-            />
-            <BozzaContratto contrattoId={selezionato.id} />
-            <FirmaContratto
-              contrattoId={selezionato.id}
-              statoContratto={selezionato.stato}
-              firme={firme[selezionato.id]?.firme ?? []}
-              improntaAttuale={firme[selezionato.id]?.improntaAttuale ?? null}
-            />
-            <ArchivioContratto contrattoId={selezionato.id} documenti={documenti[selezionato.id] ?? []} />
-          </>
-        )}
-      </Sheet>
-
       {/* ---- Sheet: bollette (demo) ---- */}
       <Sheet
         open={bolletteAperto}
@@ -183,37 +121,5 @@ export function GestioneClient({
         <LinkUtenze />
       </Sheet>
     </PageContainer>
-  );
-}
-
-function DettaglioRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="feat-row">
-      <span className="k">{label}</span>
-      <span className="v">{value}</span>
-    </div>
-  );
-}
-
-/** La scheda di un contratto nell'elenco. Quelle dello storico sono attenuate, come le candidature chiuse. */
-function SchedaContratto({
-  c,
-  onSelect,
-  passato = false,
-}: {
-  c: ContrattoConAnnuncio;
-  onSelect: (c: ContrattoConAnnuncio) => void;
-  passato?: boolean;
-}) {
-  return (
-    <button onClick={() => onSelect(c)} className="match-card" style={passato ? { opacity: 0.55 } : undefined}>
-      <div className="mc-avatar">{(c.candidature?.listings?.titolo ?? "IM").slice(0, 2).toUpperCase()}</div>
-      <div className="mc-body">
-        <div className="mc-zona">{c.candidature?.listings?.zona ?? ""}</div>
-        <div className="mc-title">{c.candidature?.listings?.titolo ?? "Immobile"}</div>
-        <div className="mc-meta">{c.canone ? `€${c.canone.toLocaleString("it-IT")}/mese` : "—"}</div>
-      </div>
-      <div className={`mc-pct ${badgeStato(c.stato)}`}>{etichettaStato(c.stato)}</div>
-    </button>
   );
 }

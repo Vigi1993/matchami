@@ -111,3 +111,54 @@ test("le due schermate importano gli stati da lib/contratti e non ne hanno una c
     assert.match(codice, /Storico — \{storico\.length\}/, `${f.at(-1)} non mostra il gruppo Storico`);
   }
 });
+
+// ------------------------------------------------------------
+// Gestione affitto (inquilino): i contratti stanno NELLA PAGINA, non in una scheda a comparsa
+// ------------------------------------------------------------
+
+const pulito = (t) => t.replace(/\r\n/g, "\n");
+const gestione = () => pulito(leggi("src", "app", "(app)", "gestione", "GestioneClient.tsx"));
+const blocco = () => pulito(leggi("src", "components", "ContrattoInPagina.tsx"));
+
+test("modo di presentazione: un solo contratto in corso = tutto visibile; più d'uno (o nessuno) = ciascuno a scomparsa; lo storico sempre a scomparsa", () => {
+  assert.equal(c.modoInCorso(1), "fisso"); for (const n of [2, 3, 10, 0]) assert.equal(c.modoInCorso(n), "a_scomparsa", String(n));
+  for (const strano of [-1, NaN, undefined, null, 1.5, "1"]) assert.equal(c.modoInCorso(strano), "a_scomparsa", `un numero strano (${strano}) non deve dare «fisso»`);
+  assert.equal(c.MODO_STORICO, "a_scomparsa");
+});
+
+test("pagina: la scheda a comparsa dei contratti non c'è più; i contratti si mostrano con il blocco in pagina, nel modo giusto, e le bollette restano come erano", () => {
+  const g = gestione(); assert.ok(!/selezionato|setSelezionato/.test(g), "resta lo stato della scheda a comparsa"); assert.ok(!/<SchedaContratto|function SchedaContratto|onSelect/.test(g), "restano le vecchie schede-elenco che aprivano la scheda");
+  assert.ok(!/title=\{selezionato/.test(g) && !/Sheet: dettaglio contratto/.test(g)); assert.equal([...g.matchAll(/<Sheet\b/g)].length, 1, "deve restare una sola scheda a comparsa: le bollette"); assert.match(g, /title="Bollette e utenze"/);
+  assert.match(g, /<ContrattoInPagina key=\{c\.id\} c=\{c\} modo=\{modoInCorso\(inCorso\.length\)\} firme=\{firme\[c\.id\]\} documenti=\{documenti\[c\.id\] \?\? \[\]\} \/>/);
+  assert.match(g, /<ContrattoInPagina key=\{c\.id\} c=\{c\} modo=\{MODO_STORICO\} firme=\{firme\[c\.id\]\} documenti=\{documenti\[c\.id\] \?\? \[\]\} passato \/>/);
+  assert.match(g, /\{inCorso\.length > 1 && \(\s+<div className="pref-label" style=\{\{ marginTop: 12 \}\}>\s+<span>In corso — \{inCorso\.length\}<\/span>/, "con un solo contratto non serve il conteggio");
+  assert.match(g, /Nessun contratto ancora/); assert.match(g, /NESSUN_CONTRATTO_IN_CORSO/);
+});
+
+test("blocco del contratto: l'intestazione è un pulsante (aria-expanded) SOLO se a scomparsa, e il corpo si nasconde solo allora", () => {
+  const b = blocco(); assert.match(b, /const scomparsa = modo === "a_scomparsa";/); assert.match(b, /const visibile = !scomparsa \|\| aperto;/); assert.match(b, /\{scomparsa \? \(\s+<button type="button" className="contratto-testa" aria-expanded=\{aperto\} aria-controls=\{idCorpo\}/);
+  assert.match(b, /<div className="contratto-testa">\{intestazione\}<\/div>/, "in modo fisso l'intestazione non è un pulsante"); assert.match(b, /<div id=\{idCorpo\} className="contratto-corpo" hidden=\{!visibile\}>/); assert.match(b, /const \[aperto, setAperto\] = useState\(false\);/, "a scomparsa parte chiuso");
+  assert.match(b, /\{scomparsa && <IconChevronSu/, "la freccia solo se si può aprire");
+});
+
+test("blocco del contratto: ha tutto ciò che aveva la scheda (dati, bozza, firma, archivio) e il corpo non si smonta da chiuso (non si perde un documento o una firma a metà)", () => {
+  const b = blocco(); assert.ok(!b.includes('label="Zona"') && !b.includes('label="Canone mensile"'), "zona e canone sono già nell'intestazione: non devono comparire due volte");
+  assert.ok(b.includes('<div className="mc-zona">') && b.includes('<div className="mc-meta">{c.canone ?'), "l'intestazione deve dire zona e canone");
+  for (const pezzo of ['label="Durata"', 'label="Data inizio"', 'label="Data firma"', "<BozzaContratto contrattoId={c.id} />", "<FirmaContratto contrattoId={c.id} statoContratto={c.stato} firme={firme?.firme ?? []} improntaAttuale={firme?.improntaAttuale ?? null} />", "<ArchivioContratto contrattoId={c.id} documenti={documenti} />"]) assert.ok(b.includes(pezzo), `manca «${pezzo}»`);
+  assert.ok(!/\{aperto && \(/.test(b) && !/visibile &&/.test(b), "il corpo non deve essere montato solo da aperto");
+  assert.match(b, /aria-label=\{`Contratto: \$\{titolo\}`\}/); assert.match(b, /\$\{passato \? "passato" : ""\}/);
+});
+
+test("stile: un corpo nascosto resta nascosto anche se la classe imposta un display (come per le altre parti ripiegabili)", () => {
+  const css = pulito(leggi("src", "app", "globals.css")); assert.match(css, /\.contratto-corpo\[hidden\] \{\s+display: none !important;/); assert.match(css, /\.contratto-freccia\.chiuso \{\s+transform: rotate\(180deg\);/);
+});
+
+test("il proprietario non cambia: la sua pagina dei contratti non usa il blocco nuovo né è stata toccata", () => {
+  const p = pulito(leggi("src", "app", "(app)", "gestione-affitti", "page.tsx")); assert.ok(!/ContrattoInPagina/.test(p)); assert.ok(!fs.readdirSync(path.join(radice, "src", "app", "(app)", "gestione-affitti")).some((f) => /ContrattoInPagina/.test(f)));
+});
+
+test("stile: ogni parte dell'intestazione del contratto (avatar, corpo, zona, titolo, sigla…) ha lo stesso stile della scheda del match: senza, l'intestazione sembra rotta", () => {
+  const css = pulito(leggi("src", "app", "globals.css")); const b = blocco();
+  const usate = [...new Set([...b.matchAll(/className=\{?[`"](mc-[a-z]+)/g)].map((m) => m[1]))]; assert.deepEqual(usate.sort(), ["mc-avatar", "mc-body", "mc-meta", "mc-pct", "mc-title", "mc-zona"], "l'intestazione usa altre parti: aggiorna il test");
+  for (const classe of usate) assert.match(css, new RegExp(`\\.match-card \\.${classe},\\s+\\.contratto-testa \\.${classe} \\{`), `manca lo stile di «${classe}» dentro .contratto-testa`);
+});

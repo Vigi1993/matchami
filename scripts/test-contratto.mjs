@@ -404,7 +404,8 @@ test("il PDF non viene salvato da nessuna parte: nessuna scrittura su database n
 });
 
 test("la pagina e i pannelli: la bozza si apre dai due pannelli dei contratti, uno per ruolo", () => {
-  assert.match(leggi("src", "app", "(app)", "gestione", "GestioneClient.tsx"), /<BozzaContratto contrattoId=\{selezionato\.id\} \/>/);
+  // inquilino: il contratto sta nella pagina (non più in una scheda a comparsa), dentro il blocco ContrattoInPagina
+  assert.match(leggi("src", "components", "ContrattoInPagina.tsx"), /<BozzaContratto contrattoId=\{c\.id\} \/>/); assert.match(leggi("src", "app", "(app)", "gestione", "GestioneClient.tsx"), /<ContrattoInPagina /);
   assert.match(leggi("src", "app", "(app)", "gestione-affitti", "GestioneAffittiClient.tsx"), /<BozzaContratto contrattoId=\{selezionato\.id\} \/>/);
   const c = leggi("src", "components", "BozzaContratto.tsx"); assert.match(c, /href=\{`\/contratto\/\$\{contrattoId\}`\}/); assert.match(c, /href=\{`\/contratto\/\$\{contrattoId\}\/pdf`\}[^>]*download/);
 });

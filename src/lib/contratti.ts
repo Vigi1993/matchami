@@ -51,6 +51,22 @@ export function raggruppaContratti<T extends { stato: string }>(
   };
 }
 
+/**
+ * Come si presenta un contratto nella pagina «Gestione affitto» dell'inquilino: SEMPRE nella pagina, mai in una scheda a
+ * comparsa.
+ *  - `fisso`: tutto subito visibile, senza niente da aprire (il caso normale: un inquilino ha un solo contratto in corso);
+ *  - `a_scomparsa`: nella stessa pagina ma ripiegato, si apre toccando il titolo.
+ */
+export type ModoContratto = "fisso" | "a_scomparsa";
+
+/** Un solo contratto in corso: tutto visibile. Più d'uno (o nessuno): ognuno a scomparsa. */
+export function modoInCorso(numeroInCorso: number): ModoContratto {
+  return numeroInCorso === 1 ? "fisso" : "a_scomparsa";
+}
+
+/** Lo storico è sempre a scomparsa: è ciò che è finito, non deve occupare la pagina. */
+export const MODO_STORICO: ModoContratto = "a_scomparsa";
+
 /** L'etichetta di uno stato; per uno sconosciuto, il testo com'è (mai «undefined»). */
 export function etichettaStato(stato: string): string {
   return (STATO_LABEL as Record<string, string>)[stato] ?? stato;

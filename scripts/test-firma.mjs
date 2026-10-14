@@ -170,7 +170,10 @@ test("componente: nessuna chiamata diretta al database, solo le due azioni", () 
   assert.match(c, /firmaContratto\(contrattoId\)/); assert.match(c, /ritiraFirma\(contrattoId\)/);
 });
 test("collegamenti: la firma si vede nei due pannelli dei contratti, con le firme di QUEL contratto", () => {
-  for (const f of [["gestione", "GestioneClient.tsx"], ["gestione-affitti", "GestioneAffittiClient.tsx"]]) { const c = leggi("src", "app", "(app)", ...f); assert.match(c, /<FirmaContratto\s+contrattoId=\{selezionato\.id\}\s+statoContratto=\{selezionato\.stato\}\s+firme=\{firme\[selezionato\.id\]\?\.firme \?\? \[\]\}\s+improntaAttuale=\{firme\[selezionato\.id\]\?\.improntaAttuale \?\? null\}/, f.join("/")); }
+  // inquilino: la firma sta nel blocco del contratto in pagina, con le firme di QUEL contratto (firme[c.id])
+  assert.match(leggi("src", "components", "ContrattoInPagina.tsx"), /<FirmaContratto contrattoId=\{c\.id\} statoContratto=\{c\.stato\} firme=\{firme\?\.firme \?\? \[\]\} improntaAttuale=\{firme\?\.improntaAttuale \?\? null\} \/>/);
+  assert.equal([...leggi("src", "app", "(app)", "gestione", "GestioneClient.tsx").matchAll(/firme=\{firme\[c\.id\]\}/g)].length, 2, "in corso e storico passano le firme del PROPRIO contratto");
+  for (const f of [["gestione-affitti", "GestioneAffittiClient.tsx"]]) { const c = leggi("src", "app", "(app)", ...f); assert.match(c, /<FirmaContratto\s+contrattoId=\{selezionato\.id\}\s+statoContratto=\{selezionato\.stato\}\s+firme=\{firme\[selezionato\.id\]\?\.firme \?\? \[\]\}\s+improntaAttuale=\{firme\[selezionato\.id\]\?\.improntaAttuale \?\? null\}/, f.join("/")); }
   for (const f of [["gestione", "page.tsx"], ["gestione-affitti", "page.tsx"]]) { const c = leggi("src", "app", "(app)", ...f); assert.match(c, /await caricaFirme\(supabase\)/); assert.match(c, /firme=\{firme\}/); }
 });
 test("la logica pura della firma non ha accesso alla rete né al browser", () => {

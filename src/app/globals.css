@@ -406,7 +406,8 @@ input[type="range"]::-moz-range-thumb {
   flex-shrink: 0;
 }
 /* sostituto della foto quando la riga non ne ha una */
-.match-card .mc-avatar {
+.match-card .mc-avatar,
+.contratto-testa .mc-avatar {
   width: 74px;
   height: 74px;
   border-radius: 14px;
@@ -421,18 +422,21 @@ input[type="range"]::-moz-range-thumb {
   font-size: 22px;
   overflow: hidden;
 }
-.match-card .mc-body {
+.match-card .mc-body,
+.contratto-testa .mc-body {
   flex: 1;
   min-width: 0;
 }
-.match-card .mc-zona {
+.match-card .mc-zona,
+.contratto-testa .mc-zona {
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--moss);
 }
-.match-card .mc-title {
+.match-card .mc-title,
+.contratto-testa .mc-title {
   font-family: var(--font-display);
   font-size: 15.5px;
   font-weight: 700;
@@ -440,11 +444,13 @@ input[type="range"]::-moz-range-thumb {
   margin: 2px 0 4px 0;
   line-height: 1.2;
 }
-.match-card .mc-meta {
+.match-card .mc-meta,
+.contratto-testa .mc-meta {
   font-size: 12px;
   color: var(--muted);
 }
-.match-card .mc-pct {
+.match-card .mc-pct,
+.contratto-testa .mc-pct {
   flex-shrink: 0;
   text-align: center;
   font-family: var(--font-display);
@@ -455,7 +461,8 @@ input[type="range"]::-moz-range-thumb {
   border-radius: 12px;
   padding: 8px 10px;
 }
-.match-card .mc-pct span {
+.match-card .mc-pct span,
+.contratto-testa .mc-pct span {
   display: block;
   font-family: var(--font-sans);
   font-size: 9px;
@@ -3616,5 +3623,57 @@ mark.segnaposto {
 .gruppo-match .card-grid[hidden],
 .gruppo-match [hidden],
 [role="tabpanel"][hidden] {
+  display: none !important;
+}
+
+/* ---- Gestione affitto: il contratto nella pagina (non in una scheda a comparsa) ---- */
+.contratto-blocco {
+  background: #fff;
+  border-radius: 20px;
+  margin-bottom: 12px;
+  box-shadow: 0 8px 20px rgba(16, 21, 26, 0.06);
+  overflow: hidden;
+}
+.contratto-blocco.passato .contratto-testa {
+  opacity: 0.6;
+}
+.contratto-testa {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  width: 100%;
+  padding: 12px;
+  border: 0;
+  background: none;
+  text-align: left;
+  font-family: var(--font-sans);
+  color: inherit;
+}
+button.contratto-testa {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+button.contratto-testa:focus-visible {
+  outline: 2px solid var(--moss);
+  outline-offset: -2px;
+  border-radius: 20px;
+}
+.contratto-freccia {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 2;
+  transition: transform 0.18s ease;
+}
+.contratto-freccia.chiuso {
+  transform: rotate(180deg);
+}
+.contratto-corpo {
+  padding: 4px 16px 18px;
+  border-top: 1px solid rgba(16, 21, 26, 0.08);
+}
+.contratto-corpo[hidden] {
   display: none !important;
 }
