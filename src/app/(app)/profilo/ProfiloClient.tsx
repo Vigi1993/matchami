@@ -111,6 +111,21 @@ export function ProfiloClient({
         <div className="avatar-testo">
           <h1 className="avatar-name">{nomeCompleto(nome, cognome) || "Il tuo profilo"}</h1>
           {email && <div className="avatar-sub">{email}</div>}
+          {/* quanto è completo il profilo: sotto il nome, dove si legge insieme a chi sei */}
+          <div
+            className="completezza"
+            role="progressbar"
+            aria-label="Completezza del profilo"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={completezza}
+            aria-valuetext={`Profilo completo al ${completezza}%`}
+          >
+            <span className="completezza-testo">Profilo completo al {completezza}%</span>
+            <div className="completeness-bar">
+              <div className="completeness-fill" style={{ width: `${completezza}%` }} />
+            </div>
+          </div>
         </div>
         <CampanellaNovita nonLette={nonLette} />
       </div>
@@ -124,17 +139,6 @@ export function ProfiloClient({
         cta="Vedi e modifica i tuoi dati"
         onClick={() => setSheetAperta("dati")}
       />
-
-      {/* Completezza */}
-      <div className="completeness-row">
-        <div className="completeness-bar">
-          <div
-            className="completeness-fill"
-            style={{ width: `${completezza}%` }}
-          />
-        </div>
-        <span>{completezza}% completo</span>
-      </div>
 
       <div className="card-grid">
         <RigaPreferiti preferiti={preferiti} />

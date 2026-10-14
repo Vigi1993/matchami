@@ -115,3 +115,14 @@ export function descrizionePreferito(p: Pick<Preferito, "prezzo" | "locali" | "m
 }
 
 export const TESTO_CANDIDATURA_INVIATA = "Candidatura inviata — la trovi in I tuoi match.";
+
+/**
+ * Quanto resta visibile un avviso della Home («Scarto annullato», «Salvato nei preferiti», «Ricerca aggiornata»…), poi
+ * sparisce da solo. Un errore resta di più: va letto, e spesso dice cosa fare.
+ */
+export const DURATA_AVVISO_MS = 4000;
+export const DURATA_AVVISO_ERRORE_MS = 7000;
+
+export function durataAvviso(errore: boolean): number {
+  return errore ? DURATA_AVVISO_ERRORE_MS : DURATA_AVVISO_MS;
+}

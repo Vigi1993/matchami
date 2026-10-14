@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import type { AffidabilitaResult } from "@/lib/affidabilita";
 import type { RiepilogoRecensioni } from "@/lib/recensioni";
 import type { TenantProfile } from "@/lib/types";
@@ -19,6 +19,8 @@ import {
   TESTO_PREFERITO_TOLTO,
   TESTO_SALVATO,
   TESTO_SCARTO_ANNULLATO,
+  TESTO_CANDIDATURA_INVIATA,
+  durataAvviso,
   TITOLO_TUTTI_SCELTI,
   annullaUltima,
   registra,
@@ -82,13 +84,17 @@ export function HomeClient({
   const [mazzo, setMazzo] = useState(listings);
   const [index, setIndex] = useState(0);
   const [separatoreVisto, setSeparatoreVisto] = useState(false);
-  const [candidatureInviate, setCandidatureInviate] = useState<Set<string>>(
-    new Set()
-  );
   const [pending, startTransition] = useTransition();
   // Le scelte fatte in questa sessione, per «annulla»; e l'ultimo avviso mostrato.
   const [storia, setStoria] = useState<Scelta[]>([]);
   const [avviso, setAvviso] = useState<{ errore: boolean; testo: string } | null>(null);
+
+  // Ogni avviso sparisce da solo dopo qualche secondo (prima restava finché non si scartava un'altra casa).
+  useEffect(() => {
+    if (!avviso) return;
+    const t = setTimeout(() => setAvviso(null), durataAvviso(avviso.errore));
+    return () => clearTimeout(t);
+  }, [avviso]);
 
   // ---- stato del trascinamento della card ----
   const [fotoIdx, setFotoIdx] = useState(0);
@@ -185,13 +191,11 @@ export function HomeClient({
   function candidati_(listing: ListingConMatch) {
     startTransition(async () => {
       const res = await candidati(listing.id);
-      if (!res?.error) {
-        setCandidatureInviate((prev) => new Set(prev).add(listing.id));
-      }
       // una candidatura non si annulla da qui (si ritira da «I tuoi match»): dopo,
       // «annulla» non torna indietro oltre questo punto
       setStoria(svuota());
-      setAvviso(null);
+      // se è partita lo si dice (come tutti gli avvisi, poi sparisce da solo); se non è partita non si dice niente
+      setAvviso(res?.error ? null : { errore: false, testo: TESTO_CANDIDATURA_INVIATA });
       setIndex((i) => i + 1);
       setFotoIdx(0);
     });
@@ -286,17 +290,18 @@ export function HomeClient({
 
   return (
     <div className="screen-dark">
-      {/* ---- Barra in alto: marchio e contatore ---- */}
+      {/* ---- Barra in alto: il marchio. Niente contatore: il pannello dice già quante case sono in linea ---- */}
       <div className="topbar">
         <div className="brand">
           Match<b>AmI</b>
         </div>
-        {mazzo.length > 0 && !finito && (
-          <div className="counter">
-            {index + 1} / {mazzo.length}
-          </div>
-        )}
       </div>
+      {/* la posizione nel mazzo resta, ma solo per chi usa un lettore di schermo */}
+      {mazzo.length > 0 && !finito && (
+        <p className="solo-lettori" role="status">
+          Casa {index + 1} di {mazzo.length}
+        </p>
+      )}
 
       {/* ---- In alto: il punteggio (si tocca per vedere da cosa è fatto) e le case della ricerca ---- */}
       <div className="home-intro">
@@ -603,11 +608,6 @@ export function HomeClient({
         </div>
       )}
 
-      {!avviso && candidatureInviate.size > 0 && (
-        <div className="toast-inline">
-          Candidatura inviata — la trovi in &quot;I tuoi match&quot;.
-        </div>
-      )}
     </div>
   );
 }

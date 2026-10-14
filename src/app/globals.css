@@ -130,18 +130,6 @@ body {
   color: var(--gold);
   font-style: normal;
 }
-.counter {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  color: var(--paper);
-  background: rgba(16, 21, 26, 0.45);
-  backdrop-filter: blur(6px);
-  border: 1px solid var(--line);
-  padding: 6px 12px;
-  border-radius: 999px;
-}
-
 .screen-title {
   font-family: var(--font-display);
   font-size: 26px;
@@ -574,12 +562,6 @@ input[type="range"]::-moz-range-thumb {
   color: var(--muted);
 }
 
-.completeness-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 22px;
-}
 .completeness-bar {
   flex: 1;
   height: 6px;
@@ -593,13 +575,6 @@ input[type="range"]::-moz-range-thumb {
   border-radius: 999px;
   transition: width 0.5s ease;
 }
-.completeness-row span {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--moss);
-  white-space: nowrap;
-}
-
 /* riga-scheda cliccabile del profilo */
 .pv-row {
   display: flex;
@@ -3737,4 +3712,32 @@ button.contratto-testa:focus-visible {
   font-weight: 800;
   line-height: 1.3;
   text-align: center;
+}
+
+/* testo solo per chi usa un lettore di schermo: c'è, ma non si vede */
+.solo-lettori {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* completezza del profilo, sotto il nome */
+.avatar-row .completezza {
+  margin-top: 8px;
+}
+.completezza-testo {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--moss);
+}
+.completezza .completeness-bar {
+  width: 100%;
 }

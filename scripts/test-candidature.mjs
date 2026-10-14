@@ -267,7 +267,7 @@ test("simbolo «I tuoi match»: esiste, è diverso da quello della chat e dalle 
 });
 
 test("i testi che nominano la pagina dicono «I tuoi match» (Home, Preferiti e commenti), non più «Candidature»", () => {
-  assert.match(leggiFile("src", "lib", "scelte.ts"), /TESTO_CANDIDATURA_INVIATA = "Candidatura inviata — la trovi in I tuoi match\."/); assert.match(leggiFile("src", "app", "(app)", "HomeClient.tsx"), /la trovi in &quot;I tuoi match&quot;/);
+  assert.match(leggiFile("src", "lib", "scelte.ts"), /TESTO_CANDIDATURA_INVIATA = "Candidatura inviata — la trovi in I tuoi match\."/); const home = leggiFile("src", "app", "(app)", "HomeClient.tsx"); assert.match(home, /testo: TESTO_CANDIDATURA_INVIATA/, "la Home usa il testo condiviso, che dice «I tuoi match»"); assert.ok(!/Candidatura inviata —/.test(home), "la Home non ha più una sua copia del testo");
   for (const f of [["src", "lib", "scelte.ts"], ["src", "app", "(app)", "HomeClient.tsx"], ["src", "app", "(app)", "actions.ts"]]) assert.ok(!/in «?"?&?q?u?o?t?;?Candidature/.test(leggiFile(...f).replace(/Candidatur[ae] inviat/g, "")), `un testo cita ancora «Candidature» in ${f.join("/")}`);
 });
 
