@@ -6,8 +6,8 @@ import { etichettaConteggio } from "@/lib/notifiche";
 import {
   IconCasa,
   IconBusta,
-  IconChat,
   IconDocumento,
+  IconMatch,
   IconPalazzo,
   IconPersona,
   IconPersone,
@@ -21,7 +21,7 @@ type Tab = {
 
 const TENANT_TABS: Tab[] = [
   { href: "/", label: "Home", Icon: IconCasa },
-  { href: "/candidature", label: "Candidature", Icon: IconChat },
+  { href: "/candidature", label: "I tuoi match", Icon: IconMatch },
   { href: "/messaggi", label: "Messaggi", Icon: IconBusta },
   { href: "/gestione", label: "Gestione affitto", Icon: IconDocumento },
   { href: "/profilo", label: "Profilo", Icon: IconPersona },

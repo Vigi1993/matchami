@@ -25,7 +25,7 @@ export type Scelta = { listingId: string; tipo: TipoScelta };
 
 /**
  * Aggiunge una scelta alla storia. Una candidatura NON è una scelta annullabile
- * (si ritira da «Candidature»): dopo averne inviata una, `svuota` riparte da
+ * (si ritira da «I tuoi match»): dopo averne inviata una, `svuota` riparte da
  * zero, perché tornare indietro oltre quel punto riporterebbe sotto gli occhi
  * un annuncio a cui ci si è già candidati.
  */
@@ -114,4 +114,4 @@ export function descrizionePreferito(p: Pick<Preferito, "prezzo" | "locali" | "m
   return parti.join(" · ");
 }
 
-export const TESTO_CANDIDATURA_INVIATA = "Candidatura inviata — la trovi in Candidature.";
+export const TESTO_CANDIDATURA_INVIATA = "Candidatura inviata — la trovi in I tuoi match.";

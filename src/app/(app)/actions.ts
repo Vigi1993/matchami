@@ -18,7 +18,7 @@ export async function candidati(listingId: string) {
   if (!user) return { error: "Non autenticato." };
 
   // Fotografia di quanto la casa andava bene all'inquilino nel momento in
-  // cui ha scelto: è il numero che rivede in "Candidature". La candidatura
+  // cui ha scelto: è il numero che rivede in "I tuoi match". La candidatura
   // non deve MAI fallire per colpa di questo calcolo: se qualcosa non va,
   // parte comunque, senza percentuale.
   let matchPct: number | null = null;

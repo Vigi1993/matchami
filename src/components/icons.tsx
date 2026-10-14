@@ -23,6 +23,21 @@ export function IconChat({ className }: IconProps) {
   );
 }
 
+/** Due mani che si stringono: «i tuoi match». Disegnato qui, sullo stesso reticolo e con lo stesso tratto degli altri. */
+export function IconMatch({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden>
+      <path d="M1.5 8.2v8.2" />
+      <path d="M22.5 8.2v8.2" />
+      <path d="M1.5 9.8 7.4 7.6c1-.38 2.1-.2 2.9.5L12 9.6" />
+      <path d="M22.5 9.8l-5.9-2.2c-1-.38-2.1-.2-2.9.5l-4.4 4.1a1.2 1.2 0 0 0 1.7 1.7L12.5 12.4" />
+      <path d="M1.5 15.4l5.7 3.3c.8.5 1.9.4 2.6-.2l.7-.6" />
+      <path d="M22.5 15.4l-5.7 3.3c-.8.5-1.9.4-2.6-.2l-1.7-1.5" />
+      <path d="M11 14.4l2.6 2.4" />
+    </svg>
+  );
+}
+
 export function IconDocumento({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" className={className} aria-hidden>

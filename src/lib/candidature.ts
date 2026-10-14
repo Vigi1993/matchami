@@ -40,6 +40,40 @@ export function raggruppaCandidature<T extends { status: StatoCandidatura }>(
   };
 }
 
+/** Le due schede della pagina «I tuoi match»: ciò che hai fatto tu, e ciò che ti arriva dai proprietari. */
+export const SCHEDE_MATCH = [
+  { id: "candidature", etichetta: "Le tue candidature" },
+  { id: "richieste", etichetta: "Richieste dei proprietari" },
+] as const;
+export type SchedaMatch = (typeof SCHEDE_MATCH)[number]["id"];
+
+/** Le parti in cui si dividono le candidature, nell'ordine in cui compaiono. */
+export const SEZIONI_CANDIDATURE = [
+  { id: "match", titolo: "Match", stato: "accettata", aperta: true },
+  { id: "in_attesa", titolo: "In attesa di risposta", stato: "in_attesa", aperta: true },
+  { id: "non_andate", titolo: "Non andate a buon fine", stato: "rifiutata", aperta: false },
+  { id: "ritirate", titolo: "Ritirate", stato: "ritirata", aperta: false },
+] as const satisfies readonly { id: string; titolo: string; stato: StatoCandidatura; aperta: boolean }[];
+
+export type SezioneCandidature<T> = {
+  id: (typeof SEZIONI_CANDIDATURE)[number]["id"];
+  titolo: string;
+  items: T[];
+  /** si presenta aperta o chiusa all'inizio */
+  aperta: boolean;
+};
+
+/**
+ * Le candidature divise nelle loro parti, SOLO quelle che hanno qualcosa, nell'ordine fisso (match, in attesa, non
+ * andate a buon fine, ritirate). Match e in attesa partono aperte; le due che chiudono la storia partono chiuse, per
+ * non coprire ciò che conta, TRANNE quando non c'è altro: se non è aperta nessuna parte, si aprono tutte (una pagina
+ * con soli titoli chiusi sembrerebbe vuota).
+ */
+export function sezioniCandidature<T extends { status: StatoCandidatura }>(elenco: T[]): SezioneCandidature<T>[] {
+  const parti = SEZIONI_CANDIDATURE.map((d) => ({ id: d.id, titolo: d.titolo, items: elenco.filter((c) => c.status === d.stato), aperta: d.aperta as boolean })).filter((p) => p.items.length > 0);
+  return parti.some((p) => p.aperta) ? parti : parti.map((p) => ({ ...p, aperta: true }));
+}
+
 /** La riga sotto il titolo della schermata. Le ritirate si contano ancora tra le inviate. */
 export function riepilogoCandidature(
   elenco: { status: StatoCandidatura }[]

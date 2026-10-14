@@ -1,22 +1,24 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Sheet } from "@/components/Sheet";
 import type { CandidaturaConAnnuncio } from "@/lib/types";
 import {
   NOTA_RITIRATA,
+  SCHEDE_MATCH,
   STATO_BADGE,
   STATO_LABEL,
   puoRitirare,
-  raggruppaCandidature,
   riepilogoCandidature,
+  sezioniCandidature,
+  type SchedaMatch,
 } from "@/lib/candidature";
 import { RitiraCandidatura } from "@/components/RitiraCandidatura";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { messaggioMotivoRifiuto } from "@/lib/motivi-rifiuto";
-import { IconChat } from "@/components/icons";
+import { IconChevronSu, IconMatch } from "@/components/icons";
 
 export function CandidatureClient({
   candidature,
@@ -24,108 +26,101 @@ export function CandidatureClient({
   candidature: CandidaturaConAnnuncio[];
 }) {
   const router = useRouter();
-  const [selezionata, setSelezionata] = useState<CandidaturaConAnnuncio | null>(
-    null
-  );
+  const idBase = useId();
+  const [scheda, setScheda] = useState<SchedaMatch>("candidature");
+  const [selezionata, setSelezionata] = useState<CandidaturaConAnnuncio | null>(null);
 
-  const { inAttesa, accettate, rifiutate, ritirate } = raggruppaCandidature(candidature);
+  const sezioni = sezioniCandidature(candidature);
+
+  // frecce destra/sinistra tra le due schede, come ci si aspetta da un gruppo di schede
+  function tastoScheda(e: React.KeyboardEvent) {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    e.preventDefault();
+    const i = SCHEDE_MATCH.findIndex((s) => s.id === scheda);
+    const prossima = SCHEDE_MATCH[(i + (e.key === "ArrowRight" ? 1 : SCHEDE_MATCH.length - 1)) % SCHEDE_MATCH.length].id;
+    setScheda(prossima);
+    document.getElementById(`${idBase}-${prossima}`)?.focus();
+  }
 
   return (
     <PageContainer wide>
       <h1 className="screen-title">I tuoi match</h1>
-      <p className="screen-sub">
-        {riepilogoCandidature(candidature)}
-      </p>
 
-      {candidature.length === 0 ? (
+      <div className="match-schede" role="tablist" aria-label="I tuoi match" onKeyDown={tastoScheda}>
+        {SCHEDE_MATCH.map((s) => (
+          <button
+            key={s.id}
+            id={`${idBase}-${s.id}`}
+            type="button"
+            role="tab"
+            aria-selected={scheda === s.id}
+            aria-controls={`${idBase}-pannello-${s.id}`}
+            tabIndex={scheda === s.id ? 0 : -1}
+            className={scheda === s.id ? "attiva" : ""}
+            onClick={() => setScheda(s.id)}
+          >
+            {s.etichetta}
+            {s.id === "candidature" && candidature.length > 0 && <span className="conteggio">{candidature.length}</span>}
+          </button>
+        ))}
+      </div>
+
+      {/* ---- Le tue candidature, divise per come sono andate ---- */}
+      <div role="tabpanel" id={`${idBase}-pannello-candidature`} aria-labelledby={`${idBase}-candidature`} hidden={scheda !== "candidature"}>
+        <p className="screen-sub">{riepilogoCandidature(candidature)}</p>
+
+        {candidature.length === 0 ? (
+          <div className="empty-inline">
+            <IconMatch className="icon-empty" />
+            <h3>Ancora nessuna candidatura</h3>
+            <p>Torna alla Home e scorri gli annunci: le tue candidature e gli eventuali match finiscono qui.</p>
+          </div>
+        ) : (
+          sezioni.map((s) => <Gruppo key={s.id} titolo={s.titolo} items={s.items} apertaAllInizio={s.aperta} onSelect={setSelezionata} />)
+        )}
+      </div>
+
+      {/* ---- Le richieste che arrivano dai proprietari ---- */}
+      <div role="tabpanel" id={`${idBase}-pannello-richieste`} aria-labelledby={`${idBase}-richieste`} hidden={scheda !== "richieste"}>
         <div className="empty-inline">
-          <IconChat className="icon-empty" />
-          <h3>Ancora nessuna candidatura</h3>
+          <IconMatch className="icon-empty" />
+          <h3>Nessuna richiesta dai proprietari</h3>
           <p>
-            Torna su &quot;Cerca&quot; e scorri gli annunci: le tue candidature
-            e gli eventuali match finiscono qui.
+            Qui compariranno le richieste che ti mandano i proprietari. Per ora i proprietari vedono solo chi si candida alle loro case, quindi non
+            ce ne sono: le tue candidature le trovi nell&apos;altra scheda.
           </p>
         </div>
-      ) : (
-        <>
-          {accettate.length > 0 && (
-            <Gruppo titolo="Match" items={accettate} onSelect={setSelezionata} />
-          )}
-          {inAttesa.length > 0 && (
-            <Gruppo
-              titolo="In attesa di risposta"
-              items={inAttesa}
-              onSelect={setSelezionata}
-            />
-          )}
-          {rifiutate.length > 0 && (
-            <Gruppo
-              titolo="Non andate a buon fine"
-              items={rifiutate}
-              onSelect={setSelezionata}
-            />
-          )}
-          {ritirate.length > 0 && (
-            <Gruppo titolo="Ritirate" items={ritirate} onSelect={setSelezionata} />
-          )}
-        </>
-      )}
+      </div>
 
-      <Sheet
-        open={selezionata !== null}
-        onClose={() => setSelezionata(null)}
-        title={selezionata?.listings?.titolo ?? "Candidatura"}
-      >
+      <Sheet open={selezionata !== null} onClose={() => setSelezionata(null)} title={selezionata?.listings?.titolo ?? "Candidatura"}>
         {selezionata && (
           <>
             <div className="mb-4">
-              <span className={`mc-pct ${STATO_BADGE[selezionata.status]}`}>
-                {STATO_LABEL[selezionata.status]}
-              </span>
+              <span className={`mc-pct ${STATO_BADGE[selezionata.status]}`}>{STATO_LABEL[selezionata.status]}</span>
             </div>
 
             <DettaglioRow label="Zona" value={selezionata.listings?.zona ?? "—"} />
             <DettaglioRow
               label="Canone"
-              value={
-                selezionata.listings?.prezzo
-                  ? `€${selezionata.listings.prezzo.toLocaleString("it-IT")}/mese`
-                  : "—"
-              }
+              value={selezionata.listings?.prezzo ? `€${selezionata.listings.prezzo.toLocaleString("it-IT")}/mese` : "—"}
             />
             <DettaglioRow
               label="Taglio"
-              value={
-                selezionata.listings?.locali
-                  ? `${selezionata.listings.locali} locali · ${selezionata.listings.mq ?? "—"} m²`
-                  : "—"
-              }
+              value={selezionata.listings?.locali ? `${selezionata.listings.locali} locali · ${selezionata.listings.mq ?? "—"} m²` : "—"}
             />
-            {selezionata.match_pct !== null && (
-              <DettaglioRow
-                label="Compatibilità"
-                value={`${selezionata.match_pct}%`}
-              />
-            )}
+            {selezionata.match_pct !== null && <DettaglioRow label="Compatibilità" value={`${selezionata.match_pct}%`} />}
 
             {selezionata.status === "accettata" && (
               <div className="flex flex-col gap-3 mt-5">
-                <div className="note-ok">
-                  Il proprietario ha accettato la tua candidatura.
-                </div>
-                <Link
-                  href={`/chat/${selezionata.id}`}
-                  className="opp-cta block text-center"
-                >
+                <div className="note-ok">Il proprietario ha accettato la tua candidatura.</div>
+                <Link href={`/chat/${selezionata.id}`} className="opp-cta block text-center">
                   Apri chat
                 </Link>
               </div>
             )}
             {selezionata.status === "in_attesa" && (
               <>
-                <div className="note-box mt-5">
-                  Il proprietario non ha ancora valutato questa candidatura.
-                </div>
+                <div className="note-box mt-5">Il proprietario non ha ancora valutato questa candidatura.</div>
                 {puoRitirare(selezionata.status) && (
                   <RitiraCandidatura
                     key={selezionata.id}
@@ -139,14 +134,8 @@ export function CandidatureClient({
                 )}
               </>
             )}
-            {selezionata.status === "ritirata" && (
-              <div className="note-box mt-5">{NOTA_RITIRATA}</div>
-            )}
-            {selezionata.status === "rifiutata" && (
-              <div className="note-box mt-5">
-                {messaggioMotivoRifiuto(selezionata.motivo_rifiuto)}
-              </div>
-            )}
+            {selezionata.status === "ritirata" && <div className="note-box mt-5">{NOTA_RITIRATA}</div>}
+            {selezionata.status === "rifiutata" && <div className="note-box mt-5">{messaggioMotivoRifiuto(selezionata.motivo_rifiuto)}</div>}
           </>
         )}
       </Sheet>
@@ -154,23 +143,29 @@ export function CandidatureClient({
   );
 }
 
+/** Una parte delle candidature: il titolo con il conteggio apre e chiude l'elenco. */
 function Gruppo({
   titolo,
   items,
+  apertaAllInizio,
   onSelect,
 }: {
   titolo: string;
   items: CandidaturaConAnnuncio[];
+  apertaAllInizio: boolean;
   onSelect: (c: CandidaturaConAnnuncio) => void;
 }) {
+  const [aperto, setAperto] = useState(apertaAllInizio);
+  const id = useId();
   return (
-    <>
-      <div className="pref-label" style={{ marginTop: 20 }}>
+    <section className="gruppo-match">
+      <button type="button" className="gruppo-testa" aria-expanded={aperto} aria-controls={id} onClick={() => setAperto((a) => !a)}>
         <span>
           {titolo} — {items.length}
         </span>
-      </div>
-      <div className="card-grid">
+        <IconChevronSu className={`gruppo-freccia ${aperto ? "" : "chiuso"}`} />
+      </button>
+      <div id={id} className="card-grid" hidden={!aperto}>
         {items.map((c) => (
           <button
             key={c.id}
@@ -178,26 +173,20 @@ function Gruppo({
             className="match-card"
             style={c.status === "rifiutata" || c.status === "ritirata" ? { opacity: 0.55 } : undefined}
           >
-            <div className="mc-avatar">
-              {(c.listings?.titolo ?? "IM").slice(0, 2).toUpperCase()}
-            </div>
+            <div className="mc-avatar">{(c.listings?.titolo ?? "IM").slice(0, 2).toUpperCase()}</div>
             <div className="mc-body">
               <div className="mc-zona">{c.listings?.zona ?? ""}</div>
               <div className="mc-title">{c.listings?.titolo ?? "Immobile"}</div>
               <div className="mc-meta">
-                {c.listings?.prezzo
-                  ? `€${c.listings.prezzo.toLocaleString("it-IT")}/mese`
-                  : "—"}
+                {c.listings?.prezzo ? `€${c.listings.prezzo.toLocaleString("it-IT")}/mese` : "—"}
                 {c.match_pct !== null && ` · ${c.match_pct}% compatibile`}
               </div>
             </div>
-            <div className={`mc-pct ${STATO_BADGE[c.status]}`}>
-              {STATO_LABEL[c.status]}
-            </div>
+            <div className={`mc-pct ${STATO_BADGE[c.status]}`}>{STATO_LABEL[c.status]}</div>
           </button>
         ))}
       </div>
-    </>
+    </section>
   );
 }
 

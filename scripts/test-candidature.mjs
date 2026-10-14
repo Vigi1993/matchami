@@ -211,3 +211,79 @@ test("migrazione: il ritiro non è chiamabile da chi non ha un account", () => {
   assert.match(sql, /grant execute on function public\.ritira_candidatura\(uuid\) to authenticated;/);
   assert.ok(!/ritira_candidatura\(uuid\) to anon/.test(sql));
 });
+
+// ------------------------------------------------------------
+// «I tuoi match»: le schede, le parti in cui si dividono le candidature, la barra
+// ------------------------------------------------------------
+
+const leggiFile = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8").replace(/\r\n/g, "\n");
+const con = (stati) => stati.map((s, i) => ({ id: "c" + i, status: s }));
+
+test("schede: due, nell'ordine «le tue candidature» e «richieste dei proprietari»", () => {
+  assert.deepEqual(c.SCHEDE_MATCH.map((s) => s.id), ["candidature", "richieste"]); assert.deepEqual(c.SCHEDE_MATCH.map((s) => s.etichetta), ["Le tue candidature", "Richieste dei proprietari"]);
+});
+
+test("parti delle candidature: nell'ordine match, in attesa, non andate a buon fine, ritirate; coprono tutti gli stati e nessuno due volte", () => {
+  assert.deepEqual(c.SEZIONI_CANDIDATURE.map((s) => s.id), ["match", "in_attesa", "non_andate", "ritirate"]); assert.deepEqual(c.SEZIONI_CANDIDATURE.map((s) => s.titolo), ["Match", "In attesa di risposta", "Non andate a buon fine", "Ritirate"]);
+  assert.deepEqual(c.SEZIONI_CANDIDATURE.map((s) => s.stato).sort(), Object.keys(c.STATO_LABEL).sort(), "ogni stato di una candidatura deve avere la sua parte");
+});
+
+test("sezioniCandidature: ogni candidatura finisce nella parte del suo stato, e nessuna si perde né si duplica (anche con tante)", () => {
+  const stati = ["accettata", "in_attesa", "rifiutata", "ritirata"]; let seme = 5; const rnd = () => (seme = (seme * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  for (let n = 0; n < 200; n++) {
+    const e = con(Array.from({ length: Math.floor(rnd() * 15) }, () => stati[Math.floor(rnd() * 4)])); const parti = c.sezioniCandidature(e);
+    assert.equal(parti.reduce((s, p) => s + p.items.length, 0), e.length, "una candidatura è sparita o si è duplicata"); assert.ok(parti.every((p) => p.items.length > 0), "una parte vuota compare");
+    for (const p of parti) { const stato = c.SEZIONI_CANDIDATURE.find((d) => d.id === p.id).stato; assert.ok(p.items.every((x) => x.status === stato), `«${p.titolo}» contiene una candidatura di un altro stato`); }
+    assert.deepEqual(parti.map((p) => p.id), c.SEZIONI_CANDIDATURE.map((d) => d.id).filter((id) => parti.some((p) => p.id === id)), "ordine");
+  }
+});
+
+test("sezioniCandidature: nessuna candidatura = nessuna parte; uno stato sconosciuto non compare in nessuna parte e non rompe niente", () => {
+  assert.deepEqual(c.sezioniCandidature([]), []); const strano = c.sezioniCandidature(con(["stato_di_domani", "accettata"])); assert.equal(strano.length, 1); assert.equal(strano[0].id, "match");
+});
+
+test("sezioniCandidature: match e in attesa partono aperte, non andate e ritirate chiuse; se c'è solo roba chiusa si apre tutto (una pagina di soli titoli sembrerebbe vuota)", () => {
+  const aperte = (e) => Object.fromEntries(c.sezioniCandidature(con(e)).map((p) => [p.id, p.aperta]));
+  assert.deepEqual(aperte(["accettata", "in_attesa", "rifiutata", "ritirata"]), { match: true, in_attesa: true, non_andate: false, ritirate: false });
+  assert.deepEqual(aperte(["in_attesa", "rifiutata"]), { in_attesa: true, non_andate: false }); assert.deepEqual(aperte(["rifiutata", "ritirata"]), { non_andate: true, ritirate: true }, "senza match né attesa si aprono tutte"); assert.deepEqual(aperte(["ritirata"]), { ritirate: true });
+});
+
+test("sezioniCandidature: non modifica l'elenco ricevuto e rispetta l'ordine di arrivo dentro ogni parte", () => {
+  const e = [{ id: "z", status: "accettata" }, { id: "a", status: "accettata" }, { id: "m", status: "accettata" }]; const copia = JSON.stringify(e); const parti = c.sezioniCandidature(e);
+  assert.equal(JSON.stringify(e), copia); assert.deepEqual(parti[0].items.map((x) => x.id), ["z", "a", "m"]);
+});
+
+test("barra dell'inquilino: la voce si chiama «I tuoi match», porta alla stessa pagina di prima e ha il simbolo nuovo; quella del proprietario non cambia", () => {
+  const n = leggiFile("src", "components", "Navigation.tsx"); const tenant = n.slice(n.indexOf("const TENANT_TABS"), n.indexOf("const OWNER_TABS")); const owner = n.slice(n.indexOf("const OWNER_TABS"), n.indexOf("export function Navigation"));
+  assert.match(tenant, /\{ href: "\/candidature", label: "I tuoi match", Icon: IconMatch \}/); assert.ok(!/label: "Candidature"/.test(n), "resta la vecchia etichetta"); assert.ok(!/IconChat/.test(n), "la barra usa ancora il simbolo della chat");
+  assert.match(tenant, /\{ href: "\/messaggi", label: "Messaggi", Icon: IconBusta \}/, "il simbolo dei Messaggi non deve cambiare"); assert.match(owner, /label: "Database"/); assert.ok(!/I tuoi match/.test(owner), "la barra del proprietario non ha questa voce");
+});
+
+test("simbolo «I tuoi match»: esiste, è diverso da quello della chat e dalle altre voci della barra, e ha il solito reticolo 24x24", () => {
+  const i = leggiFile("src", "components", "icons.tsx"); const corpo = (nome) => i.slice(i.indexOf(`export function ${nome}(`), i.indexOf("\n}\n", i.indexOf(`export function ${nome}(`)));
+  const m = corpo("IconMatch"); assert.match(m, /viewBox="0 0 24 24"/); assert.match(m, /aria-hidden/); assert.ok([...m.matchAll(/<path /g)].length >= 5, "troppo semplice per una stretta di mano");
+  for (const altro of ["IconChat", "IconBusta", "IconCasa", "IconDocumento", "IconPersona"]) assert.notEqual(m.match(/<path d="([^"]+)"/)[1], corpo(altro).match(/<path d="([^"]+)"/)?.[1], `uguale a ${altro}`);
+  assert.ok(!/\bd="[^"]*(NaN|undefined)/.test(m), "un tratto rotto");
+});
+
+test("i testi che nominano la pagina dicono «I tuoi match» (Home, Preferiti e commenti), non più «Candidature»", () => {
+  assert.match(leggiFile("src", "lib", "scelte.ts"), /TESTO_CANDIDATURA_INVIATA = "Candidatura inviata — la trovi in I tuoi match\."/); assert.match(leggiFile("src", "app", "(app)", "HomeClient.tsx"), /la trovi in &quot;I tuoi match&quot;/);
+  for (const f of [["src", "lib", "scelte.ts"], ["src", "app", "(app)", "HomeClient.tsx"], ["src", "app", "(app)", "actions.ts"]]) assert.ok(!/in «?"?&?q?u?o?t?;?Candidature/.test(leggiFile(...f).replace(/Candidatur[ae] inviat/g, "")), `un testo cita ancora «Candidature» in ${f.join("/")}`);
+});
+
+test("pagina: due schede accessibili (gruppo di schede, frecce), le parti ripiegabili con il conteggio, la scheda delle richieste dice la verità e non finge dati", () => {
+  const p = leggiFile("src", "app", "(app)", "candidature", "CandidatureClient.tsx");
+  assert.match(p, /role="tablist"/); assert.match(p, /role="tab"[\s\S]*?aria-selected=\{scheda === s\.id\}[\s\S]*?aria-controls=/); assert.equal([...p.matchAll(/role="tabpanel"/g)].length, 2); assert.match(p, /e\.key !== "ArrowRight" && e\.key !== "ArrowLeft"/); assert.match(p, /tabIndex=\{scheda === s\.id \? 0 : -1\}/);
+  assert.match(p, /aria-labelledby=\{`\$\{idBase\}-candidature`\} hidden=\{scheda !== "candidature"\}/); assert.match(p, /aria-labelledby=\{`\$\{idBase\}-richieste`\} hidden=\{scheda !== "richieste"\}/, "una scheda non attiva deve essere nascosta"); assert.match(p, /<div id=\{id\} className="card-grid" hidden=\{!aperto\}>/, "una parte chiusa deve essere nascosta");
+  assert.match(p, /sezioniCandidature\(candidature\)/); assert.match(p, /aria-expanded=\{aperto\}/); assert.match(p, /\{titolo\} — \{items\.length\}/); assert.match(p, /useState\(apertaAllInizio\)/);
+  assert.match(p, /Nessuna richiesta dai proprietari/); assert.match(p, /Per ora i proprietari vedono solo chi si candida alle loro case, quindi non\s+ce ne sono/); assert.ok(!/IconChat/.test(p), "la pagina usa ancora il simbolo della chat");
+  assert.match(p, /Torna alla Home e scorri gli annunci/); assert.ok(!/Torna su &quot;Cerca&quot;/.test(p), "rimanda a una voce «Cerca» che non esiste");
+  const css = leggiFile("src", "app", "globals.css"); assert.match(css, /\.gruppo-match \.card-grid\[hidden\][\s\S]*?display: none !important;/, "una parte chiusa resterebbe visibile: la griglia vince sull'attributo hidden");
+});
+
+test("pagina: nessuna azione sulle candidature è cambiata (ritiro, chat, motivo del rifiuto, note)", () => {
+  const p = leggiFile("src", "app", "(app)", "candidature", "CandidatureClient.tsx");
+  assert.match(p, /\{puoRitirare\(selezionata\.status\) && \(\s+<RitiraCandidatura\s+key=\{selezionata\.id\}/, "il ritiro deve comparire dentro la candidatura in attesa");
+  for (const pezzo of ["puoRitirare(selezionata.status)", "<RitiraCandidatura", "router.refresh()", "href={`/chat/${selezionata.id}`}", "Apri chat", "messaggioMotivoRifiuto(selezionata.motivo_rifiuto)", "NOTA_RITIRATA", "Il proprietario ha accettato la tua candidatura.", "Il proprietario non ha ancora valutato questa candidatura."]) assert.ok(p.includes(pezzo), `manca «${pezzo}»`);
+  const pg = leggiFile("src", "app", "(app)", "candidature", "page.tsx"); assert.match(pg, /\.eq\("tenant_id", user!\.id\)/);
+});

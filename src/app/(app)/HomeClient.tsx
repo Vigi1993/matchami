@@ -188,7 +188,7 @@ export function HomeClient({
       if (!res?.error) {
         setCandidatureInviate((prev) => new Set(prev).add(listing.id));
       }
-      // una candidatura non si annulla da qui (si ritira da «Candidature»): dopo,
+      // una candidatura non si annulla da qui (si ritira da «I tuoi match»): dopo,
       // «annulla» non torna indietro oltre questo punto
       setStoria(svuota());
       setAvviso(null);
@@ -605,7 +605,7 @@ export function HomeClient({
 
       {!avviso && candidatureInviate.size > 0 && (
         <div className="toast-inline">
-          Candidatura inviata — la trovi in &quot;Candidature&quot;.
+          Candidatura inviata — la trovi in &quot;I tuoi match&quot;.
         </div>
       )}
     </div>

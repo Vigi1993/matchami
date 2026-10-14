@@ -3532,3 +3532,89 @@ mark.segnaposto {
   font-size: 13px;
   white-space: nowrap;
 }
+
+/* ---- «I tuoi match»: le due schede e le parti ripiegabili ---- */
+.match-schede {
+  display: flex;
+  gap: 4px;
+  margin: 4px 0 14px;
+  padding: 4px;
+  background: rgba(16, 21, 26, 0.06);
+  border-radius: 999px;
+}
+.match-schede button {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--body-soft);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.match-schede button.attiva {
+  background: var(--ink);
+  color: var(--paper);
+}
+.match-schede button:focus-visible {
+  outline: 2px solid var(--moss);
+  outline-offset: 2px;
+}
+.match-schede .conteggio {
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(201, 161, 90, 0.25);
+  font-size: 11px;
+}
+.gruppo-match {
+  margin-top: 8px;
+}
+.gruppo-testa {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 14px 2px 8px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+}
+.gruppo-testa:focus-visible {
+  outline: 2px solid var(--moss);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+.gruppo-freccia {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  transition: transform 0.18s ease;
+}
+.gruppo-freccia.chiuso {
+  transform: rotate(180deg);
+}
+/* l'attributo hidden deve vincere sui display impostati dalle classi (griglie, schede) */
+.gruppo-match .card-grid[hidden],
+.gruppo-match [hidden],
+[role="tabpanel"][hidden] {
+  display: none !important;
+}
