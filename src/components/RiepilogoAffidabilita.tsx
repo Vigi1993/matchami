@@ -1,4 +1,4 @@
-import { PUNTEGGIO_MASSIMO, punteggioPossibile, type AffidabilitaResult, type VoceAffidabilita } from "@/lib/affidabilita";
+import { PUNTEGGIO_MASSIMO, PUNTEGGIO_MINIMO, punteggioPossibile, type AffidabilitaResult, type VoceAffidabilita } from "@/lib/affidabilita";
 import {
   ANNI_VALIDITA,
   AUTORI_DIVERSI_MINIMI,
@@ -20,6 +20,7 @@ export function testoRaccomandazione(r: StatoRaccomandazione): string {
 
 /** I punti di una voce, come si leggono: «+60» se l'hai presa, «0 su 60» se no. */
 export function testoPunti(v: { presa: boolean; punti: number; massimo: number }): string {
+  if (v.punti < 0) return `−${Math.abs(v.punti)}`;
   return v.presa ? `+${v.punti}` : `0 su ${v.massimo}`;
 }
 
@@ -66,7 +67,7 @@ export function RiepilogoAffidabilita({
 
       <ul className="aff-voci">
         {voci.map((v) => (
-          <li key={v.id} className={`aff-voce ${v.presa ? "is-presa" : "is-non-presa"}`}>
+          <li key={v.id} className={`aff-voce ${v.presa ? "is-presa" : v.punti < 0 ? "is-negativa" : "is-non-presa"}`}>
             <div className="aff-voce-riga">
               <span>{v.etichetta}</span>
               <b className="aff-punti">{testoPunti(v)}</b>
@@ -85,6 +86,7 @@ export function RiepilogoAffidabilita({
           </li>
         ))}
       </ul>
+      {affidabilita.grezzo < 0 && <p className="field-note">Il punteggio non scende sotto {PUNTEGGIO_MINIMO}, anche se le voci tolgono più di quanto danno.</p>}
       {possibile > punteggio && (
         <p className="aff-possibile">
           Completando le voci che puoi ottenere arrivi a <b>{possibile}</b>.

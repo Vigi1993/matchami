@@ -133,13 +133,13 @@ export function DatiForm({
         </Field>
 
         <div id="dati-protesti" className="ancora-dati" />
-        <Field label="Hai protesti o segnalazioni in centrale rischi?">
+        <Field label="Hai protesti o segnalazioni in centrale rischi? · obbligatorio">
           <div className="chip-row">
             <Chip label="No" active={protestato === false} onClick={() => setProtestato(false)} />
             <Chip label="Sì" active={protestato === true} onClick={() => setProtestato(true)} />
           </div>
           <p className="field-note">
-            Rispondere «No» vale +{PUNTI_AFFIDABILITA.protesti} nel punteggio; se non rispondi vale come «Sì». Lo dichiari tu: nessuno lo controlla.
+            Va indicato. Rispondere «No» vale +{PUNTI_AFFIDABILITA.protesti} nel punteggio; «Sì», o non rispondere, toglie {PUNTI_AFFIDABILITA.protesti}. Lo dichiari tu: nessuno lo controlla.
           </p>
         </Field>
 

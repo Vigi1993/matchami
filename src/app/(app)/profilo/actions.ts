@@ -1,5 +1,6 @@
 "use server";
 
+import { MESSAGGIO_PROTESTI_OBBLIGATORI } from "@/lib/affidabilita";
 import { revalidatePath } from "next/cache";
 import { messaggioErroreVerifica } from "@/lib/verifica";
 import { createClient } from "@/lib/supabase/server";
@@ -42,6 +43,9 @@ export async function updateDatiPersonali(
   const presentazione = String(formData.get("presentazione") || "");
   // stringa vuota = nessuna foto, così l'inquilino può anche rimuoverla
   const avatar_url = String(formData.get("avatar_url") || "").trim() || null;
+
+  // La risposta sui protesti è obbligatoria: senza, varrebbe come «sì» e toglierebbe punti senza che la persona lo sappia.
+  if (protestato === null) return { error: MESSAGGIO_PROTESTI_OBBLIGATORI };
 
   const { error } = await supabase
     .from("tenant_profiles")

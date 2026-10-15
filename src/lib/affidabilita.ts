@@ -1,12 +1,16 @@
 /**
- * Il punteggio di affidabilità: da 0 a 100, tre voci, nessun numero negativo.
+ * Il punteggio di affidabilità: da 0 a 100, tre voci. I protesti TOLGONO punti.
  *
- *  - REDDITO VERIFICATO  +60  lo controlla lo staff sui documenti
- *  - NESSUN PROTESTO     +25  lo dichiara la persona (non si verifica)
- *  - GARANTE o FIDEIUSSIONE  +15  lo dichiara la persona (non si verifica)
+ *  - REDDITO VERIFICATO       +50  lo controlla lo staff sui documenti
+ *  - NESSUN PROTESTO          +30  lo dichiara la persona (non si verifica)
+ *    protesti, o NON INDICATO  −30  «non indicato» vale come «sì»: va risposto
+ *  - GARANTE o FIDEIUSSIONE   +20  lo dichiara la persona (non si verifica)
  *
- * Chi non ha niente ha 0. «Protestato» e «non indicato» valgono lo stesso: niente punti. Le RECENSIONI non fanno
- * parte del punteggio: si mostrano a parte, accanto (vedi recensioni.ts).
+ * Il totale può scendere sotto zero (protesti e niente altro): il punteggio mostrato non va sotto 0, ma il calcolo tiene il
+ * numero vero (`grezzo`) per dire a quanto si può arrivare. Il principio dei pesi: conta di più ciò che si può verificare (il
+ * reddito) di ciò che si dichiara (garante); e un protesto pesa quanto la sua assenza vale.
+ *
+ * Le RECENSIONI non fanno parte del punteggio: si mostrano a parte, accanto (vedi recensioni.ts).
  */
 export type AffidabilitaInput = {
   verificato: boolean;
@@ -15,23 +19,27 @@ export type AffidabilitaInput = {
   fideiussione: boolean | null;
 };
 
-export const PUNTI_AFFIDABILITA = { reddito: 60, protesti: 25, garanzia: 15 } as const;
+/** `protesti` è il peso della voce: +30 se non ne hai, −30 se ne hai o non hai risposto. */
+export const PUNTI_AFFIDABILITA = { reddito: 50, protesti: 30, garanzia: 20 } as const;
 export const PUNTEGGIO_MINIMO = 0;
 export const PUNTEGGIO_MASSIMO = PUNTI_AFFIDABILITA.reddito + PUNTI_AFFIDABILITA.protesti + PUNTI_AFFIDABILITA.garanzia;
 
 /**
- * Da quale punteggio in su vale ogni etichetta. Con queste soglie le sole dichiarazioni (al massimo 40) non arrivano
- * mai a «Molto buona»: ci vuole il reddito verificato.
+ * Da quale punteggio in su vale ogni etichetta. Con queste soglie le sole dichiarazioni (al massimo 50: nessun protesto e
+ * garante) non arrivano mai a «Molto buona»: ci vuole il reddito verificato. E con i protesti si arriva a «Buona» solo con
+ * reddito verificato E garante.
  */
-export const SOGLIE_ETICHETTA = { buona: 40, moltoBuona: 60, eccellente: 85 } as const;
+export const SOGLIE_ETICHETTA = { buona: 30, moltoBuona: 60, eccellente: 85 } as const;
+
+export type EtichettaPunteggio = "Scarsa" | "Buona" | "Molto buona" | "Eccellente";
 
 /** Una voce del punteggio: quanto vale, se l'hai presa, e come si sa (verificata dallo staff o dichiarata da te). */
 export type VoceAffidabilita = {
   id: "reddito" | "protesti" | "garanzia";
   etichetta: string;
-  /** i punti che dà oggi (0 se non è presa) */
+  /** i punti che dà oggi: positivi se l'hai presa, 0 se non è presa, NEGATIVI per i protesti (o il non averli indicati) */
   punti: number;
-  /** quanto vale al massimo */
+  /** quanto vale al massimo (in positivo) */
   massimo: number;
   presa: boolean;
   /** `verificato`: lo ha controllato lo staff; `dichiarato`: lo dici tu e nessuno lo controlla */
@@ -47,38 +55,47 @@ export type VoceAffidabilita = {
 };
 
 export type AffidabilitaResult = {
+  /** da 0 a 100 */
   punteggio: number;
-  label: "Da costruire" | "Buona" | "Molto buona" | "Eccellente";
+  /** la somma delle voci prima di fermarla a 0: può essere negativa (−30 se hai protesti e nient'altro) */
+  grezzo: number;
+  /** «Da completare» finché non hai risposto sui protesti: non è un giudizio, è una domanda senza risposta */
+  label: EtichettaPunteggio | "Da completare";
   /** le tre voci, sempre nello stesso ordine */
   voci: VoceAffidabilita[];
 };
 
-export function etichettaPunteggio(punteggio: number): AffidabilitaResult["label"] {
+export function etichettaPunteggio(punteggio: number): EtichettaPunteggio {
   if (punteggio >= SOGLIE_ETICHETTA.eccellente) return "Eccellente";
   if (punteggio >= SOGLIE_ETICHETTA.moltoBuona) return "Molto buona";
   if (punteggio >= SOGLIE_ETICHETTA.buona) return "Buona";
-  return "Da costruire";
+  return "Scarsa";
 }
 
 /** Le fasce di punteggio, con gli estremi: ricavate dalle soglie, così l'informativa non può contraddire la formula. */
-export function fasceAffidabilita(): { label: AffidabilitaResult["label"]; da: number; a: number }[] {
+export function fasceAffidabilita(): { label: EtichettaPunteggio; da: number; a: number }[] {
   const { buona, moltoBuona, eccellente } = SOGLIE_ETICHETTA;
   return [
-    { label: "Da costruire", da: PUNTEGGIO_MINIMO, a: buona - 1 },
+    { label: "Scarsa", da: PUNTEGGIO_MINIMO, a: buona - 1 },
     { label: "Buona", da: buona, a: moltoBuona - 1 },
     { label: "Molto buona", da: moltoBuona, a: eccellente - 1 },
     { label: "Eccellente", da: eccellente, a: PUNTEGGIO_MASSIMO },
   ];
 }
 
-/** Qualche caso tipico, con il punteggio che dà e l'etichetta (anche questi ricavati dalle regole). */
+/** I casi tipici, dal migliore al peggiore, con il punteggio che dà e l'etichetta (ricavati dalle regole, non scritti a mano). */
 export function esempiAffidabilita(): { descrizione: string; punteggio: number; label: AffidabilitaResult["label"] }[] {
+  const no = false as const;
   const casi: [string, AffidabilitaInput][] = [
-    ["Nessun dato", { verificato: false, protestato: null, garante: null, fideiussione: null }],
-    ["Solo le dichiarazioni (nessun protesto, garante)", { verificato: false, protestato: false, garante: true, fideiussione: null }],
-    ["Solo il reddito verificato", { verificato: true, protestato: null, garante: null, fideiussione: null }],
-    ["Reddito verificato e nessun protesto", { verificato: true, protestato: false, garante: null, fideiussione: null }],
-    ["Tutto", { verificato: true, protestato: false, garante: true, fideiussione: null }],
+    ["Reddito verificato, nessun protesto, garante o fideiussione", { verificato: true, protestato: no, garante: true, fideiussione: null }],
+    ["Reddito verificato e nessun protesto", { verificato: true, protestato: no, garante: null, fideiussione: null }],
+    ["Nessun protesto e garante o fideiussione", { verificato: false, protestato: no, garante: true, fideiussione: null }],
+    ["Solo nessun protesto", { verificato: false, protestato: no, garante: null, fideiussione: null }],
+    ["Reddito verificato, protesti, garante o fideiussione", { verificato: true, protestato: true, garante: true, fideiussione: null }],
+    ["Reddito verificato e protesti", { verificato: true, protestato: true, garante: null, fideiussione: null }],
+    ["Protesti e garante o fideiussione", { verificato: false, protestato: true, garante: true, fideiussione: null }],
+    ["Protesti e nient'altro", { verificato: false, protestato: true, garante: null, fideiussione: null }],
+    ["Protesti non indicati", { verificato: false, protestato: null, garante: null, fideiussione: null }],
   ];
   return casi.map(([descrizione, input]) => {
     const r = computeAffidabilita(input);
@@ -93,12 +110,13 @@ export function computeAffidabilita(p: AffidabilitaInput): AffidabilitaResult {
     ? { id: "reddito", etichetta: "Reddito verificato", punti: reddito, massimo: reddito, presa: true, origine: "verificato", potenziale: 0, suggerimento: null, sezione: null, nota: "Controllato dallo staff sui tuoi documenti." }
     : { id: "reddito", etichetta: "Reddito verificato", punti: 0, massimo: reddito, presa: false, origine: "verificato", potenziale: reddito, suggerimento: "Verifica il tuo reddito", sezione: "verifica", nota: "Non ancora verificato: carica i documenti e lo controlla lo staff." };
 
+  // «sì» e «non indicato» valgono lo stesso: tolgono i punti. Solo il «non indicato» si può ancora correggere.
   const voceProtesti: VoceAffidabilita =
     p.protestato === false
       ? { id: "protesti", etichetta: "Nessun protesto", punti: protesti, massimo: protesti, presa: true, origine: "dichiarato", potenziale: 0, suggerimento: null, sezione: null, nota: "Nessuno lo controlla: vale quanto hai dichiarato." }
       : p.protestato === true
-        ? { id: "protesti", etichetta: "Nessun protesto", punti: 0, massimo: protesti, presa: false, origine: "dichiarato", potenziale: 0, suggerimento: null, sezione: null, nota: "Hai dichiarato dei protesti o segnalazioni: non danno punti." }
-        : { id: "protesti", etichetta: "Nessun protesto", punti: 0, massimo: protesti, presa: false, origine: "dichiarato", potenziale: protesti, suggerimento: "Indica i protesti nei tuoi dati", sezione: "dati", nota: "Non indicato: vale come se ci fossero." };
+        ? { id: "protesti", etichetta: "Protesti dichiarati", punti: -protesti, massimo: protesti, presa: false, origine: "dichiarato", potenziale: 0, suggerimento: null, sezione: null, nota: `Hai dichiarato dei protesti o segnalazioni: tolgono ${protesti} punti.` }
+        : { id: "protesti", etichetta: "Protesti non indicati", punti: -protesti, massimo: protesti, presa: false, origine: "dichiarato", potenziale: 2 * protesti, suggerimento: "Indica i protesti nei tuoi dati", sezione: "dati", nota: `Non indicati: valgono come se ci fossero e tolgono ${protesti} punti.` };
 
   const haGaranzia = p.garante === true || p.fideiussione === true;
   const voceGaranzia: VoceAffidabilita = haGaranzia
@@ -106,13 +124,18 @@ export function computeAffidabilita(p: AffidabilitaInput): AffidabilitaResult {
     : { id: "garanzia", etichetta: "Garante o fideiussione", punti: 0, massimo: garanzia, presa: false, origine: "dichiarato", potenziale: garanzia, suggerimento: "Indica un garante o una fideiussione", sezione: "dati", nota: "Non indicato." };
 
   const voci = [voceReddito, voceProtesti, voceGaranzia];
-  const punteggio = voci.reduce((somma, v) => somma + v.punti, 0);
-  return { punteggio, label: etichettaPunteggio(punteggio), voci };
+  const grezzo = voci.reduce((somma, v) => somma + v.punti, 0);
+  const punteggio = Math.max(PUNTEGGIO_MINIMO, Math.min(PUNTEGGIO_MASSIMO, grezzo));
+  return { punteggio, grezzo, label: p.protestato === null ? "Da completare" : etichettaPunteggio(punteggio), voci };
 }
 
-/** Il punteggio che si raggiungerebbe completando tutte le voci ottenibili. */
-export function punteggioPossibile(r: Pick<AffidabilitaResult, "voci" | "punteggio">): number {
-  return Math.min(PUNTEGGIO_MASSIMO, r.punteggio + r.voci.reduce((somma, v) => somma + v.potenziale, 0));
+/** Cosa si dice a chi salva i dati senza aver risposto sui protesti: la risposta è obbligatoria. */
+export const MESSAGGIO_PROTESTI_OBBLIGATORI = "Indica se hai protesti o segnalazioni: serve per il punteggio di affidabilità.";
+
+/** Il punteggio che si raggiungerebbe completando tutte le voci ottenibili (parte dal totale vero, anche se negativo). */
+export function punteggioPossibile(r: Pick<AffidabilitaResult, "voci" | "punteggio"> & Partial<Pick<AffidabilitaResult, "grezzo">>): number {
+  const partenza = typeof r.grezzo === "number" ? r.grezzo : r.punteggio;
+  return Math.max(PUNTEGGIO_MINIMO, Math.min(PUNTEGGIO_MASSIMO, partenza + r.voci.reduce((somma, v) => somma + v.potenziale, 0)));
 }
 
 export type CompletenessInput = {

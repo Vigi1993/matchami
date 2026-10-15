@@ -13,8 +13,8 @@ export function ComeSiCalcola() {
   return (
     <div className="come-scheda">
       <p className="sheet-sub">
-        L&apos;affidabilità è un numero da 0 a {PUNTEGGIO_MASSIMO} che i proprietari vedono accanto alla tua candidatura. Si costruisce con tre
-        voci; chi non ha ancora niente parte da 0. Non entra nella percentuale di compatibilità con la casa: nell&apos;elenco dei candidati
+        L&apos;affidabilità è un numero da 0 a {PUNTEGGIO_MASSIMO} che i proprietari vedono accanto alla tua candidatura. Si costruisce con tre voci: due danno punti,
+        i protesti li tolgono. Non scende sotto 0. Non entra nella percentuale di compatibilità con la casa: nell&apos;elenco dei candidati
         conta solo a parità di compatibilità: prima passa chi ha il badge «{NOME_BADGE_RACCOMANDATO}», poi chi ha l&apos;affidabilità più alta.
       </p>
 
@@ -33,11 +33,14 @@ export function ComeSiCalcola() {
         </li>
         <li>
           <div className="aff-voce-riga">
-            <span>Nessun protesto</span>
-            <b className="aff-punti">+{PUNTI_AFFIDABILITA.protesti}</b>
+            <span>Protesti</span>
+            <b className="aff-punti">
+              +{PUNTI_AFFIDABILITA.protesti} o −{PUNTI_AFFIDABILITA.protesti}
+            </b>
           </div>
           <small>
-            Lo dichiari tu e nessuno lo controlla. Se dichiari dei protesti o non rispondi, la voce non dà punti.
+            Lo dichiari tu e nessuno lo controlla. «Nessun protesto» dà {PUNTI_AFFIDABILITA.protesti} punti; se dichiari dei protesti, o non rispondi, ne toglie{" "}
+            {PUNTI_AFFIDABILITA.protesti}: «non indicato» vale come «sì». La domanda è obbligatoria.
           </small>
         </li>
         <li>
@@ -62,9 +65,12 @@ export function ComeSiCalcola() {
           </li>
         ))}
       </ul>
+      <p className="field-note" style={{ margin: "6px 0 0 0" }}>
+        Finché non rispondi alla domanda sui protesti, al posto della fascia vedi «Da completare»: il punteggio intanto conta i protesti.
+      </p>
 
       <div className="pref-label" style={{ marginTop: 16 }}>
-        <span>Qualche esempio</span>
+        <span>Tutti i casi</span>
       </div>
       <ul className="come-fasce">
         {esempi.map((e) => (
@@ -77,7 +83,8 @@ export function ComeSiCalcola() {
         ))}
       </ul>
       <p className="field-note" style={{ marginTop: 8 }}>
-        Il reddito verificato pesa più delle dichiarazioni: con le sole dichiarazioni non si arriva mai oltre la fascia «Buona».
+        Conta di più ciò che si verifica (il reddito) di ciò che si dichiara. Con le sole dichiarazioni non si va oltre «Buona». Con dei protesti si arriva a
+        «Buona» solo con reddito verificato e garante.
       </p>
 
       <div className="pref-label" style={{ marginTop: 16 }}>

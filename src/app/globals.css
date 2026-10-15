@@ -3833,3 +3833,9 @@ button.contratto-testa:focus-visible {
 .come-regole li::marker {
   color: var(--gold);
 }
+
+/* una voce che toglie punti (protesti) */
+.aff-voce.is-negativa .aff-punti {
+  background: rgba(176, 94, 74, 0.14);
+  color: var(--clay);
+}
