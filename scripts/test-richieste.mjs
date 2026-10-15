@@ -149,11 +149,28 @@ test("azioni: gli identificativi si controllano PRIMA di chiamare il database, i
   assert.match(r, /\.update\(\{ visibile_ai_proprietari: visibile, visibile_dal: visibile \? new Date\(\)\.toISOString\(\) : null \}\)\s+\.eq\("profile_id", user\.id\)/, "si cambia solo il proprio consenso");
 });
 
-test("il consenso è spento di partenza nel database, nel tipo e nell'informativa; ritirarlo si salva subito", () => {
-  assert.match(migrazione, /add column if not exists visibile_ai_proprietari boolean not null default false/); assert.match(leggi("src", "lib", "types.ts"), /visibile_ai_proprietari\?: boolean;/); assert.match(leggi("src", "app", "(app)", "candidature", "page.tsx"), /visibile=\{profilo\?\.visibile_ai_proprietari === true\}/, "se la lettura del profilo non riesce, NON si deve risultare disponibili: solo un «sì» esplicito conta");
-  const p = leggi("src", "components", "PrivacySheet.tsx"); assert.match(p, /visibileProprietariIniziale\?: boolean;/); assert.match(p, /useState\(visibileProprietariIniziale === true\)/); assert.match(p, /\{visibileProprietariIniziale !== undefined && \(\s+<Field label="Fatti trovare dai proprietari">/); assert.match(p, /const r = await impostaVisibilita\(nuova\);/);
-  assert.match(leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx"), /visibileProprietariIniziale=\{tenant\.visibile_ai_proprietari === true\}/); assert.ok(!/visibileProprietariIniziale/.test(leggi("src", "app", "(app)", "profilo", "OwnerProfiloClient.tsx")), "il proprietario non ha questo consenso");
-  const t = JSON.stringify(inf.INFORMATIVA); assert.ok(t.includes("è spento finché non lo accendi tu, e lo puoi ritirare quando vuoi")); assert.ok(t.includes("Non vedono il reddito né i contatti")); assert.ok(t.includes(`al massimo ${{ 20: "venti" }[rq.RICHIESTE_AL_GIORNO]} al giorno`));
+const migrazione33 = leggi("supabase", "migrations", "0033_visibile_di_default.sql");
+
+test("di partenza si è VISIBILI ai proprietari (dalla 0033, anche per chi era già iscritto); si può nascondere subito; lato server si mostra solo chi ha un «sì» esplicito", () => {
+  assert.match(migrazione33, /alter column visibile_ai_proprietari set default true;/); assert.match(migrazione33, /alter column visibile_dal set default now\(\);/); assert.match(migrazione33, /update tenant_profiles\s+set visibile_ai_proprietari = true,\s+visibile_dal = coalesce\(visibile_dal, now\(\)\)\s+where visibile_ai_proprietari is not true;/);
+  assert.match(leggi("src", "lib", "types.ts"), /visibile_ai_proprietari\?: boolean;/);
+  // la schermata: solo un «no» esplicito vuol dire «nascosto»; se non si sa, si è visibili come di partenza
+  assert.match(leggi("src", "app", "(app)", "candidature", "page.tsx"), /visibile=\{profilo\?\.visibile_ai_proprietari !== false\}/); assert.match(leggi("src", "app", "(app)", "candidature", "CandidatureClient.tsx"), /visibile = true,/);
+  assert.match(leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx"), /visibileProprietariIniziale=\{tenant\.visibile_ai_proprietari !== false\}/); assert.ok(!/visibileProprietariIniziale/.test(leggi("src", "app", "(app)", "profilo", "OwnerProfiloClient.tsx")), "il proprietario non ha questa scelta");
+  const p = leggi("src", "components", "PrivacySheet.tsx"); assert.match(p, /visibileProprietariIniziale\?: boolean;/); assert.match(p, /useState\(visibileProprietariIniziale === true\)/); assert.match(p, /\{visibileProprietariIniziale !== undefined && \(\s+<Field label="Fatti trovare dai proprietari">/); assert.match(p, /const r = await impostaVisibilita\(nuova\);/); assert.ok(p.includes("Di partenza i proprietari con una casa adatta alla tua ricerca possono vedere il tuo profilo") && p.includes("Con «No» non ti vedono più. Si salva subito."));
+  // il server: chi ESPONE guarda il database, e lo fa con un «sì» esplicito (se la riga non si legge, non si mostra niente)
+  const srv = senzaCommenti(leggi("src", "lib", "proprietario", "possibili-server.ts")); assert.match(srv, /visibile: t\.visibile_ai_proprietari === true,/); assert.match(srv, /det\.visibile_ai_proprietari !== true\) continue;/);
+  const t = JSON.stringify(inf.INFORMATIVA); assert.ok(t.includes("È così per ogni iscritto, ma puoi nasconderti quando vuoi da Privacy e consensi: da quel momento non compari più")); assert.ok(t.includes("Non vedono il reddito né i contatti")); assert.ok(t.includes(`al massimo ${{ 20: "venti" }[rq.RICHIESTE_AL_GIORNO]} al giorno`)); assert.ok(!t.includes("è spento finché non lo accendi tu"), "l'informativa dice ancora che è spento");
+});
+
+test("iscrizione: chi si registra come inquilino legge, prima di creare l'account, che il suo profilo sarà visibile ai proprietari e che può nasconderlo; il proprietario no", () => {
+  const l = leggi("src", "app", "login", "page.tsx"); assert.match(l, /\{ruolo === "inquilino" && \(\s+<p className="login-consent"[^>]*>\s+Il tuo profilo sarà visibile ai proprietari con una casa adatta alla tua ricerca: vedono nome e iniziale, lavoro, foto e affidabilità, non il\s+reddito né i contatti\. Puoi nasconderti quando vuoi dal Profilo\.\s+<\/p>\s+\)\}/);
+  assert.ok(l.indexOf("Il tuo profilo sarà visibile ai proprietari") < l.indexOf("Crea il tuo account"), "la frase sta prima del pulsante");
+});
+
+test("NESSUNA schermata chiede più di «rendersi disponibili»: la parola non compare in nessun file dell'app", () => {
+  const trovati = []; const visita = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) visita(p); else if (/\.(ts|tsx)$/.test(e.name) && /Mi rendo disponibile|rendersi disponibil|ti rendi disponibile/i.test(fs.readFileSync(p, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, ""))) trovati.push(path.relative(radice, p)); } };
+  visita(path.join(radice, "src")); assert.deepEqual(trovati, [], "ci sono ancora richieste di rendersi disponibili: " + trovati.join(", "));
 });
 
 // ============================================================ le schermate
@@ -161,6 +178,8 @@ test("Database (proprietario): «Fai match» NON invia subito: apre una conferma
   const c = senzaCommenti(leggi("src", "components", "PossibiliInquilini.tsx"));
   assert.match(c, /onClick=\{\(\) => setScelta\(\{ casa: p, scheda: s \}\)\}>\s+Fai match/); assert.equal([...c.matchAll(/faiMatch\(/g)].length, 1, "faiMatch si chiama in un solo punto"); assert.ok(c.indexOf("faiMatch(") > c.indexOf("function invia()") && c.indexOf("faiMatch(") < c.indexOf("function invia()") + 400, "solo dentro «invia»");
   for (const x of ["Fai match con ${scelta.scheda.nome}?", "Le arriverà una richiesta per", "Se non risponde o dice di no, non succede\n              niente", "Sì, invia la richiesta", "No, torna indietro", "Vuoi aggiungere due parole? (facoltativo)"]) assert.ok(c.includes(x) || c.replace(/\s+/g, " ").includes(x.replace(/\s+/g, " ")), `manca «${x}»`);
+  for (const x of ["Queste persone hanno scelto di non farsi trovare dai proprietari: se una di loro si candida, la trovi tra le candidature.", "Puoi contattare questa persona:", "Puoi contattare ${p.disponibili.length} di queste persone:", "Sono persone iscritte che cercano una casa adatta alla tua."]) assert.ok(c.replace(/\s+/g, " ").includes(x), `manca la frase «${x}»`);
+  for (const vecchia of ["si è ancora reso disponibile", "si sono rese disponibili", "si è resa disponibile", "Vedi solo chi ha scelto di farsi trovare"]) assert.ok(!c.includes(vecchia), `c'è ancora la frase vecchia «${vecchia}»`);
   assert.match(c, /className="ob-textarea"/, "il campo del messaggio deve usare la classe che esiste (con bordo e sfondo)"); assert.ok(!/textarea-base/.test(c)); assert.match(leggi("src", "app", "globals.css"), /\.ob-textarea \{/, "la classe del campo di testo deve esistere nel CSS");
   assert.match(c, /maxLength=\{MESSAGGIO_RICHIESTA_MAX\}/); assert.match(c, /\{messaggio\.length\}\/\{MESSAGGIO_RICHIESTA_MAX\}/);
 });
@@ -171,9 +190,10 @@ test("Database (proprietario): la scheda non mostra reddito né contatti; mostra
   assert.match(c, /\{rifiutate === 1 \? "1 persona non ha accettato" : `\$\{rifiutate\} persone non hanno accettato`\}/); const s = senzaCommenti(leggi("src", "lib", "proprietario", "possibili-server.ts")); assert.match(s, /nome: r\.stato === "inviata" \? nomiRichieste\.get\(r\.id as string\) \?\? null : null,/);
 });
 
-test("«I tuoi match» (inquilino): il consenso è spiegato, si risponde con «Sì, mi interessa» / «No, grazie», accettando si apre la chat; il numero sulla scheda e sulla barra conta solo le richieste in attesa", () => {
-  const c = senzaCommenti(leggi("src", "components", "RichiesteProprietari.tsx")); for (const x of ["Fatti trovare dai proprietari", "Mi rendo disponibile", "Non voglio più essere trovato", "Sì, mi interessa", "No, grazie", "È un match!", "Apri la chat", "Nessuna richiesta per ora", "non il reddito né i contatti"]) assert.ok(c.replace(/\s+/g, " ").includes(x), `manca «${x}»`);
-  assert.match(c, /href=\{`\/chat\/\$\{esito\.candidaturaId\}`\}/); assert.match(c, /disabled=\{pending \|\| !r\.casa\}/, "non si accetta una casa che non c'è più");
+test("«I tuoi match» (inquilino): una nota dice cosa vedono i proprietari e come nascondersi, chi si è nascosto può tornare visibile, si risponde con «Sì, mi interessa» / «No, grazie», accettando si apre la chat; il numero sulla scheda e sulla barra conta solo le richieste in attesa", () => {
+  const c = senzaCommenti(leggi("src", "components", "RichiesteProprietari.tsx")); for (const x of ["non il reddito né i contatti", "Per non farti trovare: Profilo › Privacy e consensi", "Ti sei nascosto ai proprietari", "Torna visibile", "Sì, mi interessa", "No, grazie", "È un match!", "Apri la chat", "Nessuna richiesta per ora", "Finché sei nascosto nessun proprietario può scriverti"]) assert.ok(c.replace(/\s+/g, " ").includes(x), `manca «${x}»`);
+  for (const x of ["Mi rendo disponibile", "Non voglio più essere trovato"]) assert.ok(!c.includes(x), `c'è ancora «${x}»`);
+  assert.match(c, /\{vis \? \(\s+<p className="richieste-nota">/, "chi è visibile vede solo la nota"); assert.match(c, /onClick=\{\(\) => cambiaVisibilita\(true\)\}/, "chi si è nascosto può solo TORNARE visibile da qui");
   const l = leggi("src", "app", "(app)", "layout.tsx"); assert.match(l, /ruolo === "inquilino"\s+\? await supabase\.from\("richieste_proprietari"\)\.select\("id", \{ count: "exact", head: true \}\)\.eq\("stato", "inviata"\)\s+: \{ count: 0 \}/); assert.match(leggi("src", "components", "Navigation.tsx"), /"\/candidature": \{ etichetta: etichettaConteggio\(richiesteInAttesa\), descrizione: "richieste dei proprietari a cui rispondere" \}/);
   assert.match(leggi("src", "app", "(app)", "candidature", "CandidatureClient.tsx"), /\{s\.id === "richieste" && nRichieste > 0 && <span className="conteggio da-leggere">\{nRichieste\}<\/span>\}/);
 });

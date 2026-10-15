@@ -25,7 +25,7 @@ import { IconChevronSu, IconMatch } from "@/components/icons";
 export function CandidatureClient({
   candidature,
   richieste = [],
-  visibile = false,
+  visibile = true,
   schedaIniziale = "candidature",
 }: {
   candidature: CandidaturaConAnnuncio[];

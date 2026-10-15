@@ -134,6 +134,12 @@ function LoginForm() {
               e accetto il trattamento dei dati necessario al funzionamento di
               MatchAmI.
             </label>
+            {ruolo === "inquilino" && (
+              <p className="login-consent" style={{ margin: "0 0 2px 0" }}>
+                Il tuo profilo sarà visibile ai proprietari con una casa adatta alla tua ricerca: vedono nome e iniziale, lavoro, foto e affidabilità, non il
+                reddito né i contatti. Puoi nasconderti quando vuoi dal Profilo.
+              </p>
+            )}
 
             {signupState?.error && (
               <p className="login-error">{signupState.error}</p>

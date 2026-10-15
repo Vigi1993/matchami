@@ -31,7 +31,7 @@ export default async function CandidaturePage({ searchParams }: { searchParams: 
     <CandidatureClient
       candidature={(candidature ?? []) as unknown as CandidaturaConAnnuncio[]}
       richieste={lista}
-      visibile={profilo?.visibile_ai_proprietari === true}
+      visibile={profilo?.visibile_ai_proprietari !== false}
       schedaIniziale={schedaMatchDaParametro((await searchParams).scheda)}
     />
   );

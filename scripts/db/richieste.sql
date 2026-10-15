@@ -58,12 +58,16 @@ insert into listings (id, owner_id, titolo, zona, prezzo, pubblicato, verifica_s
  ('aaaaaaaa-0000-0000-0000-000000000003', '22222222-0000-0000-0000-000000000001', 'Monolocale non pubblicato', 'Isola, Milano', 800, false, 'verificato'),
  ('aaaaaaaa-0000-0000-0000-000000000004', '22222222-0000-0000-0000-000000000001', 'Casa in verifica', 'Isola, Milano', 900, true, 'in_verifica');
 
-select t.ok((select visibile_ai_proprietari from tenant_profiles where profile_id = '11111111-0000-0000-0000-000000000002') is false, '01 un inquilino nuovo NON è visibile ai proprietari (lo accende lui)');
-select t.ok((select visibile_dal from tenant_profiles where profile_id = '11111111-0000-0000-0000-000000000002') is null, '02 senza consenso non c''è nemmeno una data');
-select t.ok((select origine from candidature limit 1) is null, '03 (nessuna candidatura ancora)');
+select t.ok((select count(*) from tenant_profiles where visibile_ai_proprietari is true) = 4, '01 chi si iscrive come inquilino è VISIBILE ai proprietari di partenza (tutti e quattro)');
+select t.ok((select count(*) from tenant_profiles where visibile_dal is not null) = 4, '02 e c''è la data da cui lo è');
+select t.ok((select origine from candidature limit 1) is null, '03a (nessuna candidatura ancora)');
 
--- t1 e t3 e t4 si rendono disponibili, t2 no
-update tenant_profiles set visibile_ai_proprietari = true, visibile_dal = now() where profile_id in ('11111111-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000003', '11111111-0000-0000-0000-000000000004');
+-- Bruno (t2) si nasconde: gli altri restano visibili come di partenza. Si nasconde da solo, con i suoi permessi.
+select t.come('11111111-0000-0000-0000-000000000002');
+update tenant_profiles set visibile_ai_proprietari = false, visibile_dal = null where profile_id = '11111111-0000-0000-0000-000000000002';
+select t.torna();
+select t.ok((select visibile_ai_proprietari from tenant_profiles where profile_id = '11111111-0000-0000-0000-000000000002') is false, '03b Bruno può nascondersi da solo, con i suoi permessi');
+select t.ok((select count(*) from tenant_profiles where visibile_ai_proprietari is true) = 3, '03c gli altri tre restano visibili');
 
 -- ---- chi può e chi non può mandare una richiesta ----
 select t.come(null);
@@ -78,7 +82,7 @@ select t.come('22222222-0000-0000-0000-000000000001');
 select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000001', null)$q$, 'NON_TUO_IMMOBILE', '06 un proprietario non può scrivere per la casa di un altro');
 select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000003', '11111111-0000-0000-0000-000000000001', null)$q$, 'IMMOBILE_NON_PUBBLICATO', '07 per una casa non pubblicata no');
 select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000004', '11111111-0000-0000-0000-000000000001', null)$q$, 'IMMOBILE_NON_PUBBLICATO', '08 per una casa in verifica no');
-select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000002', null)$q$, 'INQUILINO_NON_DISPONIBILE', '09 a chi non ha dato il consenso no');
+select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000002', null)$q$, 'INQUILINO_NON_DISPONIBILE', '09 a chi si è nascosto no');
 select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000001', '99999999-0000-0000-0000-000000000009', null)$q$, 'INQUILINO_NON_DISPONIBILE', '10 a una persona che non esiste: lo stesso errore (non si capisce se esiste)');
 select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', repeat('a', 281))$q$, 'MESSAGGIO_TROPPO_LUNGO', '11 un messaggio di 281 caratteri no');
 select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000001', '22222222-0000-0000-0000-000000000002', null)$q$, 'INQUILINO_NON_DISPONIBILE', '12 a un altro proprietario no (non è un inquilino)');
@@ -200,7 +204,7 @@ select t.torna();
 -- ---- il consenso si può ritirare ----
 update tenant_profiles set visibile_ai_proprietari = false where profile_id = '11111111-0000-0000-0000-000000000003';
 select t.come('22222222-0000-0000-0000-000000000002');
-select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000003', null)$q$, 'INQUILINO_NON_DISPONIBILE', '54 chi ritira il consenso non si può più contattare');
+select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000003', null)$q$, 'INQUILINO_NON_DISPONIBILE', '54 chi si nasconde dopo non si può più contattare');
 select t.torna();
 
 -- ---- la casa non c'è più al momento della risposta ----
@@ -258,5 +262,5 @@ delete from auth.users where id = '11111111-0000-0000-0000-000000000001';
 select t.ok((select count(*) from richieste_proprietari where tenant_id = '11111111-0000-0000-0000-000000000001') = 0, '66 cancellando un account spariscono le sue richieste');
 delete from listings where id = 'aaaaaaaa-0000-0000-0000-000000000001';
 select t.ok((select count(*) from richieste_proprietari where listing_id = 'aaaaaaaa-0000-0000-0000-000000000001') = 0, '67 cancellando una casa spariscono le sue richieste');
-select t.ok((select count(*) from t.esiti) = 67, '68 nessun controllo è stato saltato (ne servono 67 prima di questo)');
+select t.ok((select count(*) from t.esiti) = 69, '70 nessun controllo è stato saltato (ne servono 69 prima di questo)');
 select 'TUTTI I CONTROLLI: ' || count(*) from t.esiti;

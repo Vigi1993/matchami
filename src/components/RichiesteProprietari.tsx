@@ -10,8 +10,8 @@ import { IconMatch } from "@/components/icons";
 type Esito = { stato: "accettata"; candidaturaId: string | null } | { stato: "rifiutata" };
 
 /**
- * La scheda «Richieste dei proprietari» di «I tuoi match»: prima il consenso a farsi trovare (spento di partenza), poi le
- * richieste a cui rispondere. Accettare crea un match con la chat; rifiutare chiude la richiesta.
+ * La scheda «Richieste dei proprietari» di «I tuoi match»: di partenza si è visibili ai proprietari (chi si è nascosto lo vede e può
+ * tornare visibile), poi le richieste a cui rispondere. Accettare crea un match con la chat; rifiutare chiude la richiesta.
  */
 export function RichiesteProprietari({ richieste, visibile }: { richieste: RichiestaPerInquilino[]; visibile: boolean }) {
   const router = useRouter();
@@ -44,19 +44,21 @@ export function RichiesteProprietari({ richieste, visibile }: { richieste: Richi
 
   return (
     <div className="richieste">
-      {/* ---- il consenso ---- */}
-      <div className={`richieste-consenso ${vis ? "attivo" : ""}`}>
-        <h3>{vis ? "Sei disponibile ai proprietari" : "Fatti trovare dai proprietari"}</h3>
-        <p>
-          {vis
-            ? "I proprietari con una casa adatta alla tua ricerca possono vedere il tuo profilo (nome e iniziale del cognome, lavoro, foto, affidabilità e recensioni, non il reddito né i contatti) e scriverti. Tu decidi se rispondere."
-            : "Se ti rendi disponibile, i proprietari con una casa adatta alla tua ricerca possono vedere il tuo profilo (nome e iniziale del cognome, lavoro, foto, affidabilità e recensioni, non il reddito né i contatti) e scriverti. Tu decidi se rispondere. Puoi cambiare idea quando vuoi."}
+      {/* ---- la visibilità: di partenza si è visibili; qui si dice com'è, e chi si è nascosto può tornare visibile ---- */}
+      {vis ? (
+        <p className="richieste-nota">
+          I proprietari con una casa adatta alla tua ricerca possono vedere il tuo profilo (nome e iniziale del cognome, lavoro, foto, affidabilità e
+          recensioni, non il reddito né i contatti) e scriverti. Tu decidi se rispondere. Per non farti trovare: Profilo › Privacy e consensi.
         </p>
-        <button type="button" className={vis ? "richieste-secondario" : "opp-cta"} disabled={pending} onClick={() => cambiaVisibilita(!vis)}>
-          {vis ? "Non voglio più essere trovato" : "Mi rendo disponibile"}
-        </button>
-        {!vis && <small>La ricerca che hai impostato serve a trovare le case adatte a te: è la stessa con cui i proprietari ti trovano.</small>}
-      </div>
+      ) : (
+        <div className="richieste-consenso">
+          <h3>Ti sei nascosto ai proprietari</h3>
+          <p>I proprietari non vedono il tuo profilo e non possono scriverti. Puoi tornare visibile quando vuoi.</p>
+          <button type="button" className="opp-cta" disabled={pending} onClick={() => cambiaVisibilita(true)}>
+            Torna visibile
+          </button>
+        </div>
+      )}
 
       {errore && (
         <p className="note-error" role="alert">
@@ -69,7 +71,7 @@ export function RichiesteProprietari({ richieste, visibile }: { richieste: Richi
         <div className="empty-inline">
           <IconMatch className="icon-empty" />
           <h3>Nessuna richiesta per ora</h3>
-          <p>{vis ? "Quando un proprietario sceglie il tuo profilo, la trovi qui e puoi rispondere." : "Rendendoti disponibile, i proprietari potranno scriverti: le richieste arrivano qui."}</p>
+          <p>{vis ? "Quando un proprietario sceglie il tuo profilo, la trovi qui e puoi rispondere." : "Finché sei nascosto nessun proprietario può scriverti."}</p>
         </div>
       ) : (
         <ul className="richieste-lista" aria-label="Richieste dei proprietari">

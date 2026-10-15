@@ -227,7 +227,7 @@ export function ProfiloClient({
         onClose={() => setSheetAperta(null)}
         consensoMarketingIniziale={consensoMarketingIniziale}
         consensoTerziIniziale={consensoTerziIniziale}
-        visibileProprietariIniziale={tenant.visibile_ai_proprietari === true}
+        visibileProprietariIniziale={tenant.visibile_ai_proprietari !== false}
       />
       <FaqSheet open={sheetAperta === "faq"} onClose={() => setSheetAperta(null)} />
         </PageContainer>

@@ -4283,6 +4283,14 @@ button.contratto-testa:focus-visible {
   color: var(--ink);
 }
 
+/* nota discreta sulla visibilità ai proprietari (per chi è visibile, cioè quasi tutti) */
+.richieste-nota {
+  margin: 2px 0 16px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--body-soft);
+}
+
 /* ---- Database: le schede dei possibili inquilini e la richiesta ---- */
 .possibili-casa + .possibili-casa {
   margin-top: 14px;

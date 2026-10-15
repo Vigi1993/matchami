@@ -90,8 +90,10 @@ test("L'INSIDIA: chi ha accettato PIÙ versioni (quindi ha più righe) passa lo 
 });
 
 test("la controprova: una lettura con maybeSingle su più righe darebbe «non accettata» (il finto lo riproduce)", async () => {
+  // due righe tra le versioni ammesse: succede quando una versione ne ha di equivalenti (oggi l'elenco è vuoto, in futuro no)
+  const ammesseConUnaVecchia = [...AMMESSE, "2026-10-provvisoria-3"];
   const db = finto([riga(U1, "2026-10-provvisoria-3"), riga(U1, INFORMATIVA.versione)]);
-  const { data, error } = await db.from("accettazioni_informativa").select("versione").eq("user_id", U1).in("versione", AMMESSE).maybeSingle();
+  const { data, error } = await db.from("accettazioni_informativa").select("versione").eq("user_id", U1).in("versione", ammesseConUnaVecchia).maybeSingle();
   assert.equal(data, null); assert.match(error.message, /multiple/);
 });
 

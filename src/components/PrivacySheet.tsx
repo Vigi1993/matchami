@@ -35,8 +35,8 @@ export function PrivacySheet({
   );
   const [marketing, setMarketing] = useState(consensoMarketingIniziale);
   const [terzi, setTerzi] = useState(consensoTerziIniziale);
-  // Il consenso a farsi trovare dai proprietari si salva subito, a ogni scelta (non col pulsante «Salva preferenze»):
-  // ritirarlo deve essere immediato.
+  // Farsi trovare dai proprietari si salva subito, a ogni scelta (non col pulsante «Salva preferenze»): nascondersi deve essere
+  // immediato.
   const [visibile, setVisibile] = useState(visibileProprietariIniziale === true);
   const [erroreVisibilita, setErroreVisibilita] = useState<string | null>(null);
   const [inCorsoVisibilita, avviaVisibilita] = useTransition();
@@ -119,8 +119,8 @@ export function PrivacySheet({
         {visibileProprietariIniziale !== undefined && (
           <Field label="Fatti trovare dai proprietari">
             <p className="field-note" style={{ margin: "-4px 0 10px 0" }}>
-              I proprietari con una casa adatta alla tua ricerca possono vedere il tuo profilo (nome e iniziale del cognome, lavoro, foto, affidabilità
-              e recensioni, non il reddito né i contatti) e scriverti. Tu decidi se rispondere. Si salva subito, e lo puoi ritirare quando vuoi.
+              Di partenza i proprietari con una casa adatta alla tua ricerca possono vedere il tuo profilo (nome e iniziale del cognome, lavoro, foto,
+              affidabilità e recensioni, non il reddito né i contatti) e scriverti. Tu decidi se rispondere. Con «No» non ti vedono più. Si salva subito.
             </p>
             <div className="chip-row">
               <Chip label="Sì" active={visibile} onClick={() => !inCorsoVisibilita && scegliVisibilita(true)} />

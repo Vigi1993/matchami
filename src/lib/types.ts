@@ -3,7 +3,7 @@ export type NucleoFamiliare = "single" | "coppia";
 
 export type TenantProfile = {
   profile_id: string;
-  /** l'inquilino ha scelto di farsi trovare dai proprietari (spento di partenza) */
+  /** `false` = l'inquilino si è nascosto ai proprietari; di partenza (e se non si sa) è visibile */
   visibile_ai_proprietari?: boolean;
   professione: string | null;
   reddito_mensile: number | null;

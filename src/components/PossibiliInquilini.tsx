@@ -76,10 +76,10 @@ export function PossibiliInquilini({ possibili }: { possibili: PossibiliPerCasa[
               {p.disponibili !== null && p.possibili !== null && p.possibili > 0 && (
                 <p className="possibili-testo">
                   {p.disponibili.length === 0
-                    ? "Nessuno di loro si è ancora reso disponibile a essere contattato: se una di queste persone si candida, la trovi tra le candidature."
+                    ? "Queste persone hanno scelto di non farsi trovare dai proprietari: se una di loro si candida, la trovi tra le candidature."
                     : p.disponibili.length === 1
-                      ? "Una di queste persone si è resa disponibile a essere contattata:"
-                      : `${p.disponibili.length} di queste persone si sono rese disponibili a essere contattate:`}
+                      ? "Puoi contattare questa persona:"
+                      : `Puoi contattare ${p.disponibili.length} di queste persone:`}
                 </p>
               )}
 
@@ -156,8 +156,8 @@ export function PossibiliInquilini({ possibili }: { possibili: PossibiliPerCasa[
       )}
 
       <p className="possibili-testo">
-        Sono persone che hanno impostato una ricerca adatta alla tua casa. Vedi solo chi ha scelto di farsi trovare, e non i suoi contatti: se
-        accetta la tua richiesta, o se si candida, la trovi tra le candidature e potete scrivervi.
+        Sono persone iscritte che cercano una casa adatta alla tua. Chi ha scelto di non farsi trovare non compare, e i contatti di nessuno sono
+        visibili: se accetta la tua richiesta, o se si candida, la trovi tra le candidature e potete scrivervi.
       </p>
 
       <Sheet open={scelta !== null} onClose={chiudi} title={scelta ? `Fai match con ${scelta.scheda.nome}?` : "Fai match"}>
