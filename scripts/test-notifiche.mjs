@@ -16,12 +16,13 @@ const sql = fs.readFileSync(path.join(radice, "supabase", "migrations", "0019_no
 // (il ritiro di una candidatura): la verità è l'ultima definizione.
 const sql0020 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0020_ritira_candidatura.sql"), "utf8");
 const sql0022 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0022_visite.sql"), "utf8");
+const sql0032 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0032_richieste_proprietari.sql"), "utf8");
 
 /** I tipi che il vincolo sulla tabella ammette. */
 function tipiDelDatabase() {
   // l'ultima definizione del vincolo, in ordine di migrazione
-  const tutte = [...(sql + "\n" + sql0020 + "\n" + sql0022).matchAll(/check \(tipo in \(([\s\S]*?)\)\)/g)];
-  assert.ok(tutte.length >= 3, "dovrei trovare il vincolo della 0019, quello della 0020 e quello della 0022");
+  const tutte = [...(sql + "\n" + sql0020 + "\n" + sql0022 + "\n" + sql0032).matchAll(/check \(tipo in \(([\s\S]*?)\)\)/g)];
+  assert.ok(tutte.length >= 4, "dovrei trovare il vincolo della 0019, quello della 0020, quello della 0022 e quello della 0032");
   return [...tutte[tutte.length - 1][1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
 }
 
@@ -33,7 +34,10 @@ const trigger =
   sql0020.slice(sql0020.indexOf("-- 5. La notifica al proprietario")) +
   "\n" +
   // la 0022 aggiunge il trigger delle visite: si guarda la sua funzione
-  sql0022.slice(sql0022.indexOf("create or replace function public.notifica_visita()"), sql0022.indexOf("drop trigger if exists notifica_visita"));
+  sql0022.slice(sql0022.indexOf("create or replace function public.notifica_visita()"), sql0022.indexOf("drop trigger if exists notifica_visita")) +
+  "\n" +
+  // la 0032: le due funzioni che mandano e accettano una richiesta creano le notifiche (non sono trigger, ma producono i tipi)
+  sql0032.slice(sql0032.indexOf("create or replace function public.invia_richiesta_proprietario"));
 
 // ------------------------------------------------------------
 // I tipi

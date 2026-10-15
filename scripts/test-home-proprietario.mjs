@@ -190,7 +190,12 @@ test("saluto e titolo: senza nome solo il saluto; l'ora cambia il saluto", () =>
 });
 
 // ============================================================ per chi non è pratico
-function bloccoCss() { const css = leggi("src", "app", "globals.css"); const a = css.indexOf("Home del proprietario: la casa in grande e due tessere grandi."); const b = css.indexOf("/* Database: la sezione «Possibili inquilini» */"); assert.ok(a > 0 && b > a, "blocchi di stile non trovati"); return css.slice(a, b) + css.slice(b); }
+function bloccoCss() {
+  const css = leggi("src", "app", "globals.css"); const a = css.indexOf("Home del proprietario: la casa in grande e due tessere grandi."); const fineHome = css.indexOf("/* ---- «Richieste dei proprietari» (inquilino) ---- */"); const schede = css.indexOf("/* ---- Database: le schede dei possibili inquilini e la richiesta ---- */");
+  assert.ok(a > 0 && fineHome > a && schede > fineHome, "blocchi di stile non trovati");
+  // la Home e la sezione del Database, poi le schede dei possibili inquilini e la richiesta: tutto ciò che legge il proprietario. Le richieste dell'inquilino stanno in mezzo e restano fuori.
+  return css.slice(a, fineHome) + css.slice(schede);
+}
 
 test("leggibilità: nessun carattere sotto i 15 px nella Home e nella sezione del Database; i testi di lettura da 16 px in su", () => {
   const css = bloccoCss(); const misure = [...css.matchAll(/font-size:\s*(\d+(?:\.\d+)?)px/g)].map((m) => Number(m[1])); assert.ok(misure.length >= 20, "pochi caratteri trovati: " + misure.length); assert.ok(Math.min(...misure) >= 15, `un carattere è troppo piccolo: ${Math.min(...misure)} px`);
@@ -233,12 +238,12 @@ test("la chiave di servizio manca: la Home non crolla e non mostra numeri invent
 });
 
 test("Database: la sezione «Possibili inquilini» c'è, ha l'ancora a cui porta la tessera, dice che non si vede chi sono, e funziona anche senza numeri", () => {
-  const d = leggi("src", "app", "(app)", "database", "DatabaseClient.tsx"); assert.match(d, /<section id="possibili" className="possibili" aria-labelledby="possibili-titolo">/); assert.match(d, /Non vedi chi sono: se una di loro si\s+candida, la trovi qui sotto, tra le candidature\./); assert.match(d, /Il numero non è disponibile in questo momento/); assert.match(d, /Quando la tua casa sarà pubblicata vedrai qui quanti inquilini cercano una casa come la tua\./);
-  assert.ok(d.indexOf('id="possibili"') > 0 && d.indexOf('id="possibili"') < d.indexOf("<RicercaCandidati"), "la sezione sta prima della ricerca delle candidature"); const p = leggi("src", "app", "(app)", "database", "page.tsx"); assert.match(p, /const possibili = await possibiliPerCasaDelProprietario\(supabase, user!\.id\);/); assert.match(p, /<DatabaseClient\s+possibili=\{possibili\}/);
+  const d = leggi("src", "app", "(app)", "database", "DatabaseClient.tsx"); const c = leggi("src", "components", "PossibiliInquilini.tsx"); assert.match(d, /<PossibiliInquilini possibili=\{possibili\} \/>/); assert.match(c, /<section id="possibili" className="possibili" aria-labelledby="possibili-titolo">/); assert.match(c, /Vedi solo chi ha scelto di farsi trovare, e non i suoi contatti/); assert.match(c, /Il numero non è disponibile in questo momento/); assert.match(c, /Quando la tua casa sarà pubblicata vedrai qui quanti inquilini cercano una casa come la tua\./);
+  assert.ok(d.indexOf("<PossibiliInquilini") > 0 && d.indexOf("<PossibiliInquilini") < d.indexOf("<RicercaCandidati"), "la sezione sta prima della ricerca delle candidature"); const p = leggi("src", "app", "(app)", "database", "page.tsx"); assert.match(p, /const possibili = await possibiliPerCasaDelProprietario\(supabase, user!\.id\);/); assert.match(p, /<DatabaseClient\s+possibili=\{possibili\}/);
   assert.match(leggi("src", "app", "globals.css"), /\.possibili \{[^}]*scroll-margin-top: 16px;/);
 });
 
 test("informativa: dice che ai proprietari si mostra solo un NUMERO anonimo di inquilini compatibili, con la nuova versione; chi aveva le precedenti non deve riaccettare", () => {
   const testo = JSON.stringify(inf.INFORMATIVA); assert.ok(testo.includes("QUANTI inquilini hanno una ricerca compatibile con il loro immobile")); assert.ok(testo.includes("è un numero anonimo, non vedono chi sono né nessun loro dato")); assert.ok(testo.includes("Se uno di loro si candida, il proprietario vede la candidatura come tutte le altre"));
-  assert.equal(inf.INFORMATIVA.versione, "2026-10-provvisoria-18"); for (let v = 15; v <= 17; v++) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), String(v)); assert.ok(!inf.INFORMATIVA.equivalenti.includes(inf.INFORMATIVA.versione));
+  const vN = Number(inf.INFORMATIVA.versione.match(/^2026-10-provvisoria-(\d+)$/)?.[1]); assert.ok(vN >= 19, "versione: " + inf.INFORMATIVA.versione); for (let v = 15; v < vN; v++) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} deve restare equivalente`); assert.ok(!inf.INFORMATIVA.equivalenti.includes(inf.INFORMATIVA.versione));
 });

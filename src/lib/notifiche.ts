@@ -27,6 +27,8 @@ export const TIPI_NOTIFICA = [
   "feedback_ricevuto",
   "visita_prenotata",
   "visita_annullata",
+  "richiesta_ricevuta",
+  "richiesta_accettata",
 ] as const;
 
 export type TipoNotifica = (typeof TIPI_NOTIFICA)[number];
@@ -132,6 +134,18 @@ export function descriviNotifica(
         testo: `La visita a ${annuncio(dati, "un immobile")}${quando ? ` di ${quando}` : ""} è stata annullata.`,
       };
     }
+    case "richiesta_ricevuta": {
+      const nome = dati && typeof dati.nome === "string" ? dati.nome.trim() : "";
+      return {
+        titolo: "Un proprietario vuole conoscerti",
+        testo: `${nome || "Un proprietario"} ha scelto il tuo profilo per ${annuncio(dati, "la sua casa")}. Se ti interessa, rispondi da «I tuoi match».`,
+      };
+    }
+    case "richiesta_accettata":
+      return {
+        titolo: "Hai un nuovo match",
+        testo: `L'inquilino ha accettato la tua richiesta per ${annuncio(dati, "la tua casa")}: ora potete scrivervi in chat.`,
+      };
     case "feedback_ricevuto":
       return {
         titolo: "Nuovo feedback",
@@ -147,13 +161,19 @@ export function descriviNotifica(
  * in «Gestione affitto»: si corregge qui, quando si legge il link, così vale anche per le notifiche già create (quelle del
  * proprietario hanno già un altro indirizzo e non cambiano).
  */
+/** Dove si trova la richiesta di un proprietario: la scheda «Richieste dei proprietari» di «I tuoi match». */
+export const LINK_RICHIESTE_PROPRIETARI = "/candidature?scheda=richieste";
+
 export const TIPI_NOTIFICA_AFFITTI_INQUILINO: readonly string[] = ["affitto_verificato", "affitto_respinto", "rapporto_confermato", "rapporto_rifiutato"];
 export const LINK_AFFITTI_INQUILINO = "/gestione?apri=affitti";
 
 /** Dove porta una notifica. Mai fuori dal sito, qualunque cosa ci sia nei dati. */
 export function linkNotifica(n: Pick<Notifica, "link"> & Partial<Pick<Notifica, "tipo">>): string {
   const percorso = percorsoInterno(n.link, "/");
-  return percorso === "/profilo" && typeof n.tipo === "string" && TIPI_NOTIFICA_AFFITTI_INQUILINO.includes(n.tipo) ? LINK_AFFITTI_INQUILINO : percorso;
+  if (percorso === "/profilo" && typeof n.tipo === "string" && TIPI_NOTIFICA_AFFITTI_INQUILINO.includes(n.tipo)) return LINK_AFFITTI_INQUILINO;
+  // il database salva «/candidature» (un link non può avere la query): si apre direttamente la scheda delle richieste
+  if (percorso === "/candidature" && n.tipo === "richiesta_ricevuta") return LINK_RICHIESTE_PROPRIETARI;
+  return percorso;
 }
 
 /**

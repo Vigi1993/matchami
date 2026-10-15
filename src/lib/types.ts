@@ -3,6 +3,8 @@ export type NucleoFamiliare = "single" | "coppia";
 
 export type TenantProfile = {
   profile_id: string;
+  /** l'inquilino ha scelto di farsi trovare dai proprietari (spento di partenza) */
+  visibile_ai_proprietari?: boolean;
   professione: string | null;
   reddito_mensile: number | null;
   /** reddito mensile di TUTTO il nucleo, chiesto esplicitamente */
@@ -140,6 +142,8 @@ export type CandidaturaConAnnuncio = {
   match_pct: number | null;
   /** chiave della lista chiusa in lib/motivi-rifiuto.ts; null se non rifiutata o rifiutata prima che esistesse */
   motivo_rifiuto: string | null;
+  /** chi ha cominciato: l'inquilino che si candida, o il proprietario con una richiesta accettata */
+  origine?: "inquilino" | "proprietario";
   created_at: string;
   listings: {
     titolo: string;

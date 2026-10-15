@@ -16,18 +16,29 @@ import {
   type SchedaMatch,
 } from "@/lib/candidature";
 import { RitiraCandidatura } from "@/components/RitiraCandidatura";
+import { RichiesteProprietari } from "@/components/RichiesteProprietari";
+import { richiesteInAttesa, type RichiestaPerInquilino } from "@/lib/richieste";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { messaggioMotivoRifiuto } from "@/lib/motivi-rifiuto";
 import { IconChevronSu, IconMatch } from "@/components/icons";
 
 export function CandidatureClient({
   candidature,
+  richieste = [],
+  visibile = false,
+  schedaIniziale = "candidature",
 }: {
   candidature: CandidaturaConAnnuncio[];
+  /** le richieste dei proprietari */
+  richieste?: RichiestaPerInquilino[];
+  /** l'inquilino si è reso disponibile a essere trovato dai proprietari */
+  visibile?: boolean;
+  schedaIniziale?: SchedaMatch;
 }) {
   const router = useRouter();
   const idBase = useId();
-  const [scheda, setScheda] = useState<SchedaMatch>("candidature");
+  const [scheda, setScheda] = useState<SchedaMatch>(schedaIniziale);
+  const nRichieste = richiesteInAttesa(richieste).length;
   const [selezionata, setSelezionata] = useState<CandidaturaConAnnuncio | null>(null);
 
   const sezioni = sezioniCandidature(candidature);
@@ -61,6 +72,7 @@ export function CandidatureClient({
           >
             {s.etichetta}
             {s.id === "candidature" && candidature.length > 0 && <span className="conteggio">{candidature.length}</span>}
+            {s.id === "richieste" && nRichieste > 0 && <span className="conteggio da-leggere">{nRichieste}</span>}
           </button>
         ))}
       </div>
@@ -82,14 +94,7 @@ export function CandidatureClient({
 
       {/* ---- Le richieste che arrivano dai proprietari ---- */}
       <div role="tabpanel" id={`${idBase}-pannello-richieste`} aria-labelledby={`${idBase}-richieste`} hidden={scheda !== "richieste"}>
-        <div className="empty-inline">
-          <IconMatch className="icon-empty" />
-          <h3>Nessuna richiesta dai proprietari</h3>
-          <p>
-            Qui compariranno le richieste che ti mandano i proprietari. Per ora i proprietari vedono solo chi si candida alle loro case, quindi non
-            ce ne sono: le tue candidature le trovi nell&apos;altra scheda.
-          </p>
-        </div>
+        <RichiesteProprietari richieste={richieste} visibile={visibile} />
       </div>
 
       <Sheet open={selezionata !== null} onClose={() => setSelezionata(null)} title={selezionata?.listings?.titolo ?? "Candidatura"}>
@@ -181,6 +186,7 @@ function Gruppo({
                 {c.listings?.prezzo ? `€${c.listings.prezzo.toLocaleString("it-IT")}/mese` : "—"}
                 {c.match_pct !== null && ` · ${c.match_pct}% compatibile`}
               </div>
+              {c.origine === "proprietario" && <div className="mc-origine">Ti ha scelto il proprietario</div>}
             </div>
             <div className={`mc-pct ${STATO_BADGE[c.status]}`}>{STATO_LABEL[c.status]}</div>
           </button>

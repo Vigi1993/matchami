@@ -47,6 +47,12 @@ export const SCHEDE_MATCH = [
 ] as const;
 export type SchedaMatch = (typeof SCHEDE_MATCH)[number]["id"];
 
+/** Dal parametro dell'indirizzo (`?scheda=richieste`) alla scheda da aprire; qualunque altro valore apre le candidature. */
+export function schedaMatchDaParametro(valore: unknown): SchedaMatch {
+  const v = Array.isArray(valore) ? valore[0] : valore;
+  return v === "richieste" ? "richieste" : "candidature";
+}
+
 /** Le parti in cui si dividono le candidature, nell'ordine in cui compaiono. */
 export const SEZIONI_CANDIDATURE = [
   { id: "match", titolo: "Match", stato: "accettata", aperta: true },

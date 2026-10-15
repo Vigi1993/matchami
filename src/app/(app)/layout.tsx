@@ -44,6 +44,13 @@ export default async function AppLayout({
     .eq("letto", false)
     .neq("mittente_id", user!.id);
 
+  // Le richieste dei proprietari a cui l'inquilino non ha ancora risposto (per il numero su «I tuoi match»). Solo per gli inquilini;
+  // come sopra, se non riesce si mostra zero.
+  const { count: richiesteInAttesa } =
+    ruolo === "inquilino"
+      ? await supabase.from("richieste_proprietari").select("id", { count: "exact", head: true }).eq("stato", "inviata")
+      : { count: 0 };
+
   /*
     Come nel prototipo: un unico "telaio" da 480px centrato, alto quanto
     la viewport e senza scroll di pagina. Dentro, l'area delle schermate
@@ -52,7 +59,7 @@ export default async function AppLayout({
   return (
     <div className="app-shell">
       <div className="screens">{children}</div>
-      <Navigation ruolo={ruolo} nome={profile?.nome} nonLette={count ?? 0} messaggiNonLetti={messaggiNonLetti ?? 0} />
+      <Navigation ruolo={ruolo} nome={profile?.nome} nonLette={count ?? 0} messaggiNonLetti={messaggiNonLetti ?? 0} richiesteInAttesa={richiesteInAttesa ?? 0} />
     </div>
   );
 }

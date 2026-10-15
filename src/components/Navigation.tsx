@@ -40,12 +40,15 @@ export function Navigation({
   ruolo,
   nonLette = 0,
   messaggiNonLetti = 0,
+  richiesteInAttesa = 0,
 }: {
   ruolo: string;
   /** Le novità non ancora lette: se ce ne sono, un numero sulla voce Profilo. */
   nonLette?: number;
   /** I messaggi della chat non ancora letti: se ce ne sono, un numero sulla voce Messaggi. */
   messaggiNonLetti?: number;
+  /** Le richieste dei proprietari a cui l'inquilino non ha ancora risposto: un numero sulla voce «I tuoi match». */
+  richiesteInAttesa?: number;
   /** Non più mostrato in barra: il nome resta nella schermata Profilo. */
   nome?: string | null;
 }) {
@@ -55,6 +58,7 @@ export function Navigation({
   const segnalini: Record<string, { etichetta: string; descrizione: string }> = {
     "/profilo": { etichetta: etichettaConteggio(nonLette), descrizione: "novità da leggere" },
     "/messaggi": { etichetta: etichettaConteggio(messaggiNonLetti), descrizione: "messaggi da leggere" },
+    "/candidature": { etichetta: etichettaConteggio(richiesteInAttesa), descrizione: "richieste dei proprietari a cui rispondere" },
   };
 
   return (

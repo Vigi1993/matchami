@@ -8,6 +8,7 @@ import type { RigaCriterioDb } from "@/lib/match";
 import { motivoRifiutoValido } from "@/lib/motivi-rifiuto";
 import { profiloDaVista } from "@/lib/candidati";
 import { messaggioErroreVerifica } from "@/lib/verifica";
+import { eUuid, messaggioErroreRichiesta, messaggioPulito } from "@/lib/richieste";
 
 export async function valutaCandidatura(
   candidaturaId: string,
@@ -93,5 +94,29 @@ export async function valutaCandidatura(
   }
 
   revalidatePath("/database");
+  return { ok: true };
+}
+
+/**
+ * «Fai match»: il proprietario manda una richiesta a un inquilino che si è reso disponibile. L'inquilino la trova in «I tuoi
+ * match» e decide. Le regole (la casa è tua e pubblicata, la persona ha dato il consenso, non si è già candidata, non le hai
+ * già scritto, il freno giornaliero) le controlla il database; qui si traduce l'errore in parole.
+ */
+export async function faiMatch(listingId: string, tenantId: string, messaggio?: string | null): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!eUuid(listingId) || !eUuid(tenantId)) return { ok: false, error: messaggioErroreRichiesta("INQUILINO_NON_DISPONIBILE: x") };
+  const m = messaggioPulito(messaggio ?? null);
+  if (!m.ok) return { ok: false, error: messaggioErroreRichiesta("MESSAGGIO_TROPPO_LUNGO: x") };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: messaggioErroreRichiesta("NON_AUTENTICATO: x") };
+
+  const { error } = await supabase.rpc("invia_richiesta_proprietario", { p_listing: listingId, p_tenant: tenantId, p_messaggio: m.valore });
+  if (error) return { ok: false, error: messaggioErroreRichiesta(error.message) };
+
+  revalidatePath("/database");
+  revalidatePath("/");
   return { ok: true };
 }

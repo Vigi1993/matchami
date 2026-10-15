@@ -4150,3 +4150,292 @@ button.contratto-testa:focus-visible {
   line-height: 1.45;
   color: var(--body-text);
 }
+
+/* ---- «Richieste dei proprietari» (inquilino) ---- */
+.match-schede .conteggio.da-leggere {
+  background: var(--clay);
+  color: #fff;
+}
+.mc-origine {
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--moss);
+}
+.richieste-consenso {
+  margin: 2px 0 16px;
+  padding: 16px 16px 14px;
+  border-radius: 20px;
+  background: rgba(16, 21, 26, 0.04);
+  border: 1px dashed rgba(16, 21, 26, 0.2);
+}
+.richieste-consenso.attivo {
+  background: rgba(62, 107, 87, 0.1);
+  border: 1px solid rgba(62, 107, 87, 0.4);
+}
+.richieste-consenso h3 {
+  margin: 0 0 6px;
+  font-family: var(--font-display);
+  font-size: 20px;
+  color: var(--ink);
+}
+.richieste-consenso p {
+  margin: 0 0 12px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--body-text);
+}
+.richieste-consenso small {
+  display: block;
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--body-soft);
+}
+.richieste-secondario {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 10px 18px;
+  border: 1px solid rgba(16, 21, 26, 0.25);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.richieste-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.richiesta {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 14px;
+  padding: 12px;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(16, 21, 26, 0.06);
+}
+.richiesta-foto {
+  flex: none;
+  width: 84px;
+  height: 84px;
+  border-radius: 14px;
+  object-fit: cover;
+}
+.richiesta-foto-vuota {
+  background: linear-gradient(135deg, var(--moss), var(--moss-light));
+}
+.richiesta-corpo {
+  min-width: 0;
+  flex: 1;
+}
+.richiesta-chi {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--moss);
+}
+.richiesta-casa {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 6px;
+  font-size: 14px;
+  color: var(--body-text);
+}
+.richiesta-casa b {
+  font-family: var(--font-display);
+  font-size: 18px;
+  color: var(--ink);
+}
+.richiesta-messaggio {
+  margin: 4px 0 8px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--gold);
+  background: rgba(201, 161, 90, 0.12);
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--body-text);
+}
+.richiesta-azioni {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.richiesta-azioni .opp-cta {
+  flex: 1;
+  min-width: 140px;
+  margin: 0;
+}
+.richiesta-esito {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(62, 107, 87, 0.12);
+  font-size: 14px;
+  color: var(--ink);
+}
+
+/* ---- Database: le schede dei possibili inquilini e la richiesta ---- */
+.possibili-casa + .possibili-casa {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 2px solid rgba(16, 21, 26, 0.08);
+}
+.possibili-avviso {
+  margin: 0 0 10px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: rgba(62, 107, 87, 0.14);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.schede-inquilini {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+.scheda-inquilino {
+  margin-bottom: 12px;
+  padding: 14px;
+  border-radius: 20px;
+  background: var(--paper);
+  border: 1px solid rgba(16, 21, 26, 0.08);
+}
+.scheda-testa {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.scheda-foto {
+  flex: none;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.scheda-iniziale {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--moss), var(--moss-light));
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 600;
+}
+.scheda-chi {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  font-size: 17px;
+  color: var(--body-text);
+}
+.scheda-chi b {
+  font-family: var(--font-display);
+  font-size: 20px;
+  color: var(--ink);
+}
+.scheda-compat {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--moss);
+}
+.scheda-compat small {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--body-soft);
+}
+.scheda-etichette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 6px;
+}
+.scheda-chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(16, 21, 26, 0.06);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--body-text);
+}
+.scheda-presentazione {
+  margin: 6px 0 10px;
+  font-size: 16px;
+  line-height: 1.4;
+  color: var(--body-text);
+}
+.scheda-match {
+  width: 100%;
+  min-height: 56px;
+  margin: 4px 0 0;
+  font-size: 18px;
+}
+.possibili-conferma {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+.possibili-conferma .opp-cta {
+  min-height: 56px;
+  margin: 0;
+  font-size: 18px;
+}
+.richieste-inviate {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(201, 161, 90, 0.12);
+}
+.richieste-inviate h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--gold-ink);
+}
+.richieste-inviate ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+.richieste-inviate li.accettata {
+  color: var(--moss);
+}
+.richieste-link {
+  margin-left: 8px;
+  font-weight: 800;
+  color: var(--moss);
+  text-decoration: underline;
+}
+
+/* nelle schede dei possibili inquilini il badge è leggibile come il resto (per chi non è pratico) */
+.scheda-etichette .badge-raccomandato {
+  padding: 5px 12px 5px 9px;
+  font-size: 15px;
+}
+.scheda-etichette .badge-raccomandato-icona {
+  width: 18px;
+  height: 18px;
+}

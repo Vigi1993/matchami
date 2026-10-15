@@ -91,7 +91,9 @@ test("notifiche: il link resta sempre dentro il sito, anche per i tipi spostati;
 });
 
 test("le notifiche del database non cambiano: il sistema le corregge in lettura (nessuna migrazione, nessun dato toccato)", () => {
-  const cartella = path.join(radice, "supabase", "migrations"); const ultima = fs.readdirSync(cartella).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort().at(-1); assert.equal(ultima, "0031_dati_obbligatori_annuncio_2.sql", "è comparsa una migrazione nuova: aggiorna questo test");
+  const cartella = path.join(radice, "supabase", "migrations"); const ultima = fs.readdirSync(cartella).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort().at(-1); assert.equal(ultima, "0032_richieste_proprietari.sql", "è comparsa una migrazione nuova: aggiorna questo test");
+  // la correzione dei link degli affitti resta in lettura: la 0032 non crea né cambia le notifiche degli affitti
+  const m = fs.readFileSync(path.join(cartella, ultima), "utf8"); assert.ok(!/crea_notifica\([^;]*'(affitto_|rapporto_)/.test(m), "la 0032 non deve toccare le notifiche degli affitti");
 });
 
 // ============================================================ le frasi che non sono più vere

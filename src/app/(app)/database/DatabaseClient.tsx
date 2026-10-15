@@ -2,7 +2,7 @@
 
 import { stelleTesto, testoRecensioni } from "@/lib/recensioni";
 import { BadgeRaccomandato } from "@/components/BadgeRaccomandato";
-import { frasePossibili } from "@/lib/proprietario/home";
+import { PossibiliInquilini } from "@/components/PossibiliInquilini";
 import type { PossibiliPerCasa } from "@/lib/proprietario/possibili-server";
 import { useState, useTransition } from "react";
 import Link from "next/link";
@@ -145,33 +145,7 @@ export function DatabaseClient({
       <h1 className="screen-title">Database inquilini</h1>
 
       {/* Dove porta la tessera «Possibili inquilini» della Home */}
-      <section id="possibili" className="possibili" aria-labelledby="possibili-titolo">
-        <h2 id="possibili-titolo" className="possibili-titolo">
-          Possibili inquilini
-        </h2>
-        {possibili.length === 0 ? (
-          <p className="possibili-testo">Quando la tua casa sarà pubblicata vedrai qui quanti inquilini cercano una casa come la tua.</p>
-        ) : (
-          possibili.map((p) => {
-            const f = p.possibili === null ? null : frasePossibili(p.possibili);
-            return (
-              <div key={p.id} className="possibili-riga">
-                <b className="possibili-numero">{f ? f.numero : "–"}</b>
-                <span className="possibili-frase">
-                  {f ? f.frase : "Il numero non è disponibile in questo momento"}
-                  <small>
-                    {p.titolo} · {p.zona}
-                  </small>
-                </span>
-              </div>
-            );
-          })
-        )}
-        <p className="possibili-testo">
-          Sono persone che hanno impostato una ricerca adatta alla tua casa e non si sono ancora candidate. Non vedi chi sono: se una di loro si
-          candida, la trovi qui sotto, tra le candidature.
-        </p>
-      </section>
+      <PossibiliInquilini possibili={possibili} />
       <p className="screen-sub">
         {candidature.length === 0
           ? "Le candidature ricevute sui tuoi annunci arrivano qui."
