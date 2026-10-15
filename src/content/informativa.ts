@@ -28,7 +28,7 @@ export const INFORMATIVA = {
    * controllo che fa il database (migrazione 0017): un test fallisce se
    * questa stringa non lo supera.
    */
-  versione: "2026-10-provvisoria-17",
+  versione: "2026-10-provvisoria-18",
   /**
    * Versioni precedenti che chi le ha accettate NON deve riaccettare.
    *
@@ -59,6 +59,7 @@ export const INFORMATIVA = {
     "2026-10-provvisoria-14",
     "2026-10-provvisoria-15",
     "2026-10-provvisoria-16",
+    "2026-10-provvisoria-17",
   ] as readonly string[],
   provvisoria: true,
   titolo: "Informativa sulla privacy",
@@ -99,6 +100,7 @@ export const INFORMATIVA = {
       titolo: "Punteggi calcolati automaticamente",
       paragrafi: [
         "La compatibilità (match) e l'affidabilità sono calcolate automaticamente da ciò che dichiari. Servono a ordinare annunci e candidati. La decisione di accettare o rifiutare una candidatura resta sempre del proprietario.",
+        "Ai proprietari mostriamo anche QUANTI inquilini hanno una ricerca compatibile con il loro immobile (budget, zona, locali, caratteristiche): è un numero anonimo, non vedono chi sono né nessun loro dato. Se uno di loro si candida, il proprietario vede la candidatura come tutte le altre.",
         "Se dichiari dei protesti o segnalazioni in centrale rischi, o non rispondi alla domanda (la risposta è obbligatoria e «non indicato» vale come «sì»), il punteggio di affidabilità scende di 30 punti. Il reddito verificato dallo staff e un garante o una fideiussione dichiarati lo fanno salire. Il punteggio non è mai inferiore a zero.",
         "Il badge «Inquilino raccomandato» lo ottieni in automatico con almeno due recensioni positive (da 4 stelle in su) scritte da due proprietari diversi, se negli ultimi quattro anni non hai recensioni negative. Lo vedono i proprietari a cui ti candidi, possono cercare solo gli inquilini raccomandati e, a parità di compatibilità, i candidati con il badge compaiono prima. Non cambia il punteggio di affidabilità. La decisione di accettare o rifiutare una candidatura resta sempre del proprietario.",
         "La verifica del reddito invece non è automatica: la decide una persona del team di MatchAmI, guardando i documenti che hai caricato. Se dopo la verifica cambi il lavoro o il reddito indicati, la verifica decade e va rifatta.",

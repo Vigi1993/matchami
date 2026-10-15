@@ -170,7 +170,7 @@ test("il badge non tocca il punteggio né la percentuale: affidabilita.ts non lo
 
 test("informativa: dice del badge (chi lo vede, filtro, ordine, nessun effetto sul punteggio), con una nuova versione; chi aveva la precedente non deve riaccettare (testo ancora provvisorio)", () => {
   const testo = JSON.stringify(inf.INFORMATIVA); assert.ok(testo.includes("Il badge «Inquilino raccomandato» lo ottieni in automatico con almeno due recensioni positive (da 4 stelle in su) scritte da due proprietari diversi")); assert.ok(testo.includes("possono cercare solo gli inquilini raccomandati")); assert.ok(testo.includes("Non cambia il punteggio di affidabilità")); assert.ok(testo.includes("resta sempre del proprietario"));
-  assert.equal(inf.INFORMATIVA.versione, "2026-10-provvisoria-17"); assert.ok(inf.INFORMATIVA.equivalenti.includes("2026-10-provvisoria-15") && inf.INFORMATIVA.equivalenti.includes("2026-10-provvisoria-16")); assert.ok(!inf.INFORMATIVA.equivalenti.includes(inf.INFORMATIVA.versione));
+  assert.equal(inf.INFORMATIVA.versione, "2026-10-provvisoria-18"); for (const v of [15, 16, 17]) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} deve restare equivalente`); assert.ok(!inf.INFORMATIVA.equivalenti.includes(inf.INFORMATIVA.versione));
 });
 
 test("il simbolo del badge esiste, è sul reticolo 24x24 e la spunta non è riempita", () => {

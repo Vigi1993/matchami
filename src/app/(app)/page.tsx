@@ -7,8 +7,11 @@ import { computeAffidabilita } from "@/lib/affidabilita";
 import { riepilogoRecensioni, statoRaccomandazione } from "@/lib/recensioni";
 import { campiMatchDaRiga, haCriteriDiRicerca, preparaMazzo, profiloRicercaDaRighe } from "@/lib/match";
 import { mappaLuoghi, type Luogo } from "@/lib/luoghi";
+import { possibiliPerAnnuncio } from "@/lib/proprietario/possibili-server";
+import { annuncioDaRiga } from "@/lib/match";
+import { oraInItalia, type CasaHome } from "@/lib/proprietario/home";
 import type { ProfiloRicerca } from "@/lib/match";
-import type { TenantProfile, ListingConMatch, ListingProprietario } from "@/lib/types";
+import type { TenantProfile, ListingConMatch } from "@/lib/types";
 import { idsNascosti } from "@/lib/scelte";
 import { VerificaRedditoPanel } from "@/components/VerificaRedditoPanel";
 import type { DocumentoInquilino } from "@/lib/verifica-inquilino";
@@ -212,41 +215,60 @@ async function OwnerHome({ userId }: { userId: string }) {
     );
   }
 
-  const [{ data: listings }, { data: candidature }] = await Promise.all([
+  const [{ data: listings }, { data: candidature }, { data: profilo }, { data: luoghiRighe }] = await Promise.all([
     supabase
       .from("listings")
-      .select("id, titolo, zona, prezzo, pubblicato")
+      .select(
+        "id, titolo, zona, prezzo, locali, mq, attributi, classe_energetica, luogo_id, tipologia, bagni, piano, riscaldamento, tipo_contratto, disponibile_dal, pubblicato, verifica_stato, listing_photos(url, ordine)"
+      )
       .eq("owner_id", userId)
       .order("created_at", { ascending: false }),
     supabase
       .from("candidature")
-      .select("id, status, listing_id, listings!inner(owner_id)")
+      .select("id, status, listing_id, tenant_id, listings!inner(owner_id)")
       .eq("listings.owner_id", userId),
+    supabase.from("profiles").select("nome").eq("id", userId).single(),
+    supabase.from("luoghi").select("id, livello, nome, sigla, parent_id"),
   ]);
 
-  const nCandidaturePerListing = new Map<string, number>();
+  // Per ogni casa: quante candidature, quante da valutare, e chi si è già candidato (serve solo a non contarlo tra i «possibili»)
+  const nCandidature = new Map<string, number>();
+  const daValutarePer = new Map<string, number>();
+  const giaCandidati = new Map<string, Set<string>>();
   for (const c of candidature ?? []) {
     const id = c.listing_id as string;
-    nCandidaturePerListing.set(id, (nCandidaturePerListing.get(id) ?? 0) + 1);
+    nCandidature.set(id, (nCandidature.get(id) ?? 0) + 1);
+    if (c.status === "in_attesa") daValutarePer.set(id, (daValutarePer.get(id) ?? 0) + 1);
+    const insieme = giaCandidati.get(id) ?? new Set<string>();
+    insieme.add(c.tenant_id as string);
+    giaCandidati.set(id, insieme);
   }
 
-  const listingsConConteggio: ListingProprietario[] = (listings ?? []).map((l) => ({
-    id: l.id,
-    titolo: l.titolo,
-    zona: l.zona,
-    prezzo: l.prezzo,
-    pubblicato: l.pubblicato,
-    nCandidature: nCandidaturePerListing.get(l.id) ?? 0,
-  }));
-
-  const totaleCandidature = candidature?.length ?? 0;
-  const daValutare = (candidature ?? []).filter((c) => c.status === "in_attesa").length;
-
-  return (
-    <OwnerHomeClient
-      listings={listingsConConteggio}
-      totaleCandidature={totaleCandidature}
-      daValutare={daValutare}
-    />
+  // I possibili inquilini: solo per le case che gli inquilini vedono (verificate e pubblicate). È un numero, mai un elenco.
+  const mappa = mappaLuoghi((luoghiRighe ?? []) as Luogo[]);
+  const visibili = (listings ?? []).filter((l) => l.pubblicato === true && l.verifica_stato === "verificato");
+  const conteggi = await possibiliPerAnnuncio(
+    visibili.map((l) => annuncioDaRiga({ ...(l as Parameters<typeof annuncioDaRiga>[0]), id: l.id as string }, mappa)),
+    giaCandidati
   );
+
+  const case_: CasaHome[] = (listings ?? []).map((l) => {
+    const foto = [...(l.listing_photos ?? [])].sort((a, b) => (a.ordine ?? 0) - (b.ordine ?? 0))[0]?.url ?? null;
+    return {
+      id: l.id as string,
+      titolo: l.titolo as string,
+      zona: l.zona as string,
+      prezzo: l.prezzo as number,
+      locali: (l.locali as number | null) ?? null,
+      mq: (l.mq as number | null) ?? null,
+      pubblicato: l.pubblicato === true,
+      verificata: l.verifica_stato === "verificato",
+      foto,
+      nCandidature: nCandidature.get(l.id as string) ?? 0,
+      daValutare: daValutarePer.get(l.id as string) ?? 0,
+      possibili: conteggi?.get(l.id as string) ?? null,
+    };
+  });
+
+  return <OwnerHomeClient case_={case_} nome={(profilo?.nome as string | null) ?? null} ora={oraInItalia()} />;
 }

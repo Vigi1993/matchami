@@ -3839,3 +3839,314 @@ button.contratto-testa:focus-visible {
   background: rgba(176, 94, 74, 0.14);
   color: var(--clay);
 }
+
+/* ============================================================
+   Home del proprietario: la casa in grande e due tessere grandi.
+   Pensata per chi non è pratico: caratteri grandi (mai sotto 15px), bersagli larghi
+   (almeno 64px), molto contrasto, una sola cosa da fare per volta.
+   ============================================================ */
+.casa-saluto {
+  margin: 0 0 2px;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--body-soft);
+}
+.casa-invito {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 68px;
+  margin: 6px 0 20px;
+  padding: 12px 14px 12px 20px;
+  border-radius: 22px;
+  background: var(--gold);
+  color: var(--ink);
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1.25;
+  text-decoration: none;
+  box-shadow: 0 10px 24px rgba(201, 161, 90, 0.35);
+  -webkit-tap-highlight-color: transparent;
+}
+.casa-invito b {
+  flex: none;
+  padding: 11px 18px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 18px;
+}
+.casa-invito:focus-visible,
+.casa-attesa:focus-visible,
+.casa-hero:focus-visible {
+  outline: 3px solid var(--moss);
+  outline-offset: 3px;
+}
+.casa {
+  margin-bottom: 28px;
+}
+.casa-hero {
+  position: relative;
+  display: block;
+  height: 300px;
+  overflow: hidden;
+  border-radius: 28px;
+  background: var(--ink-soft);
+  color: #fff;
+  text-decoration: none;
+  box-shadow: 0 18px 40px rgba(16, 21, 26, 0.22);
+  -webkit-tap-highlight-color: transparent;
+}
+.casa.compatta .casa-hero {
+  height: 210px;
+}
+.casa-foto {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.casa-foto-vuota {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--moss) 0%, var(--moss-light) 55%, var(--gold) 150%);
+}
+.casa-icona-vuota {
+  width: 96px;
+  height: 96px;
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.6);
+  stroke-width: 1.2;
+}
+.casa-sfumatura {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(16, 21, 26, 0.9) 0%, rgba(16, 21, 26, 0.55) 40%, rgba(16, 21, 26, 0) 72%);
+}
+.casa-stato {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(16, 21, 26, 0.74);
+  font-size: 15px;
+  font-weight: 700;
+}
+.casa-stato i {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #7fd1a0;
+}
+.casa-stato.is-in_verifica i {
+  background: var(--gold);
+}
+.casa-stato.is-non_pubblicata i {
+  background: #b9b3a5;
+}
+.casa-modifica {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(247, 244, 236, 0.96);
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+}
+.casa-testo {
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.casa-zona {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+.casa-titolo {
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1.1;
+}
+.casa.compatta .casa-titolo {
+  font-size: 24px;
+}
+.casa-dati {
+  font-size: 18px;
+  line-height: 1.3;
+}
+.casa-tessere {
+  display: grid;
+  /* due colonne SEMPRE uguali, anche se un'etichetta è più lunga dell'altra */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+.casa-tessere.una {
+  grid-template-columns: 1fr;
+}
+.tessera {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  min-height: 190px;
+  padding: 18px 16px 16px;
+  border-radius: 24px;
+  background: #fff;
+  color: var(--ink);
+  text-decoration: none;
+  box-shadow: 0 10px 26px rgba(16, 21, 26, 0.08);
+  -webkit-tap-highlight-color: transparent;
+}
+.tessera:focus-visible {
+  outline: 3px solid var(--moss);
+  outline-offset: 3px;
+}
+.tessera-etichetta {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--body-soft);
+}
+.tessera-icona {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  fill: none;
+  stroke: var(--moss);
+  stroke-width: 2;
+}
+.tessera-numero {
+  font-family: var(--font-display);
+  font-size: 56px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--moss);
+}
+.tessera-frase {
+  font-size: 17px;
+  line-height: 1.3;
+  color: var(--body-text);
+}
+.tessera-badge {
+  align-self: flex-start;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(201, 161, 90, 0.28);
+  color: var(--gold-ink);
+  font-size: 15px;
+  font-weight: 800;
+}
+.tessera-vai {
+  margin-top: auto;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--moss);
+}
+.casa-attesa {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 72px;
+  margin-top: 14px;
+  padding: 14px 20px;
+  border-radius: 22px;
+  background: var(--paper-dim);
+  color: var(--ink);
+  font-size: 17px;
+  line-height: 1.3;
+  text-decoration: none;
+}
+.casa-attesa b {
+  flex: none;
+  color: var(--moss);
+  font-size: 18px;
+}
+@media (min-width: 768px) {
+  .casa-hero {
+    height: 380px;
+  }
+  .casa.compatta .casa-hero {
+    height: 250px;
+  }
+  .casa-titolo {
+    font-size: 38px;
+  }
+  .tessera-numero {
+    font-size: 68px;
+  }
+}
+
+/* Database: la sezione «Possibili inquilini» */
+.possibili {
+  margin: 4px 0 22px;
+  padding: 18px 18px 14px;
+  border-radius: 24px;
+  background: #fff;
+  box-shadow: 0 10px 26px rgba(16, 21, 26, 0.08);
+  scroll-margin-top: 16px;
+}
+.possibili-titolo {
+  margin: 0 0 10px;
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.possibili-riga {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 0;
+  border-top: 1px solid rgba(16, 21, 26, 0.08);
+}
+.possibili-numero {
+  flex: none;
+  min-width: 56px;
+  font-family: var(--font-display);
+  font-size: 44px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--moss);
+  text-align: center;
+}
+.possibili-frase {
+  font-size: 17px;
+  line-height: 1.3;
+  color: var(--ink);
+}
+.possibili-frase small {
+  display: block;
+  margin-top: 2px;
+  font-size: 15px;
+  color: var(--body-soft);
+}
+.possibili-testo {
+  margin: 10px 0 0;
+  font-size: 16px;
+  line-height: 1.45;
+  color: var(--body-text);
+}

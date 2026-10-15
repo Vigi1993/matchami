@@ -1,6 +1,7 @@
 import type { RecensioneGrezza } from "@/lib/recensioni";
 import { createClient } from "@/lib/supabase/server";
 import { DatabaseClient } from "./DatabaseClient";
+import { possibiliPerCasaDelProprietario } from "@/lib/proprietario/possibili-server";
 import { criteriDaRighe } from "@/lib/match";
 import type { CriterioRichiesto, RigaCriterioDb } from "@/lib/match";
 import {
@@ -26,6 +27,9 @@ export default async function DatabasePage() {
     )
     .eq("listings.owner_id", user!.id)
     .order("created_at", { ascending: false });
+
+  // Quanti inquilini cercano una casa come le mie (un numero, mai un elenco)
+  const possibili = await possibiliPerCasaDelProprietario(supabase, user!.id);
 
   const righe = (candidature ?? []) as unknown as RigaCandidatura[];
   const tenantIds = [...new Set(righe.map((c) => c.tenant_id))];
@@ -68,6 +72,7 @@ export default async function DatabasePage() {
 
   return (
     <DatabaseClient
+      possibili={possibili}
       candidature={assemblaCandidature({
         candidature: righe,
         vista: (vista ?? []) as unknown as RigaVistaCandidato[],

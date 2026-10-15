@@ -1,111 +1,121 @@
 import Link from "next/link";
-import type { ListingProprietario } from "@/lib/types";
 import { PageContainer } from "@/components/ui/PageContainer";
-import { IconPalazzo } from "@/components/icons";
+import { IconBusta, IconPalazzo, IconPersone } from "@/components/icons";
+import {
+  DESTINAZIONI_HOME,
+  dettagliCasa,
+  fraseCandidature,
+  frasePossibili,
+  inviteDaValutare,
+  saluto,
+  statoCasa,
+  testoPrezzo,
+  type CasaHome,
+} from "@/lib/proprietario/home";
 
-export function OwnerHomeClient({
-  listings,
-  totaleCandidature,
-  daValutare,
-}: {
-  listings: ListingProprietario[];
-  totaleCandidature: number;
-  daValutare: number;
-}) {
+/**
+ * La Home del proprietario: la sua casa in grande (quasi tutti ne hanno una sola) e sotto due tessere grandi, «Possibili
+ * inquilini» e «Candidature». Parole semplici, caratteri grandi, un solo gesto per andare dove serve:
+ *  - toccare la casa porta a «Immobili»;
+ *  - toccare una tessera porta al «Database».
+ * Con più case, ognuna ha la sua scheda (più compatta).
+ */
+export function OwnerHomeClient({ case_, nome, ora }: { case_: CasaHome[]; nome: string | null; ora: number }) {
+  const totaleDaValutare = case_.reduce((somma, c) => somma + c.daValutare, 0);
+  const invito = inviteDaValutare(totaleDaValutare);
+
   return (
     <PageContainer wide>
-      <h1 className="screen-title">La tua area proprietario</h1>
-      <p className="screen-sub">
-        Il riepilogo dei tuoi annunci e delle candidature ricevute.
-      </p>
+      <p className="casa-saluto">{saluto(nome, ora)}</p>
+      <h1 className="screen-title">{case_.length === 1 ? "La tua casa" : "Le tue case"}</h1>
 
-      {/* ---- Statistiche ---- */}
-      <div className="stat-grid">
-        <Stat value={totaleCandidature} label="candidature ricevute" />
-        <Stat value={daValutare} label="da valutare ora" highlight />
-        <Stat value={listings.length} label="immobili pubblicati" />
-      </div>
-
-      {daValutare > 0 && (
-        <Link
-          href="/database"
-          className="opp-cta block text-center"
-          style={{ marginBottom: 26 }}
-        >
-          Vai al Database — {daValutare} da valutare
+      {/* Se c'è qualcosa da fare lo si dice per primo, con un pulsante grande */}
+      {invito && (
+        <Link href={DESTINAZIONI_HOME.candidature} className="casa-invito">
+          <span>{invito}</span>
+          <b>Guarda ›</b>
         </Link>
       )}
 
-      {/* ---- I tuoi immobili ---- */}
-      <div className="pref-label">
-        <span>
-          I tuoi immobili {listings.length > 0 && `· ${listings.length}`}
-        </span>
-      </div>
-
-      {listings.length === 0 ? (
+      {case_.length === 0 ? (
         <div className="empty-inline">
           <IconPalazzo className="icon-empty" />
-          <h3>Non hai ancora pubblicato nessun immobile</h3>
-          <p>
-            La pubblicazione di un nuovo annuncio si fa dalla schermata
-            Immobili.
-          </p>
+          <h3>Non hai ancora nessuna casa</h3>
+          <p>Per cominciare, aggiungi la tua casa.</p>
+          <Link href={DESTINAZIONI_HOME.immobili} className="casa-invito" style={{ marginTop: 14 }}>
+            <span>Aggiungi la tua casa</span>
+            <b>Vai ›</b>
+          </Link>
         </div>
       ) : (
-        <div className="card-grid">
-          {listings.map((l) => (
-            <div key={l.id} className="match-card" style={{ cursor: "default" }}>
-              <div className="mc-avatar">
-                {l.titolo.slice(0, 2).toUpperCase()}
-              </div>
-              <div className="mc-body">
-                <div className="mc-zona">{l.zona}</div>
-                <div className="mc-title">{l.titolo}</div>
-                <div className="mc-meta">
-                  €{l.prezzo.toLocaleString("it-IT")}/mese
-                  {!l.pubblicato && " · non pubblicato"}
-                </div>
-              </div>
-              <div
-                className={`mc-pct ${
-                  l.nCandidature > 0 ? "is-match" : "is-off"
-                }`}
-              >
-                {l.nCandidature > 0 ? (
-                  <>
-                    {l.nCandidature}
-                    <span>
-                      candidatur{l.nCandidature === 1 ? "a" : "e"}
-                    </span>
-                  </>
-                ) : (
-                  "Nessuna candidatura"
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
+        case_.map((c) => <Casa key={c.id} casa={c} compatta={case_.length > 1} />)
       )}
     </PageContainer>
   );
 }
 
-function Stat({
-  value,
-  label,
-  highlight = false,
-}: {
-  value: number;
-  label: string;
-  highlight?: boolean;
-}) {
+function Casa({ casa, compatta }: { casa: CasaHome; compatta: boolean }) {
+  const stato = statoCasa(casa);
+  const dettagli = [testoPrezzo(casa.prezzo), ...dettagliCasa(casa)].join(" · ");
+  const visibile = stato.chiave === "pubblicata";
+  const cand = fraseCandidature(casa.nCandidature);
+  const poss = casa.possibili === null ? null : frasePossibili(casa.possibili);
+
   return (
-    <div className="stat-card">
-      <div className="v" style={highlight ? { color: "var(--gold)" } : undefined}>
-        {value}
-      </div>
-      <div className="l">{label}</div>
-    </div>
+    <article className={`casa ${compatta ? "compatta" : ""}`} aria-label={`Casa: ${casa.titolo}`}>
+      {/* Toccare la casa: Immobili */}
+      <Link href={DESTINAZIONI_HOME.immobili} className="casa-hero" aria-label={`${casa.titolo}, ${casa.zona}. ${stato.testo}. Tocca per vedere o modificare la casa`}>
+        {casa.foto ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={casa.foto} alt="" className="casa-foto" />
+        ) : (
+          <span className="casa-foto casa-foto-vuota" aria-hidden="true">
+            <IconPalazzo className="casa-icona-vuota" />
+          </span>
+        )}
+        <span className="casa-sfumatura" aria-hidden="true" />
+        <span className={`casa-stato is-${stato.chiave}`}>
+          <i aria-hidden="true" /> {stato.testo}
+        </span>
+        <span className="casa-modifica" aria-hidden="true">
+          Vedi o modifica ›
+        </span>
+        <span className="casa-testo">
+          <span className="casa-zona">{casa.zona}</span>
+          <span className="casa-titolo">{casa.titolo}</span>
+          <span className="casa-dati">{dettagli}</span>
+        </span>
+      </Link>
+
+      {visibile ? (
+        <div className={`casa-tessere ${poss === null ? "una" : ""}`}>
+          {/* Toccare i possibili inquilini o le candidature: Database */}
+          {poss !== null && (
+            <Link href={DESTINAZIONI_HOME.possibili} className="tessera" aria-label={`Possibili inquilini: ${poss.numero} ${poss.frase}. Tocca per guardare`}>
+              <span className="tessera-etichetta">
+                <IconPersone className="tessera-icona" /> Possibili inquilini
+              </span>
+              <span className="tessera-numero">{poss.numero}</span>
+              <span className="tessera-frase">{poss.frase}</span>
+              <span className="tessera-vai">Guarda ›</span>
+            </Link>
+          )}
+          <Link href={DESTINAZIONI_HOME.candidature} className="tessera" aria-label={`Candidature: ${cand.numero} ${cand.frase}${casa.daValutare > 0 ? `, ${casa.daValutare} da valutare` : ""}. Tocca per guardare`}>
+            <span className="tessera-etichetta">
+              <IconBusta className="tessera-icona" /> Candidature
+            </span>
+            <span className="tessera-numero">{cand.numero}</span>
+            <span className="tessera-frase">{cand.frase}</span>
+            {casa.daValutare > 0 && <span className="tessera-badge">{casa.daValutare} da valutare</span>}
+            <span className="tessera-vai">Guarda ›</span>
+          </Link>
+        </div>
+      ) : (
+        <Link href={DESTINAZIONI_HOME.immobili} className="casa-attesa">
+          <span>{stato.spiegazione}</span>
+          <b>Vai alla casa ›</b>
+        </Link>
+      )}
+    </article>
   );
 }

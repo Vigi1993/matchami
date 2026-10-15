@@ -275,7 +275,7 @@ test("informativa: i numeri vengono dalle regole del calcolo (nessun punteggio s
 test("informativa legale: dice che i protesti (o non rispondere) fanno scendere il punteggio, con lo stesso numero della formula e nuova versione senza far riaccettare", () => {
   const inf = caricaTs(path.join(radice, "src", "content", "informativa.ts")); const testo = JSON.stringify(inf.INFORMATIVA);
   assert.ok(testo.includes(`la risposta è obbligatoria e «non indicato» vale come «sì»), il punteggio di affidabilità scende di ${af.PUNTI_AFFIDABILITA.protesti} punti`)); assert.ok(testo.includes("Il punteggio non è mai inferiore a zero"));
-  assert.equal(inf.INFORMATIVA.versione, "2026-10-provvisoria-17"); assert.ok(inf.INFORMATIVA.equivalenti.includes("2026-10-provvisoria-16") && inf.INFORMATIVA.equivalenti.includes("2026-10-provvisoria-15"));
+  assert.equal(inf.INFORMATIVA.versione, "2026-10-provvisoria-18"); for (const v of [15, 16, 17]) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} deve restare equivalente`);
 });
 
 test("stile: una voce che toglie punti ha un aspetto suo (come la voce presa e quella non presa)", () => {

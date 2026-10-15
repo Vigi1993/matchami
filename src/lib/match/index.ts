@@ -42,3 +42,4 @@ export {
   ordinaCandidati,
 } from "./proprietario";
 export type { VoceCandidato } from "./proprietario";
+export { annuncioDaRiga, contaPossibiliInquilini, type AnnuncioDaConfrontare, type RicercaInquilino } from "./possibili";
