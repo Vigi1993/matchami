@@ -1,0 +1,559 @@
+From c5823da770e1dc8c54c722663abf82b42fcddf76 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 14 Oct 2026 20:43:42 +0000
+Subject: [PATCH] feat(gestione): il contratto dell'inquilino sta nella pagina,
+ non in una scheda a comparsa
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+DA APPLICARE DOPO i-tuoi-match.patch. Nessuna migrazione. Nessun dato e nessuna azione cambiano.
+
+LA PAGINA «GESTIONE AFFITTO» (inquilino). Toccare un contratto non apre più una scheda a comparsa: tutto il dettaglio
+(durata, date, bozza del contratto, firma di prova, archivio dei documenti) è direttamente nella pagina.
+- UN solo contratto in corso (il caso normale: un inquilino ne ha uno): tutto subito visibile, senza niente da aprire,
+  senza intestazione 'In corso - 1'. L'intestazione non è un pulsante e non ha la freccia.
+- PIÙ DI UNO in corso: tutti nella stessa pagina ma a scomparsa. Ogni intestazione è un pulsante (aria-expanded,
+  tastiera) con la freccia; partono chiusi, se ne possono tenere aperti più d'uno, e c'è 'In corso - N'.
+- Lo STORICO (contratti conclusi): sempre nella pagina e sempre a scomparsa, attenuato come prima.
+- Non c'è nessun contratto in corso: la nota di prima, e lo storico a scomparsa. Nessun contratto: lo stato vuoto di prima.
+Il corpo di un contratto chiuso resta montato (solo nascosto): un documento da caricare o una firma a metà non si
+perdono richiudendolo. I tre componenti dentro non caricano niente all'apertura, quindi montarli tutti non pesa.
+Restano in scheda a comparsa SOLO le 'Bollette e utenze' (non erano in discussione).
+Nell'intestazione zona e canone si dicono una volta sola: le righe 'Zona' e 'Canone mensile' della vecchia scheda
+(dove l'intestazione non c'era) sono tolte per non ripeterle.
+
+Nuovi: ContrattoInPagina (il blocco), modoInCorso() / MODO_STORICO in lib/contratti.ts, gli stili .contratto-*.
+
+DIFETTI MIEI TROVATI PROVANDO
+- l'intestazione del blocco sembrava rotta (avatar senza riquadro, righe sparse): gli stili delle parti .mc-* valevano
+  solo dentro .match-card. Estesi anche a .contratto-testa, con un test che li richiede per ogni parte usata
+- il test nuovo falliva sul codice giusto: non riconosceva className scritto con l'apice rovescio (pct)
+- zona e canone comparivano due volte (nell'intestazione e nelle righe)
+- due test esistenti cercavano la bozza e la firma dentro GestioneClient: ora puntano al blocco in pagina, e il
+  proprietario resta com'era (controllato che non usi il blocco nuovo)
+
+Test: 970 in tutto (8 nuovi). Provato in Chrome col dito: un contratto con tutto subito in pagina; due in corso più
+uno concluso a scomparsa (apertura, chiusura, due aperti insieme, tastiera con Invio, lo storico che si apre); le
+bollette ancora in scheda; nessun contratto, solo uno concluso, un contratto in bozza. Difetti reintrodotti di proposito:
+19 su 19 presi.
+---
+ scripts/test-contratti.mjs                |  51 +++++++++
+ scripts/test-contratto.mjs                |   3 +-
+ scripts/test-firma.mjs                    |   5 +-
+ src/app/(app)/gestione/GestioneClient.tsx | 120 +++-------------------
+ src/app/globals.css                       |  73 +++++++++++--
+ src/components/ContrattoInPagina.tsx      |  88 ++++++++++++++++
+ src/lib/contratti.ts                      |  16 +++
+ 7 files changed, 240 insertions(+), 116 deletions(-)
+ create mode 100644 src/components/ContrattoInPagina.tsx
+
+diff --git a/scripts/test-contratti.mjs b/scripts/test-contratti.mjs
+index cd7d39b..2378d79 100644
+--- a/scripts/test-contratti.mjs
++++ b/scripts/test-contratti.mjs
+@@ -111,3 +111,54 @@ test("le due schermate importano gli stati da lib/contratti e non ne hanno una c
+     assert.match(codice, /Storico — \{storico\.length\}/, `${f.at(-1)} non mostra il gruppo Storico`);
+   }
+ });
++
++// ------------------------------------------------------------
++// Gestione affitto (inquilino): i contratti stanno NELLA PAGINA, non in una scheda a comparsa
++// ------------------------------------------------------------
++
++const pulito = (t) => t.replace(/\r\n/g, "\n");
++const gestione = () => pulito(leggi("src", "app", "(app)", "gestione", "GestioneClient.tsx"));
++const blocco = () => pulito(leggi("src", "components", "ContrattoInPagina.tsx"));
++
++test("modo di presentazione: un solo contratto in corso = tutto visibile; più d'uno (o nessuno) = ciascuno a scomparsa; lo storico sempre a scomparsa", () => {
++  assert.equal(c.modoInCorso(1), "fisso"); for (const n of [2, 3, 10, 0]) assert.equal(c.modoInCorso(n), "a_scomparsa", String(n));
++  for (const strano of [-1, NaN, undefined, null, 1.5, "1"]) assert.equal(c.modoInCorso(strano), "a_scomparsa", `un numero strano (${strano}) non deve dare «fisso»`);
++  assert.equal(c.MODO_STORICO, "a_scomparsa");
++});
++
++test("pagina: la scheda a comparsa dei contratti non c'è più; i contratti si mostrano con il blocco in pagina, nel modo giusto, e le bollette restano come erano", () => {
++  const g = gestione(); assert.ok(!/selezionato|setSelezionato/.test(g), "resta lo stato della scheda a comparsa"); assert.ok(!/<SchedaContratto|function SchedaContratto|onSelect/.test(g), "restano le vecchie schede-elenco che aprivano la scheda");
++  assert.ok(!/title=\{selezionato/.test(g) && !/Sheet: dettaglio contratto/.test(g)); assert.equal([...g.matchAll(/<Sheet\b/g)].length, 1, "deve restare una sola scheda a comparsa: le bollette"); assert.match(g, /title="Bollette e utenze"/);
++  assert.match(g, /<ContrattoInPagina key=\{c\.id\} c=\{c\} modo=\{modoInCorso\(inCorso\.length\)\} firme=\{firme\[c\.id\]\} documenti=\{documenti\[c\.id\] \?\? \[\]\} \/>/);
++  assert.match(g, /<ContrattoInPagina key=\{c\.id\} c=\{c\} modo=\{MODO_STORICO\} firme=\{firme\[c\.id\]\} documenti=\{documenti\[c\.id\] \?\? \[\]\} passato \/>/);
++  assert.match(g, /\{inCorso\.length > 1 && \(\s+<div className="pref-label" style=\{\{ marginTop: 12 \}\}>\s+<span>In corso — \{inCorso\.length\}<\/span>/, "con un solo contratto non serve il conteggio");
++  assert.match(g, /Nessun contratto ancora/); assert.match(g, /NESSUN_CONTRATTO_IN_CORSO/);
++});
++
++test("blocco del contratto: l'intestazione è un pulsante (aria-expanded) SOLO se a scomparsa, e il corpo si nasconde solo allora", () => {
++  const b = blocco(); assert.match(b, /const scomparsa = modo === "a_scomparsa";/); assert.match(b, /const visibile = !scomparsa \|\| aperto;/); assert.match(b, /\{scomparsa \? \(\s+<button type="button" className="contratto-testa" aria-expanded=\{aperto\} aria-controls=\{idCorpo\}/);
++  assert.match(b, /<div className="contratto-testa">\{intestazione\}<\/div>/, "in modo fisso l'intestazione non è un pulsante"); assert.match(b, /<div id=\{idCorpo\} className="contratto-corpo" hidden=\{!visibile\}>/); assert.match(b, /const \[aperto, setAperto\] = useState\(false\);/, "a scomparsa parte chiuso");
++  assert.match(b, /\{scomparsa && <IconChevronSu/, "la freccia solo se si può aprire");
++});
++
++test("blocco del contratto: ha tutto ciò che aveva la scheda (dati, bozza, firma, archivio) e il corpo non si smonta da chiuso (non si perde un documento o una firma a metà)", () => {
++  const b = blocco(); assert.ok(!b.includes('label="Zona"') && !b.includes('label="Canone mensile"'), "zona e canone sono già nell'intestazione: non devono comparire due volte");
++  assert.ok(b.includes('<div className="mc-zona">') && b.includes('<div className="mc-meta">{c.canone ?'), "l'intestazione deve dire zona e canone");
++  for (const pezzo of ['label="Durata"', 'label="Data inizio"', 'label="Data firma"', "<BozzaContratto contrattoId={c.id} />", "<FirmaContratto contrattoId={c.id} statoContratto={c.stato} firme={firme?.firme ?? []} improntaAttuale={firme?.improntaAttuale ?? null} />", "<ArchivioContratto contrattoId={c.id} documenti={documenti} />"]) assert.ok(b.includes(pezzo), `manca «${pezzo}»`);
++  assert.ok(!/\{aperto && \(/.test(b) && !/visibile &&/.test(b), "il corpo non deve essere montato solo da aperto");
++  assert.match(b, /aria-label=\{`Contratto: \$\{titolo\}`\}/); assert.match(b, /\$\{passato \? "passato" : ""\}/);
++});
++
++test("stile: un corpo nascosto resta nascosto anche se la classe imposta un display (come per le altre parti ripiegabili)", () => {
++  const css = pulito(leggi("src", "app", "globals.css")); assert.match(css, /\.contratto-corpo\[hidden\] \{\s+display: none !important;/); assert.match(css, /\.contratto-freccia\.chiuso \{\s+transform: rotate\(180deg\);/);
++});
++
++test("il proprietario non cambia: la sua pagina dei contratti non usa il blocco nuovo né è stata toccata", () => {
++  const p = pulito(leggi("src", "app", "(app)", "gestione-affitti", "page.tsx")); assert.ok(!/ContrattoInPagina/.test(p)); assert.ok(!fs.readdirSync(path.join(radice, "src", "app", "(app)", "gestione-affitti")).some((f) => /ContrattoInPagina/.test(f)));
++});
++
++test("stile: ogni parte dell'intestazione del contratto (avatar, corpo, zona, titolo, sigla…) ha lo stesso stile della scheda del match: senza, l'intestazione sembra rotta", () => {
++  const css = pulito(leggi("src", "app", "globals.css")); const b = blocco();
++  const usate = [...new Set([...b.matchAll(/className=\{?[`"](mc-[a-z]+)/g)].map((m) => m[1]))]; assert.deepEqual(usate.sort(), ["mc-avatar", "mc-body", "mc-meta", "mc-pct", "mc-title", "mc-zona"], "l'intestazione usa altre parti: aggiorna il test");
++  for (const classe of usate) assert.match(css, new RegExp(`\\.match-card \\.${classe},\\s+\\.contratto-testa \\.${classe} \\{`), `manca lo stile di «${classe}» dentro .contratto-testa`);
++});
+diff --git a/scripts/test-contratto.mjs b/scripts/test-contratto.mjs
+index a4c2594..d75872f 100644
+--- a/scripts/test-contratto.mjs
++++ b/scripts/test-contratto.mjs
+@@ -404,7 +404,8 @@ test("il PDF non viene salvato da nessuna parte: nessuna scrittura su database n
+ });
+ 
+ test("la pagina e i pannelli: la bozza si apre dai due pannelli dei contratti, uno per ruolo", () => {
+-  assert.match(leggi("src", "app", "(app)", "gestione", "GestioneClient.tsx"), /<BozzaContratto contrattoId=\{selezionato\.id\} \/>/);
++  // inquilino: il contratto sta nella pagina (non più in una scheda a comparsa), dentro il blocco ContrattoInPagina
++  assert.match(leggi("src", "components", "ContrattoInPagina.tsx"), /<BozzaContratto contrattoId=\{c\.id\} \/>/); assert.match(leggi("src", "app", "(app)", "gestione", "GestioneClient.tsx"), /<ContrattoInPagina /);
+   assert.match(leggi("src", "app", "(app)", "gestione-affitti", "GestioneAffittiClient.tsx"), /<BozzaContratto contrattoId=\{selezionato\.id\} \/>/);
+   const c = leggi("src", "components", "BozzaContratto.tsx"); assert.match(c, /href=\{`\/contratto\/\$\{contrattoId\}`\}/); assert.match(c, /href=\{`\/contratto\/\$\{contrattoId\}\/pdf`\}[^>]*download/);
+ });
+diff --git a/scripts/test-firma.mjs b/scripts/test-firma.mjs
+index 2e84407..496ef6f 100644
+--- a/scripts/test-firma.mjs
++++ b/scripts/test-firma.mjs
+@@ -170,7 +170,10 @@ test("componente: nessuna chiamata diretta al database, solo le due azioni", ()
+   assert.match(c, /firmaContratto\(contrattoId\)/); assert.match(c, /ritiraFirma\(contrattoId\)/);
+ });
+ test("collegamenti: la firma si vede nei due pannelli dei contratti, con le firme di QUEL contratto", () => {
+-  for (const f of [["gestione", "GestioneClient.tsx"], ["gestione-affitti", "GestioneAffittiClient.tsx"]]) { const c = leggi("src", "app", "(app)", ...f); assert.match(c, /<FirmaContratto\s+contrattoId=\{selezionato\.id\}\s+statoContratto=\{selezionato\.stato\}\s+firme=\{firme\[selezionato\.id\]\?\.firme \?\? \[\]\}\s+improntaAttuale=\{firme\[selezionato\.id\]\?\.improntaAttuale \?\? null\}/, f.join("/")); }
++  // inquilino: la firma sta nel blocco del contratto in pagina, con le firme di QUEL contratto (firme[c.id])
++  assert.match(leggi("src", "components", "ContrattoInPagina.tsx"), /<FirmaContratto contrattoId=\{c\.id\} statoContratto=\{c\.stato\} firme=\{firme\?\.firme \?\? \[\]\} improntaAttuale=\{firme\?\.improntaAttuale \?\? null\} \/>/);
++  assert.equal([...leggi("src", "app", "(app)", "gestione", "GestioneClient.tsx").matchAll(/firme=\{firme\[c\.id\]\}/g)].length, 2, "in corso e storico passano le firme del PROPRIO contratto");
++  for (const f of [["gestione-affitti", "GestioneAffittiClient.tsx"]]) { const c = leggi("src", "app", "(app)", ...f); assert.match(c, /<FirmaContratto\s+contrattoId=\{selezionato\.id\}\s+statoContratto=\{selezionato\.stato\}\s+firme=\{firme\[selezionato\.id\]\?\.firme \?\? \[\]\}\s+improntaAttuale=\{firme\[selezionato\.id\]\?\.improntaAttuale \?\? null\}/, f.join("/")); }
+   for (const f of [["gestione", "page.tsx"], ["gestione-affitti", "page.tsx"]]) { const c = leggi("src", "app", "(app)", ...f); assert.match(c, /await caricaFirme\(supabase\)/); assert.match(c, /firme=\{firme\}/); }
+ });
+ test("la logica pura della firma non ha accesso alla rete né al browser", () => {
+diff --git a/src/app/(app)/gestione/GestioneClient.tsx b/src/app/(app)/gestione/GestioneClient.tsx
+index 8f72712..15cf6b8 100644
+--- a/src/app/(app)/gestione/GestioneClient.tsx
++++ b/src/app/(app)/gestione/GestioneClient.tsx
+@@ -4,30 +4,19 @@ import { useState } from "react";
+ import { Sheet } from "@/components/Sheet";
+ import type { ContrattoConAnnuncio } from "@/lib/types";
+ import { LinkUtenze } from "@/components/LinkUtenze";
+-import { BozzaContratto } from "@/components/BozzaContratto";
+-import { ArchivioContratto } from "@/components/ArchivioContratto";
+-import { FirmaContratto } from "@/components/FirmaContratto";
++import { ContrattoInPagina } from "@/components/ContrattoInPagina";
+ import type { FirmeDelContratto } from "@/lib/firma/carica";
+ import type { DocumentoContratto } from "@/lib/documenti-contratto";
+ import { SOTTOTITOLO_UTENZE } from "@/lib/utenze";
+ import {
++  MODO_STORICO,
+   NESSUN_CONTRATTO_IN_CORSO,
+-  badgeStato,
+-  etichettaStato,
++  modoInCorso,
+   raggruppaContratti,
+ } from "@/lib/contratti";
+ import { PageContainer } from "@/components/ui/PageContainer";
+ import { IconDocumento } from "@/components/icons";
+ 
+-function formatData(d: string | null): string {
+-  if (!d) return "—";
+-  return new Date(d).toLocaleDateString("it-IT", {
+-    day: "numeric",
+-    month: "short",
+-    year: "numeric",
+-  });
+-}
+-
+ export function GestioneClient({
+   contratti,
+   documenti = {},
+@@ -39,9 +28,6 @@ export function GestioneClient({
+   /** i documenti dei miei contratti, per identificativo del contratto */
+   documenti?: Record<string, DocumentoContratto[]>;
+ }) {
+-  const [selezionato, setSelezionato] = useState<ContrattoConAnnuncio | null>(
+-    null
+-  );
+   const [bolletteAperto, setBolletteAperto] = useState(false);
+ 
+   // I contratti conclusi vanno nello storico: non restano mescolati a quelli in corso.
+@@ -72,12 +58,15 @@ export function GestioneClient({
+         <>
+           {inCorso.length > 0 ? (
+             <>
+-              <div className="pref-label" style={{ marginTop: 12 }}>
+-                <span>In corso — {inCorso.length}</span>
+-              </div>
+-              <div className="card-grid">
++              {/* con più contratti in corso si dice quanti sono; con uno solo c'è solo il contratto */}
++              {inCorso.length > 1 && (
++                <div className="pref-label" style={{ marginTop: 12 }}>
++                  <span>In corso — {inCorso.length}</span>
++                </div>
++              )}
++              <div style={{ marginTop: 12 }}>
+                 {inCorso.map((c) => (
+-                  <SchedaContratto key={c.id} c={c} onSelect={setSelezionato} />
++                  <ContrattoInPagina key={c.id} c={c} modo={modoInCorso(inCorso.length)} firme={firme[c.id]} documenti={documenti[c.id] ?? []} />
+                 ))}
+               </div>
+             </>
+@@ -92,9 +81,9 @@ export function GestioneClient({
+               <div className="pref-label" style={{ marginTop: 20 }}>
+                 <span>Storico — {storico.length}</span>
+               </div>
+-              <div className="card-grid">
++              <div style={{ marginTop: 12 }}>
+                 {storico.map((c) => (
+-                  <SchedaContratto key={c.id} c={c} onSelect={setSelezionato} passato />
++                  <ContrattoInPagina key={c.id} c={c} modo={MODO_STORICO} firme={firme[c.id]} documenti={documenti[c.id] ?? []} passato />
+                 ))}
+               </div>
+             </>
+@@ -122,57 +111,6 @@ export function GestioneClient({
+         </div>
+       </button>
+ 
+-      {/* ---- Sheet: dettaglio contratto ---- */}
+-      <Sheet
+-        open={selezionato !== null}
+-        onClose={() => setSelezionato(null)}
+-        title={selezionato?.candidature?.listings?.titolo ?? "Contratto"}
+-      >
+-        {selezionato && (
+-          <>
+-            <div className="mb-4">
+-              <span className={`mc-pct ${badgeStato(selezionato.stato)}`}>
+-                {etichettaStato(selezionato.stato)}
+-              </span>
+-            </div>
+-            <DettaglioRow
+-              label="Zona"
+-              value={selezionato.candidature?.listings?.zona ?? "—"}
+-            />
+-            <DettaglioRow
+-              label="Canone mensile"
+-              value={
+-                selezionato.canone
+-                  ? `€${selezionato.canone.toLocaleString("it-IT")}`
+-                  : "—"
+-              }
+-            />
+-            <DettaglioRow
+-              label="Durata"
+-              value={
+-                selezionato.durata_mesi ? `${selezionato.durata_mesi} mesi` : "—"
+-              }
+-            />
+-            <DettaglioRow
+-              label="Data inizio"
+-              value={formatData(selezionato.data_inizio)}
+-            />
+-            <DettaglioRow
+-              label="Data firma"
+-              value={formatData(selezionato.data_firma)}
+-            />
+-            <BozzaContratto contrattoId={selezionato.id} />
+-            <FirmaContratto
+-              contrattoId={selezionato.id}
+-              statoContratto={selezionato.stato}
+-              firme={firme[selezionato.id]?.firme ?? []}
+-              improntaAttuale={firme[selezionato.id]?.improntaAttuale ?? null}
+-            />
+-            <ArchivioContratto contrattoId={selezionato.id} documenti={documenti[selezionato.id] ?? []} />
+-          </>
+-        )}
+-      </Sheet>
+-
+       {/* ---- Sheet: bollette (demo) ---- */}
+       <Sheet
+         open={bolletteAperto}
+@@ -185,35 +123,3 @@ export function GestioneClient({
+     </PageContainer>
+   );
+ }
+-
+-function DettaglioRow({ label, value }: { label: string; value: string }) {
+-  return (
+-    <div className="feat-row">
+-      <span className="k">{label}</span>
+-      <span className="v">{value}</span>
+-    </div>
+-  );
+-}
+-
+-/** La scheda di un contratto nell'elenco. Quelle dello storico sono attenuate, come le candidature chiuse. */
+-function SchedaContratto({
+-  c,
+-  onSelect,
+-  passato = false,
+-}: {
+-  c: ContrattoConAnnuncio;
+-  onSelect: (c: ContrattoConAnnuncio) => void;
+-  passato?: boolean;
+-}) {
+-  return (
+-    <button onClick={() => onSelect(c)} className="match-card" style={passato ? { opacity: 0.55 } : undefined}>
+-      <div className="mc-avatar">{(c.candidature?.listings?.titolo ?? "IM").slice(0, 2).toUpperCase()}</div>
+-      <div className="mc-body">
+-        <div className="mc-zona">{c.candidature?.listings?.zona ?? ""}</div>
+-        <div className="mc-title">{c.candidature?.listings?.titolo ?? "Immobile"}</div>
+-        <div className="mc-meta">{c.canone ? `€${c.canone.toLocaleString("it-IT")}/mese` : "—"}</div>
+-      </div>
+-      <div className={`mc-pct ${badgeStato(c.stato)}`}>{etichettaStato(c.stato)}</div>
+-    </button>
+-  );
+-}
+diff --git a/src/app/globals.css b/src/app/globals.css
+index ef3a145..d50a48e 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -406,7 +406,8 @@ input[type="range"]::-moz-range-thumb {
+   flex-shrink: 0;
+ }
+ /* sostituto della foto quando la riga non ne ha una */
+-.match-card .mc-avatar {
++.match-card .mc-avatar,
++.contratto-testa .mc-avatar {
+   width: 74px;
+   height: 74px;
+   border-radius: 14px;
+@@ -421,18 +422,21 @@ input[type="range"]::-moz-range-thumb {
+   font-size: 22px;
+   overflow: hidden;
+ }
+-.match-card .mc-body {
++.match-card .mc-body,
++.contratto-testa .mc-body {
+   flex: 1;
+   min-width: 0;
+ }
+-.match-card .mc-zona {
++.match-card .mc-zona,
++.contratto-testa .mc-zona {
+   font-size: 10.5px;
+   font-weight: 700;
+   letter-spacing: 0.08em;
+   text-transform: uppercase;
+   color: var(--moss);
+ }
+-.match-card .mc-title {
++.match-card .mc-title,
++.contratto-testa .mc-title {
+   font-family: var(--font-display);
+   font-size: 15.5px;
+   font-weight: 700;
+@@ -440,11 +444,13 @@ input[type="range"]::-moz-range-thumb {
+   margin: 2px 0 4px 0;
+   line-height: 1.2;
+ }
+-.match-card .mc-meta {
++.match-card .mc-meta,
++.contratto-testa .mc-meta {
+   font-size: 12px;
+   color: var(--muted);
+ }
+-.match-card .mc-pct {
++.match-card .mc-pct,
++.contratto-testa .mc-pct {
+   flex-shrink: 0;
+   text-align: center;
+   font-family: var(--font-display);
+@@ -455,7 +461,8 @@ input[type="range"]::-moz-range-thumb {
+   border-radius: 12px;
+   padding: 8px 10px;
+ }
+-.match-card .mc-pct span {
++.match-card .mc-pct span,
++.contratto-testa .mc-pct span {
+   display: block;
+   font-family: var(--font-sans);
+   font-size: 9px;
+@@ -3618,3 +3625,55 @@ mark.segnaposto {
+ [role="tabpanel"][hidden] {
+   display: none !important;
+ }
++
++/* ---- Gestione affitto: il contratto nella pagina (non in una scheda a comparsa) ---- */
++.contratto-blocco {
++  background: #fff;
++  border-radius: 20px;
++  margin-bottom: 12px;
++  box-shadow: 0 8px 20px rgba(16, 21, 26, 0.06);
++  overflow: hidden;
++}
++.contratto-blocco.passato .contratto-testa {
++  opacity: 0.6;
++}
++.contratto-testa {
++  display: flex;
++  gap: 14px;
++  align-items: center;
++  width: 100%;
++  padding: 12px;
++  border: 0;
++  background: none;
++  text-align: left;
++  font-family: var(--font-sans);
++  color: inherit;
++}
++button.contratto-testa {
++  cursor: pointer;
++  -webkit-tap-highlight-color: transparent;
++}
++button.contratto-testa:focus-visible {
++  outline: 2px solid var(--moss);
++  outline-offset: -2px;
++  border-radius: 20px;
++}
++.contratto-freccia {
++  width: 18px;
++  height: 18px;
++  flex: none;
++  fill: none;
++  stroke: var(--muted);
++  stroke-width: 2;
++  transition: transform 0.18s ease;
++}
++.contratto-freccia.chiuso {
++  transform: rotate(180deg);
++}
++.contratto-corpo {
++  padding: 4px 16px 18px;
++  border-top: 1px solid rgba(16, 21, 26, 0.08);
++}
++.contratto-corpo[hidden] {
++  display: none !important;
++}
+diff --git a/src/components/ContrattoInPagina.tsx b/src/components/ContrattoInPagina.tsx
+new file mode 100644
+index 0000000..ca78284
+--- /dev/null
++++ b/src/components/ContrattoInPagina.tsx
+@@ -0,0 +1,88 @@
++"use client";
++
++import { useId, useState } from "react";
++import type { ContrattoConAnnuncio } from "@/lib/types";
++import { BozzaContratto } from "@/components/BozzaContratto";
++import { ArchivioContratto } from "@/components/ArchivioContratto";
++import { FirmaContratto } from "@/components/FirmaContratto";
++import type { FirmeDelContratto } from "@/lib/firma/carica";
++import type { DocumentoContratto } from "@/lib/documenti-contratto";
++import { badgeStato, etichettaStato, type ModoContratto } from "@/lib/contratti";
++import { IconChevronSu } from "@/components/icons";
++
++function formatData(d: string | null): string {
++  if (!d) return "—";
++  return new Date(d).toLocaleDateString("it-IT", { day: "numeric", month: "short", year: "numeric" });
++}
++
++function DettaglioRow({ label, value }: { label: string; value: string }) {
++  return (
++    <div className="feat-row">
++      <span className="k">{label}</span>
++      <span className="v">{value}</span>
++    </div>
++  );
++}
++
++/**
++ * Un contratto, direttamente nella pagina (non in una scheda a comparsa): l'intestazione con l'immobile e lo stato, e sotto
++ * i dati, la bozza, la firma e l'archivio dei documenti.
++ *
++ * `fisso`: tutto sempre visibile. `a_scomparsa`: l'intestazione è un pulsante che apre e chiude il resto. Il corpo resta
++ * montato anche da chiuso (solo nascosto), così ciò che si stava facendo (un documento da caricare, la firma) non si perde.
++ */
++export function ContrattoInPagina({
++  c,
++  modo,
++  firme,
++  documenti,
++  passato = false,
++}: {
++  c: ContrattoConAnnuncio;
++  modo: ModoContratto;
++  firme: FirmeDelContratto | undefined;
++  documenti: DocumentoContratto[];
++  /** i contratti dello storico sono attenuati, come le candidature chiuse */
++  passato?: boolean;
++}) {
++  const idCorpo = useId();
++  const [aperto, setAperto] = useState(false);
++  const scomparsa = modo === "a_scomparsa";
++  const visibile = !scomparsa || aperto;
++  const titolo = c.candidature?.listings?.titolo ?? "Immobile";
++
++  const intestazione = (
++    <>
++      <div className="mc-avatar">{titolo.slice(0, 2).toUpperCase()}</div>
++      <div className="mc-body">
++        <div className="mc-zona">{c.candidature?.listings?.zona ?? ""}</div>
++        <div className="mc-title">{titolo}</div>
++        <div className="mc-meta">{c.canone ? `€${c.canone.toLocaleString("it-IT")}/mese` : "—"}</div>
++      </div>
++      <div className={`mc-pct ${badgeStato(c.stato)}`}>{etichettaStato(c.stato)}</div>
++      {scomparsa && <IconChevronSu className={`contratto-freccia ${aperto ? "" : "chiuso"}`} />}
++    </>
++  );
++
++  return (
++    <section className={`contratto-blocco ${passato ? "passato" : ""}`} aria-label={`Contratto: ${titolo}`}>
++      {scomparsa ? (
++        <button type="button" className="contratto-testa" aria-expanded={aperto} aria-controls={idCorpo} onClick={() => setAperto((a) => !a)}>
++          {intestazione}
++        </button>
++      ) : (
++        <div className="contratto-testa">{intestazione}</div>
++      )}
++
++      <div id={idCorpo} className="contratto-corpo" hidden={!visibile}>
++        {/* la zona e il canone sono già nell'intestazione: non si ripetono */}
++        <DettaglioRow label="Durata" value={c.durata_mesi ? `${c.durata_mesi} mesi` : "—"} />
++        <DettaglioRow label="Data inizio" value={formatData(c.data_inizio)} />
++        <DettaglioRow label="Data firma" value={formatData(c.data_firma)} />
++        <BozzaContratto contrattoId={c.id} />
++        <FirmaContratto contrattoId={c.id} statoContratto={c.stato} firme={firme?.firme ?? []} improntaAttuale={firme?.improntaAttuale ?? null} />
++        <ArchivioContratto contrattoId={c.id} documenti={documenti} />
++      </div>
++    </section>
++  );
++}
+diff --git a/src/lib/contratti.ts b/src/lib/contratti.ts
+index 1874c74..49f558a 100644
+--- a/src/lib/contratti.ts
++++ b/src/lib/contratti.ts
+@@ -51,6 +51,22 @@ export function raggruppaContratti<T extends { stato: string }>(
+   };
+ }
+ 
++/**
++ * Come si presenta un contratto nella pagina «Gestione affitto» dell'inquilino: SEMPRE nella pagina, mai in una scheda a
++ * comparsa.
++ *  - `fisso`: tutto subito visibile, senza niente da aprire (il caso normale: un inquilino ha un solo contratto in corso);
++ *  - `a_scomparsa`: nella stessa pagina ma ripiegato, si apre toccando il titolo.
++ */
++export type ModoContratto = "fisso" | "a_scomparsa";
++
++/** Un solo contratto in corso: tutto visibile. Più d'uno (o nessuno): ognuno a scomparsa. */
++export function modoInCorso(numeroInCorso: number): ModoContratto {
++  return numeroInCorso === 1 ? "fisso" : "a_scomparsa";
++}
++
++/** Lo storico è sempre a scomparsa: è ciò che è finito, non deve occupare la pagina. */
++export const MODO_STORICO: ModoContratto = "a_scomparsa";
++
+ /** L'etichetta di uno stato; per uno sconosciuto, il testo com'è (mai «undefined»). */
+ export function etichettaStato(stato: string): string {
+   return (STATO_LABEL as Record<string, string>)[stato] ?? stato;
+-- 
+2.43.0
+

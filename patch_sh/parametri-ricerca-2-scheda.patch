@@ -1,0 +1,1773 @@
+From d0cb3017613c651378700e8dd3aec720088f3ef9 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 13 Oct 2026 14:30:47 +0000
+Subject: [PATCH] feat(ricerca): la scheda di ricerca nuova, con luoghi,
+ intervalli e caratteristiche necessarie
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RICHIEDE LA MIGRAZIONE 0030 (patch precedente). Nessuna migrazione nuova.
+
+LA SCHEDA, NELL'ORDINE CHE HAI CHIESTO
+- Cosa cerchi: Appartamento, Villa; Posto letto è spento e dice 'presto'
+- Dove: si scrive una provincia, una città o un quartiere e compaiono i suggerimenti (con il percorso, per
+  distinguere i due Loreto di Milano e Bergamo); scegliere una città vale per tutti i suoi quartieri e toglie
+  quelli già scelti; Invio sceglie senza inviare il modulo, Esc chiude solo la lista, frecce per scorrere
+- Budget: due cursori, minimo e massimo (a zero = nessun minimo, in cima = senza tetto)
+- Locali e metratura: 'Da' e 'A', ognuno con 'Qualsiasi'
+- Tipo di contratto: 4+4 libero, 3+2 concordato, transitorio, studenti
+- Caratteristiche: si aggiungono da una lista di 16 (le 10 di prima, 'Animali ammessi', e quelle con un valore:
+  bagni, piano, riscaldamento, 'quando ti serve la casa', classe energetica minima); ognuna è NECESSARIA
+  (se la casa non ce l'ha non la vedi) oppure opzionale con un'importanza da 1 a 10
+Si apre dalla Home e dal Profilo (?apri=ricerca) ed è la stessa. Salva TUTTO in una volta con
+salva_ricerca_inquilino (prima erano cinque scritture separate).
+
+LA HOME DICE QUANTE NE HA NASCOSTE (scelta tua). Il pannello: '3 case nascoste: non hanno le caratteristiche
+necessarie'; con il mazzo vuoto per questo, titolo e testo dedicati e il pulsante per cambiare la ricerca.
+I conteggi sono separati: 'oltre il 10% del tuo budget' conta solo gli esclusi per budget (con le esclusioni
+nuove il numero di prima non sarebbe più stato vero).
+
+TROVATI PROVANDO NEL BROWSER
+- i contatori 'Da/A' uscivano dal bordo destro della scheda e 'Posto letto' sembrava attivo
+- la funzione che salva la ricerca era chiamata solo dalla scheda vecchia: ora l'azione valida la dimensione e
+  la passa al database, che valida tutto
+- nessun test prendeva un pannello che smettesse di dire le case nascoste: aggiunte le prove
+
+Le candidature calcolano la percentuale con la stessa ricerca (luoghi, valori, 'necessaria'): prima leggevano
+solo budget, locali e metri. Informativa 2026-10-provvisoria-15 (la 14 tra le equivalenti): le preferenze di
+ricerca comprendono tipo di casa e di contratto e se una caratteristica è necessaria.
+
+Test: 907 in tutto (23 nuovi sul modulo: andata e ritorno su 600 ricerche casuali, e ogni ricerca che la
+scheda permette di salvare è accettata dalle regole del database); 34 prove di interazione sulla scheda e 4 sulle
+case nascoste. Provato in Chrome col dito (390 px) e con la tastiera (1280 px), dalla Home e dal Profilo, con
+il salvataggio che arriva al database e il mazzo che si ricompone. Difetti reintrodotti di proposito: 32 su 32
+presi (uno solo dal controllo sul codice: l'Invio che invia il modulo, verificato poi in Chrome).
+---
+ package.json                            |   2 +-
+ scripts/test-match.mjs                  |   2 +-
+ scripts/test-ricerca-form.mjs           | 187 ++++++++++++
+ src/app/(app)/HomeClient.tsx            |  24 +-
+ src/app/(app)/actions.ts                |  16 +-
+ src/app/(app)/page.tsx                  |  22 +-
+ src/app/(app)/profilo/ProfiloClient.tsx |  19 +-
+ src/app/(app)/profilo/actions.ts        |  67 +----
+ src/app/(app)/profilo/page.tsx          |  17 +-
+ src/app/globals.css                     | 124 ++++++++
+ src/components/LuogoAutocomplete.tsx    | 119 ++++++++
+ src/components/RicercaSheet.tsx         | 365 +++++++++++++++++-------
+ src/components/ui/Chip.tsx              |   1 +
+ src/components/ui/SaveButton.tsx        |   4 +-
+ src/components/ui/StepperOpzionale.tsx  |  46 +++
+ src/content/informativa.ts              |   5 +-
+ src/lib/home.ts                         |  52 +++-
+ src/lib/match/mazzo.ts                  |   3 +
+ src/lib/ricerca-form.ts                 | 173 +++++++++++
+ 19 files changed, 1036 insertions(+), 212 deletions(-)
+ create mode 100644 scripts/test-ricerca-form.mjs
+ create mode 100644 src/components/LuogoAutocomplete.tsx
+ create mode 100644 src/components/ui/StepperOpzionale.tsx
+ create mode 100644 src/lib/ricerca-form.ts
+
+diff --git a/package.json b/package.json
+index f480ebd..4d56d32 100644
+--- a/package.json
++++ b/package.json
+@@ -8,7 +8,7 @@
+     "start": "next start",
+     "lint": "eslint",
+     "pretest": "node scripts/controlla-dipendenze.mjs",
+-    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-parametri-ricerca.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-match.mjs b/scripts/test-match.mjs
+index a73541e..a2510fb 100644
+--- a/scripts/test-match.mjs
++++ b/scripts/test-match.mjs
+@@ -394,7 +394,7 @@ test("preparaMazzo: i primi `inRicerca` annunci sono davvero quelli in ricerca",
+ });
+ 
+ test("preparaMazzo: mazzo vuoto e tutti esclusi", () => {
+-  assert.deepEqual(preparaMazzo([], profilo()), { mazzo: [], inRicerca: 0, esclusi: 0, nascostiPerNecessarie: 0 });
++  assert.deepEqual(preparaMazzo([], profilo()), { mazzo: [], inRicerca: 0, esclusi: 0, esclusiPerBudget: 0, nascostiPerNecessarie: 0 });
+   const r = preparaMazzo([riga("a", { prezzo: 9000 }), riga("b", { prezzo: 8000 })], profilo());
+   assert.equal(r.mazzo.length, 0);
+   assert.equal(r.esclusi, 2);
+diff --git a/scripts/test-ricerca-form.mjs b/scripts/test-ricerca-form.mjs
+new file mode 100644
+index 0000000..7f54649
+--- /dev/null
++++ b/scripts/test-ricerca-form.mjs
+@@ -0,0 +1,187 @@
++/**
++ * Test della scheda di ricerca: dallo stato salvato allo stato del modulo e ritorno, i controlli prima di salvare, le
++ * operazioni sulle caratteristiche, il riassunto della ricerca nella Home e i collegamenti nel codice.
++ * Si lancia con:   npm test
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const rf = caricaTs(path.join(radice, "src", "lib", "ricerca-form.ts"));
++const hm = caricaTs(path.join(radice, "src", "lib", "home.ts"));
++const cr = caricaTs(path.join(radice, "src", "lib", "match", "criteri-ricerca.ts"));
++const co = caricaTs(path.join(radice, "src", "lib", "constants.ts"));
++const en = caricaTs(path.join(radice, "src", "lib", "annunci", "energia.ts"));
++// con i ritorni a capo di Windows normalizzati
++const leggi = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8").replace(/\r\n/g, "\n");
++const sql = leggi("supabase", "migrations", "0030_parametri_ricerca.sql");
++
++const VUOTA = { budgetMax: null, localiMin: null, mqMin: null, zone: [], interessi: {} };
++const crit = (chiave, o = {}) => ({ chiave, necessaria: false, peso: 5, valore: null, ...o });
++const OGGI = "2026-10-13";
++
++// ============================================================ dallo stato salvato al modulo
++test("stato del modulo: senza nessun criterio parte da un budget di 1300 (come sempre) e tutto il resto «qualsiasi»", () => {
++  assert.deepEqual(rf.statoDaRicerca(VUOTA), { tipologia: "appartamento", budgetMin: 0, budgetMax: 1300, localiMin: 0, localiMax: 0, mqMin: 0, mqMax: 0, luoghi: [], criteri: [] });
++});
++
++test("stato del modulo: con almeno un criterio, un budget vuoto vuol dire «senza tetto» (non si rimette 1300 a chi non lo voleva)", () => {
++  assert.equal(rf.statoDaRicerca({ ...VUOTA, localiMin: 2 }).budgetMax, rf.BUDGET.max); assert.equal(rf.statoDaRicerca({ ...VUOTA, criteri: [crit("balcone")] }).budgetMax, rf.BUDGET.max); assert.equal(rf.statoDaRicerca({ ...VUOTA, luoghi: ["x"] }).budgetMax, rf.BUDGET.max);
++  assert.equal(rf.statoDaRicerca({ ...VUOTA, budgetMax: 900 }).budgetMax, 900);
++});
++
++test("stato del modulo: i valori si portano, la tipologia sconosciuta diventa appartamento, le caratteristiche si ripuliscono e si ordinano", () => {
++  const s = rf.statoDaRicerca({ ...VUOTA, budgetMin: 800, budgetMax: 1400, localiMin: 2, localiMax: 3, mqMin: 50, mqMax: 90, tipologia: "villa", luoghi: ["a", "b"], criteri: [crit("bagni", { valore: { min: 2 } }), crit("x; drop"), crit("balcone"), crit("balcone", { necessaria: true })] });
++  assert.deepEqual([s.budgetMin, s.budgetMax, s.localiMin, s.localiMax, s.mqMin, s.mqMax, s.tipologia, s.luoghi], [800, 1400, 2, 3, 50, 90, "villa", ["a", "b"]]); assert.deepEqual(s.criteri.map((c) => c.chiave), ["balcone", "bagni"]);
++  for (const t of ["posto_letto", "castello", null, undefined]) assert.equal(rf.statoDaRicerca({ ...VUOTA, tipologia: t }).tipologia, "appartamento", String(t));
++  const lista = ["a"]; const r = rf.statoDaRicerca({ ...VUOTA, luoghi: lista }); r.luoghi.push("z"); assert.deepEqual(lista, ["a"], "lo stato non deve modificare la ricerca ricevuta");
++});
++
++test("stato del modulo: una ricerca vecchia (solo interessi) diventa un elenco di caratteristiche opzionali", () => {
++  assert.deepEqual(rf.statoDaRicerca({ ...VUOTA, interessi: { ascensore: 3, balcone: 8 } }).criteri, [crit("balcone", { peso: 8 }), crit("ascensore", { peso: 3 })]);
++  assert.deepEqual(rf.statoDaRicerca({ ...VUOTA, interessi: { balcone: 8 }, criteri: [] }).criteri, [], "se c'è l'elenco nuovo, anche vuoto, vale quello");
++});
++
++// ============================================================ da stato a ciò che si salva
++test("salvataggio: i valori «qualsiasi» diventano null, la tipologia e i luoghi si portano, una necessaria salva peso 5", () => {
++  const p = rf.ricercaPerSalvataggio({ tipologia: "villa", budgetMin: 0, budgetMax: 3000, localiMin: 0, localiMax: 0, mqMin: 0, mqMax: 0, luoghi: ["a"], criteri: [crit("balcone", { necessaria: true, peso: 9 }), crit("ascensore", { peso: 9 })] });
++  assert.deepEqual(p, { tipologia: "villa", budget_min: null, budget_max: null, locali_min: null, locali_max: null, mq_min: null, mq_max: null, luoghi: ["a"], criteri: [{ chiave: "balcone", necessaria: true, peso: 5, valore: null }, { chiave: "ascensore", necessaria: false, peso: 9, valore: null }] });
++  const q = rf.ricercaPerSalvataggio({ ...rf.statoDaRicerca(VUOTA), budgetMin: 900, budgetMax: 1400, localiMin: 2, localiMax: 3, mqMin: 50, mqMax: 90 }); assert.deepEqual([q.budget_min, q.budget_max, q.locali_min, q.locali_max, q.mq_min, q.mq_max], [900, 1400, 2, 3, 50, 90]);
++  assert.equal(rf.ricercaPerSalvataggio({ ...rf.statoDaRicerca(VUOTA), budgetMax: 2950 }).budget_max, 2950, "appena sotto il tetto è un valore vero"); assert.equal(rf.ricercaPerSalvataggio({ ...rf.statoDaRicerca(VUOTA), budgetMin: 50 }).budget_min, 50);
++});
++
++/** Dal contenuto salvato a una ricerca, come fa il database quando la si rilegge. */
++const daPayload = (p) => ({ budgetMin: p.budget_min, budgetMax: p.budget_max, localiMin: p.locali_min, localiMax: p.locali_max, mqMin: p.mq_min, mqMax: p.mq_max, tipologia: p.tipologia, luoghi: p.luoghi, zone: [], interessi: {}, criteri: p.criteri });
++
++function* statiCasuali(n) {
++  let seme = 424242; const rnd = () => (seme = (seme * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff; const sc = (a) => a[Math.floor(rnd() * a.length)]; const int = (a, b) => a + Math.floor(rnd() * (b - a + 1));
++  for (let i = 0; i < n; i++) {
++    let s = rf.statoDaRicerca(VUOTA); s.tipologia = sc(["appartamento", "villa"]);
++    const bmin = rnd() < 0.5 ? 0 : int(1, 50) * 50; s.budgetMin = bmin; s.budgetMax = rnd() < 0.3 ? rf.BUDGET.max : Math.max(bmin, int(1, 59) * 50);
++    const lmin = rnd() < 0.5 ? 0 : int(1, 6); s.localiMin = lmin; s.localiMax = rnd() < 0.5 ? 0 : Math.max(lmin, int(1, 10)); const qmin = rnd() < 0.5 ? 0 : int(4, 40) * 5; s.mqMin = qmin; s.mqMax = rnd() < 0.5 ? 0 : Math.max(qmin, int(4, 60) * 5);
++    s.luoghi = Array.from({ length: int(0, 4) }, () => sc(["l1", "l2", "l3", "l4", "l5"])).filter((x, i, a) => a.indexOf(x) === i);
++    for (const c of rf.CARATTERISTICHE) if (rnd() < 0.4) s.criteri = rf.aggiungi(s.criteri, c.chiave, OGGI);
++    if (rnd() < 0.5) s.criteri = rf.alternaTipo(s.criteri, "contratto", sc(co.TIPI_CONTRATTO).id);
++    s.criteri = s.criteri.map((c) => (rnd() < 0.4 ? { ...c, necessaria: true } : rnd() < 0.5 ? { ...c, peso: int(1, 10) } : c));
++    yield s;
++  }
++}
++
++test("andata e ritorno: ciò che si salva, riletto e risalvato, è IDENTICO (600 ricerche casuali)", () => {
++  let n = 0;
++  for (const s of statiCasuali(600)) {
++    n++; const una = rf.ricercaPerSalvataggio(s); const due = rf.ricercaPerSalvataggio(rf.statoDaRicerca(daPayload(una)));
++    // l'ordine delle caratteristiche si normalizza alla rilettura: si confronta l'insieme
++    const ordina = (p) => ({ ...p, criteri: [...p.criteri].sort((a, b) => a.chiave.localeCompare(b.chiave)) }); assert.deepEqual(ordina(due), ordina(una), JSON.stringify(s));
++  }
++  assert.equal(n, 600);
++});
++
++test("tutto ciò che la scheda permette di salvare è accettato dalle regole del database (600 ricerche casuali)", () => {
++  for (const s of statiCasuali(600)) {
++    assert.equal(rf.primoErrore(s), null, "gli stati costruiti dai controlli non devono avere errori: " + rf.primoErrore(s)); const p = rf.ricercaPerSalvataggio(s);
++    for (const [k, min, max] of [["budget_min", 0, 20000], ["budget_max", 1, 20000], ["locali_min", 1, 10], ["locali_max", 1, 10], ["mq_min", 10, 1000], ["mq_max", 10, 1000]]) if (p[k] !== null) assert.ok(Number.isInteger(p[k]) && p[k] >= min && p[k] <= max, `${k}=${p[k]}`);
++    if (p.budget_min !== null && p.budget_max !== null) assert.ok(p.budget_min <= p.budget_max); if (p.locali_min !== null && p.locali_max !== null) assert.ok(p.locali_min <= p.locali_max); if (p.mq_min !== null && p.mq_max !== null) assert.ok(p.mq_min <= p.mq_max);
++    assert.ok(p.luoghi.length <= 20 && p.criteri.length <= 40); const viste = new Set();
++    for (const c of p.criteri) { assert.ok(!viste.has(c.chiave), "doppione " + c.chiave); viste.add(c.chiave); assert.deepEqual(cr.normalizzaCriterioRicerca(c), c, `il database rifiuterebbe ${JSON.stringify(c)}`); assert.ok(c.peso >= 1 && c.peso <= 10); }
++  }
++});
++
++// ============================================================ testi e controlli
++test("testo del budget: fino a, da, da…a, nessun limite", () => {
++  const e = (n) => `€${n.toLocaleString("it-IT")}`; assert.equal(rf.testoBudget(0, 3000), "nessun limite"); assert.equal(rf.testoBudget(0, 1400), `fino a ${e(1400)}`); assert.equal(rf.testoBudget(900, 3000), `da ${e(900)}`); assert.equal(rf.testoBudget(900, 1400), `da ${e(900)} a ${e(1400)}`); assert.equal(rf.testoBudget(1000, 1000), `da ${e(1000)} a ${e(1000)}`);
++});
++
++test("errori prima di salvare: minimo sopra il massimo, e caratteristiche senza un valore valido; con «qualsiasi» nessun errore", () => {
++  const base = rf.statoDaRicerca(VUOTA); assert.equal(rf.primoErrore(base), null);
++  assert.match(rf.primoErrore({ ...base, budgetMin: 1500, budgetMax: 1000 }), /budget/i); assert.match(rf.primoErrore({ ...base, localiMin: 4, localiMax: 2 }), /locali/i); assert.match(rf.primoErrore({ ...base, mqMin: 80, mqMax: 60 }), /metratura/i);
++  assert.equal(rf.primoErrore({ ...base, localiMin: 4, localiMax: 0 }), null); assert.equal(rf.primoErrore({ ...base, localiMin: 0, localiMax: 2 }), null); assert.equal(rf.primoErrore({ ...base, budgetMin: 1000, budgetMax: 1000 }), null);
++  assert.equal(rf.primoErrore({ ...base, criteri: [crit("piano", { valore: { min: null, max: null } })] }), "Controlla «Piano»: manca un valore."); assert.equal(rf.primoErrore({ ...base, criteri: [crit("riscaldamento", { valore: { tipi: [] } })] }), "Controlla «Riscaldamento»: manca un valore.");
++  assert.equal(rf.primoErrore({ ...base, criteri: [crit("balcone")] }), null); assert.equal(rf.primoErrore({ ...base, criteri: [crit("bagni", { valore: { min: 2 } })] }), null);
++});
++
++// ============================================================ caratteristiche
++test("caratteristiche: 16 (le 11 sì/no e 5 con valore; il contratto ha la sua sezione), senza doppioni, e coincidono con quelle del database", () => {
++  assert.equal(rf.CARATTERISTICHE.length, 16); assert.equal(new Set(rf.CARATTERISTICHE.map((c) => c.chiave)).size, 16); assert.ok(!rf.CARATTERISTICHE.some((c) => c.chiave === "contratto"));
++  assert.deepEqual(rf.CARATTERISTICHE.filter((c) => c.tipo === "si_no").map((c) => c.chiave), co.ATTR_VOCAB.map((a) => a.key)); assert.deepEqual(rf.CARATTERISTICHE.filter((c) => c.tipo === "valore").map((c) => c.chiave), ["bagni", "piano", "riscaldamento", "ingresso", "classeEnergetica"]);
++  const booleani = [...sql.match(/v_booleani constant text\[\] := array\[([^\]]*)\]/)[1].matchAll(/'([^']+)'/g)].map((m) => m[1]); assert.deepEqual(rf.CARATTERISTICHE.filter((c) => c.tipo === "si_no").map((c) => c.chiave).sort(), booleani.sort());
++  assert.ok(rf.CARATTERISTICHE.every((c) => c.etichetta.length > 2));
++});
++
++test("valori predefiniti: ogni caratteristica con valore parte con un valore VALIDO, e la data di ingresso è tra 30 giorni (anche a cavallo di mese e anno)", () => {
++  for (const c of rf.CARATTERISTICHE.filter((x) => x.tipo === "valore")) assert.notEqual(cr.valoreValido(c.chiave, rf.valorePredefinito(c.chiave, OGGI)), null, c.chiave); assert.notEqual(cr.valoreValido("contratto", rf.valorePredefinito("contratto", OGGI)), null);
++  for (const c of rf.CARATTERISTICHE.filter((x) => x.tipo === "si_no")) assert.equal(rf.valorePredefinito(c.chiave, OGGI), null, c.chiave);
++  for (const [oggi, atteso] of [["2026-10-13", "2026-11-12"], ["2026-12-15", "2027-01-14"], ["2026-01-31", "2026-03-02"], ["2028-02-10", "2028-03-11"], ["2026-12-31", "2027-01-30"]]) assert.equal(rf.valorePredefinito("ingresso", oggi).entro, atteso, oggi);
++  assert.deepEqual(rf.valorePredefinito("bagni", OGGI), { min: 2 }); assert.deepEqual(rf.valorePredefinito("classeEnergetica", OGGI), { classe: "C" }); assert.equal(rf.valorePredefinito("sconosciuta", OGGI), null);
++});
++
++test("aggiungi, togli, modifica: non toccano le altre, non creano doppioni, non modificano l'elenco ricevuto", () => {
++  const a = [crit("balcone")]; const copia = JSON.stringify(a);
++  const b = rf.aggiungi(a, "bagni", OGGI); assert.deepEqual(b.map((c) => c.chiave), ["balcone", "bagni"]); assert.equal(JSON.stringify(a), copia, "l'elenco di partenza è cambiato"); assert.deepEqual(rf.aggiungi(b, "bagni", OGGI).map((c) => c.chiave), ["balcone", "bagni"], "doppione");
++  assert.deepEqual(rf.rimuovi(b, "balcone").map((c) => c.chiave), ["bagni"]); assert.deepEqual(rf.rimuovi(b, "assente"), b);
++  assert.equal(rf.modifica(b, "bagni", { necessaria: true }).find((c) => c.chiave === "bagni").necessaria, true); assert.equal(rf.modifica(b, "bagni", { necessaria: true }).find((c) => c.chiave === "balcone").necessaria, false); assert.deepEqual(rf.modifica(b, "assente", { necessaria: true }), b);
++});
++
++test("tipi di contratto e riscaldamento: il primo tipo aggiunge la caratteristica, gli altri si accumulano, l'ultimo tolto la fa sparire", () => {
++  let c = rf.alternaTipo([], "contratto", "libero_4_4"); assert.deepEqual(c, [crit("contratto", { valore: { tipi: ["libero_4_4"] } })]); c = rf.alternaTipo(c, "contratto", "studenti"); assert.deepEqual(c[0].valore.tipi, ["libero_4_4", "studenti"]);
++  c = rf.modifica(c, "contratto", { necessaria: true }); c = rf.alternaTipo(c, "contratto", "libero_4_4"); assert.deepEqual([c[0].valore.tipi, c[0].necessaria], [["studenti"], true], "togliere un tipo non cambia «necessaria»"); assert.deepEqual(rf.alternaTipo(c, "contratto", "studenti"), []);
++});
++
++test("disponibili: le caratteristiche non ancora aggiunte, il contratto escluso", () => {
++  assert.equal(rf.disponibili([]).length, 16); assert.ok(!rf.disponibili([crit("balcone")]).some((c) => c.chiave === "balcone")); assert.equal(rf.disponibili([crit("balcone"), crit("contratto", { valore: { tipi: ["studenti"] } })]).length, 15);
++  assert.equal(rf.disponibili(rf.CARATTERISTICHE.map((c) => crit(c.chiave))).length, 0); assert.equal(rf.inElenco(crit("contratto")), false); assert.equal(rf.inElenco(crit("balcone")), true);
++});
++
++test("opzioni: i piani del menu sono ammessi dal database, le classi sono le dieci in ordine con migliore e peggiore indicate; i limiti del modulo stanno nei limiti del database", () => {
++  assert.ok(rf.OPZIONI_PIANO.every((o) => o.valore >= -2 && o.valore <= 60) && rf.OPZIONI_PIANO[0].valore === -1 && rf.OPZIONI_PIANO[1].etichetta === "Terra" && rf.OPZIONI_PIANO.length === 12); assert.deepEqual(rf.OPZIONI_CLASSE.map((o) => o.classe), en.CLASSI_ENERGETICHE.slice()); assert.equal(rf.OPZIONI_CLASSE[0].etichetta, "A4 (la migliore)"); assert.equal(rf.OPZIONI_CLASSE.at(-1).etichetta, "G (la peggiore)");
++  assert.ok(rf.BUDGET.max <= 20000 && rf.BUDGET.step > 0 && rf.BUDGET.predefinito <= rf.BUDGET.max); assert.ok(rf.LOCALI.max <= 10); assert.ok(rf.METRATURA.min >= 10 && rf.METRATURA.max <= 1000); assert.equal(rf.IMPORTANZA_PREDEFINITA, 5);
++});
++
++// ============================================================ il riassunto nella Home
++test("riassunto della ricerca: tipologia (solo se non è l'appartamento), budget «da – a», locali e metratura a intervallo, zone, caratteristiche necessarie", () => {
++  const e = (n) => `€${n.toLocaleString("it-IT")}`;
++  assert.deepEqual(hm.vociRicerca({ ...VUOTA, tipologia: "villa", budgetMin: 900, budgetMax: 1400, localiMin: 2, localiMax: 3, mqMin: 50, mqMax: 90, zone: ["Isola, Milano"], criteri: [crit("balcone", { necessaria: true }), crit("bagni", { necessaria: true, valore: { min: 2 } }), crit("cantina")] }), ["Villa", `${e(900)} – ${e(1400)}`, "2–3 locali", "50–90 m²", "Isola", "2 necessarie"]);
++  assert.deepEqual(hm.vociRicerca({ ...VUOTA, tipologia: "appartamento", budgetMin: 900 }), [`Da ${e(900)}`]); assert.deepEqual(hm.vociRicerca({ ...VUOTA, localiMax: 3, mqMax: 80 }), ["Fino a 3 locali", "Fino a 80 m²"]); assert.deepEqual(hm.vociRicerca({ ...VUOTA, localiMin: 2, localiMax: 2 }), ["2 locali"]); assert.deepEqual(hm.vociRicerca({ ...VUOTA, criteri: [crit("balcone", { necessaria: true })] }), ["1 necessaria"]);
++  assert.deepEqual(hm.vociRicerca({ ...VUOTA, criteri: [crit("balcone")], tipologia: "appartamento" }), [], "nessuna necessaria e nessun criterio visibile: vuoto");
++});
++
++test("chiave della ricerca: ogni parametro nuovo la cambia; l'ordine delle caratteristiche e dei luoghi no", () => {
++  const base = { ...VUOTA, budgetMin: 900, budgetMax: 1400, localiMax: 3, mqMax: 90, tipologia: "villa", luoghi: ["a", "b"], criteri: [crit("balcone"), crit("bagni", { valore: { min: 2 } })] }; const k = hm.chiaveRicerca(base);
++  assert.equal(hm.chiaveRicerca({ ...base, luoghi: ["b", "a", "a"], criteri: [base.criteri[1], base.criteri[0]] }), k);
++  const diverse = [{ budgetMin: 800 }, { budgetMin: null }, { localiMax: 4 }, { localiMax: null }, { mqMax: 100 }, { mqMax: null }, { tipologia: "appartamento" }, { luoghi: ["a"] }, { luoghi: [] }, { criteri: [crit("balcone")] }, { criteri: [crit("balcone", { necessaria: true }), base.criteri[1]] }, { criteri: [crit("balcone", { peso: 9 }), base.criteri[1]] }, { criteri: [base.criteri[0], crit("bagni", { valore: { min: 3 } })] }];
++  const viste = new Set([k]); for (const d of diverse) { const x = hm.chiaveRicerca({ ...base, ...d }); assert.notEqual(x, k, JSON.stringify(d)); viste.add(x); } assert.equal(viste.size, diverse.length + 1);
++});
++
++test("case nascoste: singolare, plurale, e nulla se non ce ne sono (o se il numero è strano)", () => {
++  assert.equal(hm.testoNascoste(1), "1 casa nascosta: non ha le caratteristiche necessarie"); assert.equal(hm.testoNascoste(3), "3 case nascoste: non hanno le caratteristiche necessarie"); for (const x of [0, -2, NaN, Infinity, null, undefined]) assert.equal(hm.testoNascoste(x), null, String(x));
++});
++
++// ============================================================ i collegamenti nel codice
++test("scheda: manda UN solo campo con tutto dentro, non usa più le 13 zone scritte a mano, ed è la stessa di Home e Profilo", () => {
++  const r = leggi("src", "components", "RicercaSheet.tsx"); assert.deepEqual([...r.matchAll(/<input type="hidden" name="([^"]+)"/g)].map((m) => m[1]), ["ricerca"]); assert.ok(!/ZONE_MILANO/.test(r), "usa ancora le zone scritte a mano");
++  assert.match(r, /<SaveButton pending=\{pending\} disabled=\{errore !== null\} \/>/); assert.match(r, /export function RicercaSheet/); assert.match(r, /if \(pending\) \{\s+eraInCorso\.current = true;/);
++  for (const f of [["src", "app", "(app)", "HomeClient.tsx"], ["src", "app", "(app)", "profilo", "ProfiloClient.tsx"]]) { const c = leggi(...f); assert.match(c, /<RicercaSheet/); assert.match(c, /ricerca=\{ricerca\}\s+luoghi=\{luoghi\}/, f.join("/")); }
++});
++
++test("azione: valida la dimensione, passa tutto al database in una chiamata e aggiorna Home e Profilo", () => {
++  const a = leggi("src", "app", "(app)", "profilo", "actions.ts"); const f = a.slice(a.indexOf("export async function updateRicerca")); assert.match(f, /grezzo\.length > 30000/); assert.match(f, /supabase\.rpc\("salva_ricerca_inquilino", \{ p_ricerca: ricerca \}\)/); assert.match(f, /revalidatePath\("\/profilo"\);\s+revalidatePath\("\/"\);/);
++  assert.ok(!/\.from\("tenant_(profiles|zone_interesse|interessi)"\)\s*\.(insert|update|delete)/.test(f), "l'azione scrive ancora a pezzi"); assert.match(sql, /create or replace function public\.salva_ricerca_inquilino\(p_ricerca jsonb\)/);
++  let chiamate = 0; const cartella = path.join(radice, "src"); const visita = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) visita(p); else if (/\.(ts|tsx)$/.test(e.name) && /rpc\("salva_ricerca_inquilino"/.test(fs.readFileSync(p, "utf8"))) chiamate++; } }; visita(cartella); assert.equal(chiamate, 1, "la funzione si chiama da un posto solo");
++});
++
++test("Home e candidature: leggono luoghi, valori e «necessaria»; la Home separa i conteggi (esclusi per budget / nascosti per necessarie)", () => {
++  const h = leggi("src", "app", "(app)", "page.tsx"); assert.match(h, /select\("zona, luogo_id"\)/); assert.match(h, /select\("attributo_key, peso, valore, necessaria"\)/); assert.match(h, /from\("luoghi"\)\.select\("id, livello, nome, sigla, parent_id"\)/); assert.match(h, /esclusi=\{esclusiPerBudget\}\s+nascostiPerNecessarie=\{nascostiPerNecessarie\}\s+luoghi=\{luoghi\}/); assert.match(h, /\.\.\.campiMatchDaRiga\(l, mappa\)/);
++  const c = leggi("src", "app", "(app)", "actions.ts"); assert.match(c, /select\("zona, luogo_id"\)/); assert.match(c, /select\("attributo_key, peso, valore, necessaria"\)/); assert.match(c, /campiMatchDaRiga\(annuncio, mappa\)/); for (const colonna of ["luogo_id", "tipologia", "bagni", "piano", "riscaldamento", "tipo_contratto", "disponibile_dal", "classe_energetica"]) { assert.ok(h.includes(colonna), `la Home non legge ${colonna}`); assert.ok(c.includes(colonna), `le candidature non leggono ${colonna}`); }
++  const hc = leggi("src", "app", "(app)", "HomeClient.tsx"); assert.match(hc, /nascostiPerNecessarie > 0/); assert.match(hc, /testoNascoste\(nascostiPerNecessarie\)/);
++});
++
++test("completamento: la casella dichiara i ruoli della lista, Invio non invia il modulo, Esc non chiude altro", () => {
++  const l = leggi("src", "components", "LuogoAutocomplete.tsx"); for (const a of ['role="combobox"', "aria-expanded=", "aria-controls=", 'aria-autocomplete="list"', "aria-activedescendant=", 'role="listbox"', 'role="option"', "aria-selected="]) assert.ok(l.includes(a), a);
++  assert.match(l, /e\.key === "Enter"\) \{\s+\/\/[^\n]*\n\s+e\.preventDefault\(\);/); assert.match(l, /e\.key === "Escape"\) \{\s+if \(aperto\) \{\s+e\.stopPropagation\(\);/); assert.match(l, /maxLength=\{60\}/);
++});
++
++test("informativa: dice che le preferenze di ricerca comprendono anche il tipo di casa e di contratto e se le caratteristiche sono necessarie", () => {
++  const t = leggi("src", "content", "informativa.ts"); assert.match(t, /le tue preferenze di ricerca \(budget, zone, locali, metri, tipo di casa e di contratto, caratteristiche e se per te sono necessarie\)/);
++});
+diff --git a/src/app/(app)/HomeClient.tsx b/src/app/(app)/HomeClient.tsx
+index 57db7d7..830eb3f 100644
+--- a/src/app/(app)/HomeClient.tsx
++++ b/src/app/(app)/HomeClient.tsx
+@@ -6,7 +6,8 @@ import type { AffidabilitaResult } from "@/lib/affidabilita";
+ import type { ListingConMatch } from "@/lib/types";
+ import { TOLLERANZA_BUDGET, statoMazzo } from "@/lib/match";
+ import type { ProfiloRicerca } from "@/lib/match";
+-import { chiaveRicerca as chiaveDellaRicerca, conteggioCase, suggerimentoCard, vociRicerca } from "@/lib/home";
++import { chiaveRicerca as chiaveDellaRicerca, conteggioCase, suggerimentoCard, testoNascoste, vociRicerca } from "@/lib/home";
++import type { Luogo } from "@/lib/luoghi";
+ import { Sheet } from "@/components/Sheet";
+ import { RicercaSheet } from "@/components/RicercaSheet";
+ import { SchedaAffidabilita } from "@/components/SchedaAffidabilita";
+@@ -46,10 +47,16 @@ export function HomeClient({
+   mostraMatch,
+   nascosti = 0,
+   ricerca,
++  luoghi,
++  nascostiPerNecessarie = 0,
+ }: {
+   affidabilita: AffidabilitaResult;
+   /** la ricerca impostata: budget, taglio, zone e caratteristiche */
+   ricerca: ProfiloRicerca;
++  /** i luoghi che si possono cercare (provincia, città, quartiere) */
++  luoghi: Luogo[];
++  /** quante case non compaiono perché non hanno una caratteristica che hai segnato come necessaria */
++  nascostiPerNecessarie?: number;
+   /** il mazzo già ordinato: prima gli annunci in ricerca, poi gli altri */
+   listings: ListingConMatch[];
+   /** annunci tolti perché oltre la tolleranza sul budget */
+@@ -304,6 +311,7 @@ export function HomeClient({
+           <div className="hi-ricerca-testo">
+             <b>{testoCase.principale}</b>
+             {testoCase.secondario && <span>{testoCase.secondario}</span>}
++            {testoNascoste(nascostiPerNecessarie) && <span className="hi-nascoste">{testoNascoste(nascostiPerNecessarie)}</span>}
+           </div>
+           <button type="button" className="hi-modifica" onClick={() => setSchedaRicerca(true)}>
+             {mostraMatch ? "Modifica ricerca" : "Imposta la ricerca"}
+@@ -322,14 +330,18 @@ export function HomeClient({
+             <h2>
+               {nascosti > 0
+                 ? TITOLO_TUTTI_SCELTI
+-                : esclusi > 0
++                : nascostiPerNecessarie > 0
++                  ? "Nessuna casa con le tue caratteristiche necessarie"
++                  : esclusi > 0
+                   ? "Nessuna casa nel tuo budget"
+                   : "Nessun annuncio per la tua ricerca"}
+             </h2>
+             <p>
+               {nascosti > 0
+                 ? TESTO_DOVE_SONO
+-                : esclusi > 0
++                : nascostiPerNecessarie > 0
++                  ? `Ho nascosto ${nascostiPerNecessarie} ${nascostiPerNecessarie === 1 ? "casa" : "case"} perché non ${nascostiPerNecessarie === 1 ? "ha" : "hanno"} le caratteristiche che hai segnato come necessarie. Puoi renderne opzionale qualcuna da «Modifica ricerca».`
++                  : esclusi > 0
+                 ? `Ci sono ${esclusi} ${esclusi === 1 ? "casa" : "case"} oltre il ${tolleranzaPct}% del tuo budget, che non ti mostriamo. Se vuoi vederle, alza il budget da «Modifica ricerca».`
+                 : "Appena ci saranno immobili pubblicati che rientrano nei tuoi criteri, li vedrai qui. Nel frattempo puoi aggiornare i criteri da «Modifica ricerca»."}
+             </p>
+@@ -351,6 +363,7 @@ export function HomeClient({
+             <p>
+               Torna più tardi: ne arrivano di nuovi appena vengono pubblicati.{" "}
+               {TESTO_DOVE_SONO}
++              {nascostiPerNecessarie > 0 && ` ${testoNascoste(nascostiPerNecessarie)}.`}
+               {esclusi > 0 &&
+                 ` Altre ${esclusi} ${esclusi === 1 ? "casa è" : "case sono"} oltre il ${tolleranzaPct}% del tuo budget e non te ${esclusi === 1 ? "la" : "le"} mostriamo: se vuoi vederle, aggiorna il budget in Profilo.`}
+             </p>
+@@ -553,9 +566,8 @@ export function HomeClient({
+         <RicercaSheet
+           open
+           onClose={() => setSchedaRicerca(false)}
+-          tenant={{ budget_max: ricerca.budgetMax, locali_min: ricerca.localiMin, mq_min: ricerca.mqMin }}
+-          zoneIniziali={ricerca.zone}
+-          interessiIniziali={ricerca.interessi}
++          ricerca={ricerca}
++          luoghi={luoghi}
+           onSalvata={() => {
+             setSchedaRicerca(false);
+             setAvviso({ errore: false, testo: "Ricerca aggiornata." });
+diff --git a/src/app/(app)/actions.ts b/src/app/(app)/actions.ts
+index 9451f08..4942ac7 100644
+--- a/src/app/(app)/actions.ts
++++ b/src/app/(app)/actions.ts
+@@ -4,9 +4,11 @@ import { revalidatePath } from "next/cache";
+ import { createClient } from "@/lib/supabase/server";
+ import {
+   calcolaMatchInquilino,
++  campiMatchDaRiga,
+   haCriteriDiRicerca,
+   profiloRicercaDaRighe,
+ } from "@/lib/match";
++import { mappaLuoghi, type Luogo } from "@/lib/luoghi";
+ 
+ export async function candidati(listingId: string) {
+   const supabase = await createClient();
+@@ -21,30 +23,32 @@ export async function candidati(listingId: string) {
+   // parte comunque, senza percentuale.
+   let matchPct: number | null = null;
+   try {
+-    const [{ data: annuncio }, { data: tenant }, { data: zone }, { data: interessi }] =
++    const [{ data: annuncio }, { data: tenant }, { data: zone }, { data: interessi }, { data: luoghiRighe }] =
+       await Promise.all([
+         supabase
+           .from("listings")
+-          .select("prezzo, zona, locali, mq, attributi")
++          .select("prezzo, zona, locali, mq, attributi, luogo_id, tipologia, bagni, piano, riscaldamento, tipo_contratto, disponibile_dal, classe_energetica")
+           .eq("id", listingId)
+           .single(),
+         supabase
+           .from("tenant_profiles")
+-          .select("budget_max, locali_min, mq_min")
++          .select("budget_max, locali_min, mq_min, budget_min, locali_max, mq_max, tipologia")
+           .eq("profile_id", user.id)
+           .single(),
+-        supabase.from("tenant_zone_interesse").select("zona").eq("tenant_id", user.id),
++        supabase.from("tenant_zone_interesse").select("zona, luogo_id").eq("tenant_id", user.id),
+         supabase
+           .from("tenant_interessi")
+-          .select("attributo_key, peso")
++          .select("attributo_key, peso, valore, necessaria")
+           .eq("tenant_id", user.id),
++        supabase.from("luoghi").select("id, livello, nome, sigla, parent_id"),
+       ]);
+ 
+     if (annuncio && tenant) {
+       const profilo = profiloRicercaDaRighe(tenant, zone, interessi);
+       // senza criteri impostati ogni casa fa 99: non è un'informazione
+       if (haCriteriDiRicerca(profilo)) {
+-        matchPct = calcolaMatchInquilino(annuncio, profilo).punteggio;
++        const mappa = mappaLuoghi((luoghiRighe ?? []) as Luogo[]);
++        matchPct = calcolaMatchInquilino({ ...annuncio, ...campiMatchDaRiga(annuncio, mappa) }, profilo).punteggio;
+       }
+     }
+   } catch {
+diff --git a/src/app/(app)/page.tsx b/src/app/(app)/page.tsx
+index c3c4159..1a937d7 100644
+--- a/src/app/(app)/page.tsx
++++ b/src/app/(app)/page.tsx
+@@ -4,7 +4,8 @@ import { OwnerHomeClient } from "./OwnerHomeClient";
+ import { VerificaHome } from "./VerificaHome";
+ import type { ImmobileVerifica } from "@/lib/verifica";
+ import { computeAffidabilita } from "@/lib/affidabilita";
+-import { haCriteriDiRicerca, preparaMazzo, profiloRicercaDaRighe } from "@/lib/match";
++import { campiMatchDaRiga, haCriteriDiRicerca, preparaMazzo, profiloRicercaDaRighe } from "@/lib/match";
++import { mappaLuoghi, type Luogo } from "@/lib/luoghi";
+ import type { ProfiloRicerca } from "@/lib/match";
+ import type { TenantProfile, ListingConMatch, ListingProprietario } from "@/lib/types";
+ import { idsNascosti } from "@/lib/scelte";
+@@ -40,10 +41,10 @@ async function TenantHome({ userId }: { userId: string }) {
+     { data: nascostiRighe },
+   ] = await Promise.all([
+     supabase.from("tenant_profiles").select("*").eq("profile_id", userId).single(),
+-    supabase.from("tenant_zone_interesse").select("zona").eq("tenant_id", userId),
++    supabase.from("tenant_zone_interesse").select("zona, luogo_id").eq("tenant_id", userId),
+     supabase
+       .from("tenant_interessi")
+-      .select("attributo_key, peso")
++      .select("attributo_key, peso, valore, necessaria")
+       .eq("tenant_id", userId),
+     supabase.from("recensioni").select("voto").eq("tenant_id", userId),
+     supabase.from("candidature").select("listing_id").eq("tenant_id", userId),
+@@ -79,7 +80,7 @@ async function TenantHome({ userId }: { userId: string }) {
+   let query = supabase
+     .from("listings")
+     .select(
+-      "id, titolo, zona, prezzo, locali, mq, descrizione, attributi, classe_energetica, ep_globale, listing_photos(url, ordine)"
++      "id, titolo, zona, prezzo, locali, mq, descrizione, attributi, classe_energetica, ep_globale, luogo_id, tipologia, bagni, piano, riscaldamento, tipo_contratto, disponibile_dal, listing_photos(url, ordine)"
+     )
+     .eq("pubblicato", true);
+ 
+@@ -109,7 +110,14 @@ async function TenantHome({ userId }: { userId: string }) {
+     interessiRows
+   );
+ 
+-  const { mazzo, esclusi } = preparaMazzo(listingsOrdinati, profiloRicerca);
++  // I luoghi (poche decine di righe): servono per sapere in quale quartiere, città e provincia sta ogni annuncio, e per il
++  // completamento automatico della ricerca.
++  const { data: luoghiRighe } = await supabase.from("luoghi").select("id, livello, nome, sigla, parent_id");
++  const luoghi = (luoghiRighe ?? []) as Luogo[];
++  const mappa = mappaLuoghi(luoghi);
++  const annunci = listingsOrdinati.map((l) => ({ ...l, ...campiMatchDaRiga(l, mappa) }));
++
++  const { mazzo, esclusiPerBudget, nascostiPerNecessarie } = preparaMazzo(annunci, profiloRicerca);
+ 
+   // Se il mazzo è vuoto, bisogna dire PERCHÉ: nessun annuncio, o li ha già scelti tutti.
+   let nascosti = 0;
+@@ -126,7 +134,9 @@ async function TenantHome({ userId }: { userId: string }) {
+     <HomeClient
+       affidabilita={affidabilita}
+       listings={mazzo as unknown as ListingConMatch[]}
+-      esclusi={esclusi}
++      esclusi={esclusiPerBudget}
++      nascostiPerNecessarie={nascostiPerNecessarie}
++      luoghi={luoghi}
+       mostraMatch={haCriteriDiRicerca(profiloRicerca)}
+       nascosti={nascosti}
+       ricerca={profiloRicerca}
+diff --git a/src/app/(app)/profilo/ProfiloClient.tsx b/src/app/(app)/profilo/ProfiloClient.tsx
+index 9fea2ef..e7377dd 100644
+--- a/src/app/(app)/profilo/ProfiloClient.tsx
++++ b/src/app/(app)/profilo/ProfiloClient.tsx
+@@ -21,6 +21,8 @@ import { SaveButton } from "@/components/ui/SaveButton";
+ import { RicercaSheet } from "@/components/RicercaSheet";
+ import { SchedaAffidabilita } from "@/components/SchedaAffidabilita";
+ import type { SezioneProfilo } from "@/lib/home";
++import type { Luogo } from "@/lib/luoghi";
++import type { ProfiloRicerca } from "@/lib/match";
+ import { PrivacySheet } from "@/components/PrivacySheet";
+ import { FaqSheet } from "@/components/FaqSheet";
+ import { AvatarUpload } from "@/components/AvatarUpload";
+@@ -51,8 +53,10 @@ type Props = {
+   email: string | null;
+   tenant: TenantProfile;
+   inviti: Invito[];
+-  zoneIniziali: string[];
+-  interessiIniziali: Record<string, number>;
++  /** la ricerca com'è salvata */
++  ricerca: ProfiloRicerca;
++  /** i luoghi che si possono cercare */
++  luoghi: Luogo[];
+   mediaRecensioni: number | null;
+   numeroRecensioni: number;
+   consensoMarketingIniziale: boolean;
+@@ -71,8 +75,8 @@ export function ProfiloClient({
+   inviti,
+   affittiPanel,
+   verificaPanel,
+-  zoneIniziali,
+-  interessiIniziali,
++  ricerca,
++  luoghi,
+   mediaRecensioni,
+   numeroRecensioni,
+   consensoMarketingIniziale,
+@@ -105,7 +109,7 @@ export function ProfiloClient({
+   });
+ 
+   const completezza = computeProfileCompleteness({
+-    hasZone: zoneIniziali.length > 0,
++    hasZone: (ricerca.luoghi?.length ?? 0) > 0 || ricerca.zone.length > 0,
+     professione: tenant.professione,
+     reddito_mensile: tenant.reddito_mensile,
+     reddito_nucleo: tenant.reddito_nucleo,
+@@ -282,9 +286,8 @@ export function ProfiloClient({
+       <RicercaSheet
+         open={sheetAperta === "ricerca"}
+         onClose={() => setSheetAperta(null)}
+-        tenant={tenant}
+-        zoneIniziali={zoneIniziali}
+-        interessiIniziali={interessiIniziali}
++        ricerca={ricerca}
++        luoghi={luoghi}
+       />
+ 
+       {/* ---- Sheet: Invita il proprietario ---- */}
+diff --git a/src/app/(app)/profilo/actions.ts b/src/app/(app)/profilo/actions.ts
+index 879bbdf..28022f8 100644
+--- a/src/app/(app)/profilo/actions.ts
++++ b/src/app/(app)/profilo/actions.ts
+@@ -1,6 +1,7 @@
+ "use server";
+ 
+ import { revalidatePath } from "next/cache";
++import { messaggioErroreVerifica } from "@/lib/verifica";
+ import { createClient } from "@/lib/supabase/server";
+ 
+ export type SaveState = { error?: string; ok?: boolean } | null;
+@@ -68,7 +69,7 @@ export async function updateDatiPersonali(
+ }
+ 
+ export async function updateRicerca(
+-  _prevState: SaveState,
++  _prev: SaveState,
+   formData: FormData
+ ): Promise<SaveState> {
+   const supabase = await createClient();
+@@ -77,66 +78,18 @@ export async function updateRicerca(
+   } = await supabase.auth.getUser();
+   if (!user) return { error: "Non autenticato." };
+ 
+-  const budget_max = Number(formData.get("budget_max") || 0);
+-  const locali_min = Number(formData.get("locali_min") || 1);
+-  const mq_min = Number(formData.get("mq_min") || 25);
+-
+-  let zone: string[] = [];
+-  let interessi: Record<string, number> = {};
+-  try {
+-    zone = JSON.parse(String(formData.get("zone") || "[]"));
+-  } catch {
+-    zone = [];
+-  }
++  // La ricerca arriva come un unico oggetto: la valida e la salva il database, tutta insieme (o niente).
++  const grezzo = String(formData.get("ricerca") ?? "");
++  if (grezzo.length === 0 || grezzo.length > 30000) return { error: messaggioErroreVerifica("RICERCA_NON_VALIDA") };
++  let ricerca: unknown;
+   try {
+-    interessi = JSON.parse(String(formData.get("interessi") || "{}"));
++    ricerca = JSON.parse(grezzo);
+   } catch {
+-    interessi = {};
+-  }
+-
+-  const { error: eProfile } = await supabase
+-    .from("tenant_profiles")
+-    .update({
+-      budget_max,
+-      locali_min,
+-      mq_min,
+-      updated_at: new Date().toISOString(),
+-    })
+-    .eq("profile_id", user.id);
+-  if (eProfile) return { error: eProfile.message };
+-
+-  // Zone: sostituiamo tutta la lista (semplice e corretto per un set piccolo)
+-  const { error: eDelZone } = await supabase
+-    .from("tenant_zone_interesse")
+-    .delete()
+-    .eq("tenant_id", user.id);
+-  if (eDelZone) return { error: eDelZone.message };
+-
+-  if (zone.length > 0) {
+-    const { error: eInsZone } = await supabase
+-      .from("tenant_zone_interesse")
+-      .insert(zone.map((zona) => ({ tenant_id: user.id, zona })));
+-    if (eInsZone) return { error: eInsZone.message };
++    return { error: messaggioErroreVerifica("RICERCA_NON_VALIDA") };
+   }
+ 
+-  // Interessi: stessa logica, sostituiamo tutto
+-  const { error: eDelInt } = await supabase
+-    .from("tenant_interessi")
+-    .delete()
+-    .eq("tenant_id", user.id);
+-  if (eDelInt) return { error: eDelInt.message };
+-
+-  const entries = Object.entries(interessi).filter(([, peso]) => peso > 0);
+-  if (entries.length > 0) {
+-    const { error: eInsInt } = await supabase.from("tenant_interessi").insert(
+-      entries.map(([attributo_key, peso]) => ({
+-        tenant_id: user.id,
+-        attributo_key,
+-        peso,
+-      }))
+-    );
+-    if (eInsInt) return { error: eInsInt.message };
+-  }
++  const { error } = await supabase.rpc("salva_ricerca_inquilino", { p_ricerca: ricerca });
++  if (error) return { error: messaggioErroreVerifica(error.message) };
+ 
+   revalidatePath("/profilo");
+   revalidatePath("/"); // la Home ricalcola il mazzo con la ricerca nuova
+diff --git a/src/app/(app)/profilo/page.tsx b/src/app/(app)/profilo/page.tsx
+index ac34e59..2854dfc 100644
+--- a/src/app/(app)/profilo/page.tsx
++++ b/src/app/(app)/profilo/page.tsx
+@@ -5,6 +5,8 @@ import { RapportiPanel } from "@/components/RapportiPanel";
+ import { caricaRapportiMiei } from "@/lib/rapporti-server";
+ import { ProfiloClient } from "./ProfiloClient";
+ import { sezioneProfilo } from "@/lib/home";
++import { profiloRicercaDaRighe } from "@/lib/match";
++import type { Luogo } from "@/lib/luoghi";
+ import { OwnerProfiloClient } from "./OwnerProfiloClient";
+ import type { TenantProfile, OwnerProfile, Invito } from "@/lib/types";
+ 
+@@ -56,10 +58,10 @@ export default async function ProfiloPage({ searchParams }: { searchParams: Prom
+     { data: documentiRows },
+   ] = await Promise.all([
+     supabase.from("tenant_profiles").select("*").eq("profile_id", user!.id).single(),
+-    supabase.from("tenant_zone_interesse").select("zona").eq("tenant_id", user!.id),
++    supabase.from("tenant_zone_interesse").select("zona, luogo_id").eq("tenant_id", user!.id),
+     supabase
+       .from("tenant_interessi")
+-      .select("attributo_key, peso")
++      .select("attributo_key, peso, valore, necessaria")
+       .eq("tenant_id", user!.id),
+     supabase.from("recensioni").select("voto").eq("tenant_id", user!.id),
+     supabase
+@@ -76,10 +78,9 @@ export default async function ProfiloPage({ searchParams }: { searchParams: Prom
+ 
+   const rapporti = await caricaRapportiMiei(supabase, user!.id);
+ 
+-  const zoneIniziali = (zoneRows ?? []).map((r) => r.zona as string);
+-  const interessiIniziali = Object.fromEntries(
+-    (interessiRows ?? []).map((r) => [r.attributo_key as string, r.peso as number])
+-  );
++  // La ricerca com'è salvata, e i luoghi che si possono cercare (per il completamento automatico)
++  const ricerca = profiloRicercaDaRighe(tenant, zoneRows, interessiRows);
++  const { data: luoghiRighe } = await supabase.from("luoghi").select("id, livello, nome, sigla, parent_id");
+   const numeroRecensioni = recensioni?.length ?? 0;
+   const mediaRecensioni =
+     numeroRecensioni > 0
+@@ -119,8 +120,8 @@ export default async function ProfiloPage({ searchParams }: { searchParams: Prom
+           documenti={(documentiRows ?? []) as DocumentoInquilino[]}
+         />
+       }
+-      zoneIniziali={zoneIniziali}
+-      interessiIniziali={interessiIniziali}
++      ricerca={ricerca}
++      luoghi={(luoghiRighe ?? []) as Luogo[]}
+       mediaRecensioni={mediaRecensioni}
+       numeroRecensioni={numeroRecensioni}
+       consensoMarketingIniziale={profile?.consenso_marketing ?? false}
+diff --git a/src/app/globals.css b/src/app/globals.css
+index f32147c..59c4173 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -3313,3 +3313,127 @@ mark.segnaposto {
+ .pannello-prezzo .note-box b {
+   font-weight: 600;
+ }
++
++/* ---- scheda di ricerca: luoghi, intervalli e caratteristiche ---- */
++.luogo-ac {
++  position: relative;
++}
++.luogo-ac-input {
++  width: 100%;
++  padding: 12px 14px;
++  border-radius: 14px;
++  border: 1px solid rgba(16, 21, 26, 0.18);
++  background: #fff;
++  font: inherit;
++  font-size: 15px;
++  color: var(--ink);
++}
++.luogo-ac-input:focus-visible {
++  outline: 2px solid var(--moss);
++  outline-offset: 1px;
++}
++.luogo-ac-lista {
++  position: absolute;
++  z-index: 20;
++  left: 0;
++  right: 0;
++  margin: 4px 0 0;
++  padding: 4px;
++  list-style: none;
++  max-height: 260px;
++  overflow-y: auto;
++  background: #fff;
++  border: 1px solid rgba(16, 21, 26, 0.14);
++  border-radius: 14px;
++  box-shadow: 0 12px 28px rgba(16, 21, 26, 0.18);
++}
++.luogo-ac-lista li {
++  display: flex;
++  flex-direction: column;
++  padding: 9px 12px;
++  border-radius: 10px;
++  cursor: pointer;
++  color: var(--ink);
++}
++.luogo-ac-lista li span {
++  font-size: 12px;
++  color: var(--muted);
++}
++.luogo-ac-lista li.attivo {
++  background: rgba(62, 107, 87, 0.12);
++}
++.da-a {
++  display: flex;
++  gap: 14px;
++}
++.da-a > div {
++  flex: 1;
++}
++.da-a-et {
++  display: block;
++  font-size: 11px;
++  letter-spacing: 0.04em;
++  text-transform: uppercase;
++  color: var(--muted);
++  margin-bottom: 4px;
++}
++.carta-caratteristica {
++  padding: 12px 14px;
++  border-radius: 16px;
++  background: #fff;
++  border: 1px solid rgba(16, 21, 26, 0.1);
++}
++.carta-caratteristica-testa {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 10px;
++  margin-bottom: 8px;
++  color: var(--ink);
++}
++.importanza {
++  margin-top: 10px;
++}
++.piano-menu-riga {
++  display: flex;
++  gap: 12px;
++}
++.piano-menu {
++  display: flex;
++  flex-direction: column;
++  gap: 3px;
++  flex: 1;
++  font-size: 12px;
++  color: var(--body-soft);
++}
++.piano-menu select,
++.piano-menu input {
++  padding: 9px 10px;
++  border-radius: 10px;
++  border: 1px solid rgba(16, 21, 26, 0.18);
++  background: #fff;
++  font: inherit;
++  font-size: 14px;
++  color: var(--ink);
++}
++.home-intro .hi-ricerca-testo .hi-nascoste {
++  color: var(--gold);
++}
++
++/* contatori affiancati («Da» e «A»): ognuno sta nella sua metà, e un pulsante spento si vede spento */
++.da-a > div {
++  min-width: 0;
++}
++.da-a .stepper {
++  gap: 6px;
++}
++.da-a .stepper .val {
++  flex: 1;
++  min-width: 0;
++  font-size: 15px;
++}
++.stepper button:disabled,
++.chip:disabled {
++  opacity: 0.4;
++  cursor: not-allowed;
++}
+diff --git a/src/components/LuogoAutocomplete.tsx b/src/components/LuogoAutocomplete.tsx
+new file mode 100644
+index 0000000..05263aa
+--- /dev/null
++++ b/src/components/LuogoAutocomplete.tsx
+@@ -0,0 +1,119 @@
++"use client";
++
++import { useId, useMemo, useRef, useState } from "react";
++import { cercaLuoghi, etichettaLuogo, mappaLuoghi, MAX_LUOGHI_SCELTI, semplificaScelte, type Luogo } from "@/lib/luoghi";
++
++/**
++ * Si scrive il nome di una provincia, di una città o di un quartiere e compaiono i suggerimenti; scegliendo una città
++ * si scelgono anche tutti i suoi quartieri. I luoghi scelti compaiono come etichette che si tolgono con un tocco.
++ * Una casella con suggerimenti completa: frecce per scorrere, Invio per scegliere, Esc per chiudere.
++ */
++export function LuogoAutocomplete({
++  luoghi,
++  scelti,
++  onChange,
++}: {
++  luoghi: Luogo[];
++  scelti: string[];
++  onChange: (ids: string[]) => void;
++}) {
++  const idLista = useId();
++  const contenitore = useRef<HTMLDivElement>(null);
++  const [testo, setTesto] = useState("");
++  const [aperto, setAperto] = useState(false);
++  const [attivo, setAttivo] = useState(0);
++  const mappa = useMemo(() => mappaLuoghi(luoghi), [luoghi]);
++  const suggerimenti = useMemo(() => cercaLuoghi(testo, luoghi, { esclusi: scelti }), [testo, luoghi, scelti]);
++  const pieno = scelti.length >= MAX_LUOGHI_SCELTI;
++
++  function scegli(id: string) {
++    onChange(semplificaScelte([...scelti, id], mappa));
++    setTesto("");
++    setAttivo(0);
++    setAperto(false);
++  }
++
++  function tasto(e: React.KeyboardEvent<HTMLInputElement>) {
++    if (e.key === "ArrowDown" && suggerimenti.length > 0) {
++      e.preventDefault();
++      setAperto(true);
++      setAttivo((a) => (a + 1) % suggerimenti.length);
++    } else if (e.key === "ArrowUp" && suggerimenti.length > 0) {
++      e.preventDefault();
++      setAttivo((a) => (a - 1 + suggerimenti.length) % suggerimenti.length);
++    } else if (e.key === "Enter") {
++      // Invio sceglie il suggerimento e basta: non deve inviare il modulo
++      e.preventDefault();
++      if (aperto && suggerimenti[attivo]) scegli(suggerimenti[attivo].luogo.id);
++    } else if (e.key === "Escape") {
++      if (aperto) {
++        e.stopPropagation();
++        setAperto(false);
++      }
++    }
++  }
++
++  return (
++    <div
++      ref={contenitore}
++      className="luogo-ac"
++      onBlur={(e) => {
++        if (!contenitore.current?.contains(e.relatedTarget as Node | null)) setAperto(false);
++      }}
++    >
++      {scelti.length > 0 && (
++        <div className="chip-row" style={{ marginBottom: 8 }}>
++          {scelti.map((id) => {
++            const l = mappa.get(id);
++            if (!l) return null;
++            const etichetta = etichettaLuogo(l, mappa);
++            return (
++              <button key={id} type="button" className="chip on" aria-label={`Togli ${etichetta}`} onClick={() => onChange(scelti.filter((x) => x !== id))}>
++                {etichetta} ×
++              </button>
++            );
++          })}
++        </div>
++      )}
++
++      <input
++        type="text"
++        role="combobox"
++        aria-label="Dove cerchi: provincia, città o quartiere"
++        aria-expanded={aperto && suggerimenti.length > 0}
++        aria-controls={idLista}
++        aria-autocomplete="list"
++        aria-activedescendant={aperto && suggerimenti[attivo] ? `${idLista}-${attivo}` : undefined}
++        autoComplete="off"
++        disabled={pieno}
++        placeholder={pieno ? `Hai scelto ${MAX_LUOGHI_SCELTI} luoghi` : "Scrivi una città o un quartiere"}
++        value={testo}
++        maxLength={60}
++        className="luogo-ac-input"
++        onChange={(e) => {
++          setTesto(e.target.value);
++          setAttivo(0);
++          setAperto(true);
++        }}
++        onFocus={() => testo && setAperto(true)}
++        onKeyDown={tasto}
++      />
++
++      {aperto && suggerimenti.length > 0 && (
++        <ul id={idLista} role="listbox" aria-label="Suggerimenti" className="luogo-ac-lista" onMouseDown={(e) => e.preventDefault()}>
++          {suggerimenti.map((s, i) => (
++            <li key={s.luogo.id} id={`${idLista}-${i}`} role="option" aria-selected={i === attivo} className={i === attivo ? "attivo" : ""} onClick={() => scegli(s.luogo.id)} onMouseEnter={() => setAttivo(i)}>
++              <b>{s.luogo.livello === "provincia" ? `Provincia di ${s.luogo.nome}` : s.luogo.nome}</b>
++              <span>{s.percorso}</span>
++            </li>
++          ))}
++        </ul>
++      )}
++      {aperto && testo.trim() !== "" && suggerimenti.length === 0 && (
++        <p className="field-note" style={{ margin: "6px 0 0" }}>
++          Nessun risultato. Per ora ci sono Milano e Bergamo.
++        </p>
++      )}
++    </div>
++  );
++}
+diff --git a/src/components/RicercaSheet.tsx b/src/components/RicercaSheet.tsx
+index 07dc8fb..d25a8d6 100644
+--- a/src/components/RicercaSheet.tsx
++++ b/src/components/RicercaSheet.tsx
+@@ -1,40 +1,158 @@
+ "use client";
+ 
+-import { useActionState, useEffect, useRef, useState } from "react";
++import { useActionState, useEffect, useMemo, useRef, useState } from "react";
+ import { Sheet } from "@/components/Sheet";
+-import { ATTR_VOCAB, ZONE_MILANO } from "@/lib/constants";
+-import type { TenantProfile } from "@/lib/types";
++import { ATTR_VOCAB, RISCALDAMENTI, TIPI_CONTRATTO } from "@/lib/constants";
++import { LuogoAutocomplete } from "@/components/LuogoAutocomplete";
+ import { updateRicerca, type SaveState } from "@/app/(app)/profilo/actions";
+ import { Chip } from "@/components/ui/Chip";
+ import { Field } from "@/components/ui/Field";
+-import { Stepper } from "@/components/ui/Stepper";
+ import { SaveButton } from "@/components/ui/SaveButton";
++import { StepperOpzionale } from "@/components/ui/StepperOpzionale";
++import type { Luogo } from "@/lib/luoghi";
++import { etichettaCriterio } from "@/lib/match/criteri-ricerca";
++import type { CriterioRicerca, ProfiloRicerca } from "@/lib/match/tipi";
++import {
++  BUDGET,
++  LOCALI,
++  METRATURA,
++  OPZIONI_CLASSE,
++  OPZIONI_PIANO,
++  alternaTipo,
++  aggiungi,
++  disponibili,
++  inElenco,
++  modifica,
++  primoErrore,
++  ricercaPerSalvataggio,
++  rimuovi,
++  statoDaRicerca,
++  testoBudget,
++  type StatoRicerca,
++} from "@/lib/ricerca-form";
++
++const oggiIso = () => new Date().toISOString().slice(0, 10);
++
++/** Necessaria (se la casa non ce l'ha sparisce) oppure opzionale (pesa sul punteggio, da 1 a 10). */
++function Importanza({ nome, c, onChange }: { nome: string; c: CriterioRicerca; onChange: (cambio: Partial<CriterioRicerca>) => void }) {
++  return (
++    <div className="importanza">
++      <div className="chip-row" role="group" aria-label={`Quanto conta: ${nome}`}>
++        <Chip label="Opzionale" active={!c.necessaria} onClick={() => onChange({ necessaria: false })} />
++        <Chip label="Necessaria" active={c.necessaria} onClick={() => onChange({ necessaria: true })} />
++      </div>
++      {c.necessaria ? (
++        <p className="field-note" style={{ margin: "4px 0 0" }}>
++          Se una casa non ce l&apos;ha, non la vedi.
++        </p>
++      ) : (
++        <div style={{ marginTop: 6 }}>
++          <div className="pref-label" style={{ marginBottom: 2 }}>
++            <span>Importanza · {c.peso}/10</span>
++          </div>
++          <input type="range" min={1} max={10} value={c.peso} aria-label={`Importanza di ${nome}`} onChange={(e) => onChange({ peso: Number(e.target.value) })} className="w-full" />
++        </div>
++      )}
++    </div>
++  );
++}
++
++/** Il controllo del valore di una caratteristica: dipende da quale è. I sì/no non ne hanno. */
++function ValoreCaratteristica({ c, oggi, onChange }: { c: CriterioRicerca; oggi: string; onChange: (valore: CriterioRicerca["valore"]) => void }) {
++  const v = c.valore ?? {};
++  const tre = new Date(`${oggi}T00:00:00Z`);
++  tre.setUTCFullYear(tre.getUTCFullYear() + 3);
++  switch (c.chiave) {
++    case "bagni":
++      return <StepperOpzionale etichetta="Bagni minimi" value={v.min ?? 1} onChange={(n) => onChange({ min: Math.max(1, n) })} min={1} max={6} />;
++    case "piano": {
++      const menu = (cosa: "min" | "max", nome: string) => (
++        <label className="piano-menu">
++          <span>{nome}</span>
++          <select
++            value={v[cosa] ?? ""}
++            onChange={(e) => onChange({ min: v.min ?? null, max: v.max ?? null, [cosa]: e.target.value === "" ? null : Number(e.target.value) })}
++          >
++            <option value="">Qualsiasi</option>
++            {OPZIONI_PIANO.map((o) => (
++              <option key={o.valore} value={o.valore}>
++                {o.etichetta}
++              </option>
++            ))}
++          </select>
++        </label>
++      );
++      return (
++        <div className="piano-menu-riga">
++          {menu("min", "Dal piano")}
++          {menu("max", "Fino al piano")}
++        </div>
++      );
++    }
++    case "riscaldamento":
++      return (
++        <div className="chip-row" role="group" aria-label="Tipo di riscaldamento">
++          {RISCALDAMENTI.map((r) => {
++            const tipi = v.tipi ?? [];
++            const attivo = tipi.includes(r.id);
++            return (
++              <Chip
++                key={r.id}
++                label={r.label}
++                active={attivo}
++                // l'ultimo tipo non si toglie: per non volerlo si toglie la caratteristica
++                onClick={() => (attivo && tipi.length === 1 ? undefined : onChange({ tipi: attivo ? tipi.filter((t) => t !== r.id) : [...tipi, r.id] }))}
++              />
++            );
++          })}
++        </div>
++      );
++    case "ingresso":
++      return (
++        <label className="piano-menu">
++          <span>Disponibile entro il</span>
++          <input type="date" min={oggi} max={tre.toISOString().slice(0, 10)} value={v.entro ?? ""} onChange={(e) => e.target.value && onChange({ entro: e.target.value })} />
++        </label>
++      );
++    case "classeEnergetica":
++      return (
++        <label className="piano-menu">
++          <span>Almeno la classe</span>
++          <select value={v.classe ?? "C"} onChange={(e) => onChange({ classe: e.target.value })}>
++            {OPZIONI_CLASSE.map((o) => (
++              <option key={o.classe} value={o.classe}>
++                {o.etichetta}
++              </option>
++            ))}
++          </select>
++        </label>
++      );
++    default:
++      return null;
++  }
++}
+ 
+ /**
+- * La scheda «La tua ricerca»: budget, zone, taglio e caratteristiche. Si apre dal Profilo e dalla Home.
++ * La scheda «La tua ricerca»: cosa cerchi, dove, budget, locali, metratura, tipo di contratto e le caratteristiche (ognuna
++ * necessaria o opzionale). Si apre dal Profilo e dalla Home. Salva TUTTO in una volta.
+  */
+ export function RicercaSheet({
+   open,
+   onClose,
+-  tenant,
+-  zoneIniziali,
+-  interessiIniziali,
++  ricerca,
++  luoghi,
+   onSalvata,
+ }: {
+   open: boolean;
+   onClose: () => void;
+-  tenant: Pick<TenantProfile, "budget_max" | "locali_min" | "mq_min">;
+-  zoneIniziali: string[];
+-  interessiIniziali: Record<string, number>;
++  ricerca: ProfiloRicerca;
++  luoghi: Luogo[];
+   /** chiamata quando il salvataggio è riuscito (la Home la usa per ricominciare il mazzo) */
+   onSalvata?: () => void;
+ }) {
+-  const [state, formAction, pending] = useActionState<SaveState, FormData>(
+-    updateRicerca,
+-    null
+-  );
++  const [state, formAction, pending] = useActionState<SaveState, FormData>(updateRicerca, null);
+ 
+-  // Un salvataggio è FINITO (da «in corso» a «non più in corso") ed è andato bene: lo si comunica una volta sola.
++  // Un salvataggio è FINITO (da «in corso» a «non più in corso») ed è andato bene: lo si comunica una volta sola.
+   // Non si confronta l'oggetto dello stato con quello di prima: due risposte possono essere lo stesso oggetto.
+   const eraInCorso = useRef(false);
+   useEffect(() => {
+@@ -48,122 +166,153 @@ export function RicercaSheet({
+     }
+   }, [pending, state, onSalvata]);
+ 
+-  const [budget, setBudget] = useState(tenant.budget_max ?? 1300);
+-  const [locali, setLocali] = useState(tenant.locali_min ?? 2);
+-  const [mq, setMq] = useState(tenant.mq_min ?? 50);
+-  const [zone, setZone] = useState<string[]>(zoneIniziali);
+-  const [interessi, setInteressi] =
+-    useState<Record<string, number>>(interessiIniziali);
+-
+-  function toggleZona(z: string) {
+-    setZone((prev) =>
+-      prev.includes(z) ? prev.filter((x) => x !== z) : [...prev, z]
+-    );
+-  }
+-
+-  function toggleInteresse(key: string) {
+-    setInteressi((prev) => {
+-      const next = { ...prev };
+-      if (next[key]) delete next[key];
+-      else next[key] = 5;
+-      return next;
+-    });
+-  }
++  const [s, setS] = useState<StatoRicerca>(() => statoDaRicerca(ricerca));
++  const [oggi] = useState(oggiIso);
++  const errore = useMemo(() => primoErrore(s), [s]);
++  const cambia = (parziale: Partial<StatoRicerca>) => setS((prec) => ({ ...prec, ...parziale }));
++  const contratto = s.criteri.find((c) => c.chiave === "contratto");
++  const inLista = s.criteri.filter(inElenco);
++  const daAggiungere = disponibili(s.criteri);
++  const nomeCaratteristica = (c: CriterioRicerca) => ATTR_VOCAB.find((a) => a.key === c.chiave)?.label ?? etichettaCriterio(c);
+ 
+   return (
+     <Sheet open={open} onClose={onClose} title="La tua ricerca">
+-      <p className="sheet-sub">
+-        Le tue richieste possono cambiare nel tempo: aggiornale qui quando
+-        vuoi, il % di match si ricalcola subito.
+-      </p>
++      <p className="sheet-sub">Le tue richieste possono cambiare nel tempo: aggiornale qui quando vuoi, il % di match si ricalcola subito.</p>
+       <form action={formAction}>
+-        <input type="hidden" name="budget_max" value={budget} />
+-        <input type="hidden" name="locali_min" value={locali} />
+-        <input type="hidden" name="mq_min" value={mq} />
+-        <input type="hidden" name="zone" value={JSON.stringify(zone)} />
+-        <input
+-          type="hidden"
+-          name="interessi"
+-          value={JSON.stringify(interessi)}
+-        />
+-
+-        <Field label={`Budget massimo · €${budget.toLocaleString("it-IT")}`}>
++        <input type="hidden" name="ricerca" value={JSON.stringify(ricercaPerSalvataggio(s))} />
++
++        <Field label="Cosa cerchi">
++          <div className="chip-row" role="group" aria-label="Cosa cerchi">
++            <Chip label="Appartamento" active={s.tipologia === "appartamento"} onClick={() => cambia({ tipologia: "appartamento" })} />
++            <Chip label="Villa" active={s.tipologia === "villa"} onClick={() => cambia({ tipologia: "villa" })} />
++            <button type="button" className="chip" disabled aria-label="Posto letto, presto disponibile">
++              Posto letto · presto
++            </button>
++          </div>
++        </Field>
++
++        <Field label="Dove">
++          <LuogoAutocomplete luoghi={luoghi} scelti={s.luoghi} onChange={(ids) => cambia({ luoghi: ids })} />
++          <p className="field-note" style={{ margin: "6px 0 0" }}>
++            {s.luoghi.length === 0 ? "Senza luoghi cerchi ovunque." : "Scegliendo una città scegli tutti i suoi quartieri."}
++          </p>
++        </Field>
++
++        <Field label={`Budget · ${testoBudget(s.budgetMin, s.budgetMax)}`}>
++          <div className="pref-label" style={{ marginBottom: 2 }}>
++            <span>Minimo</span>
++          </div>
++          <input
++            type="range"
++            min={BUDGET.min}
++            max={BUDGET.max}
++            step={BUDGET.step}
++            value={s.budgetMin}
++            aria-label="Budget minimo"
++            onChange={(e) => {
++              const v = Number(e.target.value);
++              cambia({ budgetMin: v, budgetMax: Math.max(v, s.budgetMax) });
++            }}
++            className="w-full"
++          />
++          <div className="pref-label" style={{ margin: "8px 0 2px" }}>
++            <span>Massimo</span>
++          </div>
+           <input
+             type="range"
+-            min={900}
+-            max={2200}
+-            step={50}
+-            value={budget}
+-            onChange={(e) => setBudget(Number(e.target.value))}
++            min={BUDGET.min}
++            max={BUDGET.max}
++            step={BUDGET.step}
++            value={s.budgetMax}
++            aria-label="Budget massimo"
++            onChange={(e) => {
++              const v = Number(e.target.value);
++              cambia({ budgetMax: v, budgetMin: Math.min(v, s.budgetMin) });
++            }}
+             className="w-full"
+           />
+         </Field>
+ 
+-        <Field label="Zone preferite">
+-          <div className="chip-row">
+-            {ZONE_MILANO.map((z) => (
+-              <Chip
+-                key={z}
+-                label={z.split(",")[0]}
+-                active={zone.includes(z)}
+-                onClick={() => toggleZona(z)}
+-              />
+-            ))}
++        <Field label="Locali">
++          <div className="da-a">
++            <div>
++              <span className="da-a-et">Da</span>
++              <StepperOpzionale etichetta="Locali minimi" value={s.localiMin} onChange={(v) => cambia({ localiMin: v, localiMax: s.localiMax > 0 ? Math.max(v, s.localiMax) : 0 })} min={1} max={LOCALI.max} avvio={2} />
++            </div>
++            <div>
++              <span className="da-a-et">A</span>
++              <StepperOpzionale etichetta="Locali massimi" value={s.localiMax} onChange={(v) => cambia({ localiMax: v, localiMin: v > 0 && s.localiMin > 0 ? Math.min(v, s.localiMin) : s.localiMin })} min={1} max={LOCALI.max} avvio={Math.max(3, s.localiMin)} />
++            </div>
+           </div>
+         </Field>
+ 
+-        <Field label="Locali minimi">
+-          <Stepper value={locali} onChange={setLocali} min={1} max={6} />
++        <Field label="Metratura">
++          <div className="da-a">
++            <div>
++              <span className="da-a-et">Da</span>
++              <StepperOpzionale etichetta="Metratura minima" value={s.mqMin} onChange={(v) => cambia({ mqMin: v, mqMax: s.mqMax > 0 ? Math.max(v, s.mqMax) : 0 })} min={METRATURA.min} max={METRATURA.max} step={METRATURA.step} suffix=" m²" avvio={50} />
++            </div>
++            <div>
++              <span className="da-a-et">A</span>
++              <StepperOpzionale etichetta="Metratura massima" value={s.mqMax} onChange={(v) => cambia({ mqMax: v, mqMin: v > 0 && s.mqMin > 0 ? Math.min(v, s.mqMin) : s.mqMin })} min={METRATURA.min} max={METRATURA.max} step={METRATURA.step} suffix=" m²" avvio={Math.max(80, s.mqMin)} />
++            </div>
++          </div>
+         </Field>
+ 
+-        <Field label="Metratura minima">
+-          <Stepper value={mq} onChange={setMq} min={20} max={160} step={5} suffix=" m²" />
++        <Field label="Tipo di contratto">
++          <div className="chip-row" role="group" aria-label="Tipo di contratto">
++            {TIPI_CONTRATTO.map((t) => (
++              <Chip key={t.id} label={t.label} active={!!contratto?.valore?.tipi?.includes(t.id)} onClick={() => cambia({ criteri: alternaTipo(s.criteri, "contratto", t.id) })} />
++            ))}
++          </div>
++          {contratto ? (
++            <Importanza nome="il tipo di contratto" c={contratto} onChange={(cm) => cambia({ criteri: modifica(s.criteri, "contratto", cm) })} />
++          ) : (
++            <p className="field-note" style={{ margin: "6px 0 0" }}>
++              Senza una scelta vanno bene tutti.
++            </p>
++          )}
+         </Field>
+ 
+         <Field label="Caratteristiche che ti interessano">
+-          <div className="chip-row" style={{ marginBottom: 14 }}>
+-            {ATTR_VOCAB.map((a) => (
+-              <Chip
+-                key={a.key}
+-                label={a.label}
+-                active={!!interessi[a.key]}
+-                onClick={() => toggleInteresse(a.key)}
+-              />
+-            ))}
+-          </div>
+-          <div className="flex flex-col gap-3">
+-            {Object.entries(interessi).map(([key, peso]) => {
+-              const attr = ATTR_VOCAB.find((a) => a.key === key);
+-              if (!attr) return null;
+-              return (
+-                <div key={key}>
+-                  <div className="pref-label" style={{ marginBottom: 4 }}>
+-                    <span>
+-                      {attr.label} · {peso}/10
+-                    </span>
++          {inLista.length > 0 && (
++            <div className="flex flex-col gap-3" style={{ marginBottom: 12 }}>
++              {inLista.map((c) => (
++                <div key={c.chiave} className="carta-caratteristica">
++                  <div className="carta-caratteristica-testa">
++                    <b>{nomeCaratteristica(c)}</b>
++                    <button type="button" className="redo-link" aria-label={`Togli ${nomeCaratteristica(c)}`} onClick={() => cambia({ criteri: rimuovi(s.criteri, c.chiave) })}>
++                      Togli
++                    </button>
+                   </div>
+-                  <input
+-                    type="range"
+-                    min={1}
+-                    max={10}
+-                    value={peso}
+-                    onChange={(e) =>
+-                      setInteressi((prev) => ({
+-                        ...prev,
+-                        [key]: Number(e.target.value),
+-                      }))
+-                    }
+-                    className="w-full"
+-                  />
++                  <ValoreCaratteristica c={c} oggi={oggi} onChange={(valore) => cambia({ criteri: modifica(s.criteri, c.chiave, { valore }) })} />
++                  <Importanza nome={nomeCaratteristica(c)} c={c} onChange={(cm) => cambia({ criteri: modifica(s.criteri, c.chiave, cm) })} />
+                 </div>
+-              );
+-            })}
+-          </div>
++              ))}
++            </div>
++          )}
++          {daAggiungere.length > 0 && (
++            <>
++              <div className="pref-label" style={{ marginBottom: 6 }}>
++                <span>Aggiungi</span>
++              </div>
++              <div className="chip-row" role="group" aria-label="Caratteristiche da aggiungere">
++                {daAggiungere.map((c) => (
++                  <Chip key={c.chiave} label={`+ ${c.etichetta}`} active={false} onClick={() => cambia({ criteri: aggiungi(s.criteri, c.chiave, oggi) })} />
++                ))}
++              </div>
++            </>
++          )}
+         </Field>
+ 
++        {errore && (
++          <p className="note-error" role="alert">
++            {errore}
++          </p>
++        )}
+         {state?.error && <p className="note-error">{state.error}</p>}
+         {state?.ok && <p className="note-saved">Salvato — puoi chiudere.</p>}
+-        <SaveButton pending={pending} />
++        <SaveButton pending={pending} disabled={errore !== null} />
+       </form>
+     </Sheet>
+   );
+diff --git a/src/components/ui/Chip.tsx b/src/components/ui/Chip.tsx
+index ea49ca2..3e5e0ac 100644
+--- a/src/components/ui/Chip.tsx
++++ b/src/components/ui/Chip.tsx
+@@ -11,6 +11,7 @@ export function Chip({
+     <button
+       type="button"
+       onClick={onClick}
++      aria-pressed={active}
+       className={`chip ${active ? "on" : ""}`}
+     >
+       {label}
+diff --git a/src/components/ui/SaveButton.tsx b/src/components/ui/SaveButton.tsx
+index 68e8e4a..16e1275 100644
+--- a/src/components/ui/SaveButton.tsx
++++ b/src/components/ui/SaveButton.tsx
+@@ -1,8 +1,8 @@
+-export function SaveButton({ pending }: { pending: boolean }) {
++export function SaveButton({ pending, disabled = false }: { pending: boolean; disabled?: boolean }) {
+   return (
+     <button
+       type="submit"
+-      disabled={pending}
++      disabled={pending || disabled}
+       className="opp-cta"
+       style={{ marginTop: 6 }}
+     >
+diff --git a/src/components/ui/StepperOpzionale.tsx b/src/components/ui/StepperOpzionale.tsx
+new file mode 100644
+index 0000000..3239512
+--- /dev/null
++++ b/src/components/ui/StepperOpzionale.tsx
+@@ -0,0 +1,46 @@
++/**
++ * Un contatore con − e +, che può anche stare su «Qualsiasi» (valore 0). Dal valore minimo, − torna a «Qualsiasi»;
++ * da «Qualsiasi», + parte da `avvio`.
++ */
++export function StepperOpzionale({
++  etichetta,
++  value,
++  onChange,
++  min,
++  max,
++  step = 1,
++  suffix = "",
++  avvio,
++  vuoto = "Qualsiasi",
++}: {
++  /** per chi usa un lettore di schermo: «Locali minimi» */
++  etichetta: string;
++  value: number;
++  onChange: (v: number) => void;
++  min: number;
++  max: number;
++  step?: number;
++  suffix?: string;
++  avvio?: number;
++  vuoto?: string;
++}) {
++  const meno = () => {
++    if (value === 0) return;
++    const prossimo = value - step;
++    onChange(prossimo < min ? 0 : prossimo);
++  };
++  const piu = () => onChange(value === 0 ? (avvio ?? min) : Math.min(max, value + step));
++  return (
++    <div className="stepper" role="group" aria-label={etichetta}>
++      <button type="button" onClick={meno} disabled={value === 0} aria-label={`${etichetta}: diminuisci`}>
++        −
++      </button>
++      <div className="val" aria-live="polite">
++        {value === 0 ? vuoto : `${value}${suffix}`}
++      </div>
++      <button type="button" onClick={piu} disabled={value >= max} aria-label={`${etichetta}: aumenta`}>
++        +
++      </button>
++    </div>
++  );
++}
+diff --git a/src/content/informativa.ts b/src/content/informativa.ts
+index 059fc0c..e334899 100644
+--- a/src/content/informativa.ts
++++ b/src/content/informativa.ts
+@@ -28,7 +28,7 @@ export const INFORMATIVA = {
+    * controllo che fa il database (migrazione 0017): un test fallisce se
+    * questa stringa non lo supera.
+    */
+-  versione: "2026-10-provvisoria-14",
++  versione: "2026-10-provvisoria-15",
+   /**
+    * Versioni precedenti che chi le ha accettate NON deve riaccettare.
+    *
+@@ -56,6 +56,7 @@ export const INFORMATIVA = {
+     "2026-10-provvisoria-11",
+     "2026-10-provvisoria-12",
+     "2026-10-provvisoria-13",
++    "2026-10-provvisoria-14",
+   ] as readonly string[],
+   provvisoria: true,
+   titolo: "Informativa sulla privacy",
+@@ -79,7 +80,7 @@ export const INFORMATIVA = {
+       titolo: "Quali dati raccogliamo",
+       elenco: [
+         "Account: email, password (conservata come impronta, non in chiaro), nome, cognome e ruolo, inquilino o proprietario.",
+-        "Se sei inquilino: lavoro, reddito tuo e del tuo nucleo, garante, fideiussione, protesti (li dichiari tu e non vengono verificati), animali, composizione del nucleo, numero di figli, presentazione, foto del profilo, le tue preferenze di ricerca (budget, zone, locali, metri, caratteristiche) e gli annunci che salvi tra i preferiti o che scarti.",
++        "Se sei inquilino: lavoro, reddito tuo e del tuo nucleo, garante, fideiussione, protesti (li dichiari tu e non vengono verificati), animali, composizione del nucleo, numero di figli, presentazione, foto del profilo, le tue preferenze di ricerca (budget, zone, locali, metri, tipo di casa e di contratto, caratteristiche e se per te sono necessarie) e gli annunci che salvi tra i preferiti o che scarti.",
+         "Se sei proprietario: tipo di proprietario, numero di immobili, obiettivo; gli annunci con titolo, descrizione, zona, prezzo, caratteristiche, classe energetica e foto; l'indirizzo preciso, se lo indichi, e la posizione sulla mappa che se ne ricava; i criteri che chiedi ai candidati.",
+         "Per le verifiche: il documento d'identità e la prova di proprietà dell'immobile (proprietari); se sei inquilino e chiedi di verificare il reddito, un documento d'identità e una prova del reddito (una busta paga, la CU o la dichiarazione dei redditi); e i contratti di affitto caricati per dichiarare un affitto. Non chiediamo lo stato di famiglia.",
+         "Mentre usi l'app: candidature, messaggi, visite (giorno e ora, e chi le ha prenotate), contratti, recensioni, richieste di conferma di un affitto e inviti. Inoltre le notifiche sulle novità del tuo account, e le email che le riassumono (la tua impostazione, la data dell'ultimo invio e un registro di data, esito e numero di notifiche, senza contenuto né indirizzi, per 90 giorni) (per esempio l'esito di una verifica o la risposta a una candidatura): contengono il tipo di evento e, al massimo, il titolo di un annuncio e, per le visite, il giorno e l'ora; mai nomi di persone.",
+diff --git a/src/lib/home.ts b/src/lib/home.ts
+index d4c405d..16b29bf 100644
+--- a/src/lib/home.ts
++++ b/src/lib/home.ts
+@@ -4,7 +4,8 @@
+  */
+ import type { ProfiloRicerca } from "@/lib/match";
+ 
+-type RicercaMinima = Pick<ProfiloRicerca, "budgetMax" | "localiMin" | "mqMin" | "zone">;
++type RicercaMinima = Pick<ProfiloRicerca, "budgetMax" | "localiMin" | "mqMin" | "zone"> &
++  Partial<Pick<ProfiloRicerca, "budgetMin" | "localiMax" | "mqMax" | "tipologia" | "criteri">>;
+ 
+ /** Le sezioni del Profilo che si possono aprire da un collegamento (?apri=...). */
+ export const SEZIONI_PROFILO_APRIBILI = ["affidabilita", "dati", "ricerca", "invito", "affitti", "verifica"] as const;
+@@ -23,14 +24,30 @@ export function sezionePerVoce(id: string): SezioneProfilo {
+   return "dati";
+ }
+ 
+-/** La ricerca in poche parole: budget, taglio e zone. Vuota se non c'è nessun criterio. */
++/** Un intervallo in poche parole: «Da 2 locali», «2–3 locali», «Fino a 3 locali». */
++function intervallo(min: number | null | undefined, max: number | null | undefined, unita: (n: number) => string, tra: (a: number, b: number) => string): string | null {
++  if (min && max) return min === max ? unita(min) : tra(min, max);
++  if (min) return `Da ${unita(min)}`;
++  if (max) return `Fino a ${unita(max)}`;
++  return null;
++}
++
++/** La ricerca in poche parole: tipologia, budget, taglio, zone e quante caratteristiche sono necessarie. Vuota senza criteri. */
+ export function vociRicerca(p: RicercaMinima): string[] {
+   const voci: string[] = [];
+-  if (p.budgetMax) voci.push(`Fino a €${p.budgetMax.toLocaleString("it-IT")}`);
+-  if (p.localiMin) voci.push(p.localiMin === 1 ? "Da 1 locale" : `Da ${p.localiMin} locali`);
+-  if (p.mqMin) voci.push(`Da ${p.mqMin} m²`);
++  const e = (n: number) => `€${n.toLocaleString("it-IT")}`;
++  if (p.tipologia === "villa") voci.push("Villa");
++  if (p.budgetMin && p.budgetMax) voci.push(`${e(p.budgetMin)} – ${e(p.budgetMax)}`);
++  else if (p.budgetMax) voci.push(`Fino a ${e(p.budgetMax)}`);
++  else if (p.budgetMin) voci.push(`Da ${e(p.budgetMin)}`);
++  const locali = intervallo(p.localiMin, p.localiMax, (n) => (n === 1 ? "1 locale" : `${n} locali`), (a, b) => `${a}–${b} locali`);
++  if (locali) voci.push(locali);
++  const mq = intervallo(p.mqMin, p.mqMax, (n) => `${n} m²`, (a, b) => `${a}–${b} m²`);
++  if (mq) voci.push(mq);
+   const zone = [...new Set((p.zone ?? []).map((z) => z.split(",")[0].trim()).filter(Boolean))];
+   if (zone.length > 0) voci.push(zone.length <= 3 ? zone.join(", ") : `${zone.slice(0, 2).join(", ")} +${zone.length - 2}`);
++  const necessarie = (p.criteri ?? []).filter((c) => c.necessaria).length;
++  if (necessarie > 0) voci.push(necessarie === 1 ? "1 necessaria" : `${necessarie} necessarie`);
+   return voci;
+ }
+ 
+@@ -38,9 +55,24 @@ export function vociRicerca(p: RicercaMinima): string[] {
+  * Cambia se cambia un parametro della ricerca (e non per l'ordine delle zone). La Home congela il mazzo alla
+  * prima visualizzazione: quando questa chiave cambia, il mazzo si ricomincia con quello nuovo.
+  */
+-export function chiaveRicerca(p: Pick<ProfiloRicerca, "budgetMax" | "localiMin" | "mqMin" | "zone" | "interessi">): string {
++export function chiaveRicerca(
++  p: Pick<ProfiloRicerca, "budgetMax" | "localiMin" | "mqMin" | "zone" | "interessi"> & Partial<Pick<ProfiloRicerca, "budgetMin" | "localiMax" | "mqMax" | "tipologia" | "luoghi" | "criteri">>
++): string {
+   const interessi = Object.entries(p.interessi ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+-  return JSON.stringify([p.budgetMax ?? null, p.localiMin ?? null, p.mqMin ?? null, [...new Set(p.zone ?? [])].sort(), interessi]);
++  const criteri = [...(p.criteri ?? [])].sort((a, b) => (a.chiave < b.chiave ? -1 : a.chiave > b.chiave ? 1 : 0));
++  return JSON.stringify([
++    p.budgetMax ?? null,
++    p.localiMin ?? null,
++    p.mqMin ?? null,
++    [...new Set(p.zone ?? [])].sort(),
++    interessi,
++    p.budgetMin ?? null,
++    p.localiMax ?? null,
++    p.mqMax ?? null,
++    p.tipologia ?? null,
++    [...new Set(p.luoghi ?? [])].sort(),
++    criteri,
++  ]);
+ }
+ 
+ /** Il testo grande e quello piccolo del pannello sulle case. */
+@@ -61,3 +93,9 @@ export function conteggioCase(i: { mostraMatch: boolean; inRicerca: number; oltr
+ export function suggerimentoCard(numeroFoto: number): string {
+   return numeroFoto > 1 ? "Tocca ai lati per le foto" : "Trascina per scegliere";
+ }
++
++/** «3 case nascoste: non hanno le caratteristiche necessarie». `null` se non ce ne sono. */
++export function testoNascoste(n: number): string | null {
++  if (!Number.isFinite(n) || n <= 0) return null;
++  return n === 1 ? "1 casa nascosta: non ha le caratteristiche necessarie" : `${n} case nascoste: non hanno le caratteristiche necessarie`;
++}
+diff --git a/src/lib/match/mazzo.ts b/src/lib/match/mazzo.ts
+index 26df73b..95fecb4 100644
+--- a/src/lib/match/mazzo.ts
++++ b/src/lib/match/mazzo.ts
+@@ -99,6 +99,8 @@ export type Mazzo<T> = {
+   inRicerca: number;
+   /** annunci tolti perché oltre la tolleranza sul budget, o per un criterio necessario, o per la tipologia */
+   esclusi: number;
++  /** di quelli, quanti sono oltre la tolleranza sul budget (il numero che la Home dice «oltre il 10% del tuo budget») */
++  esclusiPerBudget: number;
+   /** di quelli, quanti non rispettano una caratteristica NECESSARIA (la Home lo dice) */
+   nascostiPerNecessarie: number;
+ };
+@@ -144,6 +146,7 @@ export function preparaMazzo<T extends AnnuncioPerMatch>(
+     mazzo,
+     inRicerca: mazzo.filter((v) => v.match.fascia === "in_ricerca").length,
+     esclusi: voci.length - mazzo.length,
++    esclusiPerBudget: voci.filter((v) => v.match.fascia === "escluso" && v.match.motiviEsclusione.includes("budget")).length,
+     nascostiPerNecessarie: voci.filter((v) => v.match.fascia === "escluso" && v.match.motiviEsclusione.includes("necessaria")).length,
+   };
+ }
+diff --git a/src/lib/ricerca-form.ts b/src/lib/ricerca-form.ts
+new file mode 100644
+index 0000000..1f4d627
+--- /dev/null
++++ b/src/lib/ricerca-form.ts
+@@ -0,0 +1,173 @@
++/**
++ * La scheda di ricerca: dallo stato salvato allo stato del modulo, e da questo a ciò che si manda al database.
++ * Logica pura, senza rete né interfaccia, così si prova a fondo.
++ *
++ * Nel modulo i valori «nessun limite» sono numeri speciali (0 = qualsiasi, e il massimo del cursore del budget =
++ * senza tetto): rendono semplici i controlli. Al salvataggio diventano `null`.
++ */
++import { ATTR_VOCAB, TIPI_CONTRATTO } from "./constants";
++import { CLASSI_ENERGETICHE } from "./annunci/energia";
++import { haCriteriDiRicerca } from "./match/mazzo";
++import {
++  CHIAVI_CON_VALORE,
++  ETICHETTE_CON_VALORE,
++  criteriDaInteressi,
++  haValore,
++  normalizzaCriteriRicerca,
++  valoreValido,
++} from "./match/criteri-ricerca";
++import type { CriterioRicerca, ProfiloRicerca, ValoreCriterio } from "./match/tipi";
++
++export const BUDGET = { min: 0, max: 3000, step: 50, predefinito: 1300 } as const;
++export const LOCALI = { max: 10 } as const;
++export const METRATURA = { min: 20, max: 300, step: 5 } as const;
++export const IMPORTANZA_PREDEFINITA = 5;
++
++export type StatoRicerca = {
++  tipologia: "appartamento" | "villa";
++  /** 0 = nessun minimo */
++  budgetMin: number;
++  /** BUDGET.max = senza tetto */
++  budgetMax: number;
++  /** 0 = qualsiasi, per tutti e quattro */
++  localiMin: number;
++  localiMax: number;
++  mqMin: number;
++  mqMax: number;
++  luoghi: string[];
++  criteri: CriterioRicerca[];
++};
++
++/** Dalla ricerca salvata allo stato del modulo. Senza nessun criterio parte da un budget di 1300, come sempre. */
++export function statoDaRicerca(r: ProfiloRicerca): StatoRicerca {
++  const ha = haCriteriDiRicerca(r);
++  return {
++    tipologia: r.tipologia === "villa" ? "villa" : "appartamento",
++    budgetMin: r.budgetMin ?? 0,
++    budgetMax: r.budgetMax ?? (ha ? BUDGET.max : BUDGET.predefinito),
++    localiMin: r.localiMin ?? 0,
++    localiMax: r.localiMax ?? 0,
++    mqMin: r.mqMin ?? 0,
++    mqMax: r.mqMax ?? 0,
++    luoghi: [...(r.luoghi ?? [])],
++    criteri: normalizzaCriteriRicerca(r.criteri !== undefined ? r.criteri : criteriDaInteressi(r.interessi)),
++  };
++}
++
++/** Ciò che si manda a `salva_ricerca_inquilino`. */
++export function ricercaPerSalvataggio(s: StatoRicerca) {
++  return {
++    tipologia: s.tipologia,
++    budget_min: s.budgetMin > BUDGET.min ? s.budgetMin : null,
++    budget_max: s.budgetMax < BUDGET.max ? s.budgetMax : null,
++    locali_min: s.localiMin > 0 ? s.localiMin : null,
++    locali_max: s.localiMax > 0 ? s.localiMax : null,
++    mq_min: s.mqMin > 0 ? s.mqMin : null,
++    mq_max: s.mqMax > 0 ? s.mqMax : null,
++    luoghi: s.luoghi,
++    criteri: s.criteri.map((c) => ({ chiave: c.chiave, necessaria: c.necessaria, peso: c.necessaria ? IMPORTANZA_PREDEFINITA : c.peso, valore: c.valore })),
++  };
++}
++
++/** Il testo sopra i cursori del budget: «fino a €1.400», «da €900», «da €900 a €1.400», «nessun limite». */
++export function testoBudget(min: number, max: number): string {
++  const e = (n: number) => `€${n.toLocaleString("it-IT")}`;
++  if (min <= BUDGET.min && max >= BUDGET.max) return "nessun limite";
++  if (min <= BUDGET.min) return `fino a ${e(max)}`;
++  if (max >= BUDGET.max) return `da ${e(min)}`;
++  return `da ${e(min)} a ${e(max)}`;
++}
++
++/** Il primo problema che impedisce di salvare, o `null`. */
++export function primoErrore(s: StatoRicerca): string | null {
++  if (s.budgetMin > s.budgetMax) return "Il budget minimo non può superare il massimo.";
++  if (s.localiMin > 0 && s.localiMax > 0 && s.localiMin > s.localiMax) return "I locali minimi non possono superare i massimi.";
++  if (s.mqMin > 0 && s.mqMax > 0 && s.mqMin > s.mqMax) return "La metratura minima non può superare la massima.";
++  for (const c of s.criteri) {
++    if (haValore(c.chiave) && valoreValido(c.chiave, c.valore) === null) return `Controlla «${ETICHETTE_CON_VALORE[c.chiave]}»: manca un valore.`;
++  }
++  return null;
++}
++
++// ------------------------------------------------------------ le caratteristiche
++
++export type Caratteristica = { chiave: string; etichetta: string; tipo: "si_no" | "valore" };
++
++/** Tutte quelle che si possono aggiungere alla lista (il tipo di contratto ha una sezione sua). */
++export const CARATTERISTICHE: readonly Caratteristica[] = [
++  ...ATTR_VOCAB.map((a) => ({ chiave: a.key as string, etichetta: a.label, tipo: "si_no" as const })),
++  ...CHIAVI_CON_VALORE.filter((k) => k !== "contratto").map((k) => ({ chiave: k as string, etichetta: ETICHETTE_CON_VALORE[k], tipo: "valore" as const })),
++];
++
++/** Il tipo di contratto ha una sezione sua: nella lista delle caratteristiche non compare. */
++export const inElenco = (c: CriterioRicerca) => c.chiave !== "contratto";
++
++/** Il valore con cui parte una caratteristica appena aggiunta. `oggi` è AAAA-MM-GG. */
++export function valorePredefinito(chiave: string, oggi: string): ValoreCriterio | null {
++  switch (chiave) {
++    case "bagni":
++      return { min: 2 };
++    case "piano":
++      return { min: null, max: 3 };
++    case "riscaldamento":
++      return { tipi: ["autonomo"] };
++    case "contratto":
++      return { tipi: [TIPI_CONTRATTO[0].id] };
++    case "ingresso": {
++      const d = new Date(`${oggi}T00:00:00Z`);
++      d.setUTCDate(d.getUTCDate() + 30);
++      return { entro: d.toISOString().slice(0, 10) };
++    }
++    case "classeEnergetica":
++      return { classe: "C" };
++    default:
++      return null;
++  }
++}
++
++export function criterioNuovo(chiave: string, oggi: string): CriterioRicerca {
++  return { chiave, necessaria: false, peso: IMPORTANZA_PREDEFINITA, valore: valorePredefinito(chiave, oggi) };
++}
++
++/** Aggiunge una caratteristica (se non c'è già) senza toccare le altre. */
++export function aggiungi(criteri: readonly CriterioRicerca[], chiave: string, oggi: string): CriterioRicerca[] {
++  return criteri.some((c) => c.chiave === chiave) ? [...criteri] : [...criteri, criterioNuovo(chiave, oggi)];
++}
++
++export function rimuovi(criteri: readonly CriterioRicerca[], chiave: string): CriterioRicerca[] {
++  return criteri.filter((c) => c.chiave !== chiave);
++}
++
++/** Cambia una caratteristica; se non c'è, non fa niente. */
++export function modifica(criteri: readonly CriterioRicerca[], chiave: string, cambio: Partial<Pick<CriterioRicerca, "necessaria" | "peso" | "valore">>): CriterioRicerca[] {
++  return criteri.map((c) => (c.chiave === chiave ? { ...c, ...cambio } : c));
++}
++
++/**
++ * Sceglie o toglie un tipo in una caratteristica a elenco (riscaldamento, contratto). Se non c'era la aggiunge; se l'ultimo
++ * tipo viene tolto, la caratteristica sparisce (un elenco vuoto non vuol dire niente).
++ */
++export function alternaTipo(criteri: readonly CriterioRicerca[], chiave: "riscaldamento" | "contratto", tipo: string): CriterioRicerca[] {
++  const c = criteri.find((x) => x.chiave === chiave);
++  if (!c) return [...criteri, { chiave, necessaria: false, peso: IMPORTANZA_PREDEFINITA, valore: { tipi: [tipo] } }];
++  const tipi = c.valore?.tipi ?? [];
++  const nuovi = tipi.includes(tipo) ? tipi.filter((t) => t !== tipo) : [...tipi, tipo];
++  return nuovi.length === 0 ? rimuovi(criteri, chiave) : modifica(criteri, chiave, { valore: { tipi: nuovi } });
++}
++
++/** Le caratteristiche ancora da aggiungere. */
++export function disponibili(criteri: readonly CriterioRicerca[]): Caratteristica[] {
++  return CARATTERISTICHE.filter((c) => !criteri.some((x) => x.chiave === c.chiave));
++}
++
++/** Le opzioni dei piani nei menu: seminterrato, terra, 1°…10°. */
++export const OPZIONI_PIANO: readonly { valore: number; etichetta: string }[] = [
++  { valore: -1, etichetta: "Seminterrato" },
++  { valore: 0, etichetta: "Terra" },
++  ...Array.from({ length: 10 }, (_, i) => ({ valore: i + 1, etichetta: `${i + 1}°` })),
++];
++
++export const OPZIONI_CLASSE: readonly { classe: string; etichetta: string }[] = CLASSI_ENERGETICHE.map((c) => ({
++  classe: c,
++  etichetta: c === "A4" ? "A4 (la migliore)" : c === "G" ? "G (la peggiore)" : c,
++}));
+-- 
+2.43.0
+

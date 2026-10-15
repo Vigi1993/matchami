@@ -1,0 +1,875 @@
+From f068e7c976567a9dc4154e6e8c53985c92df9962 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 14 Oct 2026 21:07:10 +0000
+Subject: [PATCH] feat(profilo): Profilo ripulito (nome in alto, campanella),
+ affitti e inviti spostati in Gestione affitto
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+DA APPLICARE DOPO gestione-affitto-in-pagina.patch. Nessuna migrazione. Riguarda il Profilo dell'INQUILINO: quello del
+proprietario non cambia (ha ancora la sua riga 'Novità').
+
+PROFILO
+- In alto il NOME ('Tina Rossi', titolo della pagina), con l'avatar con le iniziali di nome e cognome ('TR'; con una
+  parte sola le sue prime due lettere; senza niente '?') e l'email sotto. Prima c'era 'Il tuo profilo' e 'In cerca a
+  Milano' (falso da quando c'è anche Bergamo). Senza nome resta 'Il tuo profilo'.
+- La CAMPANELLA delle novità nell'angolo in alto a destra, 44 px, con il numero se ce ne sono (99+ oltre 99) e il
+  colore d'avviso solo allora; porta a /notifiche e ha un nome per i lettori di schermo ('Novità. Hai 3 novità da
+  leggere.'). La riga 'Novità' dell'inquilino è tolta. Il segnalino sulla voce 'Profilo' della barra resta.
+- TOLTE le righe e le schede 'I tuoi affitti' e 'Invita il tuo proprietario', e il caricamento dei loro dati.
+  Restano: affidabilità e dati, preferiti, ricerca, account, privacy, FAQ.
+- I vecchi collegamenti /profilo?apri=affitti e ?apri=invito portano in Gestione affitto, con la scheda aperta.
+
+GESTIONE AFFITTO (inquilino)
+- Nuova parte 'Affitti e recensioni' tra i contratti e le bollette, con 'Dichiara un affitto' (apre la scheda con gli
+  affitti dichiarati e le richieste di conferma) e 'Invita il tuo proprietario' (con 'Gestisci gli inviti' se ce n'è uno
+  inviato). La pagina carica ora gli affitti, gli inviti e il nome, che prima caricava il Profilo.
+- /gestione?apri=affitti e ?apri=invito aprono la scheda giusta; qualunque altro valore non apre niente.
+
+NOTIFICHE. Quattro notifiche dell'inquilino (affitto verificato/respinto, affitto confermato/rifiutato dall'altra
+parte) erano salvate dal database con link '/profilo' perché gli affitti stavano lì. Si correggono IN LETTURA
+(linkNotifica): portano a '/gestione?apri=affitti', anche quelle già create, senza toccare il database. Le altre
+('Reddito verificato', 'Nuovo feedback'...) restano nel Profilo, dove i contenuti sono rimasti; quelle del proprietario
+('/gestione-affitti') non cambiano. Il link resta comunque sempre dentro il sito.
+
+FRASI DIVENTATE FALSE (colpa mia, dalla modifica che ha messo le recensioni a parte dal punteggio) E CORRETTE:
+- il modulo di feedback del proprietario: 'Il voto entra nel punteggio di affidabilità'
+- la pagina del proprietario invitato (due volte, una è la conferma finale): 'fa parte del punteggio'. Parlava a una
+  TERZA persona, non all'utente
+- la scheda degli inviti: 'conta sul tuo punteggio', e 'I tuoi affitti, nel tuo profilo' (ora 'Dichiara un affitto', in
+  Gestione affitto)
+- la riga del Profilo 'alza il tuo punteggio di affidabilità'
+Ora dicono: il voto, da 1 a 5 stelle, compare tra le recensioni, accanto al punteggio. Un test cerca queste frasi in
+tutto il codice. L'informativa era già coerente (dice chi legge le recensioni) e non cambia.
+
+DIFETTI MIEI TROVATI PROVANDO
+- il test sulle iniziali contava le unità di testo e non le lettere (una lettera fuori dal piano base ne occupa due)
+- il finto con cui provo il browser ignora il filtro 'non lette': non era un difetto dell'app, ma ha fatto sbagliare
+  una prova (corretta dando zero notifiche)
+
+Test: 984 in tutto (14 nuovi). Provato in Chrome col dito: nome, iniziali, email, campanella con il numero e senza;
+senza nome; righe rimaste; i tre vecchi collegamenti; le due righe e le schede in Gestione affitto; l'apertura da
+/gestione?apri=...; una notifica 'Affitto verificato' salvata con link /profilo che porta in Gestione affitto mentre
+'Reddito verificato' resta nel Profilo. Difetti reintrodotti di proposito: 28 su 28 presi.
+---
+ package.json                               |   2 +-
+ scripts/test-contratti.mjs                 |   2 +-
+ scripts/test-home.mjs                      |   7 +-
+ scripts/test-profilo-gestione.mjs          | 109 +++++++++++++++++++++
+ src/app/(app)/gestione/GestioneClient.tsx  |  48 ++++++++-
+ src/app/(app)/gestione/page.tsx            |  29 +++++-
+ src/app/(app)/profilo/ProfiloClient.tsx    |  67 ++-----------
+ src/app/(app)/profilo/page.tsx             |  29 ++----
+ src/app/globals.css                        |  61 ++++++++++++
+ src/app/invito/[token]/InvitoClient.tsx    |   9 +-
+ src/components/CampanellaNovita.tsx        |  21 ++++
+ src/components/FormFeedback.tsx            |   7 +-
+ src/components/InvitaProprietarioSheet.tsx |   8 +-
+ src/lib/gestione.ts                        |  11 +++
+ src/lib/home.ts                            |   2 +-
+ src/lib/notifiche.ts                       |  13 ++-
+ src/lib/persona.ts                         |  22 +++++
+ 17 files changed, 346 insertions(+), 101 deletions(-)
+ create mode 100644 scripts/test-profilo-gestione.mjs
+ create mode 100644 src/components/CampanellaNovita.tsx
+ create mode 100644 src/lib/gestione.ts
+ create mode 100644 src/lib/persona.ts
+
+diff --git a/package.json b/package.json
+index 4b203a8..d84b100 100644
+--- a/package.json
++++ b/package.json
+@@ -8,7 +8,7 @@
+     "start": "next start",
+     "lint": "eslint",
+     "pretest": "node scripts/controlla-dipendenze.mjs",
+-    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-affidabilita.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-dati-immobile.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-affidabilita.mjs scripts/test-profilo-gestione.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-dati-immobile.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-contratti.mjs b/scripts/test-contratti.mjs
+index 2378d79..a1da7b4 100644
+--- a/scripts/test-contratti.mjs
++++ b/scripts/test-contratti.mjs
+@@ -128,7 +128,7 @@ test("modo di presentazione: un solo contratto in corso = tutto visibile; più d
+ 
+ test("pagina: la scheda a comparsa dei contratti non c'è più; i contratti si mostrano con il blocco in pagina, nel modo giusto, e le bollette restano come erano", () => {
+   const g = gestione(); assert.ok(!/selezionato|setSelezionato/.test(g), "resta lo stato della scheda a comparsa"); assert.ok(!/<SchedaContratto|function SchedaContratto|onSelect/.test(g), "restano le vecchie schede-elenco che aprivano la scheda");
+-  assert.ok(!/title=\{selezionato/.test(g) && !/Sheet: dettaglio contratto/.test(g)); assert.equal([...g.matchAll(/<Sheet\b/g)].length, 1, "deve restare una sola scheda a comparsa: le bollette"); assert.match(g, /title="Bollette e utenze"/);
++  assert.ok(!/title=\{selezionato/.test(g) && !/Sheet: dettaglio contratto/.test(g)); assert.equal([...g.matchAll(/<Sheet\b/g)].length, 2, "restano due schede a comparsa: gli affitti dichiarati e le bollette (nessuna per i contratti)"); assert.match(g, /title="Bollette e utenze"/); assert.match(g, /title="I tuoi affitti"/);
+   assert.match(g, /<ContrattoInPagina key=\{c\.id\} c=\{c\} modo=\{modoInCorso\(inCorso\.length\)\} firme=\{firme\[c\.id\]\} documenti=\{documenti\[c\.id\] \?\? \[\]\} \/>/);
+   assert.match(g, /<ContrattoInPagina key=\{c\.id\} c=\{c\} modo=\{MODO_STORICO\} firme=\{firme\[c\.id\]\} documenti=\{documenti\[c\.id\] \?\? \[\]\} passato \/>/);
+   assert.match(g, /\{inCorso\.length > 1 && \(\s+<div className="pref-label" style=\{\{ marginTop: 12 \}\}>\s+<span>In corso — \{inCorso\.length\}<\/span>/, "con un solo contratto non serve il conteggio");
+diff --git a/scripts/test-home.mjs b/scripts/test-home.mjs
+index 0a26248..97d6ca8 100644
+--- a/scripts/test-home.mjs
++++ b/scripts/test-home.mjs
+@@ -42,14 +42,15 @@ test("suggerimento sotto la card: tocca i lati se ci sono più foto, altrimenti
+ });
+ 
+ test("collegamenti al Profilo: solo sezioni ammesse; qualunque altro valore non apre niente", () => {
+-  for (const s of ["affidabilita", "dati", "ricerca", "invito", "affitti", "verifica"]) assert.equal(hm.sezioneProfilo(s), s); assert.equal(hm.sezioneProfilo(["verifica", "dati"]), "verifica");
+-  for (const x of ["", "Verifica", "verifica ", " verifica", "account", "privacy", "faq", "__proto__", "constructor", "toString", "ricerca;x", "../x", "<script>", null, undefined, 5, {}, [], [""]]) assert.equal(hm.sezioneProfilo(x), null, JSON.stringify(x));
++  for (const s of ["affidabilita", "dati", "ricerca", "verifica"]) assert.equal(hm.sezioneProfilo(s), s); assert.equal(hm.sezioneProfilo(["verifica", "dati"]), "verifica");
++  assert.deepEqual([...hm.SEZIONI_PROFILO_APRIBILI], ["affidabilita", "dati", "ricerca", "verifica"], "invito e affitti ora stanno in Gestione affitto");
++  for (const x of ["invito", "affitti", "", "Verifica", "verifica ", " verifica", "account", "privacy", "faq", "__proto__", "constructor", "toString", "ricerca;x", "../x", "<script>", null, undefined, 5, {}, [], [""]]) assert.equal(hm.sezioneProfilo(x), null, JSON.stringify(x));
+ });
+ 
+ test("le sezioni del Profilo che si possono aprire da un collegamento esistono davvero nel Profilo (dati, affidabilità e verifica aprono la stessa scheda)", () => {
+   const p = leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx"); const unione = p.match(/useState<([\s\S]*?)\n  >\(aperturaIniziale\)/)[1];
+   for (const s of hm.SEZIONI_PROFILO_APRIBILI) assert.ok(unione.includes(`"${s}"`), `la sezione «${s}» non è tra quelle del Profilo`);
+-  for (const s of ["ricerca", "invito", "affitti"]) assert.match(p, new RegExp(`open=\\{sheetAperta === "${s}"\\}`), `nessuna scheda per «${s}»`);
++  assert.match(p, /open=\{sheetAperta === "ricerca"\}/, "nessuna scheda per «ricerca»"); assert.ok(!/sheetAperta === "(invito|affitti)"/.test(p), "il Profilo ha ancora le schede degli inviti o degli affitti");
+   assert.match(p, /open=\{sheetAperta === "dati" \|\| sheetAperta === "affidabilita" \|\| sheetAperta === "verifica"\}/, "le tre vecchie sezioni devono aprire la scheda unica");
+   assert.ok(typeof hm.sezionePerVoce === "undefined", "sezionePerVoce non serve più");
+ });
+diff --git a/scripts/test-profilo-gestione.mjs b/scripts/test-profilo-gestione.mjs
+new file mode 100644
+index 0000000..303054f
+--- /dev/null
++++ b/scripts/test-profilo-gestione.mjs
+@@ -0,0 +1,109 @@
++/**
++ * Test della pulizia del Profilo dell'inquilino (nome in alto, campanella delle novità) e dello spostamento di «Dichiara un
++ * affitto» e «Invita il tuo proprietario» in «Gestione affitto». Si lancia con:   npm test
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { createRequire } from "node:module";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const richiedi = createRequire(import.meta.url);
++const React = richiedi("react");
++const { renderToStaticMarkup } = richiedi("react-dom/server");
++const pe = caricaTs(path.join(radice, "src", "lib", "persona.ts"));
++const nt = caricaTs(path.join(radice, "src", "lib", "notifiche.ts"));
++const gs = caricaTs(path.join(radice, "src", "lib", "gestione.ts"));
++const camp = caricaTs(path.join(radice, "src", "components", "CampanellaNovita.tsx"));
++const leggi = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8").replace(/\r\n/g, "\n");
++const profiloClient = () => leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx");
++const gestioneClient = () => leggi("src", "app", "(app)", "gestione", "GestioneClient.tsx");
++
++// ============================================================ nome e iniziali
++test("nome completo: nome e cognome insieme, uno solo se manca l'altro, vuoto se mancano entrambi; spazi ripuliti", () => {
++  assert.equal(pe.nomeCompleto("Tina", "Rossi"), "Tina Rossi"); assert.equal(pe.nomeCompleto("Tina", null), "Tina"); assert.equal(pe.nomeCompleto(null, "Rossi"), "Rossi"); assert.equal(pe.nomeCompleto(null, null), "");
++  assert.equal(pe.nomeCompleto("  Tina  ", " Rossi  Bianchi "), "Tina Rossi Bianchi"); for (const x of [undefined, 5, {}, [], "   ", ""]) assert.equal(pe.nomeCompleto(x, x), "", String(x));
++});
++
++test("iniziali: nome e cognome (TR); con una parte sola le sue prime due lettere (TI); senza niente «?»; sempre maiuscole e senza spezzare le lettere speciali", () => {
++  assert.equal(pe.iniziali("Tina", "Rossi"), "TR"); assert.equal(pe.iniziali("tina", "rossi"), "TR"); assert.equal(pe.iniziali("Tina", null), "TI"); assert.equal(pe.iniziali(null, "Rossi"), "RO"); assert.equal(pe.iniziali("A", null), "A"); assert.equal(pe.iniziali(null, null), "?"); assert.equal(pe.iniziali("  ", "  "), "?");
++  assert.equal(pe.iniziali("Émile", "Zola"), "ÉZ"); assert.equal(Array.from(pe.iniziali("𝒜nna", "Rossi")).length, 2, "una lettera fuori dal piano base non si spezza (si conta per lettere, non per unità)"); for (const x of [undefined, 5, {}, []]) assert.equal(pe.iniziali(x, x), "?");
++  let seme = 3; const rnd = () => (seme = (seme * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff; const lettere = "abcdeèéòàùçñ ,.'-9";
++  for (let i = 0; i < 500; i++) { const a = Array.from({ length: Math.floor(rnd() * 6) }, () => lettere[Math.floor(rnd() * lettere.length)]).join(""); const b = Array.from({ length: Math.floor(rnd() * 6) }, () => lettere[Math.floor(rnd() * lettere.length)]).join(""); const r = pe.iniziali(a, b); assert.ok(Array.from(r).length >= 1 && Array.from(r).length <= 2, `«${a}» «${b}» → «${r}»`); assert.equal(r, r.toUpperCase()); }
++});
++
++// ============================================================ la campanella
++test("campanella: porta alle novità, ha un nome per chi usa un lettore di schermo, e mostra il numero solo se ce ne sono (99+ oltre 99)", () => {
++  const html = (n) => renderToStaticMarkup(React.createElement(camp.CampanellaNovita, { nonLette: n }));
++  const zero = html(0); assert.match(zero, /href="\/notifiche"/); assert.match(zero, /aria-label="Novità\. Nessuna novità da leggere\."/); assert.ok(!/campanella-numero/.test(zero) && !/con-novita/.test(zero), "con zero novità non c'è né numero né aspetto di avviso");
++  const tre = html(3); assert.match(tre, /aria-label="Novità\. Hai 3 novità da leggere\."/); assert.match(tre, /class="campanella con-novita"/); assert.match(tre, /<span class="campanella-numero" aria-hidden="true">3<\/span>/);
++  assert.match(html(1), /Hai 1 novità da leggere\./); assert.match(html(150), />99\+<\/span>/); for (const strano of [-4, NaN, undefined]) assert.ok(!/campanella-numero/.test(html(strano)), String(strano));
++});
++
++// ============================================================ il Profilo dell'inquilino
++test("Profilo: in alto il nome (titolo della pagina), le iniziali nell'avatar, l'email sotto e la campanella nell'angolo; niente più «In cerca a Milano»", () => {
++  const p = profiloClient(); const alto = p.slice(p.indexOf('<div className="avatar-row">'), p.indexOf("{/* I tuoi dati e la tua affidabilità"));
++  assert.match(alto, /iniziali\(nome, cognome\)/); assert.match(alto, /<h1 className="avatar-name">\{nomeCompleto\(nome, cognome\) \|\| "Il tuo profilo"\}<\/h1>/); assert.match(alto, /\{email && <div className="avatar-sub">\{email\}<\/div>\}/); assert.match(alto, /<CampanellaNovita nonLette=\{nonLette\} \/>/);
++  assert.ok(alto.indexOf("avatar-name") < alto.indexOf("CampanellaNovita"), "la campanella sta dopo il nome, nell'angolo"); assert.ok(!/In cerca a Milano/.test(p), "una frase falsa da quando c'è anche Bergamo"); assert.ok(!/\(nome \?\? "\?"\)\.slice/.test(p), "le iniziali sono ancora quelle vecchie");
++});
++
++test("Profilo: la riga «Novità» non c'è più per l'inquilino (resta quella del proprietario), né le righe e le schede di affitti e inviti", () => {
++  const p = profiloClient(); assert.ok(!/RigaNovita/.test(p), "la riga Novità è ancora nel Profilo dell'inquilino"); assert.match(leggi("src", "app", "(app)", "profilo", "OwnerProfiloClient.tsx"), /<RigaNovita /, "la riga del proprietario non va toccata");
++  for (const vietato of ["I tuoi affitti", "Invita il tuo proprietario", "InvitaProprietarioSheet", "affittiPanel", "inviti:", "inviti,", 'sheetAperta === "invito"', 'sheetAperta === "affitti"', "IconPersone", "IconDocumento"]) assert.ok(!p.includes(vietato), `nel Profilo resta «${vietato}»`);
++  for (const resta of ["Preferiti", 'title="La tua ricerca"', 'title="Account e accesso"', 'title="Privacy e consensi"', 'title="FAQ e bonus affitto"', "<DatiSheet", "<RicercaSheet"]) assert.ok(p.includes(resta) || leggi("src", "components", "RigaPreferiti.tsx").includes("Preferiti"), `è sparito «${resta}»`);
++});
++
++test("pagina Profilo: non carica più gli inviti né gli affitti, e i vecchi collegamenti (?apri=affitti / ?apri=invito) portano in Gestione affitto", () => {
++  const pg = leggi("src", "app", "(app)", "profilo", "page.tsx"); for (const vietato of ["inviti_proprietario", "caricaRapportiMiei", "RapportiPanel", "affittiPanel", "inviti="]) assert.ok(!pg.includes(vietato), `la pagina carica ancora «${vietato}»`);
++  assert.match(pg, /const apri = \(await searchParams\)\.apri;\s+if \(apri === "affitti" \|\| apri === "invito"\) redirect\(`\/gestione\?apri=\$\{apri\}`\);/); assert.ok(pg.indexOf("OwnerProfiloClient") < pg.indexOf("redirect("), "il rimando vale solo per l'inquilino: il proprietario ha già il suo ritorno prima");
++});
++
++// ============================================================ Gestione affitto: le due righe
++test("sezioni apribili di Gestione affitto: solo «affitti» e «invito»; ogni altro valore non apre niente", () => {
++  assert.deepEqual([...gs.SEZIONI_GESTIONE_APRIBILI], ["affitti", "invito"]); assert.equal(gs.sezioneGestione("affitti"), "affitti"); assert.equal(gs.sezioneGestione("invito"), "invito"); assert.equal(gs.sezioneGestione(["invito", "affitti"]), "invito");
++  for (const x of ["", "Affitti", "affitti ", "dati", "verifica", "__proto__", "constructor", "<x>", null, undefined, 5, {}, [], [""]]) assert.equal(gs.sezioneGestione(x), null, JSON.stringify(x));
++});
++
++test("Gestione affitto: le righe «Dichiara un affitto» e «Invita il tuo proprietario» ci sono, aprono le schede giuste e si aprono anche da un collegamento", () => {
++  const g = gestioneClient(); assert.match(g, /title="Dichiara un affitto"[\s\S]*?onClick=\{\(\) => setAffittiAperto\(true\)\}/); assert.match(g, /title="Invita il tuo proprietario"[\s\S]*?onClick=\{\(\) => setInvitoAperto\(true\)\}/);
++  assert.match(g, /<Sheet open=\{affittiAperto\} onClose=\{\(\) => setAffittiAperto\(false\)\} title="I tuoi affitti">\s+\{affittiPanel\}/); assert.match(g, /<InvitaProprietarioSheet open=\{invitoAperto\} onClose=\{\(\) => setInvitoAperto\(false\)\} nomeInquilino=\{nomeInquilino\} inviti=\{inviti\} \/>/);
++  assert.match(g, /useState\(aperturaIniziale === "affitti"\)/); assert.match(g, /useState\(aperturaIniziale === "invito"\)/); assert.match(g, /cta=\{inviti\.some\(\(i\) => i\.stato === "inviato"\) \? "Gestisci gli inviti" : "Manda l'invito"\}/);
++  const ordine = ["I tuoi contratti", "Affitti e recensioni", "Bollette e utenze"].map((t) => g.indexOf(t)); assert.ok(ordine.every((x, i) => x > 0 && (i === 0 || x > ordine[i - 1])), "ordine delle parti: contratti, affitti e recensioni, bollette");
++});
++
++test("pagina Gestione affitto: carica gli inviti, il nome e gli affitti (prima li caricava il Profilo) e li passa al client", () => {
++  const pg = leggi("src", "app", "(app)", "gestione", "page.tsx"); assert.match(pg, /from\("inviti_proprietario"\)[\s\S]*?\.eq\("tenant_id", user!\.id\)/); assert.match(pg, /caricaRapportiMiei\(supabase, user!\.id\)/); assert.match(pg, /from\("profiles"\)\.select\("nome"\)\.eq\("id", user!\.id\)/);
++  assert.match(pg, /aperturaIniziale=\{sezioneGestione\(\(await searchParams\)\.apri\)\}/); assert.match(pg, /<RapportiPanel\s+ruolo="inquilino"/); for (const prop of ["nomeInquilino=", "inviti=", "affittiPanel="]) assert.ok(pg.includes(prop), prop);
++});
++
++// ============================================================ le notifiche sugli affitti
++test("notifiche: le quattro sugli affitti dell'inquilino portano a Gestione affitto (anche quelle già create); le altre e quelle del proprietario non cambiano", () => {
++  for (const tipo of ["affitto_verificato", "affitto_respinto", "rapporto_confermato", "rapporto_rifiutato"]) assert.equal(nt.linkNotifica({ tipo, link: "/profilo" }), "/gestione?apri=affitti", tipo);
++  for (const tipo of ["reddito_verificato", "reddito_respinto", "feedback_ricevuto", "candidatura_accettata", "qualcosa_di_nuovo"]) assert.equal(nt.linkNotifica({ tipo, link: "/profilo" }), "/profilo", `${tipo} deve restare nel Profilo`);
++  for (const tipo of ["affitto_verificato", "affitto_respinto", "rapporto_confermato", "rapporto_rifiutato"]) assert.equal(nt.linkNotifica({ tipo, link: "/gestione-affitti" }), "/gestione-affitti", `${tipo} del proprietario non cambia`);
++  assert.equal(nt.linkNotifica({ link: "/profilo" }), "/profilo", "senza il tipo non si sa: resta com'è"); assert.deepEqual([...nt.TIPI_NOTIFICA_AFFITTI_INQUILINO].sort(), ["affitto_respinto", "affitto_verificato", "rapporto_confermato", "rapporto_rifiutato"]);
++});
++
++test("notifiche: il link resta sempre dentro il sito, anche per i tipi spostati; la lista passa tutta la notifica (serve il tipo)", () => {
++  for (const cattivo of ["//evil.example", "https://evil.example", "/\\evil", "javascript:alert(1)", "", null, undefined]) for (const tipo of ["affitto_verificato", "reddito_verificato"]) { const l = nt.linkNotifica({ tipo, link: cattivo }); assert.ok(l.startsWith("/") && !l.startsWith("//") && !l.includes("evil"), `${tipo} ${cattivo} → ${l}`); }
++  assert.match(leggi("src", "app", "(app)", "notifiche", "NotificheLista.tsx"), /router\.push\(linkNotifica\(n\)\)/);
++});
++
++test("le notifiche del database non cambiano: il sistema le corregge in lettura (nessuna migrazione, nessun dato toccato)", () => {
++  const cartella = path.join(radice, "supabase", "migrations"); const ultima = fs.readdirSync(cartella).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort().at(-1); assert.equal(ultima, "0031_dati_obbligatori_annuncio_2.sql", "è comparsa una migrazione nuova: aggiorna questo test");
++});
++
++// ============================================================ le frasi che non sono più vere
++test("nessuna frase dice più che il voto del proprietario «entra nel» o «fa parte del» punteggio (le recensioni stanno a parte), né che affitti e inviti stanno nel Profilo", () => {
++  const cartella = path.join(radice, "src"); const trovate = [];
++  const visita = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) visita(p); else if (/\.(ts|tsx)$/.test(e.name)) { const t = fs.readFileSync(p, "utf8").replace(/\s+/g, " "); for (const re of [/entra nel punteggio/, /conta sul tuo punteggio/, /alza il tuo punteggio/, /fa parte del punteggio/, /fa parte del\s*punteggio di affidabilità/, /da «?"?&?q?u?o?t?;?I tuoi affitti&?q?u?o?t?;?»?"?, nel tuo profilo/]) if (re.test(t)) trovate.push(`${path.relative(cartella, p)}: ${re}`); } } };
++  visita(cartella); assert.deepEqual(trovate, [], "frasi ormai false: " + trovate.join(" | "));
++});
++
++test("frasi nuove: feedback, pagina del proprietario invitato e scheda degli inviti dicono che il voto sta tra le recensioni, accanto al punteggio; i contratti si dichiarano da «Dichiara un affitto»", () => {
++  const f = leggi("src", "components", "FormFeedback.tsx").replace(/\s+/g, " "); assert.match(f, /Il voto, da 1 a 5 stelle, compare tra le recensioni di questa persona, accanto al suo punteggio di affidabilità/);
++  const i = leggi("src", "app", "invito", "[token]", "InvitoClient.tsx").replace(/\s+/g, " "); assert.match(i, /da oggi compare tra le recensioni di \{inquilino\}/); assert.match(i, /compare tra le recensioni di \{inquilino\}, accanto al suo punteggio di affidabilità/);
++  const s = leggi("src", "components", "InvitaProprietarioSheet.tsx").replace(/\s+/g, " "); assert.match(s, /compare tra le tue recensioni, accanto al tuo punteggio di affidabilità/); assert.match(s, /&quot;Dichiara un affitto&quot;, in Gestione affitto/); assert.ok(!/nel tuo profilo/.test(s));
++  const g = gestioneClient().replace(/\s+/g, " "); assert.match(g, /il proprietario potrà lasciarti una recensione/); assert.match(g, /la recensione compare accanto al tuo punteggio di affidabilità/);
++});
+diff --git a/src/app/(app)/gestione/GestioneClient.tsx b/src/app/(app)/gestione/GestioneClient.tsx
+index 15cf6b8..69933db 100644
+--- a/src/app/(app)/gestione/GestioneClient.tsx
++++ b/src/app/(app)/gestione/GestioneClient.tsx
+@@ -15,20 +15,37 @@ import {
+   raggruppaContratti,
+ } from "@/lib/contratti";
+ import { PageContainer } from "@/components/ui/PageContainer";
+-import { IconDocumento } from "@/components/icons";
++import { Row } from "@/components/ui/Row";
++import { InvitaProprietarioSheet } from "@/components/InvitaProprietarioSheet";
++import { IconDocumento, IconPersone } from "@/components/icons";
++import type { Invito } from "@/lib/types";
++import type { SezioneGestione } from "@/lib/gestione";
+ 
+ export function GestioneClient({
+   contratti,
+   documenti = {},
+   firme = {},
++  affittiPanel,
++  inviti = [],
++  nomeInquilino = null,
++  aperturaIniziale = null,
+ }: {
+   contratti: ContrattoConAnnuncio[];
++  /** gli affitti dichiarati e le richieste di conferma, costruiti dal server */
++  affittiPanel?: React.ReactNode;
++  /** gli inviti mandati ai proprietari */
++  inviti?: Invito[];
++  nomeInquilino?: string | null;
++  /** la scheda da aprire subito (da un collegamento o da una notifica) */
++  aperturaIniziale?: SezioneGestione | null;
+   /** le firme di prova dei miei contratti, per identificativo del contratto */
+   firme?: Record<string, FirmeDelContratto>;
+   /** i documenti dei miei contratti, per identificativo del contratto */
+   documenti?: Record<string, DocumentoContratto[]>;
+ }) {
+   const [bolletteAperto, setBolletteAperto] = useState(false);
++  const [affittiAperto, setAffittiAperto] = useState(aperturaIniziale === "affitti");
++  const [invitoAperto, setInvitoAperto] = useState(aperturaIniziale === "invito");
+ 
+   // I contratti conclusi vanno nello storico: non restano mescolati a quelli in corso.
+   const { inCorso, storico } = raggruppaContratti(contratti);
+@@ -91,6 +108,27 @@ export function GestioneClient({
+         </>
+       )}
+ 
++      {/* ---- Affitti passati e recensioni: prima stavano nel Profilo ---- */}
++      <div className="pref-label" style={{ marginTop: 24 }}>
++        <span>Affitti e recensioni</span>
++      </div>
++      <Row
++        color="var(--moss)"
++        icon={<IconDocumento className="fill-none stroke-white stroke-2" />}
++        title="Dichiara un affitto"
++        subtitle="Hai già affittato una casa? Dichiara l'affitto con il suo contratto: se l'altra persona lo conferma e lo verifichiamo, il proprietario potrà lasciarti una recensione."
++        cta="Dichiara o gestisci gli affitti"
++        onClick={() => setAffittiAperto(true)}
++      />
++      <Row
++        color="var(--gold)"
++        icon={<IconPersone className="fill-none stroke-[var(--ink)] stroke-2" />}
++        title="Invita il tuo proprietario"
++        subtitle="Hai già una casa in affitto? Chiedi al tuo proprietario un commento su com'è andata: la recensione compare accanto al tuo punteggio di affidabilità."
++        cta={inviti.some((i) => i.stato === "inviato") ? "Gestisci gli inviti" : "Manda l'invito"}
++        onClick={() => setInvitoAperto(true)}
++      />
++
+       {/* ---- Bollette e utenze ---- */}
+       <div className="pref-label" style={{ marginTop: 24 }}>
+         <span>Bollette e utenze</span>
+@@ -111,6 +149,14 @@ export function GestioneClient({
+         </div>
+       </button>
+ 
++      {/* ---- Sheet: dichiara un affitto ---- */}
++      <Sheet open={affittiAperto} onClose={() => setAffittiAperto(false)} title="I tuoi affitti">
++        {affittiPanel}
++      </Sheet>
++
++      {/* ---- Sheet: invita il proprietario ---- */}
++      <InvitaProprietarioSheet open={invitoAperto} onClose={() => setInvitoAperto(false)} nomeInquilino={nomeInquilino} inviti={inviti} />
++
+       {/* ---- Sheet: bollette (demo) ---- */}
+       <Sheet
+         open={bolletteAperto}
+diff --git a/src/app/(app)/gestione/page.tsx b/src/app/(app)/gestione/page.tsx
+index 76e8acf..026cd49 100644
+--- a/src/app/(app)/gestione/page.tsx
++++ b/src/app/(app)/gestione/page.tsx
+@@ -1,10 +1,14 @@
+ import { createClient } from "@/lib/supabase/server";
+ import { GestioneClient } from "./GestioneClient";
++import { sezioneGestione } from "@/lib/gestione";
+ import type { ContrattoConAnnuncio } from "@/lib/types";
+ import { raggruppaPerContratto, type DocumentoContratto } from "@/lib/documenti-contratto";
+ import { caricaFirme } from "@/lib/firma/carica";
++import { RapportiPanel } from "@/components/RapportiPanel";
++import { caricaRapportiMiei } from "@/lib/rapporti-server";
++import type { Invito } from "@/lib/types";
+ 
+-export default async function GestionePage() {
++export default async function GestionePage({ searchParams }: { searchParams: Promise<{ apri?: string | string[] }> }) {
+   const supabase = await createClient();
+   const {
+     data: { user },
+@@ -26,8 +30,31 @@ export default async function GestionePage() {
+   // Le firme di prova, con l'impronta del documento di oggi per i contratti che ne hanno
+   const firme = await caricaFirme(supabase);
+ 
++  // Gli affitti dichiarati (con le richieste di conferma) e gli inviti al proprietario: prima stavano nel Profilo
++  const [{ data: inviti }, { data: profilo }, rapporti] = await Promise.all([
++    supabase
++      .from("inviti_proprietario")
++      .select("id, token, nome_proprietario, email_proprietario, indirizzo, periodo, stato, created_at")
++      .eq("tenant_id", user!.id)
++      .order("created_at", { ascending: false }),
++    supabase.from("profiles").select("nome").eq("id", user!.id).single(),
++    caricaRapportiMiei(supabase, user!.id),
++  ]);
++
+   return (
+     <GestioneClient
++      aperturaIniziale={sezioneGestione((await searchParams).apri)}
++      nomeInquilino={profilo?.nome ?? null}
++      inviti={(inviti ?? []) as Invito[]}
++      affittiPanel={
++        <RapportiPanel
++          ruolo="inquilino"
++          nomeCreatore={rapporti.nome}
++          immobili={[]}
++          richieste={rapporti.richieste}
++          rapporti={rapporti.rapporti}
++        />
++      }
+       contratti={(contratti ?? []) as unknown as ContrattoConAnnuncio[]}
+       firme={firme}
+       documenti={raggruppaPerContratto((documenti ?? []) as DocumentoContratto[])}
+diff --git a/src/app/(app)/profilo/ProfiloClient.tsx b/src/app/(app)/profilo/ProfiloClient.tsx
+index f2656f5..5a15f4c 100644
+--- a/src/app/(app)/profilo/ProfiloClient.tsx
++++ b/src/app/(app)/profilo/ProfiloClient.tsx
+@@ -1,15 +1,15 @@
+ "use client";
+ 
+ import { useState } from "react";
+-import { RigaNovita } from "@/components/RigaNovita";
++import { CampanellaNovita } from "@/components/CampanellaNovita";
++import { iniziali, nomeCompleto } from "@/lib/persona";
+ import { DatiSheet } from "@/components/DatiSheet";
+ import { RigaPreferiti } from "@/components/RigaPreferiti";
+-import { Sheet } from "@/components/Sheet";
+ import {
+   computeAffidabilita,
+   computeProfileCompleteness,
+ } from "@/lib/affidabilita";
+-import type { TenantProfile, Invito } from "@/lib/types";
++import type { TenantProfile } from "@/lib/types";
+ import { logout } from "@/app/login/actions";
+ import { PageContainer } from "@/components/ui/PageContainer";
+ import { RicercaSheet } from "@/components/RicercaSheet";
+@@ -20,15 +20,12 @@ import type { ProfiloRicerca } from "@/lib/match";
+ import { PrivacySheet } from "@/components/PrivacySheet";
+ import { FaqSheet } from "@/components/FaqSheet";
+ import { AccountSheet } from "@/components/AccountSheet";
+-import { InvitaProprietarioSheet } from "@/components/InvitaProprietarioSheet";
+ import {
+   IconDomanda,
+   IconLente,
+   IconLucchetto,
+-  IconPersone,
+   IconScudo,
+   IconStella,
+-  IconDocumento,
+ } from "@/components/icons";
+ 
+ type Props = {
+@@ -36,15 +33,12 @@ type Props = {
+   nonLette: number;
+   /** quanti annunci ha salvato tra i preferiti */
+   preferiti?: number;
+-  /** gli affitti dichiarati e confermati, costruiti dal server */
+-  affittiPanel: React.ReactNode;
+   /** il pannello per verificare il reddito con i documenti, costruito dal server */
+   verificaPanel: React.ReactNode;
+   nome: string | null;
+   cognome: string | null;
+   email: string | null;
+   tenant: TenantProfile;
+-  inviti: Invito[];
+   /** la ricerca com'è salvata */
+   ricerca: ProfiloRicerca;
+   /** i luoghi che si possono cercare */
+@@ -64,8 +58,6 @@ export function ProfiloClient({
+   cognome,
+   email,
+   tenant,
+-  inviti,
+-  affittiPanel,
+   verificaPanel,
+   ricerca,
+   luoghi,
+@@ -78,8 +70,6 @@ export function ProfiloClient({
+     | "affidabilita"
+     | "dati"
+     | "ricerca"
+-    | "invito"
+-    | "affitti"
+     | "verifica"
+     | "account"
+     | "privacy"
+@@ -108,20 +98,21 @@ export function ProfiloClient({
+ 
+   return (
+     <PageContainer>
+-      {/* Avatar */}
++      {/* In alto: l'avatar, il nome e la campanella delle novità nell'angolo */}
+       <div className="avatar-row">
+         <div className="avatar">
+           {tenant.avatar_url ? (
+             // eslint-disable-next-line @next/next/no-img-element
+             <img src={tenant.avatar_url} alt="" />
+           ) : (
+-            (nome ?? "?").slice(0, 2).toUpperCase()
++            iniziali(nome, cognome)
+           )}
+         </div>
+-        <div>
+-          <div className="avatar-name">Il tuo profilo</div>
+-          <div className="avatar-sub">In cerca a Milano</div>
++        <div className="avatar-testo">
++          <h1 className="avatar-name">{nomeCompleto(nome, cognome) || "Il tuo profilo"}</h1>
++          {email && <div className="avatar-sub">{email}</div>}
+         </div>
++        <CampanellaNovita nonLette={nonLette} />
+       </div>
+ 
+       {/* I tuoi dati e la tua affidabilità: un'unica scheda (punteggio, dati, verifica del reddito) */}
+@@ -146,7 +137,6 @@ export function ProfiloClient({
+       </div>
+ 
+       <div className="card-grid">
+-        <RigaNovita nonLette={nonLette} />
+         <RigaPreferiti preferiti={preferiti} />
+         {/* La tua ricerca */}
+         <Row
+@@ -158,28 +148,6 @@ export function ProfiloClient({
+           onClick={() => setSheetAperta("ricerca")}
+         />
+ 
+-        <Row
+-        color="var(--gold)"
+-        icon={<IconPersone className="fill-none stroke-[var(--ink)] stroke-2" />}
+-        title="Invita il tuo proprietario"
+-        subtitle="Hai già una casa in affitto? Chiedi al tuo proprietario un commento su com'è andata: alza il tuo punteggio di affidabilità."
+-        cta={
+-          inviti.some((i) => i.stato === "inviato")
+-            ? "Gestisci gli inviti"
+-            : "Manda l'invito"
+-        }
+-        onClick={() => setSheetAperta("invito")}
+-      />
+-
+-      <Row
+-        color="var(--moss)"
+-        icon={<IconDocumento className="fill-none stroke-white stroke-2" />}
+-        title="I tuoi affitti"
+-        subtitle="Dichiara un affitto con il suo contratto: se la controparte lo conferma e lo verifichiamo, il feedback del proprietario può contare."
+-        cta="Gestisci gli affitti"
+-        onClick={() => setSheetAperta("affitti")}
+-      />
+-
+       {/* Account */}
+         <Row
+           color="var(--ink-soft)"
+@@ -235,23 +203,6 @@ export function ProfiloClient({
+         luoghi={luoghi}
+       />
+ 
+-      {/* ---- Sheet: Invita il proprietario ---- */}
+-      <InvitaProprietarioSheet
+-        open={sheetAperta === "invito"}
+-        onClose={() => setSheetAperta(null)}
+-        nomeInquilino={nome}
+-        inviti={inviti}
+-      />
+-
+-      {/* ---- Sheet: I tuoi affitti ---- */}
+-      <Sheet
+-        open={sheetAperta === "affitti"}
+-        onClose={() => setSheetAperta(null)}
+-        title="I tuoi affitti"
+-      >
+-        {affittiPanel}
+-      </Sheet>
+-
+       {/* ---- Sheet: Account ---- */}
+       <AccountSheet
+         open={sheetAperta === "account"}
+diff --git a/src/app/(app)/profilo/page.tsx b/src/app/(app)/profilo/page.tsx
+index 367826c..cf8c4f8 100644
+--- a/src/app/(app)/profilo/page.tsx
++++ b/src/app/(app)/profilo/page.tsx
+@@ -2,14 +2,13 @@ import { riepilogoRecensioni } from "@/lib/recensioni";
+ import { VerificaRedditoPanel } from "@/components/VerificaRedditoPanel";
+ import type { DocumentoInquilino } from "@/lib/verifica-inquilino";
+ import { createClient } from "@/lib/supabase/server";
+-import { RapportiPanel } from "@/components/RapportiPanel";
+-import { caricaRapportiMiei } from "@/lib/rapporti-server";
+ import { ProfiloClient } from "./ProfiloClient";
+ import { sezioneProfilo } from "@/lib/home";
+ import { profiloRicercaDaRighe } from "@/lib/match";
+ import type { Luogo } from "@/lib/luoghi";
+ import { OwnerProfiloClient } from "./OwnerProfiloClient";
+-import type { TenantProfile, OwnerProfile, Invito } from "@/lib/types";
++import type { TenantProfile, OwnerProfile } from "@/lib/types";
++import { redirect } from "next/navigation";
+ 
+ export default async function ProfiloPage({ searchParams }: { searchParams: Promise<{ apri?: string | string[] }> }) {
+   const supabase = await createClient();
+@@ -17,7 +16,7 @@ export default async function ProfiloPage({ searchParams }: { searchParams: Prom
+     data: { user },
+   } = await supabase.auth.getUser();
+ 
+-  // le novità non lette, per la riga «Novità» in cima al profilo
++  // le novità non lette, per la campanella in cima al profilo (e per la riga «Novità» del proprietario)
+   const { count: nonLetteCount } = await supabase
+     .from("notifiche")
+     .select("id", { count: "exact", head: true })
+@@ -50,12 +49,15 @@ export default async function ProfiloPage({ searchParams }: { searchParams: Prom
+     );
+   }
+ 
++  // Gli affitti dichiarati e gli inviti al proprietario ora stanno in «Gestione affitto»: i vecchi collegamenti ci portano.
++  const apri = (await searchParams).apri;
++  if (apri === "affitti" || apri === "invito") redirect(`/gestione?apri=${apri}`);
++
+   const [
+     { data: tenant },
+     { data: zoneRows },
+     { data: interessiRows },
+     { data: recensioni },
+-    { data: inviti },
+     { data: documentiRows },
+   ] = await Promise.all([
+     supabase.from("tenant_profiles").select("*").eq("profile_id", user!.id).single(),
+@@ -65,11 +67,6 @@ export default async function ProfiloPage({ searchParams }: { searchParams: Prom
+       .select("attributo_key, peso, valore, necessaria")
+       .eq("tenant_id", user!.id),
+     supabase.from("recensioni").select("voto").eq("tenant_id", user!.id),
+-    supabase
+-      .from("inviti_proprietario")
+-      .select("id, token, nome_proprietario, email_proprietario, indirizzo, periodo, stato, created_at")
+-      .eq("tenant_id", user!.id)
+-      .order("created_at", { ascending: false }),
+     supabase
+       .from("documenti_inquilino")
+       .select("id, tipo, percorso, nome_file")
+@@ -77,8 +74,6 @@ export default async function ProfiloPage({ searchParams }: { searchParams: Prom
+       .order("created_at", { ascending: true }),
+   ]);
+ 
+-  const rapporti = await caricaRapportiMiei(supabase, user!.id);
+-
+   // La ricerca com'è salvata, e i luoghi che si possono cercare (per il completamento automatico)
+   const ricerca = profiloRicercaDaRighe(tenant, zoneRows, interessiRows);
+   const { data: luoghiRighe } = await supabase.from("luoghi").select("id, livello, nome, sigla, parent_id");
+@@ -97,16 +92,6 @@ export default async function ProfiloPage({ searchParams }: { searchParams: Prom
+       cognome={profile?.cognome ?? null}
+       email={user!.email ?? null}
+       tenant={tenant as TenantProfile}
+-      inviti={(inviti ?? []) as Invito[]}
+-      affittiPanel={
+-        <RapportiPanel
+-          ruolo="inquilino"
+-          nomeCreatore={rapporti.nome}
+-          immobili={[]}
+-          richieste={rapporti.richieste}
+-          rapporti={rapporti.rapporti}
+-        />
+-      }
+       verificaPanel={
+         <VerificaRedditoPanel
+           stato={(tenant as TenantProfile).verifica_stato}
+diff --git a/src/app/globals.css b/src/app/globals.css
+index d50a48e..6e5619a 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -3677,3 +3677,64 @@ button.contratto-testa:focus-visible {
+ .contratto-corpo[hidden] {
+   display: none !important;
+ }
++
++/* ---- Profilo: nome in alto e campanella delle novità nell'angolo ---- */
++.avatar-row .avatar-testo {
++  flex: 1;
++  min-width: 0;
++}
++.avatar-row .avatar-name {
++  margin: 0;
++}
++.avatar-row .avatar-name,
++.avatar-row .avatar-sub {
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++.campanella {
++  position: relative;
++  flex: none;
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  width: 44px;
++  height: 44px;
++  margin-left: auto;
++  border-radius: 50%;
++  background: rgba(16, 21, 26, 0.06);
++  -webkit-tap-highlight-color: transparent;
++}
++.campanella:focus-visible {
++  outline: 2px solid var(--moss);
++  outline-offset: 2px;
++}
++.campanella-icona {
++  width: 22px;
++  height: 22px;
++  fill: none;
++  stroke: var(--ink);
++  stroke-width: 1.9;
++  stroke-linecap: round;
++  stroke-linejoin: round;
++}
++.campanella.con-novita {
++  background: rgba(176, 94, 74, 0.14);
++}
++.campanella.con-novita .campanella-icona {
++  stroke: var(--clay);
++}
++.campanella-numero {
++  position: absolute;
++  top: -3px;
++  right: -3px;
++  min-width: 19px;
++  padding: 1px 5px;
++  border-radius: 999px;
++  background: var(--clay);
++  color: #fff;
++  font-size: 11px;
++  font-weight: 800;
++  line-height: 1.3;
++  text-align: center;
++}
+diff --git a/src/app/invito/[token]/InvitoClient.tsx b/src/app/invito/[token]/InvitoClient.tsx
+index 144a0eb..387ea09 100644
+--- a/src/app/invito/[token]/InvitoClient.tsx
++++ b/src/app/invito/[token]/InvitoClient.tsx
+@@ -39,8 +39,8 @@ export function InvitoClient({
+           <div className="empty-inline" style={{ paddingTop: 90 }}>
+             <h3>Grazie.</h3>
+             <p>
+-              Il tuo commento è stato registrato e da oggi fa parte del
+-              punteggio di affidabilità di {inquilino}.
++              Il tuo commento è stato registrato e da oggi compare tra le
++              recensioni di {inquilino}.
+             </p>
+             <Link href="/" className="opp-cta" style={{ textAlign: "center" }}>
+               Scopri MatchAmI
+@@ -57,8 +57,9 @@ export function InvitoClient({
+         <h1 className="screen-title">Com&apos;è andata con {inquilino}?</h1>
+         <p className="screen-sub">
+           {indirizzo ? `${indirizzo}` : `La casa che hai affittato a ${inquilino}`}
+-          {periodo ? ` · ${periodo}` : ""}. Il tuo voto entra nel punteggio di
+-          affidabilità, che gli altri proprietari vedono quando valutano una
++          {periodo ? ` · ${periodo}` : ""}. Il tuo voto, da 1 a 5 stelle, compare
++          tra le recensioni di {inquilino}, accanto al suo punteggio di
++          affidabilità: lo vedono i proprietari che valutano una sua
+           candidatura. Le qualità per ora non sono visibili ad altri.
+         </p>
+ 
+diff --git a/src/components/CampanellaNovita.tsx b/src/components/CampanellaNovita.tsx
+new file mode 100644
+index 0000000..57227d1
+--- /dev/null
++++ b/src/components/CampanellaNovita.tsx
+@@ -0,0 +1,21 @@
++import Link from "next/link";
++import { IconCampana } from "@/components/icons";
++import { etichettaConteggio, sottotitoloNovita } from "@/lib/notifiche";
++
++/**
++ * La campanella delle novità, nell'angolo in alto del Profilo: porta all'elenco delle notifiche e, se ce ne sono da
++ * leggere, mostra il numero. Sostituisce la riga «Novità» che stava tra le altre.
++ */
++export function CampanellaNovita({ nonLette }: { nonLette: number }) {
++  const numero = etichettaConteggio(nonLette);
++  return (
++    <Link href="/notifiche" className={`campanella ${numero ? "con-novita" : ""}`} aria-label={`Novità. ${sottotitoloNovita(nonLette)}`}>
++      <IconCampana className="campanella-icona" />
++      {numero && (
++        <span className="campanella-numero" aria-hidden="true">
++          {numero}
++        </span>
++      )}
++    </Link>
++  );
++}
+diff --git a/src/components/FormFeedback.tsx b/src/components/FormFeedback.tsx
+index 24d21cb..5d92771 100644
+--- a/src/components/FormFeedback.tsx
++++ b/src/components/FormFeedback.tsx
+@@ -99,9 +99,10 @@ export function FormFeedback({
+       <p className="field-note">Facoltativo, scegline quante vuoi.</p>
+ 
+       <p className="field-note" style={{ marginTop: 10, lineHeight: 1.6 }}>
+-        Il voto entra nel punteggio di affidabilità, che i proprietari vedono
+-        quando valutano una candidatura. Le qualità per ora non sono visibili
+-        ad altri. Dopo l&apos;invio il feedback non si può modificare.
++        Il voto, da 1 a 5 stelle, compare tra le recensioni di questa persona,
++        accanto al suo punteggio di affidabilità: lo vedono i proprietari che
++        valutano una sua candidatura. Le qualità per ora non sono visibili ad
++        altri. Dopo l&apos;invio il feedback non si può modificare.
+       </p>
+ 
+       {errore && (
+diff --git a/src/components/InvitaProprietarioSheet.tsx b/src/components/InvitaProprietarioSheet.tsx
+index 3fcc641..dc3aeb8 100644
+--- a/src/components/InvitaProprietarioSheet.tsx
++++ b/src/components/InvitaProprietarioSheet.tsx
+@@ -48,13 +48,13 @@ export function InvitaProprietarioSheet({
+     <Sheet open={open} onClose={onClose} title="Invita il tuo proprietario">
+       <p className="sheet-sub">
+         Se hai già una casa in affitto, il tuo proprietario può lasciare un
+-        commento su com&apos;è andata con te, e conta sul tuo punteggio di
+-        affidabilità. Per tenerlo affidabile, MatchAmI lo accetta solo da
++        commento su com&apos;è andata con te: compare tra le tue recensioni,
++        accanto al tuo punteggio di affidabilità. Per tenerlo affidabile, MatchAmI lo accetta solo da
+         proprietari verificati, con un immobile verificato sul portale, e solo
+         se esiste un contratto verificato tra voi due. Vale anche per gli
+         affitti iniziati fuori da MatchAmI. Il contratto lo dichiari tu da
+-        &quot;I tuoi affitti&quot;, nel tuo profilo: il proprietario lo
+-        conferma da un link.
++        &quot;Dichiara un affitto&quot;, in Gestione affitto: il proprietario
++        lo conferma da un link.
+       </p>
+ 
+       {link ? (
+diff --git a/src/lib/gestione.ts b/src/lib/gestione.ts
+new file mode 100644
+index 0000000..d0af5c5
+--- /dev/null
++++ b/src/lib/gestione.ts
+@@ -0,0 +1,11 @@
++/**
++ * La pagina «Gestione affitto» dell'inquilino: quali schede si possono aprire da un collegamento (`?apri=…`). Solo valori
++ * ammessi; qualunque altra cosa non apre niente.
++ */
++export const SEZIONI_GESTIONE_APRIBILI = ["affitti", "invito"] as const;
++export type SezioneGestione = (typeof SEZIONI_GESTIONE_APRIBILI)[number];
++
++export function sezioneGestione(valore: unknown): SezioneGestione | null {
++  const v = Array.isArray(valore) ? valore[0] : valore;
++  return typeof v === "string" && (SEZIONI_GESTIONE_APRIBILI as readonly string[]).includes(v) ? (v as SezioneGestione) : null;
++}
+diff --git a/src/lib/home.ts b/src/lib/home.ts
+index b1d1acb..62ea21e 100644
+--- a/src/lib/home.ts
++++ b/src/lib/home.ts
+@@ -8,7 +8,7 @@ type RicercaMinima = Pick<ProfiloRicerca, "budgetMax" | "localiMin" | "mqMin" |
+   Partial<Pick<ProfiloRicerca, "budgetMin" | "localiMax" | "mqMax" | "tipologia" | "criteri">>;
+ 
+ /** Le sezioni del Profilo che si possono aprire da un collegamento (?apri=...). */
+-export const SEZIONI_PROFILO_APRIBILI = ["affidabilita", "dati", "ricerca", "invito", "affitti", "verifica"] as const;
++export const SEZIONI_PROFILO_APRIBILI = ["affidabilita", "dati", "ricerca", "verifica"] as const;
+ export type SezioneProfilo = (typeof SEZIONI_PROFILO_APRIBILI)[number];
+ 
+ /** Il valore di un parametro dell'indirizzo, se è una sezione ammessa: altrimenti niente (mai un valore arbitrario). */
+diff --git a/src/lib/notifiche.ts b/src/lib/notifiche.ts
+index 1b1ea11..822fcfa 100644
+--- a/src/lib/notifiche.ts
++++ b/src/lib/notifiche.ts
+@@ -142,9 +142,18 @@ export function descriviNotifica(
+   }
+ }
+ 
++/**
++ * Le notifiche sugli affitti dichiarati che il database manda a «/profilo» per l'INQUILINO. Gli affitti ora si gestiscono
++ * in «Gestione affitto»: si corregge qui, quando si legge il link, così vale anche per le notifiche già create (quelle del
++ * proprietario hanno già un altro indirizzo e non cambiano).
++ */
++export const TIPI_NOTIFICA_AFFITTI_INQUILINO: readonly string[] = ["affitto_verificato", "affitto_respinto", "rapporto_confermato", "rapporto_rifiutato"];
++export const LINK_AFFITTI_INQUILINO = "/gestione?apri=affitti";
++
+ /** Dove porta una notifica. Mai fuori dal sito, qualunque cosa ci sia nei dati. */
+-export function linkNotifica(n: Pick<Notifica, "link">): string {
+-  return percorsoInterno(n.link, "/");
++export function linkNotifica(n: Pick<Notifica, "link"> & Partial<Pick<Notifica, "tipo">>): string {
++  const percorso = percorsoInterno(n.link, "/");
++  return percorso === "/profilo" && typeof n.tipo === "string" && TIPI_NOTIFICA_AFFITTI_INQUILINO.includes(n.tipo) ? LINK_AFFITTI_INQUILINO : percorso;
+ }
+ 
+ /**
+diff --git a/src/lib/persona.ts b/src/lib/persona.ts
+new file mode 100644
+index 0000000..f1c91f5
+--- /dev/null
++++ b/src/lib/persona.ts
+@@ -0,0 +1,22 @@
++/**
++ * Il nome di una persona, per le intestazioni: nome e cognome insieme, le iniziali per l'avatar. Logica pura: i valori
++ * mancanti, vuoti o fatti di soli spazi non rompono niente.
++ */
++const pulito = (v: unknown): string => (typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "");
++
++/** «Tina Rossi»; se manca uno dei due, l'altro; se mancano entrambi, una stringa vuota. */
++export function nomeCompleto(nome: unknown, cognome: unknown): string {
++  return [pulito(nome), pulito(cognome)].filter(Boolean).join(" ");
++}
++
++/**
++ * Le iniziali per l'avatar: la prima lettera del nome e quella del cognome («TR»); con una parte sola, le sue prime due
++ * lettere («TI»); senza niente, «?». Sempre maiuscole.
++ */
++export function iniziali(nome: unknown, cognome: unknown): string {
++  const n = Array.from(pulito(nome));
++  const c = Array.from(pulito(cognome));
++  if (n.length > 0 && c.length > 0) return (n[0] + c[0]).toUpperCase();
++  const solo = n.length > 0 ? n : c;
++  return solo.length > 0 ? solo.slice(0, 2).join("").toUpperCase() : "?";
++}
+-- 
+2.43.0
+

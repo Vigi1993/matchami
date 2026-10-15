@@ -1,0 +1,1162 @@
+From 414c5c7fba04d35da31616b36dcf0206d2f54be8 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 14 Oct 2026 07:35:45 +0000
+Subject: [PATCH] =?UTF-8?q?feat(annunci):=20dati=20obbligatori=20per=20la?=
+ =?UTF-8?q?=20verifica=20e=20modulo=20dell'annuncio=20con=20luogo,=20bagni?=
+ =?UTF-8?q?,=20piano,=20riscaldamento,=20contratto,=20disponibilit=C3=A0?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RICHIEDE LA MIGRAZIONE 0031 (dopo la 0030) PRIMA DEL PUSH.
+
+COSA SIGNIFICA «OBBLIGATORI» (come la classe energetica, 0026): si può salvare una bozza incompleta, ma
+senza questi dati NON si può chiedere la verifica dell'immobile, e quindi l'annuncio non diventa visibile.
+Gli immobili già verificati o già in verifica non si toccano (provato: restano com'erano). Gli annunci ancora
+da verificare dovranno completare i dati nuovi prima di inviare.
+
+Dati obbligatori ora SETTE: classe energetica (già), luogo scelto dall'elenco, bagni, piano, riscaldamento,
+tipo di contratto proposto, data da cui è disponibile. Il piano 0 è il piano terra: «manca» vuol dire vuoto,
+non zero (provato nel database, nell'app e nel modulo). L'elenco resta PROVVISORIO (punto 37).
+La richiesta di verifica dice tutto ciò che manca, nell'ordine; il database ricontrolla (0031).
+
+MODULO DELL'ANNUNCIO
+- Dove si trova: completamento automatico a scelta SINGOLA tra quartieri e città (mai una provincia: l'immobile
+  sta in un posto solo); sostituisce le 13 zone a chip. La zona scritta la ricava il database dal luogo
+- Tipo di immobile (appartamento, villa; posto letto spento), bagni (da 1 a 10), piano (seminterrato, terra,
+  1°-25°), riscaldamento, tipo di contratto, 'disponibile dal' (con 'Subito')
+- una nota elenca ciò che manca per la verifica e si accorcia man mano; ricorda che si può salvare come bozza
+- un annuncio vecchio senza luogo lo dice ('Zona attuale: Isola, Milano. Scegli dall'elenco per ritrovarla.')
+  senza perdere la zona scritta
+- il luogo serve per salvare (la colonna zona non può restare vuota); gli altri dati no
+
+I dati vengono letti e controllati lato server (leggiDatiImmobile): intervalli, elenchi ammessi, date vere tra
+il 2020 e tre anni da oggi. Un errore del luogo si legge come frase, non come codice.
+
+Con questo i criteri della ricerca (bagni, piano, riscaldamento, contratto, disponibilità) hanno finalmente
+un dato da confrontare: prima sugli annunci erano sempre 'non indicato'.
+
+DIFETTI MIEI TROVATI PROVANDO
+- aggancio sbagliato nella query della pagina: il testo delle colonne nuove era finito dentro .eq('owner_id…'),
+  che avrebbe rotto l'elenco dei miei immobili
+- una sostituzione automatica aveva cancellato le righe onSaved del modulo (ripristinate e confrontate)
+- un controllo che cercava il nome della colonna ovunque nel file non vedeva una colonna tolta dalla query
+- la prova dei 1000 moduli casuali non accettava mai nessun modulo (generatore sbagliato): ora deve vedere sia
+  accettati sia rifiutati
+
+Test: 928 in tutto (21 nuovi sui dati dell'annuncio e sulla coerenza con le migrazioni), 13 prove di interazione
+sul modulo, quelle esistenti su prezzo e verifica aggiornate. Migrazione provata su PostgreSQL fedele a Supabase
+con immobili già verificati, in verifica e da inviare. Provato in Chrome col dito: zona dall'elenco, dati nuovi,
+piano terra inviato come 0, annuncio vecchio. Difetti reintrodotti di proposito: 27 su 27 presi (4 solo dal controllo
+sul codice, ripresi poi dalle prove di interazione).
+---
+ package.json                                  |   2 +-
+ scripts/test-annunci.mjs                      |  21 ++-
+ scripts/test-dati-immobile.mjs                | 132 ++++++++++++++++++
+ scripts/test-verifica.mjs                     |  34 ++++-
+ src/app/(app)/immobili/ImmobiliClient.tsx     | 125 +++++++++++++++--
+ src/app/(app)/immobili/actions.ts             |  34 +++--
+ src/app/(app)/immobili/page.tsx               |  16 ++-
+ src/app/(app)/page.tsx                        |  12 +-
+ src/components/LuogoAutocomplete.tsx          |  22 ++-
+ src/lib/annunci/dati-immobile.ts              |  98 +++++++++++++
+ src/lib/annunci/obbligatori.ts                |  61 +++++++-
+ src/lib/luoghi.ts                             |   4 +-
+ src/lib/types.ts                              |   8 ++
+ src/lib/verifica.ts                           |  10 +-
+ .../0031_dati_obbligatori_annuncio_2.sql      |  83 +++++++++++
+ 15 files changed, 603 insertions(+), 59 deletions(-)
+ create mode 100644 scripts/test-dati-immobile.mjs
+ create mode 100644 src/lib/annunci/dati-immobile.ts
+ create mode 100644 supabase/migrations/0031_dati_obbligatori_annuncio_2.sql
+
+diff --git a/package.json b/package.json
+index 4d56d32..662bb87 100644
+--- a/package.json
++++ b/package.json
+@@ -8,7 +8,7 @@
+     "start": "next start",
+     "lint": "eslint",
+     "pretest": "node scripts/controlla-dipendenze.mjs",
+-    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-dati-immobile.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-annunci.mjs b/scripts/test-annunci.mjs
+index ed27e2d..6f5a97f 100644
+--- a/scripts/test-annunci.mjs
++++ b/scripts/test-annunci.mjs
+@@ -63,22 +63,29 @@ test("testo mostrato: classe e indice, solo classe, o «Non indicata»", () => {
+ });
+ 
+ // ============================================================ i dati obbligatori
+-test("obbligatori: oggi la classe energetica, e l'elenco è dichiarato provvisorio", () => {
+-  assert.deepEqual(ob.DATI_OBBLIGATORI.map((d) => d.chiave), ["classe_energetica"]);
++const COMPLETI = { classe_energetica: "C", luogo_id: "q1", bagni: 1, piano: 0, riscaldamento: "autonomo", tipo_contratto: "libero_4_4", disponibile_dal: "2026-12-01" };
++
++test("obbligatori: sette dati (classe energetica, luogo, bagni, piano, riscaldamento, contratto, disponibilità), e l'elenco è dichiarato provvisorio", () => {
++  assert.deepEqual(ob.DATI_OBBLIGATORI.map((d) => d.chiave), ["classe_energetica", "luogo_id", "bagni", "piano", "riscaldamento", "tipo_contratto", "disponibile_dal"]);
+   assert.equal(ob.ELENCO_DATI_OBBLIGATORI_PROVVISORIO, true, "se l'elenco è stato confermato da un legale va tolto il «provvisorio» e aggiornato il punto 37");
+   for (const d of ob.DATI_OBBLIGATORI) { assert.ok(d.etichetta && d.perche && d.frase); assert.ok(!/\b(lui|lei)\b/i.test(d.frase)); }
+ });
+ 
+-test("obbligatori: un valore nullo, assente o vuoto vale «manca»; qualunque classe valida no", () => {
+-  for (const x of [null, undefined, "", "   "]) assert.equal(ob.datiMancanti({ classe_energetica: x }).length, 1, JSON.stringify(x));
+-  assert.equal(ob.datiMancanti({}).length, 1);
+-  for (const c of en.CLASSI_ENERGETICHE) assert.equal(ob.datiMancanti({ classe_energetica: c }).length, 0, c);
++test("obbligatori: un valore nullo, assente o vuoto vale «manca», per ognuno dei sette; lo zero NO (il piano 0 è il piano terra)", () => {
++  assert.deepEqual(ob.datiMancanti(COMPLETI), []); assert.equal(ob.datiMancanti({}).length, 7);
++  for (const chiave of Object.keys(COMPLETI)) for (const x of [null, undefined, "", "   "]) assert.deepEqual(ob.datiMancanti({ ...COMPLETI, [chiave]: x }).map((d) => d.chiave), [chiave], `${chiave}=${JSON.stringify(x)}`);
++  assert.deepEqual(ob.datiMancanti({ ...COMPLETI, piano: 0 }), [], "il piano terra non è «manca»"); assert.deepEqual(ob.datiMancanti({ ...COMPLETI, piano: -1 }), []);
++  for (const c of en.CLASSI_ENERGETICHE) assert.equal(ob.datiMancanti({ ...COMPLETI, classe_energetica: c }).length, 0, c);
++  assert.deepEqual(ob.datiMancanti({ ...COMPLETI, bagni: null, piano: null }).map((d) => d.chiave), ["bagni", "piano"], "tutto ciò che manca si dice insieme, nell'ordine dell'elenco");
+ });
+ 
+ test("obbligatori: ciò che l'app chiede e ciò che il database fa rispettare coincidono", () => {
+   // ogni dato obbligatorio dell'app deve essere controllato anche dalla funzione del database:
+   // se si aggiunge un dato all'elenco e non alla migrazione, un annuncio incompleto passerebbe
+-  const funzione = sql.slice(sql.indexOf("create or replace function public.richiedi_verifica_immobile"));
++  // vale la versione PIÙ RECENTE della funzione (le migrazioni successive la riscrivono)
++  const cartella = path.join(radice, "supabase", "migrations"); const ultima = fs.readdirSync(cartella).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort().filter((f) => fs.readFileSync(path.join(cartella, f), "utf8").includes("create or replace function public.richiedi_verifica_immobile")).pop();
++  const testoUltima = fs.readFileSync(path.join(cartella, ultima), "utf8"); assert.equal(ultima, "0031_dati_obbligatori_annuncio_2.sql", "la funzione è stata riscritta di nuovo: aggiorna questo test");
++  const funzione = testoUltima.slice(testoUltima.indexOf("create or replace function public.richiedi_verifica_immobile"));
+   for (const d of ob.DATI_OBBLIGATORI) assert.match(funzione, new RegExp(`v_listing\\.${d.chiave} is null`), `${d.chiave} non è controllato dal database`);
+   // e viceversa: il database non chiede di più di ciò che l'app sa spiegare
+   const controlli = [...funzione.matchAll(/v_listing\.(\w+) is null/g)].map((m) => m[1]);
+diff --git a/scripts/test-dati-immobile.mjs b/scripts/test-dati-immobile.mjs
+new file mode 100644
+index 0000000..1e06740
+--- /dev/null
++++ b/scripts/test-dati-immobile.mjs
+@@ -0,0 +1,132 @@
++/**
++ * Test dei dati dell'annuncio che chi cerca può filtrare (luogo, tipologia, bagni, piano, riscaldamento, tipo di contratto,
++ * disponibilità): lettura controllata dal modulo, completamento dei luoghi per l'annuncio e coerenza con le migrazioni.
++ * Si lancia con:   npm test
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const di = caricaTs(path.join(radice, "src", "lib", "annunci", "dati-immobile.ts"));
++const ob = caricaTs(path.join(radice, "src", "lib", "annunci", "obbligatori.ts"));
++const lg = caricaTs(path.join(radice, "src", "lib", "luoghi.ts"));
++const co = caricaTs(path.join(radice, "src", "lib", "constants.ts"));
++// con i ritorni a capo di Windows normalizzati
++const leggi = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8").replace(/\r\n/g, "\n");
++const m30 = leggi("supabase", "migrations", "0030_parametri_ricerca.sql");
++const m31 = leggi("supabase", "migrations", "0031_dati_obbligatori_annuncio_2.sql");
++
++const OGGI = "2026-10-14";
++const UUID = "0a1b2c3d-1111-4222-8333-444455556666";
++const leggiCampi = (campi) => di.leggiDatiImmobile((k) => (k in campi ? campi[k] : null), OGGI);
++const ok = (campi) => { const r = leggiCampi(campi); assert.equal(r.ok, true, JSON.stringify(campi) + " -> " + (r.errore ?? "")); return r.dati; };
++const no = (campi, re) => { const r = leggiCampi(campi); assert.equal(r.ok, false, "doveva essere rifiutato: " + JSON.stringify(campi)); if (re) assert.match(r.errore, re); return r.errore; };
++
++// ============================================================ lettura dal modulo
++test("dati vuoti: una bozza è ammessa (tutto null, tipologia «appartamento»); campi mancanti e testi vuoti o di soli spazi valgono vuoto", () => {
++  assert.deepEqual(ok({}), { luogo_id: null, tipologia: "appartamento", bagni: null, piano: null, riscaldamento: null, tipo_contratto: null, disponibile_dal: null });
++  assert.deepEqual(ok({ luogo_id: "", tipologia: "", bagni: "", piano: "", riscaldamento: "", tipo_contratto: "", disponibile_dal: "" }), ok({}));
++  assert.deepEqual(ok({ luogo_id: "  ", bagni: "  ", piano: "   ", disponibile_dal: " " }), ok({}));
++});
++
++test("dati completi: si portano com'erano, il luogo in minuscolo e i numeri come numeri", () => {
++  const d = ok({ luogo_id: UUID.toUpperCase(), tipologia: "villa", bagni: "2", piano: "0", riscaldamento: "autonomo", tipo_contratto: "studenti", disponibile_dal: "2026-12-01" });
++  assert.deepEqual(d, { luogo_id: UUID, tipologia: "villa", bagni: 2, piano: 0, riscaldamento: "autonomo", tipo_contratto: "studenti", disponibile_dal: "2026-12-01" });
++  assert.strictEqual(d.piano, 0, "il piano terra deve restare 0 (non null)");
++});
++
++test("il piano terra (0) e il seminterrato non si perdono; sono ammessi da -2 a 60 e non un numero in più", () => {
++  assert.strictEqual(ok({ piano: "0" }).piano, 0); assert.strictEqual(ok({ piano: "-1" }).piano, -1); assert.strictEqual(ok({ piano: "-2" }).piano, -2); assert.strictEqual(ok({ piano: "60" }).piano, 60); assert.strictEqual(ok({ piano: " 7 " }).piano, 7);
++  for (const x of ["-3", "61", "1.5", "7a", "a", "1e1", "--1", "999999", "0x10", "٣"]) no({ piano: x }, /piano/i);
++});
++
++test("bagni: da 1 a 10 interi; zero, negativi, decimali, testo e numeri enormi rifiutati", () => {
++  for (const n of [1, 2, 9, 10]) assert.strictEqual(ok({ bagni: String(n) }).bagni, n);
++  for (const x of ["0", "11", "-1", "1.5", "1,5", "due", "1e1", "100000"]) no({ bagni: x }, /bagni/i);
++});
++
++test("tipologia: appartamento o villa; il posto letto dice «per ora»; il resto è rifiutato", () => {
++  assert.equal(ok({ tipologia: "appartamento" }).tipologia, "appartamento"); assert.equal(ok({ tipologia: "villa" }).tipologia, "villa"); assert.equal(ok({ tipologia: " villa " }).tipologia, "villa");
++  no({ tipologia: "posto_letto" }, /per ora/i); for (const x of ["castello", "Villa", "VILLA", "monolocale", "'; drop"]) no({ tipologia: x }, /tipo di immobile/i);
++});
++
++test("riscaldamento e contratto: solo i valori ammessi (gli stessi dell'app e del database)", () => {
++  for (const r of co.RISCALDAMENTI) assert.equal(ok({ riscaldamento: r.id }).riscaldamento, r.id); for (const t of co.TIPI_CONTRATTO) assert.equal(ok({ tipo_contratto: t.id }).tipo_contratto, t.id);
++  for (const x of ["gas", "Autonomo", "autonomo ", "centralizzato;", "pompa di calore"]) assert.ok(x.trim() === "autonomo" || !leggiCampi({ riscaldamento: x }).ok || x === "autonomo ", x);
++  no({ riscaldamento: "gas" }, /riscaldamento/i); no({ riscaldamento: "Autonomo" }, /riscaldamento/i); no({ tipo_contratto: "boh" }, /contratto/i); no({ tipo_contratto: "4+4 libero" }, /contratto/i);
++});
++
++test("luogo: un identificativo valido o vuoto; qualunque altro testo rifiutato (anche un nome di zona scritto a mano)", () => {
++  assert.equal(ok({ luogo_id: UUID }).luogo_id, UUID); for (const x of ["Isola, Milano", "boh", "1", UUID + "x", "x" + UUID, UUID.slice(0, 35), "../x", "<script>", "0a1b2c3d-1111-4222-8333-44445555666g"]) no({ luogo_id: x }, /zona/i);
++});
++
++test("data di disponibilità: una data vera, dal 2020 a tre anni da oggi; il passato recente (disponibile subito) è ammesso; date impossibili no", () => {
++  for (const d of ["2026-10-14", "2026-10-13", "2020-01-01", "2029-10-14", "2028-02-29"]) assert.equal(ok({ disponibile_dal: d }).disponibile_dal, d);
++  for (const d of ["2019-12-31", "2029-10-15", "2099-01-01", "2026-02-31", "2026-13-01", "2026-1-1", "domani", "14/10/2026", "2026-10-14T00:00", "20261014", "2027-02-29"]) no({ disponibile_dal: d }, /data/i);
++});
++
++test("il primo errore trovato si dice, e un errore non lascia valori a metà", () => {
++  const r = leggiCampi({ luogo_id: "boh", bagni: "0" }); assert.equal(r.ok, false); assert.equal("dati" in r, false); assert.match(r.errore, /zona/i);
++  for (const c of [{ bagni: "x" }, { piano: "x" }, { disponibile_dal: "x" }, { tipologia: "x" }]) { const e = leggiCampi(c); assert.equal(e.ok, false); assert.ok(e.errore.endsWith(".") && e.errore.length > 10, e.errore); }
++});
++
++test("1000 moduli casuali: non danno mai errori, e ciò che viene accettato rispetta i limiti del database", () => {
++  let seme = 77; const rnd = () => (seme = (seme * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff; const sc = (a) => a[Math.floor(rnd() * a.length)]; const int = (a, b) => a + Math.floor(rnd() * (b - a + 1));
++  // per ogni campo: valori validi (o vuoti) e, ogni tanto, un valore brutto
++  const validi = { luogo_id: () => sc(["", UUID]), tipologia: () => sc(["", "appartamento", "villa"]), bagni: () => sc(["", String(int(1, 10))]), piano: () => sc(["", String(int(-2, 60))]), riscaldamento: () => sc(["", ...co.RISCALDAMENTI.map((x) => x.id)]), tipo_contratto: () => sc(["", ...co.TIPI_CONTRATTO.map((x) => x.id)]), disponibile_dal: () => sc(["", "2026-12-01", "2027-06-30", "2026-10-14"]) };
++  const brutti = ["0", "-1", "99", "1.5", "x", "'; drop", "2026-02-30", "posto_letto", "💥", "9".repeat(50), "null", "undefined", "Isola, Milano", "gas"];
++  let accettati = 0, rifiutati = 0;
++  for (let i = 0; i < 1000; i++) {
++    const campi = {}; for (const k of Object.keys(validi)) if (rnd() < 0.9) campi[k] = rnd() < 0.12 ? sc(brutti) : validi[k]();
++    let r; assert.doesNotThrow(() => { r = leggiCampi(campi); }, JSON.stringify(campi));
++    if (r.ok) { accettati++; const d = r.dati; if (d.bagni !== null) assert.ok(Number.isInteger(d.bagni) && d.bagni >= 1 && d.bagni <= 10); if (d.piano !== null) assert.ok(Number.isInteger(d.piano) && d.piano >= -2 && d.piano <= 60); assert.ok(["appartamento", "villa"].includes(d.tipologia)); if (d.disponibile_dal !== null) assert.match(d.disponibile_dal, /^\d{4}-\d{2}-\d{2}$/); } else rifiutati++;
++  }
++  assert.ok(accettati > 150 && rifiutati > 150, `la prova deve vedere entrambi i casi: accettati ${accettati}, rifiutati ${rifiutati}`);
++});
++
++test("piani del modulo: seminterrato, piano terra e 1°…25°, tutti ammessi dal database", () => {
++  const o = di.OPZIONI_PIANO_ANNUNCIO; assert.equal(o.length, 27); assert.deepEqual(o.slice(0, 3), [{ valore: -1, etichetta: "Seminterrato" }, { valore: 0, etichetta: "Piano terra" }, { valore: 1, etichetta: "1°" }]); assert.equal(o.at(-1).etichetta, "25°"); for (const x of o) assert.strictEqual(ok({ piano: String(x.valore) }).piano, x.valore);
++});
++
++// ============================================================ il completamento per l'annuncio
++const L = (id, livello, nome, parent_id = null, sigla = null) => ({ id, livello, nome, sigla, parent_id });
++const LUOGHI = [L("pMI", "provincia", "Milano", null, "MI"), L("cMI", "comune", "Milano", "pMI"), L("qIsola", "quartiere", "Isola", "cMI"), L("pBG", "provincia", "Bergamo", null, "BG"), L("cBG", "comune", "Bergamo", "pBG")];
++
++test("completamento per l'annuncio: limitato a quartieri e città, mai le province (anche scrivendo la sigla)", () => {
++  const trova = (q, livelli) => lg.cercaLuoghi(q, LUOGHI, { livelli }).map((x) => x.luogo.id);
++  assert.deepEqual(trova("milano", ["quartiere", "comune"]), ["cMI", "qIsola"], "la città e il suo quartiere, mai la provincia"); assert.ok(trova("milano").includes("pMI"), "senza il limite la provincia c'è"); assert.deepEqual(trova("bg", ["quartiere", "comune"]), ["cBG"], "scrivendo la sigla trova la città, non la provincia"); assert.deepEqual(trova("isola", ["comune"]), []); assert.deepEqual(trova("isola", []), []);
++});
++
++// ============================================================ coerenza con le migrazioni e il codice
++test("le liste ammesse sono quelle del database e i limiti coincidono (bagni 1-10, piano -2..60)", () => {
++  assert.match(m30, /bagni between 1 and 10/); assert.equal(di.LIMITI_ANNUNCIO.bagni.min, 1); assert.equal(di.LIMITI_ANNUNCIO.bagni.max, 10); assert.match(m30, /piano between -2 and 60/); assert.equal(di.LIMITI_ANNUNCIO.piano.min, -2); assert.equal(di.LIMITI_ANNUNCIO.piano.max, 60);
++  const lista = (re) => [...m30.match(re)[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
++  assert.deepEqual(co.RISCALDAMENTI.map((x) => x.id), lista(/listings_riscaldamento_check check \(riscaldamento is null or riscaldamento in \(([^)]*)\)/)); assert.deepEqual(co.TIPI_CONTRATTO.map((x) => x.id), lista(/listings_tipo_contratto_check check \(tipo_contratto is null or tipo_contratto in \(([^)]*)\)/));
++});
++
++test("obbligatori: i sette dati dell'app sono ESATTAMENTE quelli controllati dalla migrazione 0031, e il piano si controlla come «è nullo» (non «è zero»)", () => {
++  const controlli = [...m31.matchAll(/v_listing\.(\w+) is null/g)].map((x) => x[1]); assert.deepEqual(controlli.sort(), ob.DATI_OBBLIGATORI.map((d) => d.chiave).sort());
++  assert.ok(!/v_listing\.piano\s*(=|<>|!=)\s*0/.test(m31) && !/not v_listing\.piano/.test(m31), "il piano terra non deve contare come «manca»"); assert.ok(!/drop (table|column)/i.test(m31.replace(/--[^\n]*/g, "")), "la migrazione cancella qualcosa");
++  assert.match(m31, /revoke all on function public\.richiedi_verifica_immobile\(uuid\) from public, anon;\s+grant execute on function public\.richiedi_verifica_immobile\(uuid\) to authenticated;/);
++  // le colonne controllate esistono (le aggiunge la 0030 o la 0026)
++  for (const c of controlli.filter((x) => x !== "classe_energetica")) assert.match(m30, new RegExp(`alter table listings add column if not exists ${c}\\b`), c);
++});
++
++test("azioni: leggono i dati con la funzione controllata, richiedono il luogo, non mandano più la zona scritta e traducono l'errore del luogo", () => {
++  const a = leggi("src", "app", "(app)", "immobili", "actions.ts"); assert.equal([...a.matchAll(/leggiDatiImmobile\(\(chiave\) => formData\.get\(chiave\), new Date\(\)\.toISOString\(\)\.slice\(0, 10\)\)/g)].length, 2, "crea e aggiorna");
++  assert.equal([...a.matchAll(/if \(!dati\.dati\.luogo_id\) return \{ error: "Scegli la zona dall'elenco\." \}/g)].length, 2); assert.equal([...a.matchAll(/\.\.\.dati\.dati,/g)].length, 2); assert.ok(!/formData\.get\("zona"\)/.test(a), "legge ancora la zona scritta");
++  assert.ok(!/^\s+zona,\s*$/m.test(a), "scrive ancora la zona scritta a mano"); assert.equal([...a.matchAll(/error\.message\.includes\("LUOGO_NON_VALIDO"\) \? messaggioErroreVerifica\(error\.message\)/g)].length, 2);
++});
++
++test("modulo e pagina: zona a scelta singola tra quartieri e città, i sette campi inviati, la nota su ciò che manca; la pagina legge luoghi e colonne nuove", () => {
++  const c = leggi("src", "app", "(app)", "immobili", "ImmobiliClient.tsx"); assert.ok(!/ZONE_MILANO/.test(c), "usa ancora le zone scritte a mano"); assert.match(c, /<LuogoAutocomplete[\s\S]*?singolo[\s\S]*?livelli=\{\["quartiere", "comune"\]\}/);
++  assert.deepEqual([...c.matchAll(/<input type="hidden" name="(luogo_id|tipologia|bagni|piano|riscaldamento|tipo_contratto|disponibile_dal)"/g)].map((m) => m[1]), ["luogo_id", "tipologia", "bagni", "piano", "riscaldamento", "tipo_contratto", "disponibile_dal"]);
++  assert.match(c, /<input type="hidden" name="piano" value=\{piano\} \/>/, "il piano deve passare così com'è (lo zero conta)"); assert.match(c, /piano: piano === "" \? null : Number\(piano\)/, "la nota non deve dare il piano terra per mancante"); assert.match(c, /const mancanti = datiMancanti\(/);
++  const p = leggi("src", "app", "(app)", "immobili", "page.tsx"); const elencoColonne = p.match(/\.from\("listings"\)\s*\.select\(\s*"([^"]+)"/)[1]; for (const col of ["luogo_id", "tipologia", "bagni", "piano", "riscaldamento", "tipo_contratto", "disponibile_dal"]) { assert.ok(elencoColonne.split(/,\s*/).includes(col), `la query non legge «${col}»`); assert.ok(p.includes(`${col}: `), `la pagina non passa «${col}» al modulo`); } assert.match(p, /\.eq\("owner_id", user!\.id\)/); assert.match(p, /from\("luoghi"\)\.select\("id, livello, nome, sigla, parent_id"\)/);
++});
++
++test("Home del proprietario: passa alla verifica i sette dati dell'annuncio", () => {
++  const h = leggi("src", "app", "(app)", "page.tsx"); const blocco = h.slice(h.indexOf("const immobili: ImmobileVerifica[]")); for (const k of ["classe_energetica", "luogo_id", "bagni", "piano", "riscaldamento", "tipo_contratto", "disponibile_dal"]) assert.match(blocco, new RegExp(`${k}: \\(l\\.${k} as`), k); assert.match(h, /\.select\("id, titolo, zona, verifica_stato, verifica_esito_note, classe_energetica, luogo_id, bagni, piano, riscaldamento, tipo_contratto, disponibile_dal"\)/);
++});
+diff --git a/scripts/test-verifica.mjs b/scripts/test-verifica.mjs
+index b34cdf5..6a50cfb 100644
+--- a/scripts/test-verifica.mjs
++++ b/scripts/test-verifica.mjs
+@@ -14,7 +14,9 @@ const {
+   DIMENSIONE_MAX_BYTE,
+ } = v;
+ 
+-const imm = (o = {}) => ({ id: "L1", titolo: "Casa", zona: "Isola", stato: "non_avviata", note: null, nProprieta: 0, classeEnergetica: "C", ...o });
++const DATI = { classe_energetica: "C", luogo_id: "q1", bagni: 1, piano: 0, riscaldamento: "autonomo", tipo_contratto: "libero_4_4", disponibile_dal: "2026-12-01" };
++const imm = (o = {}) => ({ id: "L1", titolo: "Casa", zona: "Isola", stato: "non_avviata", note: null, nProprieta: 0, dati: DATI, ...o });
++const senzaDato = (chiave, valore = null) => ({ ...DATI, [chiave]: valore });
+ 
+ // ---------------- stati ----------------
+ test("stato: ogni stato dice a che punto si è, con un tono diverso", () => {
+@@ -135,19 +137,19 @@ test("errori: ogni codice del database ha una frase, e mai il testo tecnico", ()
+ // ------------------------------------------------------------
+ 
+ test("manca la classe energetica: lo dice, e non si può inviare", () => {
+-  const senza = imm({ nProprieta: 1, classeEnergetica: null });
++  const senza = imm({ nProprieta: 1, dati: senzaDato("classe_energetica") });
+   const m = cosaManca(true, senza);
+   assert.equal(m.length, 1); assert.match(m[0], /classe energetica/); assert.match(m[0], /scheda dell'annuncio/);
+   assert.equal(puoInviare(true, senza), false);
+-  assert.equal(puoInviare(true, imm({ nProprieta: 1, classeEnergetica: "G" })), true, "ogni classe va bene, anche la peggiore");
++  assert.equal(puoInviare(true, imm({ nProprieta: 1, dati: senzaDato("classe_energetica", "G") })), true, "ogni classe va bene, anche la peggiore");
+ });
+ 
+ test("la classe vuota o con soli spazi vale «manca»; undefined anche", () => {
+-  for (const c of ["", "   ", null, undefined]) assert.equal(puoInviare(true, imm({ nProprieta: 1, classeEnergetica: c })), false, JSON.stringify(c));
++  for (const c of ["", "   ", null, undefined]) assert.equal(puoInviare(true, imm({ nProprieta: 1, dati: senzaDato("classe_energetica", c) })), false, JSON.stringify(c));
+ });
+ 
+ test("tutto ciò che manca si dice insieme, nell'ordine: identità, proprietà, classe", () => {
+-  const m = cosaManca(false, imm({ nProprieta: 0, classeEnergetica: null }));
++  const m = cosaManca(false, imm({ nProprieta: 0, dati: senzaDato("classe_energetica") }));
+   assert.equal(m.length, 3); assert.match(m[0], /identità/); assert.match(m[1], /proprietà/); assert.match(m[2], /classe energetica/);
+ });
+ 
+@@ -155,3 +157,25 @@ test("il messaggio del database per i dati mancanti è una frase, non un codice"
+   const f = messaggioErroreVerifica("ERROR: DATI_OBBLIGATORI_MANCANTI (P0001)");
+   assert.match(f, /classe energetica/); assert.ok(!/DATI_OBBLIGATORI|P0001/.test(f));
+ });
++
++// ------------------------------------------------------------
++// I dati obbligatori nuovi: luogo, bagni, piano, riscaldamento, contratto, disponibilità
++// ------------------------------------------------------------
++
++test("manca uno qualunque dei dati nuovi: lo dice con parole sue, e non si può inviare", () => {
++  const attese = { luogo_id: /zona/, bagni: /bagni/, piano: /piano/, riscaldamento: /riscaldamento/, tipo_contratto: /contratto/, disponibile_dal: /disponibile/ };
++  for (const [chiave, re] of Object.entries(attese)) { const i = imm({ nProprieta: 1, dati: senzaDato(chiave) }); const m = cosaManca(true, i); assert.equal(m.length, 1, chiave); assert.match(m[0], re, chiave); assert.match(m[0], /scheda dell'annuncio/); assert.equal(puoInviare(true, i), false, chiave); }
++  assert.equal(puoInviare(true, imm({ nProprieta: 1 })), true, "con tutti e sette si può");
++});
++
++test("il piano terra (0) e il seminterrato (-1) NON sono «manca»; il vuoto sì", () => {
++  assert.equal(puoInviare(true, imm({ nProprieta: 1, dati: senzaDato("piano", 0) })), true); assert.equal(puoInviare(true, imm({ nProprieta: 1, dati: senzaDato("piano", -1) })), true); assert.equal(puoInviare(true, imm({ nProprieta: 1, dati: senzaDato("piano", null) })), false); assert.equal(puoInviare(true, imm({ nProprieta: 1, dati: senzaDato("piano", undefined) })), false);
++});
++
++test("tutto ciò che manca si dice insieme: identità, proprietà, poi i dati nell'ordine dell'elenco", () => {
++  const m = cosaManca(false, imm({ nProprieta: 0, dati: {} })); assert.equal(m.length, 9); assert.match(m[0], /identità/); assert.match(m[1], /proprietà/); assert.match(m[2], /classe energetica/); assert.match(m[3], /zona/); assert.match(m[8], /disponibile/);
++});
++
++test("il messaggio del database per i dati mancanti li elenca tutti, in una frase", () => {
++  const f = messaggioErroreVerifica("ERROR: DATI_OBBLIGATORI_MANCANTI (P0001)"); for (const p of ["classe energetica", "zona", "bagni", "piano", "riscaldamento", "tipo di contratto", "disponibilità"]) assert.match(f, new RegExp(p), p);
++});
+diff --git a/src/app/(app)/immobili/ImmobiliClient.tsx b/src/app/(app)/immobili/ImmobiliClient.tsx
+index f8f6d3c..5627ecb 100644
+--- a/src/app/(app)/immobili/ImmobiliClient.tsx
++++ b/src/app/(app)/immobili/ImmobiliClient.tsx
+@@ -3,12 +3,13 @@
+ import {
+   useActionState,
+   useEffect,
++  useMemo,
+   useRef,
+   useState,
+   useTransition,
+ } from "react";
+ import { Sheet } from "@/components/Sheet";
+-import { ATTR_VOCAB, ZONE_MILANO } from "@/lib/constants";
++import { ATTR_VOCAB, RISCALDAMENTI, TIPI_CONTRATTO } from "@/lib/constants";
+ import type { ImmobileDettaglio } from "@/lib/types";
+ import type { CriterioRichiesto } from "@/lib/match";
+ import { CriteriCandidati } from "@/components/CriteriCandidati";
+@@ -20,6 +21,11 @@ import { PannelloPrezzo } from "@/components/PannelloPrezzo";
+ import type { RisultatoQuotazione } from "@/lib/prezzi";
+ import { Field } from "@/components/ui/Field";
+ import { Stepper } from "@/components/ui/Stepper";
++import { StepperOpzionale } from "@/components/ui/StepperOpzionale";
++import { LuogoAutocomplete } from "@/components/LuogoAutocomplete";
++import { etichettaLuogo, mappaLuoghi, type Luogo } from "@/lib/luoghi";
++import { OPZIONI_PIANO_ANNUNCIO } from "@/lib/annunci/dati-immobile";
++import { datiMancanti } from "@/lib/annunci/obbligatori";
+ import { createClient } from "@/lib/supabase/client";
+ import { IconPalazzo } from "@/components/icons";
+ import { VisiteImmobile } from "@/components/VisiteImmobile";
+@@ -38,8 +44,11 @@ export function ImmobiliClient({
+   visite = [],
+   indirizzi = {},
+   quotazioni = {},
++  luoghi = [],
+ }: {
+   immobili: ImmobileDettaglio[];
++  /** i luoghi dove si può mettere un immobile (provincia → città → quartiere) */
++  luoghi?: Luogo[];
+   /** i posti liberi e le prenotazioni di tutti i miei immobili */
+   visite?: VisitaProprietario[];
+   /** gli indirizzi dei miei immobili, per identificativo */
+@@ -132,6 +141,7 @@ export function ImmobiliClient({
+         <ImmobileForm
+           action={creaImmobile}
+           quotazioni={quotazioni}
++          luoghi={luoghi}
+           onSaved={() => setNuovoAperto(false)}
+         />
+       </Sheet>
+@@ -149,6 +159,7 @@ export function ImmobiliClient({
+               action={aggiornaImmobile}
+               immobile={selezionato}
+               quotazioni={quotazioni}
++              luoghi={luoghi}
+               onSaved={() => setSelezionato(null)}
+             />
+           </>
+@@ -162,18 +173,31 @@ function ImmobileForm({
+   action,
+   immobile,
+   quotazioni,
++  luoghi,
+   onSaved,
+ }: {
+   action: (prevState: SaveState, formData: FormData) => Promise<SaveState>;
+   immobile?: ImmobileDettaglio;
+   quotazioni: Record<string, RisultatoQuotazione>;
++  luoghi: Luogo[];
+   onSaved: () => void;
+ }) {
+   const [state, formAction, pending] = useActionState(action, null);
+   const [pendingDelete, startDeleteTransition] = useTransition();
+   const [erroreDelete, setErroreDelete] = useState<string | null>(null);
+ 
+-  const [zona, setZona] = useState(immobile?.zona ?? ZONE_MILANO[0]);
++  // Dove si trova: un luogo dell'elenco (la zona scritta ne deriva). Un annuncio vecchio può non averne ancora uno.
++  const mappa = useMemo(() => mappaLuoghi(luoghi), [luoghi]);
++  const [luogoId, setLuogoId] = useState<string | null>(immobile?.luogo_id ?? null);
++  const luogo = luogoId ? mappa.get(luogoId) : undefined;
++  const zona = luogo ? etichettaLuogo(luogo, mappa) : (immobile?.zona ?? "");
++  // I dati che chi cerca può filtrare. Vuoti = «da indicare»: servono tutti per chiedere la verifica.
++  const [tipologia, setTipologia] = useState<"appartamento" | "villa">(immobile?.tipologia === "villa" ? "villa" : "appartamento");
++  const [bagni, setBagni] = useState(immobile?.bagni ?? 0);
++  const [piano, setPiano] = useState(immobile?.piano !== null && immobile?.piano !== undefined ? String(immobile.piano) : "");
++  const [riscaldamento, setRiscaldamento] = useState(immobile?.riscaldamento ?? "");
++  const [contratto, setContratto] = useState(immobile?.tipo_contratto ?? "");
++  const [disponibile, setDisponibile] = useState(immobile?.disponibile_dal ?? "");
+   const [prezzo, setPrezzo] = useState(immobile?.prezzo ?? 1200);
+   const [locali, setLocali] = useState(immobile?.locali ?? 2);
+   const [mq, setMq] = useState(immobile?.mq ?? 50);
+@@ -185,6 +209,15 @@ function ImmobileForm({
+   const [pubblicato, setPubblicato] = useState(immobile?.pubblicato ?? true);
+   const [foto, setFoto] = useState<string[]>(immobile?.foto ?? []);
+   const [criteri, setCriteri] = useState<CriterioRichiesto[]>(immobile?.criteri ?? []);
++  const mancanti = datiMancanti({
++    classe_energetica: classe,
++    luogo_id: luogoId,
++    bagni: bagni > 0 ? bagni : null,
++    piano: piano === "" ? null : Number(piano),
++    riscaldamento,
++    tipo_contratto: contratto,
++    disponibile_dal: disponibile,
++  });
+   const inputFotoRef = useRef<HTMLInputElement>(null);
+   const [caricamentoFoto, setCaricamentoFoto] = useState(false);
+   const [erroreFoto, setErroreFoto] = useState<string | null>(null);
+@@ -281,7 +314,13 @@ function ImmobileForm({
+   return (
+     <form action={formAction} className="flex flex-col gap-5">
+       {immobile && <input type="hidden" name="id" value={immobile.id} />}
+-      <input type="hidden" name="zona" value={zona} />
++      <input type="hidden" name="luogo_id" value={luogoId ?? ""} />
++      <input type="hidden" name="tipologia" value={tipologia} />
++      <input type="hidden" name="bagni" value={bagni > 0 ? bagni : ""} />
++      <input type="hidden" name="piano" value={piano} />
++      <input type="hidden" name="riscaldamento" value={riscaldamento} />
++      <input type="hidden" name="tipo_contratto" value={contratto} />
++      <input type="hidden" name="disponibile_dal" value={disponibile} />
+       <input type="hidden" name="prezzo" value={prezzo} />
+       <input type="hidden" name="locali" value={locali} />
+       <input type="hidden" name="mq" value={mq} />
+@@ -311,17 +350,21 @@ function ImmobileForm({
+         />
+       </Field>
+ 
+-      <Field label="Zona">
+-        <div className="flex flex-wrap gap-2">
+-          {ZONE_MILANO.map((z) => (
+-            <Chip
+-              key={z}
+-              label={z.split(",")[0]}
+-              active={zona === z}
+-              onClick={() => setZona(z)}
+-            />
+-          ))}
+-        </div>
++      <Field label="Dove si trova">
++        <LuogoAutocomplete
++          luoghi={luoghi}
++          scelti={luogoId ? [luogoId] : []}
++          onChange={(ids) => setLuogoId(ids[0] ?? null)}
++          singolo
++          livelli={["quartiere", "comune"]}
++          etichetta="Dove si trova l'immobile: città o quartiere"
++          segnaposto="Scrivi la città o il quartiere"
++        />
++        {!luogoId && (
++          <p className="field-note" style={{ margin: "8px 0 0 0" }}>
++            {immobile?.zona ? `Zona attuale: ${immobile.zona}. Scegli dall'elenco per ritrovarla.` : "Scegli la zona dall'elenco: serve per salvare l'annuncio."}
++          </p>
++        )}
+       </Field>
+ 
+       <Field label={`Canone mensile · €${prezzo.toLocaleString("it-IT")}`}>
+@@ -344,6 +387,60 @@ function ImmobileForm({
+         <Stepper value={mq} onChange={setMq} min={15} max={250} step={5} suffix=" m²" />
+       </Field>
+ 
++      <Field label="Tipo di immobile">
++        <div className="chip-row" role="group" aria-label="Tipo di immobile">
++          <Chip label="Appartamento" active={tipologia === "appartamento"} onClick={() => setTipologia("appartamento")} />
++          <Chip label="Villa" active={tipologia === "villa"} onClick={() => setTipologia("villa")} />
++          <button type="button" className="chip" disabled aria-label="Posto letto, presto disponibile">
++            Posto letto · presto
++          </button>
++        </div>
++      </Field>
++
++      <Field label="Bagni · obbligatorio per la verifica">
++        <StepperOpzionale etichetta="Numero di bagni" value={bagni} onChange={setBagni} min={1} max={10} avvio={1} vuoto="Da indicare" />
++      </Field>
++
++      <Field label="Piano · obbligatorio per la verifica">
++        <select value={piano} onChange={(e) => setPiano(e.target.value)} aria-label="Piano" className="contract-input">
++          <option value="">Da indicare</option>
++          {OPZIONI_PIANO_ANNUNCIO.map((o) => (
++            <option key={o.valore} value={o.valore}>
++              {o.etichetta}
++            </option>
++          ))}
++        </select>
++      </Field>
++
++      <Field label="Riscaldamento · obbligatorio per la verifica">
++        <div className="chip-row" role="group" aria-label="Tipo di riscaldamento">
++          {RISCALDAMENTI.map((r) => (
++            <Chip key={r.id} label={r.label} active={riscaldamento === r.id} onClick={() => setRiscaldamento(riscaldamento === r.id ? "" : r.id)} />
++          ))}
++        </div>
++      </Field>
++
++      <Field label="Tipo di contratto proposto · obbligatorio per la verifica">
++        <div className="chip-row" role="group" aria-label="Tipo di contratto proposto">
++          {TIPI_CONTRATTO.map((t) => (
++            <Chip key={t.id} label={t.label} active={contratto === t.id} onClick={() => setContratto(contratto === t.id ? "" : t.id)} />
++          ))}
++        </div>
++      </Field>
++
++      <Field label="Disponibile dal · obbligatorio per la verifica">
++        <div className="flex gap-2 items-center">
++          <input type="date" value={disponibile} onChange={(e) => setDisponibile(e.target.value)} aria-label="Disponibile dal" className="contract-input" style={{ flex: 1 }} />
++          <Chip label="Subito" active={disponibile === new Date().toISOString().slice(0, 10)} onClick={() => setDisponibile(new Date().toISOString().slice(0, 10))} />
++        </div>
++      </Field>
++
++      {mancanti.length > 0 && (
++        <p className="field-note" style={{ margin: "-6px 0 0 0" }}>
++          Per chiedere la verifica dell&apos;immobile manca ancora: {mancanti.map((d) => d.etichetta.toLowerCase()).join(", ")}. Intanto puoi salvare l&apos;annuncio come bozza.
++        </p>
++      )}
++
+       <Field label="Classe energetica (APE) · obbligatoria per la verifica">
+         <div className="flex flex-wrap gap-2">
+           {CLASSI_ENERGETICHE.map((c) => (
+diff --git a/src/app/(app)/immobili/actions.ts b/src/app/(app)/immobili/actions.ts
+index 3c96f73..1e92389 100644
+--- a/src/app/(app)/immobili/actions.ts
++++ b/src/app/(app)/immobili/actions.ts
+@@ -2,6 +2,8 @@
+ 
+ import { leggiClasse, leggiEp } from "@/lib/annunci/energia";
+ import { revalidatePath } from "next/cache";
++import { leggiDatiImmobile } from "@/lib/annunci/dati-immobile";
++import { messaggioErroreVerifica } from "@/lib/verifica";
+ import { createClient } from "@/lib/supabase/server";
+ import { normalizzaCriteri, righeDaCriteri } from "@/lib/match";
+ import type { CriterioRichiesto } from "@/lib/match";
+@@ -70,12 +72,17 @@ export async function creaImmobile(
+   if (!user) return { error: "Non autenticato." };
+ 
+   const titolo = String(formData.get("titolo") || "").trim();
+-  const zona = String(formData.get("zona") || "").trim();
+   const prezzo = Number(formData.get("prezzo") || 0);
+-  if (!titolo || !zona || !prezzo) {
+-    return { error: "Titolo, zona e canone sono obbligatori." };
++  if (!titolo || !prezzo) {
++    return { error: "Titolo e canone sono obbligatori." };
+   }
+ 
++  // I dati che chi cerca può filtrare (luogo, tipologia, bagni, piano…). Si possono lasciare vuoti in una bozza, tranne il
++  // luogo (la zona dell'annuncio ne deriva); per chiedere la verifica servono tutti.
++  const dati = leggiDatiImmobile((chiave) => formData.get(chiave), new Date().toISOString().slice(0, 10));
++  if (!dati.ok) return { error: dati.errore };
++  if (!dati.dati.luogo_id) return { error: "Scegli la zona dall'elenco." };
++
+   const descrizione = String(formData.get("descrizione") || "") || null;
+   const locali = Number(formData.get("locali") || 0) || null;
+   const mq = Number(formData.get("mq") || 0) || null;
+@@ -95,7 +102,8 @@ export async function creaImmobile(
+       owner_id: user.id,
+       titolo,
+       descrizione,
+-      zona,
++      // la zona scritta la ricava il database dal luogo
++      ...dati.dati,
+       prezzo,
+       locali,
+       mq,
+@@ -107,7 +115,7 @@ export async function creaImmobile(
+     .select("id")
+     .single();
+ 
+-  if (error) return { error: error.message };
++  if (error) return { error: error.message.includes("LUOGO_NON_VALIDO") ? messaggioErroreVerifica(error.message) : error.message };
+ 
+   if (foto.length > 0 && listing) {
+     const { error: eFoto } = await supabase.from("listing_photos").insert(
+@@ -140,12 +148,17 @@ export async function aggiornaImmobile(
+   if (!id) return { error: "Immobile non trovato." };
+ 
+   const titolo = String(formData.get("titolo") || "").trim();
+-  const zona = String(formData.get("zona") || "").trim();
+   const prezzo = Number(formData.get("prezzo") || 0);
+-  if (!titolo || !zona || !prezzo) {
+-    return { error: "Titolo, zona e canone sono obbligatori." };
++  if (!titolo || !prezzo) {
++    return { error: "Titolo e canone sono obbligatori." };
+   }
+ 
++  // I dati che chi cerca può filtrare (luogo, tipologia, bagni, piano…). Si possono lasciare vuoti in una bozza, tranne il
++  // luogo (la zona dell'annuncio ne deriva); per chiedere la verifica servono tutti.
++  const dati = leggiDatiImmobile((chiave) => formData.get(chiave), new Date().toISOString().slice(0, 10));
++  if (!dati.ok) return { error: dati.errore };
++  if (!dati.dati.luogo_id) return { error: "Scegli la zona dall'elenco." };
++
+   const descrizione = String(formData.get("descrizione") || "") || null;
+   const locali = Number(formData.get("locali") || 0) || null;
+   const mq = Number(formData.get("mq") || 0) || null;
+@@ -164,7 +177,8 @@ export async function aggiornaImmobile(
+     .update({
+       titolo,
+       descrizione,
+-      zona,
++      // la zona scritta la ricava il database dal luogo
++      ...dati.dati,
+       prezzo,
+       locali,
+       mq,
+@@ -177,7 +191,7 @@ export async function aggiornaImmobile(
+     .eq("id", id)
+     .eq("owner_id", user.id);
+ 
+-  if (error) return { error: error.message };
++  if (error) return { error: error.message.includes("LUOGO_NON_VALIDO") ? messaggioErroreVerifica(error.message) : error.message };
+ 
+   // Riscriviamo l'intera galleria: l'ordine delle foto è quello in cui
+   // il proprietario le ha lasciate nel modulo.
+diff --git a/src/app/(app)/immobili/page.tsx b/src/app/(app)/immobili/page.tsx
+index bd67e4d..56d8a4d 100644
+--- a/src/app/(app)/immobili/page.tsx
++++ b/src/app/(app)/immobili/page.tsx
+@@ -5,6 +5,7 @@ import type { VisitaProprietario } from "@/lib/visite";
+ import { conVista } from "@/lib/mappe";
+ import { quotazioniPerZone } from "@/lib/prezzi";
+ import { ZONE_MILANO } from "@/lib/constants";
++import type { Luogo } from "@/lib/luoghi";
+ import type { IndirizzoConVista } from "@/lib/mappe/tipi";
+ import { criteriDaRighe } from "@/lib/match";
+ import type { RigaCriterioDb } from "@/lib/match";
+@@ -15,11 +16,11 @@ export default async function ImmobiliPage() {
+     data: { user },
+   } = await supabase.auth.getUser();
+ 
+-  const [{ data: listings }, { data: candidature }, { data: visite }, { data: indirizziRighe }] = await Promise.all([
++  const [{ data: listings }, { data: candidature }, { data: visite }, { data: indirizziRighe }, { data: luoghiRighe }] = await Promise.all([
+     supabase
+       .from("listings")
+       .select(
+-        "id, titolo, descrizione, zona, prezzo, locali, mq, attributi, pubblicato, classe_energetica, ep_globale, verifica_stato, verifica_esito_note, listing_photos(url, ordine), listing_criteri(chiave, peso, modo, soglia_pct)"
++        "id, titolo, descrizione, zona, prezzo, locali, mq, attributi, pubblicato, classe_energetica, ep_globale, verifica_stato, verifica_esito_note, luogo_id, tipologia, bagni, piano, riscaldamento, tipo_contratto, disponibile_dal, listing_photos(url, ordine), listing_criteri(chiave, peso, modo, soglia_pct)"
+       )
+       .eq("owner_id", user!.id)
+       .order("created_at", { ascending: false }),
+@@ -31,6 +32,8 @@ export default async function ImmobiliPage() {
+     supabase.rpc("visite_del_proprietario"),
+     // gli indirizzi dei miei immobili, con la posizione sulla mappa
+     supabase.rpc("indirizzi_dei_miei_immobili"),
++    // i luoghi dove si può mettere un immobile (provincia → città → quartiere)
++    supabase.from("luoghi").select("id, livello, nome, sigla, parent_id"),
+   ]);
+ 
+   const indirizzi: Record<string, IndirizzoConVista> = {};
+@@ -57,6 +60,13 @@ export default async function ImmobiliPage() {
+     pubblicato: l.pubblicato,
+     classe_energetica: (l.classe_energetica as string | null) ?? null,
+     ep_globale: l.ep_globale === null || l.ep_globale === undefined ? null : Number(l.ep_globale),
++    luogo_id: (l.luogo_id as string | null) ?? null,
++    tipologia: ((l.tipologia as string | null) === "villa" ? "villa" : "appartamento") as "appartamento" | "villa",
++    bagni: (l.bagni as number | null) ?? null,
++    piano: (l.piano as number | null) ?? null,
++    riscaldamento: (l.riscaldamento as string | null) ?? null,
++    tipo_contratto: (l.tipo_contratto as string | null) ?? null,
++    disponibile_dal: (l.disponibile_dal as string | null) ?? null,
+     verifica_stato: l.verifica_stato,
+     verifica_esito_note: l.verifica_esito_note ?? null,
+     foto: [...((l.listing_photos as { url: string; ordine: number }[]) ?? [])]
+@@ -66,5 +76,5 @@ export default async function ImmobiliPage() {
+     nCandidature: nCandidaturePerListing.get(l.id) ?? 0,
+   }));
+ 
+-  return <ImmobiliClient immobili={immobili} visite={(visite ?? []) as VisitaProprietario[]} indirizzi={indirizzi} quotazioni={quotazioni} />;
++  return <ImmobiliClient immobili={immobili} visite={(visite ?? []) as VisitaProprietario[]} indirizzi={indirizzi} quotazioni={quotazioni} luoghi={(luoghiRighe ?? []) as Luogo[]} />;
+ }
+diff --git a/src/app/(app)/page.tsx b/src/app/(app)/page.tsx
+index 1a937d7..5c00fdb 100644
+--- a/src/app/(app)/page.tsx
++++ b/src/app/(app)/page.tsx
+@@ -158,7 +158,7 @@ async function OwnerHome({ userId }: { userId: string }) {
+     const [{ data: miei }, { data: documenti }] = await Promise.all([
+       supabase
+         .from("listings")
+-        .select("id, titolo, zona, verifica_stato, verifica_esito_note, classe_energetica")
++        .select("id, titolo, zona, verifica_stato, verifica_esito_note, classe_energetica, luogo_id, bagni, piano, riscaldamento, tipo_contratto, disponibile_dal")
+         .eq("owner_id", userId)
+         .order("created_at", { ascending: false }),
+       supabase.from("documenti_verifica").select("tipo, listing_id").eq("owner_id", userId),
+@@ -181,7 +181,15 @@ async function OwnerHome({ userId }: { userId: string }) {
+       stato: l.verifica_stato as ImmobileVerifica["stato"],
+       note: (l.verifica_esito_note as string | null) ?? null,
+       nProprieta: proprietaPerImmobile.get(l.id as string) ?? 0,
+-      classeEnergetica: (l.classe_energetica as string | null) ?? null,
++      dati: {
++        classe_energetica: (l.classe_energetica as string | null) ?? null,
++        luogo_id: (l.luogo_id as string | null) ?? null,
++        bagni: (l.bagni as number | null) ?? null,
++        piano: (l.piano as number | null) ?? null,
++        riscaldamento: (l.riscaldamento as string | null) ?? null,
++        tipo_contratto: (l.tipo_contratto as string | null) ?? null,
++        disponibile_dal: (l.disponibile_dal as string | null) ?? null,
++      },
+     }));
+ 
+     return (
+diff --git a/src/components/LuogoAutocomplete.tsx b/src/components/LuogoAutocomplete.tsx
+index 05263aa..27e94b1 100644
+--- a/src/components/LuogoAutocomplete.tsx
++++ b/src/components/LuogoAutocomplete.tsx
+@@ -1,7 +1,7 @@
+ "use client";
+ 
+ import { useId, useMemo, useRef, useState } from "react";
+-import { cercaLuoghi, etichettaLuogo, mappaLuoghi, MAX_LUOGHI_SCELTI, semplificaScelte, type Luogo } from "@/lib/luoghi";
++import { cercaLuoghi, etichettaLuogo, mappaLuoghi, MAX_LUOGHI_SCELTI, semplificaScelte, type Luogo, type LivelloLuogo } from "@/lib/luoghi";
+ 
+ /**
+  * Si scrive il nome di una provincia, di una città o di un quartiere e compaiono i suggerimenti; scegliendo una città
+@@ -12,10 +12,20 @@ export function LuogoAutocomplete({
+   luoghi,
+   scelti,
+   onChange,
++  singolo = false,
++  livelli,
++  etichetta = "Dove cerchi: provincia, città o quartiere",
++  segnaposto = "Scrivi una città o un quartiere",
+ }: {
+   luoghi: Luogo[];
+   scelti: string[];
+   onChange: (ids: string[]) => void;
++  /** un solo luogo: sceglierne uno sostituisce il precedente (per l'annuncio: l'immobile sta in un posto solo) */
++  singolo?: boolean;
++  /** quali livelli si possono scegliere (per l'annuncio: quartiere o città, non una provincia) */
++  livelli?: readonly LivelloLuogo[];
++  etichetta?: string;
++  segnaposto?: string;
+ }) {
+   const idLista = useId();
+   const contenitore = useRef<HTMLDivElement>(null);
+@@ -23,11 +33,11 @@ export function LuogoAutocomplete({
+   const [aperto, setAperto] = useState(false);
+   const [attivo, setAttivo] = useState(0);
+   const mappa = useMemo(() => mappaLuoghi(luoghi), [luoghi]);
+-  const suggerimenti = useMemo(() => cercaLuoghi(testo, luoghi, { esclusi: scelti }), [testo, luoghi, scelti]);
+-  const pieno = scelti.length >= MAX_LUOGHI_SCELTI;
++  const suggerimenti = useMemo(() => cercaLuoghi(testo, luoghi, { esclusi: scelti, livelli }), [testo, luoghi, scelti, livelli]);
++  const pieno = !singolo && scelti.length >= MAX_LUOGHI_SCELTI;
+ 
+   function scegli(id: string) {
+-    onChange(semplificaScelte([...scelti, id], mappa));
++    onChange(singolo ? [id] : semplificaScelte([...scelti, id], mappa));
+     setTesto("");
+     setAttivo(0);
+     setAperto(false);
+@@ -79,14 +89,14 @@ export function LuogoAutocomplete({
+       <input
+         type="text"
+         role="combobox"
+-        aria-label="Dove cerchi: provincia, città o quartiere"
++        aria-label={etichetta}
+         aria-expanded={aperto && suggerimenti.length > 0}
+         aria-controls={idLista}
+         aria-autocomplete="list"
+         aria-activedescendant={aperto && suggerimenti[attivo] ? `${idLista}-${attivo}` : undefined}
+         autoComplete="off"
+         disabled={pieno}
+-        placeholder={pieno ? `Hai scelto ${MAX_LUOGHI_SCELTI} luoghi` : "Scrivi una città o un quartiere"}
++        placeholder={pieno ? `Hai scelto ${MAX_LUOGHI_SCELTI} luoghi` : singolo && scelti.length > 0 ? "Cambia zona" : segnaposto}
+         value={testo}
+         maxLength={60}
+         className="luogo-ac-input"
+diff --git a/src/lib/annunci/dati-immobile.ts b/src/lib/annunci/dati-immobile.ts
+new file mode 100644
+index 0000000..9e0a145
+--- /dev/null
++++ b/src/lib/annunci/dati-immobile.ts
+@@ -0,0 +1,98 @@
++/**
++ * I dati dell'annuncio che chi cerca può filtrare: luogo, tipologia, bagni, piano, riscaldamento, tipo di contratto e
++ * disponibilità. Si controllano qui quando arrivano dal modulo; il database li ricontrolla.
++ *
++ * Tutti facoltativi nel SALVATAGGIO (si può tenere una bozza incompleta) e obbligatori per chiedere la verifica
++ * (vedi obbligatori.ts). Il vuoto vale «non indicato»: lo zero NO (il piano 0 è il piano terra).
++ */
++import { RISCALDAMENTI, TIPI_CONTRATTO } from "../constants";
++import { dataValida } from "../match/criteri-ricerca";
++
++export const LIMITI_ANNUNCIO = {
++  bagni: { min: 1, max: 10 },
++  piano: { min: -2, max: 60 },
++  /** la data di disponibilità: non prima di questa, e al massimo tra tanti anni */
++  disponibileDa: "2020-01-01",
++  anniAvanti: 3,
++} as const;
++
++export type DatiImmobile = {
++  luogo_id: string | null;
++  tipologia: "appartamento" | "villa";
++  bagni: number | null;
++  piano: number | null;
++  riscaldamento: string | null;
++  tipo_contratto: string | null;
++  disponibile_dal: string | null;
++};
++
++export type EsitoDatiImmobile = { ok: true; dati: DatiImmobile } | { ok: false; errore: string };
++
++/** I piani che si scelgono nel modulo: seminterrato, terra, 1°…25°. */
++export const OPZIONI_PIANO_ANNUNCIO: readonly { valore: number; etichetta: string }[] = [
++  { valore: -1, etichetta: "Seminterrato" },
++  { valore: 0, etichetta: "Piano terra" },
++  ...Array.from({ length: 25 }, (_, i) => ({ valore: i + 1, etichetta: `${i + 1}°` })),
++];
++
++const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
++const vuoto = (v: FormDataEntryValue | null) => v === null || (typeof v === "string" && v.trim() === "");
++
++function intero(v: FormDataEntryValue | null, min: number, max: number): number | null | "errore" {
++  if (vuoto(v)) return null;
++  if (typeof v !== "string" || !/^-?\d{1,3}$/.test(v.trim())) return "errore";
++  const n = Number(v.trim());
++  return n >= min && n <= max ? n : "errore";
++}
++
++/** `oggi` è AAAA-MM-GG (si passa da fuori per poter provare le date). */
++export function leggiDatiImmobile(get: (chiave: string) => FormDataEntryValue | null, oggi: string): EsitoDatiImmobile {
++  const errore = (e: string): EsitoDatiImmobile => ({ ok: false, errore: e });
++
++  const luogo = get("luogo_id");
++  if (!vuoto(luogo) && (typeof luogo !== "string" || !UUID.test(luogo.trim()))) return errore("La zona scelta non è valida.");
++
++  const tip = get("tipologia");
++  const tipologia = vuoto(tip) ? "appartamento" : String(tip).trim();
++  if (tipologia === "posto_letto") return errore("Per ora si possono pubblicare solo appartamenti e ville.");
++  if (tipologia !== "appartamento" && tipologia !== "villa") return errore("Il tipo di immobile non è valido.");
++
++  const bagni = intero(get("bagni"), LIMITI_ANNUNCIO.bagni.min, LIMITI_ANNUNCIO.bagni.max);
++  if (bagni === "errore") return errore(`I bagni devono essere da ${LIMITI_ANNUNCIO.bagni.min} a ${LIMITI_ANNUNCIO.bagni.max}.`);
++  const piano = intero(get("piano"), LIMITI_ANNUNCIO.piano.min, LIMITI_ANNUNCIO.piano.max);
++  if (piano === "errore") return errore("Il piano non è valido.");
++
++  const elenco = (chiave: string, ammessi: readonly { id: string }[]): string | null | "errore" => {
++    const v = get(chiave);
++    if (vuoto(v)) return null;
++    return typeof v === "string" && ammessi.some((a) => a.id === v.trim()) ? v.trim() : "errore";
++  };
++  const riscaldamento = elenco("riscaldamento", RISCALDAMENTI);
++  if (riscaldamento === "errore") return errore("Il tipo di riscaldamento non è valido.");
++  const contratto = elenco("tipo_contratto", TIPI_CONTRATTO);
++  if (contratto === "errore") return errore("Il tipo di contratto non è valido.");
++
++  let disponibile: string | null = null;
++  const d = get("disponibile_dal");
++  if (!vuoto(d)) {
++    const limite = new Date(`${oggi}T00:00:00Z`);
++    limite.setUTCFullYear(limite.getUTCFullYear() + LIMITI_ANNUNCIO.anniAvanti);
++    if (typeof d !== "string" || !dataValida(d.trim()) || d.trim() < LIMITI_ANNUNCIO.disponibileDa || d.trim() > limite.toISOString().slice(0, 10)) {
++      return errore("La data di disponibilità non è valida.");
++    }
++    disponibile = d.trim();
++  }
++
++  return {
++    ok: true,
++    dati: {
++      luogo_id: vuoto(luogo) ? null : String(luogo).trim().toLowerCase(),
++      tipologia,
++      bagni,
++      piano,
++      riscaldamento,
++      tipo_contratto: contratto,
++      disponibile_dal: disponibile,
++    },
++  };
++}
+diff --git a/src/lib/annunci/obbligatori.ts b/src/lib/annunci/obbligatori.ts
+index 6283f5f..4594f16 100644
+--- a/src/lib/annunci/obbligatori.ts
++++ b/src/lib/annunci/obbligatori.ts
+@@ -8,8 +8,18 @@
+  * l'annuncio non diventa visibile. Gli immobili già verificati non si toccano.
+  */
+ 
++/** Le colonne dell'annuncio che sono obbligatorie per chiedere la verifica. */
++export type ChiaveDatoObbligatorio =
++  | "classe_energetica"
++  | "luogo_id"
++  | "bagni"
++  | "piano"
++  | "riscaldamento"
++  | "tipo_contratto"
++  | "disponibile_dal";
++
+ export type DatoObbligatorio = {
+-  chiave: "classe_energetica";
++  chiave: ChiaveDatoObbligatorio;
+   etichetta: string;
+   /** perché si chiede, in una riga */
+   perche: string;
+@@ -20,19 +30,60 @@ export type DatoObbligatorio = {
+ /** Finché è `true` l'elenco non è stato confermato da un legale. */
+ export const ELENCO_DATI_OBBLIGATORI_PROVVISORIO = true;
+ 
++const DOVE = "si indica dalla scheda dell'annuncio, in Annunci";
++
+ export const DATI_OBBLIGATORI: readonly DatoObbligatorio[] = [
+   {
+     chiave: "classe_energetica",
+     etichetta: "Classe energetica (APE)",
+     perche: "Va indicata nell'annuncio.",
+-    frase: "la classe energetica dell'immobile (si indica dalla scheda dell'annuncio, in Annunci)",
++    frase: `la classe energetica dell'immobile (${DOVE})`,
++  },
++  {
++    chiave: "luogo_id",
++    etichetta: "Dove si trova",
++    perche: "Serve a farlo trovare a chi cerca in quella zona.",
++    frase: `la zona scelta dall'elenco (${DOVE})`,
++  },
++  {
++    chiave: "bagni",
++    etichetta: "Numero di bagni",
++    perche: "Chi cerca può chiedere un numero minimo di bagni.",
++    frase: `il numero di bagni (${DOVE})`,
++  },
++  {
++    chiave: "piano",
++    etichetta: "Piano",
++    perche: "Chi cerca può chiedere certi piani.",
++    frase: `il piano (${DOVE})`,
++  },
++  {
++    chiave: "riscaldamento",
++    etichetta: "Riscaldamento",
++    perche: "Chi cerca può chiedere un certo tipo di riscaldamento.",
++    frase: `il tipo di riscaldamento (${DOVE})`,
++  },
++  {
++    chiave: "tipo_contratto",
++    etichetta: "Tipo di contratto proposto",
++    perche: "Chi cerca può chiedere un certo tipo di contratto.",
++    frase: `il tipo di contratto che proponi (${DOVE})`,
++  },
++  {
++    chiave: "disponibile_dal",
++    etichetta: "Disponibile dal",
++    perche: "Chi cerca può chiedere una data di ingresso.",
++    frase: `la data da cui l'immobile è disponibile (${DOVE})`,
+   },
+ ];
+ 
+-/** I dati obbligatori che mancano. Un valore nullo, assente o vuoto vale «manca». */
+-export function datiMancanti(annuncio: { classe_energetica?: unknown }): DatoObbligatorio[] {
++/**
++ * I dati obbligatori che mancano. Un valore nullo, assente o vuoto vale «manca»; lo zero NO (il piano 0 è il piano terra).
++ * `annuncio` ha le colonne dell'annuncio, con i nomi del database.
++ */
++export function datiMancanti(annuncio: Partial<Record<ChiaveDatoObbligatorio, unknown>>): DatoObbligatorio[] {
+   return DATI_OBBLIGATORI.filter((d) => {
+-    const v = (annuncio as Record<string, unknown>)[d.chiave];
++    const v = annuncio[d.chiave];
+     return v === null || v === undefined || (typeof v === "string" && v.trim() === "");
+   });
+ }
+diff --git a/src/lib/luoghi.ts b/src/lib/luoghi.ts
+index 0352cea..13ef1b4 100644
+--- a/src/lib/luoghi.ts
++++ b/src/lib/luoghi.ts
+@@ -76,17 +76,19 @@ const ORDINE_LIVELLO: Record<LivelloLuogo, number> = { comune: 0, provincia: 1,
+ export function cercaLuoghi(
+   testo: unknown,
+   luoghi: readonly Luogo[] | null | undefined,
+-  opzioni: { max?: number; esclusi?: readonly string[] } = {}
++  opzioni: { max?: number; esclusi?: readonly string[]; livelli?: readonly LivelloLuogo[] } = {}
+ ): SuggerimentoLuogo[] {
+   const parole = normalizza(testo).split(" ").filter(Boolean);
+   if (parole.length === 0) return [];
+   const mappa = mappaLuoghi(luoghi);
+   const esclusi = new Set(opzioni.esclusi ?? []);
++  const livelli = opzioni.livelli ? new Set<LivelloLuogo>(opzioni.livelli) : null;
+   const max = Math.max(1, Math.min(20, opzioni.max ?? 8));
+   const trovati: SuggerimentoLuogo[] = [];
+ 
+   for (const l of mappa.values()) {
+     if (esclusi.has(l.id)) continue;
++    if (livelli && !livelli.has(l.livello)) continue;
+     const nome = normalizza(l.nome);
+     const contesto = antenati(l.id, mappa)
+       .slice(1)
+diff --git a/src/lib/types.ts b/src/lib/types.ts
+index 7925788..fb39ba1 100644
+--- a/src/lib/types.ts
++++ b/src/lib/types.ts
+@@ -59,6 +59,14 @@ export type ImmobileDettaglio = {
+   /** classe energetica (APE) e indice di prestazione: dati pubblici dell'annuncio */
+   classe_energetica?: string | null;
+   ep_globale?: number | null;
++  /** i dati che chi cerca può filtrare (obbligatori per chiedere la verifica) */
++  luogo_id?: string | null;
++  tipologia?: "appartamento" | "villa" | null;
++  bagni?: number | null;
++  piano?: number | null;
++  riscaldamento?: string | null;
++  tipo_contratto?: string | null;
++  disponibile_dal?: string | null;
+   /** galleria dell'annuncio, già ordinata */
+   foto: string[];
+   /** stato della verifica dell'immobile e, se respinto, il motivo */
+diff --git a/src/lib/verifica.ts b/src/lib/verifica.ts
+index 296b43a..4fa6a31 100644
+--- a/src/lib/verifica.ts
++++ b/src/lib/verifica.ts
+@@ -6,7 +6,7 @@
+  * per dire subito alla persona cosa non va.
+  */
+ 
+-import { datiMancanti } from "./annunci/obbligatori";
++import { datiMancanti, type ChiaveDatoObbligatorio } from "./annunci/obbligatori";
+ 
+ export type StatoImmobile = "non_avviata" | "in_verifica" | "verificato";
+ 
+@@ -19,8 +19,8 @@ export type ImmobileVerifica = {
+   note: string | null;
+   /** quante prove di proprietà ha già caricato per questo immobile */
+   nProprieta: number;
+-  /** la classe energetica indicata nell'annuncio: senza, non si può chiedere la verifica */
+-  classeEnergetica: string | null;
++  /** i dati obbligatori dell'annuncio (classe energetica, luogo, bagni…): senza, non si può chiedere la verifica */
++  dati: Partial<Record<ChiaveDatoObbligatorio, unknown>>;
+ };
+ 
+ export type DescrizioneStato = {
+@@ -64,7 +64,7 @@ export function cosaManca(haIdentita: boolean, immobile: ImmobileVerifica): stri
+   if (!haIdentita) manca.push("il tuo documento d'identità");
+   if (immobile.nProprieta === 0) manca.push("una prova di proprietà dell'immobile (visura o atto)");
+   // i dati obbligatori dell'annuncio (l'elenco è in lib/annunci/obbligatori.ts)
+-  for (const d of datiMancanti({ classe_energetica: immobile.classeEnergetica })) manca.push(d.frase);
++  for (const d of datiMancanti(immobile.dati)) manca.push(d.frase);
+   return manca;
+ }
+ 
+@@ -154,7 +154,7 @@ const MESSAGGI: Record<string, string> = {
+   IMMOBILE_NON_TUO: "Questo immobile non risulta tuo.",
+   GIA_VERIFICATO: "Questo immobile è già verificato.",
+   GIA_IN_VERIFICA: "Questo immobile è già in verifica.",
+-  DATI_OBBLIGATORI_MANCANTI: "Per chiedere la verifica indica prima la classe energetica dell'immobile, dalla scheda dell'annuncio.",
++  DATI_OBBLIGATORI_MANCANTI: "Per chiedere la verifica completa prima i dati dell'annuncio: classe energetica, zona, bagni, piano, riscaldamento, tipo di contratto e data di disponibilità (dalla scheda dell'annuncio, in Annunci).",
+   DOCUMENTI_MANCANTI:
+     "Mancano dei documenti: servono il tuo documento d'identità e una prova di proprietà dell'immobile.",
+   NON_STAFF: "Non hai i permessi per farlo.",
+diff --git a/supabase/migrations/0031_dati_obbligatori_annuncio_2.sql b/supabase/migrations/0031_dati_obbligatori_annuncio_2.sql
+new file mode 100644
+index 0000000..6ca7d1d
+--- /dev/null
++++ b/supabase/migrations/0031_dati_obbligatori_annuncio_2.sql
+@@ -0,0 +1,83 @@
++-- ============================================================
++-- MatchAmI — dati obbligatori dell'annuncio: tutti quelli che chi cerca può chiedere
++--
++-- Oltre alla classe energetica (0026), per chiedere la verifica dell'immobile servono: il LUOGO scelto
++-- dall'elenco, i BAGNI, il PIANO, il RISCALDAMENTO, il TIPO DI CONTRATTO proposto e la DATA da cui è
++-- disponibile (colonne aggiunte dalla 0030). Senza questi dati chi cerca non potrebbe filtrare per bagni,
++-- piano, contratto… e la casa resterebbe sempre «non indicato».
++--
++-- COSA SIGNIFICA «OBBLIGATORIO»: non si può chiedere la verifica (e quindi l'annuncio non diventa visibile),
++-- ma si può salvare una bozza incompleta. Gli immobili GIÀ verificati o già in verifica non si toccano.
++-- L'elenco è PROVVISORIO (punto 37 degli open point): quali dati la normativa imponga di indicare va
++-- confermato con un legale.
++--
++-- Il piano 0 è il piano terra: «manca» vuol dire vuoto, non zero.
++--
++-- ORDINE: esegui questa migrazione dopo la 0030 e PRIMA del push del codice.
++-- ============================================================
++
++create or replace function public.richiedi_verifica_immobile(p_listing uuid)
++returns void
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_listing listings;
++begin
++  if auth.uid() is null then
++    raise exception 'NON_AUTENTICATO';
++  end if;
++
++  select * into v_listing from listings where id = p_listing and owner_id = auth.uid();
++  if not found then
++    raise exception 'IMMOBILE_NON_TUO';
++  end if;
++  if v_listing.verifica_stato = 'verificato' then
++    raise exception 'GIA_VERIFICATO';
++  end if;
++  if v_listing.verifica_stato = 'in_verifica' then
++    raise exception 'GIA_IN_VERIFICA';
++  end if;
++
++  -- i dati obbligatori dell'annuncio
++  if v_listing.classe_energetica is null
++     or v_listing.luogo_id is null
++     or v_listing.bagni is null
++     or v_listing.piano is null
++     or v_listing.riscaldamento is null
++     or v_listing.tipo_contratto is null
++     or v_listing.disponibile_dal is null then
++    raise exception 'DATI_OBBLIGATORI_MANCANTI';
++  end if;
++
++  if not exists (
++       select 1 from documenti_verifica
++        where owner_id = auth.uid() and tipo = 'identita')
++     or not exists (
++       select 1 from documenti_verifica
++        where owner_id = auth.uid() and tipo = 'proprieta' and listing_id = p_listing)
++  then
++    raise exception 'DOCUMENTI_MANCANTI';
++  end if;
++
++  update listings
++     set verifica_stato = 'in_verifica',
++         verifica_inviata_at = now(),
++         verifica_esito_note = null
++   where id = p_listing;
++end;
++$$;
++
++-- stessi permessi di prima
++revoke all on function public.richiedi_verifica_immobile(uuid) from public, anon;
++grant execute on function public.richiedi_verifica_immobile(uuid) to authenticated;
++
++-- ------------------------------------------------------------
++-- Verifica
++-- ------------------------------------------------------------
++
++-- gli annunci che già c'erano non cambiano: quelli ancora da verificare dovranno completare i dati nuovi prima di inviare
++select verifica_stato, count(*) as annunci,
++       count(*) filter (where luogo_id is null or bagni is null or piano is null or riscaldamento is null or tipo_contratto is null or disponibile_dal is null) as con_dati_da_completare
++from listings group by verifica_stato order by 1;
+-- 
+2.43.0
+

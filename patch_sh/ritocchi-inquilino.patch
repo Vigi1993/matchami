@@ -1,0 +1,404 @@
+From aae177966583c6a2343840def0cfd08cef2f2b0b Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 14 Oct 2026 21:24:46 +0000
+Subject: [PATCH] fix(home,profilo): gli avvisi della Home spariscono da soli,
+ via il contatore, completezza sotto il nome
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+DA APPLICARE DOPO profilo-ripulito.patch. Nessuna migrazione.
+
+BUG: «SCARTO ANNULLATO» NON SPARIVA PIÙ. Riprodotto in Chrome sul codice di prima: l'avviso era ancora lì dopo 8 secondi.
+Causa: NESSUN avviso della Home aveva un timer; si azzeravano solo scartando un'altra casa. Valeva per 'Scarto annullato',
+'Tolto dai preferiti', 'Salvato nei preferiti', 'Dati aggiornati', 'Ricerca aggiornata'. Ora ogni avviso sparisce da solo:
+4 secondi, 7 per gli errori (vanno letti). Il timer riparte a ogni avviso nuovo e si ferma se la Home cambia.
+Corretto ANCHE un difetto gemello, peggiore: dopo una candidatura il toast 'Candidatura inviata - la trovi in I tuoi match'
+compariva ogni volta che non c'era un altro avviso, cioè restava per tutta la sessione (lo teneva uno stato a parte,
+candidatureInviate, che serviva solo a quello: tolto). Ora è un avviso normale: compare e sparisce. Se la candidatura
+non parte non si dice niente, come prima. Dopo la correzione, nella stessa prova: l'avviso c'è a 2 secondi e non c'è
+più a 4.
+
+HOME: tolto il contatore '1 / 2' in alto a destra (scelta mia: il pannello dice già quante case sono in linea, e vicino ai
+pulsanti non c'è posto). La posizione nel mazzo resta come testo 'Casa 1 di 2' solo per chi usa un lettore di
+schermo (nascosto con la tecnica standard, aggiornato a ogni scelta).
+
+PROFILO: la barra di completezza non sta più in mezzo alla pagina. Sta nell'intestazione, sotto nome ed email, con la
+scritta 'Profilo completo al 78%' e gli attributi di una barra di avanzamento (valore, minimo, massimo, testo letto
+dal lettore di schermo). Scelta mia: non dentro la scheda dei dati, perché la completezza conta anche la ricerca
+(le zone) e non solo i dati. Il calcolo non è cambiato.
+
+DIFETTI MIEI TROVATI PROVANDO
+- il mio controllo sulla colonna del nome passava anche con la barra FUORI dalla colonna (cercava una sequenza di
+  tag che compariva comunque): ora estrae la colonna e richiede che la barra stia dentro
+- nella prova del bug non trovavo il pulsante 'annulla': con il separatore sullo schermo è un link con testo, non il
+  pulsante con etichetta (errore dello script, non dell'app)
+
+Test: 994 in tutto (10 nuovi; la completezza è provata su tutte le 512 combinazioni). Difetti reintrodotti di proposito:
+19 su 19 presi (uno dopo aver sostituito il controllo debole). Provato in Chrome col dito: bug riprodotto prima e
+risolto dopo; avvisi di scarto annullato, preferiti e candidatura che compaiono e spariscono; la Home con in alto solo il
+marchio; il Profilo con la barra dentro la colonna del nome, senza toccare la campanella.
+---
+ package.json                            |  2 +-
+ scripts/test-avvisi-profilo.mjs         | 77 +++++++++++++++++++++++++
+ scripts/test-candidature.mjs            |  2 +-
+ src/app/(app)/HomeClient.tsx            | 38 ++++++------
+ src/app/(app)/profilo/ProfiloClient.tsx | 26 +++++----
+ src/app/globals.css                     | 53 +++++++++--------
+ src/lib/scelte.ts                       | 11 ++++
+ 7 files changed, 152 insertions(+), 57 deletions(-)
+ create mode 100644 scripts/test-avvisi-profilo.mjs
+
+diff --git a/package.json b/package.json
+index d84b100..cd765a4 100644
+--- a/package.json
++++ b/package.json
+@@ -8,7 +8,7 @@
+     "start": "next start",
+     "lint": "eslint",
+     "pretest": "node scripts/controlla-dipendenze.mjs",
+-    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-affidabilita.mjs scripts/test-profilo-gestione.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-dati-immobile.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-affidabilita.mjs scripts/test-profilo-gestione.mjs scripts/test-avvisi-profilo.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-dati-immobile.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-avvisi-profilo.mjs b/scripts/test-avvisi-profilo.mjs
+new file mode 100644
+index 0000000..aba9c7b
+--- /dev/null
++++ b/scripts/test-avvisi-profilo.mjs
+@@ -0,0 +1,77 @@
++/**
++ * Test dei ritocchi alla Home e al Profilo dell'inquilino: gli avvisi che spariscono da soli (bug: «Scarto annullato» restava
++ * per sempre), il contatore «1 / 2» tolto, e la barra di completezza del profilo sotto il nome. Si lancia con:   npm test
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const sc = caricaTs(path.join(radice, "src", "lib", "scelte.ts"));
++const af = caricaTs(path.join(radice, "src", "lib", "affidabilita.ts"));
++const leggi = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8").replace(/\r\n/g, "\n");
++const home = () => leggi("src", "app", "(app)", "HomeClient.tsx");
++const profilo = () => leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx");
++const css = () => leggi("src", "app", "globals.css");
++
++// ============================================================ gli avvisi della Home
++test("durata degli avvisi: sono tutti temporanei, e un errore resta più a lungo (va letto)", () => {
++  assert.equal(sc.DURATA_AVVISO_MS, 4000); assert.equal(sc.DURATA_AVVISO_ERRORE_MS, 7000); assert.equal(sc.durataAvviso(false), 4000); assert.equal(sc.durataAvviso(true), 7000);
++  assert.ok(sc.durataAvviso(true) > sc.durataAvviso(false)); for (const ms of [sc.durataAvviso(false), sc.durataAvviso(true)]) assert.ok(Number.isFinite(ms) && ms >= 2500 && ms <= 10000, `${ms} ms: troppo breve per leggerlo o troppo lungo per sparire`);
++});
++
++test("Home: ogni avviso sparisce da solo (timer che riparte a ogni avviso nuovo e si ferma se la Home cambia), con la durata giusta per tipo", () => {
++  const h = home(); assert.match(h, /useEffect\(\(\) => \{\s+if \(!avviso\) return;\s+const t = setTimeout\(\(\) => setAvviso\(null\), durataAvviso\(avviso\.errore\)\);\s+return \(\) => clearTimeout\(t\);\s+\}, \[avviso\]\);/);
++  assert.match(h, /import \{ useEffect, useRef, useState, useTransition \} from "react";/);
++});
++
++test("Home: «Scarto annullato» è un avviso come gli altri (e quindi sparisce); lo scarto e l'annullamento non toccano altro", () => {
++  const h = home(); assert.match(h, /setAvviso\(\{ errore: false, testo: annullata\.tipo === "preferito" \? TESTO_PREFERITO_TOLTO : TESTO_SCARTO_ANNULLATO \}\);/);
++  assert.equal(sc.TESTO_SCARTO_ANNULLATO, "Scarto annullato."); assert.equal(sc.TESTO_PREFERITO_TOLTO, "Tolto dai preferiti."); assert.match(h, /\{avviso && \(\s+<div className=\{`toast-inline \$\{avviso\.errore \? "is-no" : ""\}`\} role=\{avviso\.errore \? "alert" : "status"\}>/);
++});
++
++test("Home: «Candidatura inviata» è un avviso normale (compare e sparisce); non resta più per tutta la sessione, e non c'è più lo stato che lo teneva", () => {
++  const h = home(); assert.ok(!/candidatureInviate|setCandidatureInviate/.test(h), "resta lo stato che teneva il toast per sempre"); assert.ok(!/\{!avviso && /.test(h), "resta un toast che compare quando NON c'è un avviso (cioè sempre)");
++  assert.match(h, /setAvviso\(res\?\.error \? null : \{ errore: false, testo: TESTO_CANDIDATURA_INVIATA \}\);/, "se la candidatura non parte non si dice niente, come prima"); assert.match(sc.TESTO_CANDIDATURA_INVIATA, /I tuoi match/);
++});
++
++test("Home: tutti gli avvisi impostati sono temporanei per costruzione (passano da setAvviso, mai da un'altra parte dello stato)", () => {
++  const h = home(); const usi = [...h.matchAll(/setAvviso\(/g)].length; assert.ok(usi >= 7, "gli avvisi dell'app sono almeno sette: " + usi); assert.equal([...h.matchAll(/useState<\{ errore: boolean; testo: string \} \| null>\(null\)/g)].length, 1, "un solo posto dove vive l'avviso");
++  assert.ok(!/toast-inline/.test(h.replace(/\{avviso && \([\s\S]*?\)\}/, "")), "c'è un altro toast fuori dall'avviso, senza timer");
++});
++
++// ============================================================ il contatore «1 / 2»
++test("Home: il contatore «1 / 2» in alto a destra non c'è più; la posizione nel mazzo resta solo come testo per i lettori di schermo", () => {
++  const h = home(); assert.ok(!/className="counter"/.test(h), "il contatore c'è ancora"); assert.ok(!/\{index \+ 1\} \/ \{mazzo\.length\}/.test(h), "resta il numero «1 / 2»");
++  assert.match(h, /\{mazzo\.length > 0 && !finito && \(\s+<p className="solo-lettori" role="status">\s+Casa \{index \+ 1\} di \{mazzo\.length\}\s+<\/p>\s+\)\}/); assert.match(h, /<div className="topbar">\s+<div className="brand">\s+Match<b>AmI<\/b>\s+<\/div>\s+<\/div>/, "in alto resta solo il marchio");
++  const c = css(); assert.ok(!/\.counter\b/.test(c), "resta lo stile del contatore"); assert.match(c, /\.solo-lettori \{\s+position: absolute;\s+width: 1px;\s+height: 1px;[\s\S]*?clip: rect\(0, 0, 0, 0\);/, "il testo per i lettori di schermo deve essere davvero nascosto");
++});
++
++// ============================================================ la barra di completezza
++test("completezza del profilo: da 0 a 100 per TUTTE le 512 combinazioni, e riempire un campo non la fa mai scendere", () => {
++  const nomi = ["hasZone", "professione", "reddito_mensile", "reddito_nucleo", "garante", "animali", "presentazione", "nucleo", "fideiussione"];
++  const da = (m) => ({ hasZone: !!(m & 1), professione: m & 2 ? "Designer" : null, reddito_mensile: m & 4 ? 2600 : null, reddito_nucleo: m & 8 ? 1200 : null, garante: m & 16 ? false : null, animali: m & 32 ? false : null, presentazione: m & 64 ? "Ciao, cerco casa a Milano." : "", nucleo: m & 128 ? "single" : null, fideiussione: m & 256 ? false : null });
++  let n = 0; for (let m = 0; m < 512; m++) { n++; const v = af.computeProfileCompleteness(da(m)); const pieni = nomi.filter((_, i) => m & (1 << i)).length; assert.ok(Number.isInteger(v) && v >= 0 && v <= 100, `${m}: ${v}`); assert.equal(v, Math.round((pieni / 9) * 100), `maschera ${m}`);
++    for (let i = 0; i < 9; i++) if (!(m & (1 << i))) assert.ok(af.computeProfileCompleteness(da(m | (1 << i))) >= v, `riempire il campo ${nomi[i]} fa scendere la completezza`); }
++  assert.equal(n, 512); assert.equal(af.computeProfileCompleteness(da(0)), 0); assert.equal(af.computeProfileCompleteness(da(511)), 100);
++});
++
++test("completezza: una presentazione di 10 lettere o meno non conta, e solo uno spazio non è un campo compilato", () => {
++  const base = { hasZone: false, professione: null, reddito_mensile: null, garante: null, animali: null, nucleo: null, fideiussione: null };
++  assert.equal(af.computeProfileCompleteness({ ...base, presentazione: "0123456789" }), 0); assert.equal(af.computeProfileCompleteness({ ...base, presentazione: "           x" }), 0, "gli spazi non fanno testo"); assert.equal(af.computeProfileCompleteness({ ...base, presentazione: "01234567890" }), 11); assert.equal(af.computeProfileCompleteness({ ...base, presentazione: null }), 0); assert.equal(af.computeProfileCompleteness({ ...base, professione: "   " }), 11, "una professione di soli spazi conta come scritta: si vede in cima al Profilo, non è un errore di questo ritocco");
++});
++
++test("Profilo: la barra sta sotto il nome (nell'intestazione, dopo l'email), con «Profilo completo al N%» e gli attributi della barra di avanzamento; la riga di prima non c'è più", () => {
++  const p = profilo(); const alto = p.slice(p.indexOf('<div className="avatar-row">'), p.indexOf("{/* I tuoi dati e la tua affidabilità"));
++  assert.match(alto, /<div\s+className="completezza"\s+role="progressbar"\s+aria-label="Completezza del profilo"\s+aria-valuemin=\{0\}\s+aria-valuemax=\{100\}\s+aria-valuenow=\{completezza\}\s+aria-valuetext=\{`Profilo completo al \$\{completezza\}%`\}/);
++  assert.match(alto, /<span className="completezza-testo">Profilo completo al \{completezza\}%<\/span>/); assert.match(alto, /<div className="completeness-fill" style=\{\{ width: `\$\{completezza\}%` \}\} \/>/);
++  const ordine = ["avatar-name", "avatar-sub", "completezza", "CampanellaNovita"].map((x) => alto.indexOf(x)); assert.ok(ordine.every((x, i) => x > 0 && (i === 0 || x > ordine[i - 1])), "ordine: nome, email, barra, campanella: " + ordine.join(","));
++  const inizioColonna = alto.indexOf('<div className="avatar-testo">'); const colonna = alto.slice(inizioColonna, alto.indexOf("\n        </div>\n", inizioColonna));
++  assert.ok(colonna.includes('className="completezza"') && colonna.includes('className="avatar-name"') && colonna.includes('className="avatar-sub"'), "nome, email e barra devono stare nella stessa colonna: la barra non può stare accanto"); assert.ok(!colonna.includes("CampanellaNovita"), "la campanella sta fuori dalla colonna, nell'angolo"); assert.ok(!/completeness-row|% completo<\/span>/.test(p), "resta la vecchia riga");
++  const c = css(); assert.ok(!/completeness-row/.test(c), "resta lo stile della vecchia riga"); assert.match(c, /\.completezza \.completeness-bar \{\s+width: 100%;/); assert.match(c, /\.completeness-bar \{\s+flex: 1;\s+height: 6px;/);
++});
++
++test("Profilo: la completezza si calcola ancora con gli stessi dati di prima (solo la posizione è cambiata)", () => {
++  const p = profilo(); assert.match(p, /const completezza = computeProfileCompleteness\(\{\s+hasZone: \(ricerca\.luoghi\?\.length \?\? 0\) > 0 \|\| ricerca\.zone\.length > 0,\s+professione: tenant\.professione,/);
++});
+diff --git a/scripts/test-candidature.mjs b/scripts/test-candidature.mjs
+index 274d9a7..d87ff0f 100644
+--- a/scripts/test-candidature.mjs
++++ b/scripts/test-candidature.mjs
+@@ -267,7 +267,7 @@ test("simbolo «I tuoi match»: esiste, è diverso da quello della chat e dalle
+ });
+ 
+ test("i testi che nominano la pagina dicono «I tuoi match» (Home, Preferiti e commenti), non più «Candidature»", () => {
+-  assert.match(leggiFile("src", "lib", "scelte.ts"), /TESTO_CANDIDATURA_INVIATA = "Candidatura inviata — la trovi in I tuoi match\."/); assert.match(leggiFile("src", "app", "(app)", "HomeClient.tsx"), /la trovi in &quot;I tuoi match&quot;/);
++  assert.match(leggiFile("src", "lib", "scelte.ts"), /TESTO_CANDIDATURA_INVIATA = "Candidatura inviata — la trovi in I tuoi match\."/); const home = leggiFile("src", "app", "(app)", "HomeClient.tsx"); assert.match(home, /testo: TESTO_CANDIDATURA_INVIATA/, "la Home usa il testo condiviso, che dice «I tuoi match»"); assert.ok(!/Candidatura inviata —/.test(home), "la Home non ha più una sua copia del testo");
+   for (const f of [["src", "lib", "scelte.ts"], ["src", "app", "(app)", "HomeClient.tsx"], ["src", "app", "(app)", "actions.ts"]]) assert.ok(!/in «?"?&?q?u?o?t?;?Candidature/.test(leggiFile(...f).replace(/Candidatur[ae] inviat/g, "")), `un testo cita ancora «Candidature» in ${f.join("/")}`);
+ });
+ 
+diff --git a/src/app/(app)/HomeClient.tsx b/src/app/(app)/HomeClient.tsx
+index fbd5487..05d8f33 100644
+--- a/src/app/(app)/HomeClient.tsx
++++ b/src/app/(app)/HomeClient.tsx
+@@ -1,6 +1,6 @@
+ "use client";
+ 
+-import { useRef, useState, useTransition } from "react";
++import { useEffect, useRef, useState, useTransition } from "react";
+ import type { AffidabilitaResult } from "@/lib/affidabilita";
+ import type { RiepilogoRecensioni } from "@/lib/recensioni";
+ import type { TenantProfile } from "@/lib/types";
+@@ -19,6 +19,8 @@ import {
+   TESTO_PREFERITO_TOLTO,
+   TESTO_SALVATO,
+   TESTO_SCARTO_ANNULLATO,
++  TESTO_CANDIDATURA_INVIATA,
++  durataAvviso,
+   TITOLO_TUTTI_SCELTI,
+   annullaUltima,
+   registra,
+@@ -82,14 +84,18 @@ export function HomeClient({
+   const [mazzo, setMazzo] = useState(listings);
+   const [index, setIndex] = useState(0);
+   const [separatoreVisto, setSeparatoreVisto] = useState(false);
+-  const [candidatureInviate, setCandidatureInviate] = useState<Set<string>>(
+-    new Set()
+-  );
+   const [pending, startTransition] = useTransition();
+   // Le scelte fatte in questa sessione, per «annulla»; e l'ultimo avviso mostrato.
+   const [storia, setStoria] = useState<Scelta[]>([]);
+   const [avviso, setAvviso] = useState<{ errore: boolean; testo: string } | null>(null);
+ 
++  // Ogni avviso sparisce da solo dopo qualche secondo (prima restava finché non si scartava un'altra casa).
++  useEffect(() => {
++    if (!avviso) return;
++    const t = setTimeout(() => setAvviso(null), durataAvviso(avviso.errore));
++    return () => clearTimeout(t);
++  }, [avviso]);
++
+   // ---- stato del trascinamento della card ----
+   const [fotoIdx, setFotoIdx] = useState(0);
+   const [schedaAperta, setSchedaAperta] = useState(false);
+@@ -185,13 +191,11 @@ export function HomeClient({
+   function candidati_(listing: ListingConMatch) {
+     startTransition(async () => {
+       const res = await candidati(listing.id);
+-      if (!res?.error) {
+-        setCandidatureInviate((prev) => new Set(prev).add(listing.id));
+-      }
+       // una candidatura non si annulla da qui (si ritira da «I tuoi match»): dopo,
+       // «annulla» non torna indietro oltre questo punto
+       setStoria(svuota());
+-      setAvviso(null);
++      // se è partita lo si dice (come tutti gli avvisi, poi sparisce da solo); se non è partita non si dice niente
++      setAvviso(res?.error ? null : { errore: false, testo: TESTO_CANDIDATURA_INVIATA });
+       setIndex((i) => i + 1);
+       setFotoIdx(0);
+     });
+@@ -286,17 +290,18 @@ export function HomeClient({
+ 
+   return (
+     <div className="screen-dark">
+-      {/* ---- Barra in alto: marchio e contatore ---- */}
++      {/* ---- Barra in alto: il marchio. Niente contatore: il pannello dice già quante case sono in linea ---- */}
+       <div className="topbar">
+         <div className="brand">
+           Match<b>AmI</b>
+         </div>
+-        {mazzo.length > 0 && !finito && (
+-          <div className="counter">
+-            {index + 1} / {mazzo.length}
+-          </div>
+-        )}
+       </div>
++      {/* la posizione nel mazzo resta, ma solo per chi usa un lettore di schermo */}
++      {mazzo.length > 0 && !finito && (
++        <p className="solo-lettori" role="status">
++          Casa {index + 1} di {mazzo.length}
++        </p>
++      )}
+ 
+       {/* ---- In alto: il punteggio (si tocca per vedere da cosa è fatto) e le case della ricerca ---- */}
+       <div className="home-intro">
+@@ -603,11 +608,6 @@ export function HomeClient({
+         </div>
+       )}
+ 
+-      {!avviso && candidatureInviate.size > 0 && (
+-        <div className="toast-inline">
+-          Candidatura inviata — la trovi in &quot;I tuoi match&quot;.
+-        </div>
+-      )}
+     </div>
+   );
+ }
+diff --git a/src/app/(app)/profilo/ProfiloClient.tsx b/src/app/(app)/profilo/ProfiloClient.tsx
+index 5a15f4c..5ac59c9 100644
+--- a/src/app/(app)/profilo/ProfiloClient.tsx
++++ b/src/app/(app)/profilo/ProfiloClient.tsx
+@@ -111,6 +111,21 @@ export function ProfiloClient({
+         <div className="avatar-testo">
+           <h1 className="avatar-name">{nomeCompleto(nome, cognome) || "Il tuo profilo"}</h1>
+           {email && <div className="avatar-sub">{email}</div>}
++          {/* quanto è completo il profilo: sotto il nome, dove si legge insieme a chi sei */}
++          <div
++            className="completezza"
++            role="progressbar"
++            aria-label="Completezza del profilo"
++            aria-valuemin={0}
++            aria-valuemax={100}
++            aria-valuenow={completezza}
++            aria-valuetext={`Profilo completo al ${completezza}%`}
++          >
++            <span className="completezza-testo">Profilo completo al {completezza}%</span>
++            <div className="completeness-bar">
++              <div className="completeness-fill" style={{ width: `${completezza}%` }} />
++            </div>
++          </div>
+         </div>
+         <CampanellaNovita nonLette={nonLette} />
+       </div>
+@@ -125,17 +140,6 @@ export function ProfiloClient({
+         onClick={() => setSheetAperta("dati")}
+       />
+ 
+-      {/* Completezza */}
+-      <div className="completeness-row">
+-        <div className="completeness-bar">
+-          <div
+-            className="completeness-fill"
+-            style={{ width: `${completezza}%` }}
+-          />
+-        </div>
+-        <span>{completezza}% completo</span>
+-      </div>
+-
+       <div className="card-grid">
+         <RigaPreferiti preferiti={preferiti} />
+         {/* La tua ricerca */}
+diff --git a/src/app/globals.css b/src/app/globals.css
+index 6e5619a..637d503 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -130,18 +130,6 @@ body {
+   color: var(--gold);
+   font-style: normal;
+ }
+-.counter {
+-  font-size: 12px;
+-  font-weight: 600;
+-  letter-spacing: 0.08em;
+-  color: var(--paper);
+-  background: rgba(16, 21, 26, 0.45);
+-  backdrop-filter: blur(6px);
+-  border: 1px solid var(--line);
+-  padding: 6px 12px;
+-  border-radius: 999px;
+-}
+-
+ .screen-title {
+   font-family: var(--font-display);
+   font-size: 26px;
+@@ -574,12 +562,6 @@ input[type="range"]::-moz-range-thumb {
+   color: var(--muted);
+ }
+ 
+-.completeness-row {
+-  display: flex;
+-  align-items: center;
+-  gap: 10px;
+-  margin-bottom: 22px;
+-}
+ .completeness-bar {
+   flex: 1;
+   height: 6px;
+@@ -593,13 +575,6 @@ input[type="range"]::-moz-range-thumb {
+   border-radius: 999px;
+   transition: width 0.5s ease;
+ }
+-.completeness-row span {
+-  font-size: 11px;
+-  font-weight: 700;
+-  color: var(--moss);
+-  white-space: nowrap;
+-}
+-
+ /* riga-scheda cliccabile del profilo */
+ .pv-row {
+   display: flex;
+@@ -3738,3 +3713,31 @@ button.contratto-testa:focus-visible {
+   line-height: 1.3;
+   text-align: center;
+ }
++
++/* testo solo per chi usa un lettore di schermo: c'è, ma non si vede */
++.solo-lettori {
++  position: absolute;
++  width: 1px;
++  height: 1px;
++  margin: -1px;
++  padding: 0;
++  overflow: hidden;
++  clip: rect(0, 0, 0, 0);
++  white-space: nowrap;
++  border: 0;
++}
++
++/* completezza del profilo, sotto il nome */
++.avatar-row .completezza {
++  margin-top: 8px;
++}
++.completezza-testo {
++  display: block;
++  margin-bottom: 4px;
++  font-size: 11.5px;
++  font-weight: 700;
++  color: var(--moss);
++}
++.completezza .completeness-bar {
++  width: 100%;
++}
+diff --git a/src/lib/scelte.ts b/src/lib/scelte.ts
+index 8fc1835..213fc3e 100644
+--- a/src/lib/scelte.ts
++++ b/src/lib/scelte.ts
+@@ -115,3 +115,14 @@ export function descrizionePreferito(p: Pick<Preferito, "prezzo" | "locali" | "m
+ }
+ 
+ export const TESTO_CANDIDATURA_INVIATA = "Candidatura inviata — la trovi in I tuoi match.";
++
++/**
++ * Quanto resta visibile un avviso della Home («Scarto annullato», «Salvato nei preferiti», «Ricerca aggiornata»…), poi
++ * sparisce da solo. Un errore resta di più: va letto, e spesso dice cosa fare.
++ */
++export const DURATA_AVVISO_MS = 4000;
++export const DURATA_AVVISO_ERRORE_MS = 7000;
++
++export function durataAvviso(errore: boolean): number {
++  return errore ? DURATA_AVVISO_ERRORE_MS : DURATA_AVVISO_MS;
++}
+-- 
+2.43.0
+

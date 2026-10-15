@@ -1,0 +1,2011 @@
+From 370b582a1d7fb297ea2fbd57ed217c29c1fc9da4 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 14 Oct 2026 12:35:53 +0000
+Subject: [PATCH] feat(affidabilita): punteggio semplificato (60/25/15),
+ recensioni a parte, e due pulsanti nella Home
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Nessuna migrazione. Non cambia nessun dato salvato.
+
+IL PUNTEGGIO, DA CAPO. Da 0 a 100, tre voci, nessun numero negativo:
+  - reddito verificato          +60  (lo controlla lo staff sui documenti)
+  - nessun protesto             +25  (lo dichiara la persona)
+  - garante o fideiussione      +15  (lo dichiara la persona)
+Chi non ha niente ha 0. 'Protestato' e 'non indicato' valgono lo stesso: niente punti. Prima si partiva da 45,
+chi taceva sui protesti prendeva 0 e chi li ammetteva -30, e le recensioni entravano nel numero.
+Con 60/25/15 i punteggi possibili sono otto (0, 15, 25, 40, 60, 75, 85, 100) e tutti distinguibili: il reddito
+verificato da solo (60) batte le due dichiarazioni insieme (40), cosa che con 50/30/20 sarebbe finita pari.
+Etichette: Da costruire sotto 40, Buona da 40, Molto buona da 60, Eccellente da 85. Con queste soglie le sole
+dichiarazioni (al massimo 40) non arrivano mai a 'Molto buona': ci vuole il reddito verificato.
+Professione e reddito dichiarato non contano (come prima) e non si mostrano più nella scheda.
+
+LE RECENSIONI STANNO A PARTE. Stelle intere da 1 a 5 (lo 0 si confonderebbe con 'nessuna'), media a un decimale
+e SEMPRE quante sono ('4,3 su 5 · 3 recensioni': una sola non pesa come dieci). Nuovo modulo recensioni.ts.
+Le vede l'inquilino nella scheda e nel Profilo; il proprietario le vede accanto al punteggio (lista e dettaglio
+dei candidati), le usa come ultimo spareggio nell'ordine (dopo criteri, match e affidabilità) e le trova nella
+fotografia della valutazione. Le fotografie già scattate non le hanno e restano valide con il vecchio numero.
+
+LA SCHEDA 'COME SI CALCOLA'. Tre righe: la voce, i punti (+60 oppure 0 su 60), CHI la controlla ('Lo controlla lo
+staff' / 'Lo dichiari tu') e l'azione per completarla. Dice a quanto si può arrivare, ricorda che lo staff controlla
+solo il reddito e mostra le recensioni a parte. Sparisce la lista 'dati che indichi' e ogni '+20 possibili'.
+
+LA HOME. Nel pannello dell'affidabilità ci sono due pulsanti veri: 'Come si calcola' (apre la scheda) e 'Modifica
+dati' (apre la scheda dei dati personali DENTRO la Home, senza andare nel Profilo; salvando si chiude, dice
+'Dati aggiornati.' e il punteggio si ricalcola). L'anello non è più un pulsante. La verifica del reddito resta nel
+Profilo perché carica documenti. La scheda dei dati è estratta in un componente condiviso (Home e Profilo), con
+note che dicono cosa vale cosa nel punteggio (+25, +15: i numeri vengono dalle costanti) e, a reddito verificato,
+che cambiare lavoro o reddito fa decadere la verifica. updateDatiPersonali aggiorna anche la Home.
+Il mazzo parte 12 px più in basso per lasciare respiro sotto il pannello più alto.
+
+DIFETTI MIEI TROVATI PROVANDO
+- il bollino verde 'Verificato dallo staff' compariva anche sul reddito NON ancora verificato: ora dice chi controlla
+  ('Lo controlla lo staff'), non lo stato
+- il pannello lasciava 4 px tra se stesso e il mazzo
+- un test non vedeva le recensioni nascoste con l'attributo hidden: ora la scheda si disegna davvero nei test
+- i test dell'origine controllavano solo il caso 'non preso': ora tutte le 54 combinazioni
+
+AMBIENTE. L'ambiente di lavoro era stato azzerato: il repository è stato ricostruito dallo zip originale più le 41
+patch precedenti (stesso risultato: 928 test verdi prima di cominciare). Il caricatore dei test ora legge anche i
+.tsx e l'alias @/, così la scheda si prova disegnata davvero. Il banco di prova per le interazioni (jsdom) non c'è
+più: questa patch è provata con i test del repository e in Chrome.
+
+Test: 948 in tutto (20 nuovi sul punteggio, le recensioni e la scheda disegnata). Provato in Chrome col dito e
+col mouse: i due pulsanti, la scheda, il collegamento alla verifica, 'Modifica dati' dentro la Home e il
+salvataggio che porta il punteggio da 40 a 25; quattro situazioni (nessun dato, dichiarazioni, tutto, protesti
+dichiarati). Difetti reintrodotti di proposito: 29 su 29 presi.
+---
+ package.json                              |   2 +-
+ scripts/carica-ts.mjs                     |  17 +-
+ scripts/test-affidabilita.mjs             | 197 +++++++++++++++++++
+ scripts/test-candidati.mjs                |  12 +-
+ scripts/test-home.mjs                     | 127 +++---------
+ scripts/test-match.mjs                    |  10 +-
+ src/app/(app)/HomeClient.tsx              |  46 ++++-
+ src/app/(app)/database/DatabaseClient.tsx |  14 ++
+ src/app/(app)/database/actions.ts         |   4 +-
+ src/app/(app)/page.tsx                    |  14 +-
+ src/app/(app)/profilo/ProfiloClient.tsx   | 212 +-------------------
+ src/app/(app)/profilo/actions.ts          |   1 +
+ src/app/(app)/profilo/page.tsx            |  11 +-
+ src/app/globals.css                       |  74 +++++--
+ src/components/DatiPersonaliSheet.tsx     | 226 ++++++++++++++++++++++
+ src/components/SchedaAffidabilita.tsx     |  81 ++++----
+ src/lib/affidabilita.ts                   | 159 ++++++---------
+ src/lib/candidati.ts                      |   4 +-
+ src/lib/home.ts                           |   6 -
+ src/lib/match/candidato.ts                |  18 +-
+ src/lib/match/proprietario.ts             |  14 +-
+ src/lib/recensioni.ts                     |  49 +++++
+ 22 files changed, 770 insertions(+), 528 deletions(-)
+ create mode 100644 scripts/test-affidabilita.mjs
+ create mode 100644 src/components/DatiPersonaliSheet.tsx
+ create mode 100644 src/lib/recensioni.ts
+
+diff --git a/package.json b/package.json
+index 662bb87..4b203a8 100644
+--- a/package.json
++++ b/package.json
+@@ -8,7 +8,7 @@
+     "start": "next start",
+     "lint": "eslint",
+     "pretest": "node scripts/controlla-dipendenze.mjs",
+-    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-dati-immobile.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-affidabilita.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-dati-immobile.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/carica-ts.mjs b/scripts/carica-ts.mjs
+index 3fbb400..6b8c5eb 100644
+--- a/scripts/carica-ts.mjs
++++ b/scripts/carica-ts.mjs
+@@ -21,9 +21,12 @@ export function caricaTs(file) {
+ 
+   const sorgente = fs.readFileSync(assoluto, "utf8");
+   const { outputText } = ts.transpileModule(sorgente, {
++    fileName: assoluto,
+     compilerOptions: {
+       module: ts.ModuleKind.CommonJS,
+       target: ts.ScriptTarget.ES2020,
++      // i componenti (.tsx) si disegnano con il runtime di React
++      jsx: ts.JsxEmit.ReactJSX,
+     },
+   });
+ 
+@@ -31,10 +34,16 @@ export function caricaTs(file) {
+   cache.set(assoluto, modulo);
+ 
+   const richiedi = (spec) => {
+-    if (!spec.startsWith(".")) return require(spec);
+-    let p = path.resolve(path.dirname(assoluto), spec);
+-    if (fs.existsSync(p + ".ts")) p += ".ts";
+-    else if (fs.existsSync(path.join(p, "index.ts"))) p = path.join(p, "index.ts");
++    // l'alias @/ è la cartella src (come nel progetto)
++    const interno = spec.startsWith(".") || spec.startsWith("@/");
++    if (!interno) return require(spec);
++    let p = spec.startsWith("@/") ? path.join(radice, "src", spec.slice(2)) : path.resolve(path.dirname(assoluto), spec);
++    for (const estensione of [".ts", ".tsx"]) {
++      if (fs.existsSync(p + estensione)) return caricaTs(p + estensione);
++    }
++    for (const indice of ["index.ts", "index.tsx"]) {
++      if (fs.existsSync(path.join(p, indice))) return caricaTs(path.join(p, indice));
++    }
+     return caricaTs(p);
+   };
+ 
+diff --git a/scripts/test-affidabilita.mjs b/scripts/test-affidabilita.mjs
+new file mode 100644
+index 0000000..ee4dcaf
+--- /dev/null
++++ b/scripts/test-affidabilita.mjs
+@@ -0,0 +1,197 @@
++/**
++ * Test del punteggio di affidabilità (reddito verificato +60, nessun protesto +25, garante o fideiussione +15; da 0 a 100,
++ * niente numeri negativi) e delle recensioni, che stanno a parte. Si lancia con:   npm test
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { createRequire } from "node:module";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const richiedi = createRequire(import.meta.url);
++const React = richiedi("react");
++const { renderToStaticMarkup } = richiedi("react-dom/server");
++
++const af = caricaTs(path.join(radice, "src", "lib", "affidabilita.ts"));
++const rc = caricaTs(path.join(radice, "src", "lib", "recensioni.ts"));
++const scheda = caricaTs(path.join(radice, "src", "components", "SchedaAffidabilita.tsx"));
++const cd = caricaTs(path.join(radice, "src", "lib", "match", "candidato.ts"));
++const pr = caricaTs(path.join(radice, "src", "lib", "match", "proprietario.ts"));
++const leggi = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8").replace(/\r\n/g, "\n");
++
++const tri = [null, false, true];
++function* tutte() { for (const verificato of [false, true]) for (const protestato of tri) for (const garante of tri) for (const fideiussione of tri) yield { verificato, protestato, garante, fideiussione }; }
++/** La regola, riscritta a parte: 60 + 25 + 15. */
++const oracolo = (p) => (p.verificato ? 60 : 0) + (p.protestato === false ? 25 : 0) + (p.garante === true || p.fideiussione === true ? 15 : 0);
++const calcola = (o = {}) => af.computeAffidabilita({ verificato: false, protestato: null, garante: null, fideiussione: null, ...o });
++
++// ============================================================ il punteggio
++test("punteggio: 60 + 25 + 15, per OGNI combinazione (54 casi), mai negativo e mai oltre 100", () => {
++  let n = 0;
++  for (const p of tutte()) { n++; const r = af.computeAffidabilita(p); assert.equal(r.punteggio, oracolo(p), JSON.stringify(p)); assert.ok(Number.isInteger(r.punteggio) && r.punteggio >= 0 && r.punteggio <= 100, String(r.punteggio)); assert.equal(r.punteggio, r.voci.reduce((s, v) => s + v.punti, 0), "la somma delle voci è il punteggio"); }
++  assert.equal(n, 54); assert.equal(af.PUNTEGGIO_MINIMO, 0); assert.equal(af.PUNTEGGIO_MASSIMO, 100); assert.deepEqual(af.PUNTI_AFFIDABILITA, { reddito: 60, protesti: 25, garanzia: 15 });
++});
++
++test("chi non ha niente ha 0; «protestato» e «non indicato» valgono lo stesso (niente punti); il massimo è 100", () => {
++  assert.equal(calcola().punteggio, 0); assert.equal(calcola({ protestato: true }).punteggio, 0); assert.equal(calcola({ protestato: null }).punteggio, calcola({ protestato: true }).punteggio);
++  assert.equal(calcola({ verificato: true, protestato: false, garante: true }).punteggio, 100); assert.equal(calcola({ verificato: true, protestato: false, fideiussione: true }).punteggio, 100);
++});
++
++test("i soli punteggi possibili sono 8: 0, 15, 25, 40, 60, 75, 85, 100 (ogni caso è distinguibile)", () => {
++  assert.deepEqual([...new Set([...tutte()].map((p) => af.computeAffidabilita(p).punteggio))].sort((a, b) => a - b), [0, 15, 25, 40, 60, 75, 85, 100]);
++});
++
++test("il reddito verificato da solo (60) batte le due dichiarazioni insieme (40)", () => {
++  assert.ok(calcola({ verificato: true }).punteggio > calcola({ protestato: false, garante: true }).punteggio);
++});
++
++test("garante o fideiussione valgono +15 una volta sola, anche se ci sono entrambi; «no» non dà punti", () => {
++  assert.equal(calcola({ garante: true, fideiussione: true }).punteggio, 15); assert.equal(calcola({ garante: false, fideiussione: false }).punteggio, 0); assert.equal(calcola({ garante: true, fideiussione: false }).punteggio, 15); assert.equal(calcola({ garante: false, fideiussione: true }).punteggio, 15);
++});
++
++test("etichette: Da costruire sotto 40, Buona da 40, Molto buona da 60, Eccellente da 85; le sole dichiarazioni non arrivano mai a «Molto buona»", () => {
++  const e = af.etichettaPunteggio; assert.deepEqual([0, 15, 25, 39, 40, 59, 60, 75, 84, 85, 100].map(e), ["Da costruire", "Da costruire", "Da costruire", "Da costruire", "Buona", "Buona", "Molto buona", "Molto buona", "Molto buona", "Eccellente", "Eccellente"]);
++  assert.deepEqual(af.SOGLIE_ETICHETTA, { buona: 40, moltoBuona: 60, eccellente: 85 });
++  for (const p of tutte()) { const r = af.computeAffidabilita(p); assert.equal(r.label, e(r.punteggio)); if (!p.verificato) assert.ok(r.label !== "Molto buona" && r.label !== "Eccellente", `${JSON.stringify(p)} → ${r.label}`); }
++});
++
++// ============================================================ le voci
++test("voci: sempre le stesse tre, nell'ordine, con una coerenza interna tra stato, punti, potenziale, origine e dove si fa", () => {
++  for (const p of tutte()) {
++    const r = af.computeAffidabilita(p); assert.deepEqual(r.voci.map((v) => v.id), ["reddito", "protesti", "garanzia"]);
++    for (const v of r.voci) {
++      assert.equal(v.origine, v.id === "reddito" ? "verificato" : "dichiarato", `${v.id}: solo il reddito lo controlla lo staff (anche quando è preso)`);
++      assert.ok(Number.isInteger(v.punti) && v.punti >= 0, `${v.id}: punti negativi o non interi`); assert.equal(v.punti, v.presa ? v.massimo : 0); assert.ok(v.nota.length > 5);
++      if (v.presa) { assert.equal(v.potenziale, 0); assert.equal(v.suggerimento, null); assert.equal(v.sezione, null); }
++      else { assert.ok(v.potenziale === 0 || v.potenziale === v.massimo); if (v.potenziale > 0) { assert.equal(typeof v.suggerimento, "string"); assert.ok(["verifica", "dati"].includes(v.sezione)); } else { assert.equal(v.suggerimento, null); assert.equal(v.sezione, null); } }
++    }
++  }
++});
++
++test("voci: chi controlla cosa (solo il reddito lo controlla lo staff) e dove si completa", () => {
++  const r = calcola(); const [red, pro, gar] = r.voci;
++  assert.deepEqual([red.origine, pro.origine, gar.origine], ["verificato", "dichiarato", "dichiarato"]); assert.deepEqual([red.massimo, pro.massimo, gar.massimo], [60, 25, 15]);
++  assert.deepEqual([red.sezione, pro.sezione, gar.sezione], ["verifica", "dati", "dati"]); assert.equal(red.suggerimento, "Verifica il tuo reddito"); assert.equal(pro.suggerimento, "Indica i protesti nei tuoi dati"); assert.equal(gar.suggerimento, "Indica un garante o una fideiussione");
++  assert.match(calcola({ verificato: true }).voci[0].nota, /staff/); assert.match(calcola({ protestato: false }).voci[1].nota, /Nessuno lo controlla/); assert.match(calcola({ garante: true }).voci[2].nota, /Nessuno lo controlla/);
++});
++
++test("protesti: «No» dà i punti; «Sì» e «non indicato» no, ma solo il «non indicato» si può completare (chi ha dichiarato dei protesti non ha niente da guadagnare)", () => {
++  const no = calcola({ protestato: false }).voci[1]; const si = calcola({ protestato: true }).voci[1]; const nd = calcola({ protestato: null }).voci[1];
++  assert.deepEqual([no.presa, no.punti], [true, 25]); assert.deepEqual([si.presa, si.punti, si.potenziale, si.suggerimento], [false, 0, 0, null]); assert.match(si.nota, /dichiarato dei protesti/); assert.deepEqual([nd.presa, nd.punti, nd.potenziale], [false, 0, 25]); assert.match(nd.nota, /Non indicato/);
++});
++
++test("punteggio possibile: quello di oggi più le voci ottenibili, mai oltre 100; con tutto preso non c'è niente da guadagnare; protesti dichiarati non si contano", () => {
++  for (const p of tutte()) { const r = af.computeAffidabilita(p); const possibile = af.punteggioPossibile(r); assert.ok(possibile >= r.punteggio && possibile <= 100); assert.equal(possibile, r.punteggio + r.voci.reduce((s, v) => s + v.potenziale, 0)); }
++  assert.equal(af.punteggioPossibile(calcola()), 100); assert.equal(af.punteggioPossibile(calcola({ protestato: true })), 75, "con i protesti dichiarati il massimo è 75"); assert.equal(af.punteggioPossibile(calcola({ verificato: true, protestato: false, garante: true })), 100);
++});
++
++test("gli input che non servono più non cambiano il punteggio (professione, reddito dichiarato, recensioni non ne fanno parte)", () => {
++  const base = { verificato: true, protestato: false, garante: null, fideiussione: null };
++  assert.equal(af.computeAffidabilita({ ...base, professione: "Designer", reddito_mensile: 9999, mediaRecensioni: 1, numeroRecensioni: 9 }).punteggio, af.computeAffidabilita(base).punteggio);
++  for (const vecchio of ["checks", "hasRecensioni", "limite", "totaleGrezzo"]) assert.equal(vecchio in calcola(), false, vecchio);
++});
++
++// ============================================================ le recensioni, a parte
++test("recensioni: stelle intere da 1 a 5 e la loro media a un decimale; tutto ciò che non è una stella valida si ignora", () => {
++  assert.deepEqual(rc.riepilogoRecensioni([5, 4, 4]), { numero: 3, media: 4.3 }); assert.deepEqual(rc.riepilogoRecensioni([5]), { numero: 1, media: 5 }); assert.deepEqual(rc.riepilogoRecensioni([1, 2]), { numero: 2, media: 1.5 }); assert.deepEqual(rc.riepilogoRecensioni([5, 5, 4]), { numero: 3, media: 4.7 });
++  for (const v of [[], null, undefined]) assert.deepEqual(rc.riepilogoRecensioni(v), { numero: 0, media: null });
++  assert.deepEqual(rc.riepilogoRecensioni([0, 6, -1, 3.5, "5", null, NaN, Infinity, 4]), { numero: 1, media: 4 }, "0 non è una recensione (si confonderebbe con «nessuna»)"); assert.deepEqual(rc.riepilogoRecensioni([0, 0]), { numero: 0, media: null });
++  assert.equal(rc.VOTO_MINIMO, 1); assert.equal(rc.VOTO_MASSIMO, 5);
++});
++
++test("recensioni: il testo dice SEMPRE anche quante sono (una sola non pesa come dieci)", () => {
++  const t = rc.testoRecensioni; assert.equal(t({ numero: 0, media: null }), "Nessuna recensione ancora"); assert.equal(t({ numero: 1, media: 5 }), "5,0 su 5 · 1 recensione"); assert.equal(t({ numero: 3, media: 4.5 }), "4,5 su 5 · 3 recensioni"); assert.equal(t({ numero: 12, media: 3.2 }), "3,2 su 5 · 12 recensioni");
++  for (const x of [{ numero: 0, media: 4 }, { numero: -1, media: 4 }, { numero: 2, media: null }]) assert.equal(t(x), "Nessuna recensione ancora", JSON.stringify(x));
++});
++
++test("recensioni: le stelle da disegnare, sempre cinque; la media si arrotonda alla più vicina", () => {
++  const s = rc.stelleTesto; assert.equal(s(null), "☆☆☆☆☆"); assert.equal(s(5), "★★★★★"); assert.equal(s(4.5), "★★★★★"); assert.equal(s(4.4), "★★★★☆"); assert.equal(s(1), "★☆☆☆☆"); assert.equal(s(0.4), "☆☆☆☆☆"); assert.equal(s(99), "★★★★★"); assert.equal(s(-3), "☆☆☆☆☆"); assert.equal(s(NaN), "☆☆☆☆☆");
++  for (const m of [null, 1, 2.5, 3.3, 4.9, 5, 100, -1]) assert.equal(s(m).length, 5, String(m));
++});
++
++test("recensioni: un riepilogo salvato si rilegge solo se ha la forma giusta", () => {
++  const l = rc.leggiRiepilogo; assert.deepEqual(l({ numero: 3, media: 4.5 }), { numero: 3, media: 4.5 }); assert.deepEqual(l({ numero: 0, media: null }), { numero: 0, media: null });
++  for (const x of [null, undefined, 5, "x", [], {}, { numero: 3 }, { numero: 3, media: 6 }, { numero: 3, media: 0.5 }, { numero: -1, media: null }, { numero: 1.5, media: 3 }, { numero: 0, media: 3 }, { numero: 2, media: "4" }, { numero: 2, media: NaN }]) assert.equal(l(x), null, JSON.stringify(x));
++});
++
++test("il voto nel database è da 1 a 5 (da cui le stelle da 1 a 5)", () => {
++  assert.match(leggi("supabase", "migrations", "0001_init.sql"), /voto smallint not null check \(voto between 1 and 5\)/);
++});
++
++// ============================================================ lato proprietario
++const profilo = { professione: "Designer", reddito_mensile: 2600, reddito_nucleo: null, garante: true, fideiussione: false, protestato: false, animali_compilato: true, nucleo_compilato: true, presentazione: "Ciao", verificato: true };
++const valuta = (recensioni) => cd.valutaCandidato({ criteri: [], canone: 1000, profilo, recensioni });
++
++test("valutazione del candidato: il punteggio è lo stesso con qualunque recensione; le recensioni viaggiano a parte", () => {
++  const a = valuta({ numero: 0, media: null }); const b = valuta({ numero: 9, media: 1 }); const c = valuta({ numero: 1, media: 5 });
++  assert.equal(a.affidabilita, 100); assert.equal(b.affidabilita, a.affidabilita); assert.equal(c.affidabilita, a.affidabilita); assert.deepEqual(b.recensioni, { numero: 9, media: 1 });
++});
++
++test("fotografia: le recensioni si rileggono se ci sono e si ignorano se rotte; una fotografia vecchia (senza) resta valida", () => {
++  const v = valuta({ numero: 3, media: 4.5 }); const fot = JSON.parse(JSON.stringify(v));
++  assert.deepEqual(cd.leggiFotografia(fot).recensioni, { numero: 3, media: 4.5 });
++  const vecchia = { match: fot.match, affidabilita: 85 }; const r = cd.leggiFotografia(vecchia); assert.ok(r, "la fotografia vecchia non si legge più"); assert.equal(r.affidabilita, 85); assert.equal("recensioni" in r, false);
++  for (const rotta of [5, "x", { numero: 3 }, { numero: 3, media: 9 }]) { const x = cd.leggiFotografia({ ...fot, recensioni: rotta }); assert.ok(x && x.affidabilita === fot.affidabilita, "una recensione rotta non deve far perdere la fotografia"); assert.equal("recensioni" in x, false, JSON.stringify(rotta)); }
++});
++
++test("ordine dei candidati: a parità di tutto, prima la media di stelle più alta, poi chi ha più recensioni; il resto non cambia", () => {
++  const m = { bloccato: false, punteggio: 80 }; const voce = (id, aff, rec) => ({ id, match: m, affidabilita: aff, recensioni: rec });
++  const ordine = (v) => pr.ordinaCandidati(v).map((x) => x.id).join();
++  assert.equal(ordine([voce("a", 75, { numero: 1, media: 3 }), voce("b", 75, { numero: 1, media: 5 }), voce("c", 75, null)]), "b,a,c"); assert.equal(ordine([voce("a", 75, { numero: 1, media: 5 }), voce("b", 75, { numero: 4, media: 5 })]), "b,a");
++  assert.equal(ordine([voce("a", 60, { numero: 9, media: 5 }), voce("b", 75, null)]), "b,a", "l'affidabilità conta più delle recensioni"); assert.equal(ordine([voce("a", 75, undefined), voce("b", 75, { numero: 0, media: null })]).length, 3);
++  assert.equal(pr.ordinaCandidati([{ id: "x", match: { bloccato: true, punteggio: 99 }, affidabilita: 100, recensioni: { numero: 9, media: 5 } }, { id: "y", match: { bloccato: false, punteggio: 10 }, affidabilita: 0 }]).map((v) => v.id).join(), "y,x", "chi non soddisfa i criteri obbligatori resta in fondo qualunque punteggio abbia");
++});
++
++// ============================================================ i collegamenti nel codice
++test("scheda dei dati condivisa: la usano Home e Profilo, avvisa UNA volta per salvataggio, e le note sul punteggio vengono dalle costanti", () => {
++  const d = leggi("src", "components", "DatiPersonaliSheet.tsx"); assert.match(d, /export function DatiPersonaliSheet/); assert.match(d, /if \(pending\) \{\s+eraInCorso\.current = true;\s+return;\s+\}\s+if \(eraInCorso\.current\) \{\s+eraInCorso\.current = false;\s+if \(state\?\.ok\) onSalvata\?\.\(\);/);
++  assert.match(d, /\+\{PUNTI_AFFIDABILITA\.garanzia\}/); assert.match(d, /\+\{PUNTI_AFFIDABILITA\.protesti\}/); assert.ok(!/\b(60|25|15)\b/.test(d.replace(/max=\{[^}]*\}|step=\{[^}]*\}/g, "")), "un numero di punti scritto a mano nelle note"); assert.match(d, /tenant\.verificato && \(\s+<p className="field-note">\s+Il tuo reddito è verificato: se cambi lavoro o reddito/);
++  const a = leggi("src", "app", "(app)", "profilo", "actions.ts"); const f = a.slice(a.indexOf("export async function updateDatiPersonali"), a.indexOf("export async function updateRicerca")); assert.match(f, /revalidatePath\("\/profilo"\);\s+revalidatePath\("\/"\);/, "la Home non si aggiorna dopo il salvataggio dei dati");
++});
++
++test("proprietario: vede le recensioni a parte dal punteggio (lista e dettaglio) e le usa solo come ultimo spareggio", () => {
++  const d = leggi("src", "app", "(app)", "database", "DatabaseClient.tsx"); assert.match(d, /label="Recensioni"/); assert.match(d, /selezionata\.valutazione\?\.recensioni/); assert.match(d, /recensioni: c\.valutazione!\.recensioni \?\? null/);
++  const c = leggi("src", "lib", "candidati.ts"); assert.match(c, /recensioni: riepilogoRecensioni\(voti\)/); const x = leggi("src", "app", "(app)", "database", "actions.ts"); assert.match(x, /recensioni: riepilogoRecensioni\(voti\)/);
++});
++
++test("nessun posto del codice calcola ancora la media delle recensioni a mano né le dà al punteggio", () => {
++  const cartella = path.join(radice, "src"); const trovati = [];
++  const visita = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) visita(p); else if (/\.(ts|tsx)$/.test(e.name)) { const t = fs.readFileSync(p, "utf8"); if (/mediaRecensioni|numeroRecensioni/.test(t)) trovati.push(path.relative(cartella, p)); } } };
++  visita(cartella); assert.deepEqual(trovati, [], "campi vecchi ancora in uso: " + trovati.join(", "));
++});
++
++// ============================================================ la scheda, disegnata davvero
++const html = (input, recensioni, onApri = () => {}) => renderToStaticMarkup(React.createElement(scheda.SchedaAffidabilita, { affidabilita: af.computeAffidabilita(input), recensioni, onApri }));
++const testoDi = (h) => h.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
++const NESSUNA = { numero: 0, media: null };
++const nBottoni = (h) => (h.match(/<button/g) ?? []).length;
++
++test("scheda disegnata, senza niente: 0 su ogni voce, i tre suggerimenti sono pulsanti, e si dice a quanto si può arrivare", () => {
++  const h = html({ verificato: false, protestato: null, garante: null, fideiussione: null }, NESSUNA); const t = testoDi(h);
++  for (const x of ["0 /100", "Da costruire", "0 su 60", "0 su 25", "0 su 15", "Verifica il tuo reddito", "Indica i protesti nei tuoi dati", "Indica un garante o una fideiussione", "arrivi a 100", "Nessuna recensione ancora"]) assert.ok(t.includes(x), `manca «${x}»: ${t}`);
++  assert.equal(nBottoni(h), 3, "i tre suggerimenti sono pulsanti"); for (const vietato of ["\u2212", "possibili", "Punto di partenza", "Dati che indichi"]) assert.ok(!t.includes(vietato), `non deve esserci «${vietato}»`);
++});
++
++test("scheda disegnata, con tutto: +60 +25 +15, nessun pulsante, nessun invito a completare", () => {
++  const h = html({ verificato: true, protestato: false, garante: true, fideiussione: null }, { numero: 3, media: 4.3 }); const t = testoDi(h);
++  for (const x of ["100 /100", "Eccellente", "+60", "+25", "+15", "Controllato dallo staff sui tuoi documenti"]) assert.ok(t.includes(x), `manca «${x}»`); assert.equal(nBottoni(h), 0); assert.ok(!t.includes("arrivi a") && !t.includes("0 su"), "con tutto preso non c'è niente da completare");
++});
++
++test("scheda disegnata: chi controlla cosa è scritto sotto ogni voce (una volta lo staff, due volte la persona); senza il gestore i suggerimenti non sono pulsanti", () => {
++  const h = html({ verificato: false, protestato: null, garante: null, fideiussione: null }, NESSUNA); assert.equal((h.match(/Lo controlla lo staff/g) ?? []).length, 1); assert.equal((h.match(/Lo dichiari tu/g) ?? []).length, 2);
++  const senza = renderToStaticMarkup(React.createElement(scheda.SchedaAffidabilita, { affidabilita: af.computeAffidabilita({ verificato: false, protestato: null, garante: null, fideiussione: null }), recensioni: NESSUNA })); assert.equal(nBottoni(senza), 0); assert.ok(testoDi(senza).includes("Verifica il tuo reddito"), "il suggerimento si legge anche senza pulsante");
++});
++
++test("scheda disegnata: le recensioni si VEDONO (stelle, media e quante sono), anche quando non ce ne sono, e non sono nascoste", () => {
++  const con = html({ verificato: false, protestato: null, garante: null, fideiussione: null }, { numero: 3, media: 4.3 }); const senza = html({ verificato: false, protestato: null, garante: null, fideiussione: null }, NESSUNA);
++  assert.ok(testoDi(con).includes("★★★★☆ 4,3 su 5 · 3 recensioni"), testoDi(con).slice(-160)); assert.ok(testoDi(senza).includes("☆☆☆☆☆ Nessuna recensione ancora"));
++  for (const h of [con, senza]) { const blocco = h.slice(h.indexOf("aff-recensioni") - 20, h.indexOf("aff-recensioni") + 200); assert.ok(!/\shidden(=|\s|>)/.test(blocco), "il blocco delle recensioni è nascosto"); assert.ok(blocco.includes('aria-label="'), "senza un nome per chi usa un lettore di schermo"); assert.ok(testoDi(h).includes("Le recensioni, a parte") && testoDi(h).includes("Non cambiano il punteggio")); }
++});
++
++test("scheda disegnata: cliccare un suggerimento chiama il gestore con la sezione giusta (verifica oppure dati)", () => {
++  const chiamate = []; const input = { verificato: false, protestato: null, garante: null, fideiussione: null };
++  const albero = scheda.SchedaAffidabilita({ affidabilita: af.computeAffidabilita(input), recensioni: NESSUNA, onApri: (x) => chiamate.push(x) });
++  const bottoni = []; const visita = (n) => { if (!n || typeof n !== "object") return; if (Array.isArray(n)) return n.forEach(visita); if (n.type === "button") bottoni.push(n); visita(n.props?.children); }; visita(albero);
++  assert.equal(bottoni.length, 3); for (const b of bottoni) b.props.onClick(); assert.deepEqual(chiamate, ["verifica", "dati", "dati"]);
++});
+diff --git a/scripts/test-candidati.mjs b/scripts/test-candidati.mjs
+index b85f351..5e80e22 100644
+--- a/scripts/test-candidati.mjs
++++ b/scripts/test-candidati.mjs
+@@ -67,7 +67,7 @@ test("in attesa: il match si ricalcola sui dati attuali, non congelato", () => {
+ });
+ 
+ test("decisa con una valutazione registrata: si mostra quella, anche se i dati sono cambiati", () => {
+-  const registrata = JSON.parse(JSON.stringify(valutaCandidato({ criteri: criteri.get("L1"), canone: 1500, profilo: profiloDaVista(vista("1", { reddito_nucleo: 2000 })), mediaRecensioni: null, numeroRecensioni: 0 })));
++  const registrata = JSON.parse(JSON.stringify(valutaCandidato({ criteri: criteri.get("L1"), canone: 1500, profilo: profiloDaVista(vista("1", { reddito_nucleo: 2000 })), recensioni: { numero: 0, media: null } })));
+   const [r] = assembla([riga("1", { status: "accettata" })], [vista("1", { reddito_nucleo: 9999 })], { valutazioni: [{ candidatura_id: "1", valutazione: registrata }] });
+   assert.equal(r.valutazione.congelata, true);
+   assert.equal(r.valutazione.match.bloccato, true, "la valutazione registrata aveva il reddito troppo basso");
+@@ -75,7 +75,7 @@ test("decisa con una valutazione registrata: si mostra quella, anche se i dati s
+ 
+ test("RIFIUTATA: la vista dà solo il nome, e la valutazione registrata si legge comunque", () => {
+   const vuota = vista("1", { professione: null, reddito_mensile: null, reddito_nucleo: null, garante: null, fideiussione: null, protestato: null, verificato: null, presentazione: null, avatar_url: null, animali_compilato: null, nucleo_compilato: null });
+-  const registrata = JSON.parse(JSON.stringify(valutaCandidato({ criteri: criteri.get("L1"), canone: 1500, profilo: profiloDaVista(vista("1")), mediaRecensioni: null, numeroRecensioni: 0 })));
++  const registrata = JSON.parse(JSON.stringify(valutaCandidato({ criteri: criteri.get("L1"), canone: 1500, profilo: profiloDaVista(vista("1")), recensioni: { numero: 0, media: null } })));
+   const [r] = assembla([riga("1", { status: "rifiutata" })], [vuota], { valutazioni: [{ candidatura_id: "1", valutazione: registrata }] });
+   assert.equal(r.nome, "Tina"); assert.equal(r.cognome, "Rossi");
+   assert.equal(r.valutazione.congelata, true);
+@@ -104,7 +104,7 @@ test("manca la riga della vista (non dovrebbe): niente crollo, nome vuoto", () =
+ });
+ 
+ test("la valutazione di una candidatura non finisce mai su un'altra", () => {
+-  const a = JSON.parse(JSON.stringify(valutaCandidato({ criteri: criteri.get("L1"), canone: 1500, profilo: profiloDaVista(vista("1", { reddito_nucleo: 1000 })), mediaRecensioni: null, numeroRecensioni: 0 })));
++  const a = JSON.parse(JSON.stringify(valutaCandidato({ criteri: criteri.get("L1"), canone: 1500, profilo: profiloDaVista(vista("1", { reddito_nucleo: 1000 })), recensioni: { numero: 0, media: null } })));
+   const risultati = assembla([riga("1", { status: "accettata" }), riga("2", { status: "accettata" })], [vista("1"), vista("2")], { valutazioni: [{ candidatura_id: "1", valutazione: a }] });
+   assert.equal(risultati[0].valutazione.congelata, true);
+   assert.equal(risultati[1].valutazione.congelata, false, "la seconda non ha valutazione registrata");
+@@ -116,10 +116,12 @@ test("l'ordine delle candidature e i loro dati restano quelli di arrivo", () =>
+   assert.deepEqual(out.map((x) => [x.id, x.nome]), [["3", "Tre"], ["1", "Uno"], ["2", "Due"]]);
+ });
+ 
+-test("l'affidabilità usa le recensioni dell'inquilino giusto", () => {
++test("le recensioni sono quelle dell'inquilino giusto, e NON cambiano il punteggio di affidabilità", () => {
+   const voti = new Map([["t1", [5, 5, 5]], ["t2", [1]]]);
+   const out = assembla([riga("1"), riga("2")], [vista("1"), vista("2")], { votiPerTenant: voti });
+-  assert.ok(out[0].valutazione.affidabilita > out[1].valutazione.affidabilita, `${out[0].valutazione.affidabilita} contro ${out[1].valutazione.affidabilita}`);
++  assert.deepEqual(out[0].valutazione.recensioni, { numero: 3, media: 5 }); assert.deepEqual(out[1].valutazione.recensioni, { numero: 1, media: 1 });
++  assert.equal(out[0].valutazione.affidabilita, out[1].valutazione.affidabilita, "due persone con gli stessi dati hanno lo stesso punteggio, qualunque recensione abbiano");
++  const senza = assembla([riga("1")], [vista("1")]); assert.deepEqual(senza[0].valutazione.recensioni, { numero: 0, media: null });
+ });
+ 
+ test("l'output non contiene nessun campo che il proprietario non deve vedere", () => {
+diff --git a/scripts/test-home.mjs b/scripts/test-home.mjs
+index e46f26e..6d74638 100644
+--- a/scripts/test-home.mjs
++++ b/scripts/test-home.mjs
+@@ -8,99 +8,10 @@ import path from "node:path";
+ import fs from "node:fs";
+ import { caricaTs, radice } from "./carica-ts.mjs";
+ 
+-const af = caricaTs(path.join(radice, "src", "lib", "affidabilita.ts"));
+ const hm = caricaTs(path.join(radice, "src", "lib", "home.ts"));
+ // con i ritorni a capo di Windows normalizzati
+ const leggi = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8").replace(/\r\n/g, "\n");
+ 
+-// ============================================================ il punteggio: nessun numero è cambiato
+-/** La formula com'era PRIMA delle voci, riscritta qui a parte: il punteggio non deve essere cambiato per nessuna combinazione. */
+-function oracolo(p) {
+-  let s = 45;
+-  if (p.verificato) s += 20;
+-  if (p.protestato === false) s += 15;
+-  if (p.protestato === true) s -= 30;
+-  if (p.garante === true || p.fideiussione === true) s += 10;
+-  if (p.numeroRecensioni > 0 && p.mediaRecensioni !== null) s += Math.round((p.mediaRecensioni - 3) * 6);
+-  return Math.max(5, Math.min(99, Math.round(s)));
+-}
+-const tri = [null, false, true];
+-const recensioni = [{ numeroRecensioni: 0, mediaRecensioni: null }, { numeroRecensioni: 1, mediaRecensioni: 1 }, { numeroRecensioni: 1, mediaRecensioni: 2 }, { numeroRecensioni: 2, mediaRecensioni: 2.5 }, { numeroRecensioni: 3, mediaRecensioni: 3 }, { numeroRecensioni: 2, mediaRecensioni: 3.5 }, { numeroRecensioni: 4, mediaRecensioni: 4.25 }, { numeroRecensioni: 5, mediaRecensioni: 5 }, { numeroRecensioni: 2, mediaRecensioni: null }];
+-function* tutte() {
+-  for (const verificato of [false, true]) for (const protestato of tri) for (const garante of tri) for (const fideiussione of tri) for (const r of recensioni)
+-    yield { verificato, protestato, garante, fideiussione, professione: verificato ? "Designer" : null, reddito_mensile: garante ? 2600 : null, ...r };
+-}
+-
+-test("punteggio: identico alla formula di prima per OGNI combinazione (486 casi), e l'etichetta segue le soglie", () => {
+-  let n = 0;
+-  for (const p of tutte()) {
+-    const r = af.computeAffidabilita(p); n++;
+-    assert.equal(r.punteggio, oracolo(p), JSON.stringify(p));
+-    assert.equal(r.label, r.punteggio >= 85 ? "Eccellente" : r.punteggio >= 70 ? "Molto buona" : r.punteggio >= 50 ? "Buona" : "Da costruire", JSON.stringify(p));
+-  }
+-  assert.equal(n, 486);
+-});
+-
+-test("voci: la somma dà il punteggio (stesso calcolo, nessuna divergenza possibile), e il limite si dice quando scatta", () => {
+-  for (const p of tutte()) {
+-    const r = af.computeAffidabilita(p); const somma = r.voci.reduce((s, v) => s + v.punti, 0);
+-    assert.equal(somma, r.totaleGrezzo, JSON.stringify(p)); assert.equal(r.punteggio, Math.max(5, Math.min(99, Math.round(r.totaleGrezzo))));
+-    assert.equal(r.limite, r.totaleGrezzo > 99 ? "massimo" : r.totaleGrezzo < 5 ? "minimo" : null, `${r.totaleGrezzo}`);
+-  }
+-});
+-
+-test("voci: sempre le stesse cinque, nell'ordine, con una coerenza interna tra stato, punti, potenziale e suggerimento", () => {
+-  for (const p of tutte()) {
+-    const r = af.computeAffidabilita(p); assert.deepEqual(r.voci.map((v) => v.id), ["base", "verifica", "protesti", "garanzia", "recensioni"]);
+-    for (const v of r.voci) {
+-      assert.ok(Number.isInteger(v.punti) && Number.isInteger(v.potenziale), `${v.id}: punti non interi`); assert.ok(v.etichetta.length > 3);
+-      if (v.stato === "mancante") { assert.equal(v.punti, 0, `${v.id} mancante con punti`); assert.ok(v.potenziale > 0, `${v.id} mancante senza potenziale`); assert.equal(typeof v.suggerimento, "string"); }
+-      else { assert.equal(v.potenziale, 0, `${v.id} ${v.stato} con potenziale`); assert.equal(v.suggerimento, null, `${v.id} ${v.stato} con suggerimento`); }
+-      if (v.stato === "ottenuta") assert.ok(v.punti > 0, `${v.id} ottenuta senza punti`);
+-      if (v.stato === "negativa") assert.ok(v.punti < 0, `${v.id} negativa senza punti negativi`);
+-    }
+-    assert.deepEqual(r.voci[0], { id: "base", etichetta: "Punto di partenza", punti: 45, stato: "neutra", potenziale: 0, suggerimento: null, nota: null });
+-  }
+-});
+-
+-test("voci: i punti di ogni voce sono quelli della formula (+20, +15 o −30, +10, e le recensioni da −12 a +12)", () => {
+-  const base = { verificato: false, protestato: null, garante: null, fideiussione: null, professione: null, reddito_mensile: null, mediaRecensioni: null, numeroRecensioni: 0 };
+-  const v = (o, id) => af.computeAffidabilita({ ...base, ...o }).voci.find((x) => x.id === id);
+-  assert.equal(v({ verificato: true }, "verifica").punti, 20); assert.equal(v({}, "verifica").potenziale, 20);
+-  assert.equal(v({ protestato: false }, "protesti").punti, 15); assert.equal(v({ protestato: true }, "protesti").punti, -30); assert.equal(v({}, "protesti").potenziale, 15); assert.equal(v({}, "protesti").stato, "mancante");
+-  assert.equal(v({ garante: true }, "garanzia").punti, 10); assert.equal(v({ fideiussione: true }, "garanzia").punti, 10); assert.equal(v({ garante: false, fideiussione: false }, "garanzia").stato, "mancante");
+-  for (const [media, atteso] of [[1, -12], [2, -6], [3, 0], [4, 6], [5, 12]]) assert.equal(v({ numeroRecensioni: 3, mediaRecensioni: media }, "recensioni").punti, atteso, `media ${media}`);
+-  assert.equal(v({}, "recensioni").potenziale, 12, "con tutte a 5 stelle varrebbe +12 (il voto è da 1 a 5)"); assert.equal(v({ numeroRecensioni: 1, mediaRecensioni: 3 }, "recensioni").stato, "neutra");
+-  assert.match(v({ numeroRecensioni: 1, mediaRecensioni: 4 }, "recensioni").nota, /^Media 4 su 5, 1 recensione$/); assert.match(v({ numeroRecensioni: 3, mediaRecensioni: 4.5 }, "recensioni").nota, /^Media 4,5 su 5, 3 recensioni$/);
+-});
+-
+-test("il voto delle recensioni è da 1 a 5 nel database (da cui il +12 massimo mostrato)", () => {
+-  assert.match(leggi("supabase", "migrations", "0001_init.sql"), /voto smallint not null check \(voto between 1 and 5\)/);
+-});
+-
+-test("limiti: tutto in regola con 5 stelle somma 102 e il punteggio è 99; il peggio somma 3 e il punteggio è 5", () => {
+-  const alto = af.computeAffidabilita({ verificato: true, protestato: false, garante: true, fideiussione: false, professione: "x", reddito_mensile: 1, mediaRecensioni: 5, numeroRecensioni: 2 }); assert.equal(alto.totaleGrezzo, 102); assert.equal(alto.punteggio, 99); assert.equal(alto.limite, "massimo");
+-  const basso = af.computeAffidabilita({ verificato: false, protestato: true, garante: false, fideiussione: false, professione: null, reddito_mensile: null, mediaRecensioni: 1, numeroRecensioni: 2 }); assert.equal(basso.totaleGrezzo, 3); assert.equal(basso.punteggio, 5); assert.equal(basso.limite, "minimo");
+-  assert.equal(af.PUNTI_BASE, 45); assert.equal(af.PUNTEGGIO_MINIMO, 5); assert.equal(af.PUNTEGGIO_MASSIMO, 99);
+-});
+-
+-test("punteggio possibile: mai sotto l'attuale, mai oltre 99, e uguale alla somma con le voci mancanti completate", () => {
+-  for (const p of tutte()) {
+-    const r = af.computeAffidabilita(p); const possibile = af.punteggioPossibile(r); const guadagno = r.voci.reduce((s, v) => s + (v.stato === "mancante" ? v.potenziale : 0), 0);
+-    assert.ok(possibile <= 99 && possibile >= 5, `${possibile}`); assert.equal(possibile, Math.max(5, Math.min(99, Math.round(r.totaleGrezzo + guadagno))));
+-    if (r.punteggio < 99 || guadagno === 0) assert.ok(possibile >= r.punteggio, `${possibile} < ${r.punteggio}`);
+-  }
+-  const tutto = af.computeAffidabilita({ verificato: true, protestato: false, garante: true, fideiussione: false, professione: "x", reddito_mensile: 1, mediaRecensioni: 4, numeroRecensioni: 1 }); assert.equal(af.punteggioPossibile(tutto), tutto.punteggio, "con tutto fatto non c'è niente da guadagnare");
+-});
+-
+-test("i controlli «dati che indichi» sono professione e reddito dichiarato, nei primi due posti (la scheda ne mostra solo quelli)", () => {
+-  const con = af.computeAffidabilita({ verificato: false, protestato: null, garante: null, fideiussione: null, professione: "Designer", reddito_mensile: 2600, mediaRecensioni: null, numeroRecensioni: 0 });
+-  assert.deepEqual(con.checks.slice(0, 2).map((c) => [c.ok, c.label]), [[true, "Designer"], [true, "Reddito dichiarato €2600/mese".replace("€2600", "€" + (2600).toLocaleString("it-IT"))]]);
+-  const senza = af.computeAffidabilita({ verificato: false, protestato: null, garante: null, fideiussione: null, professione: null, reddito_mensile: null, mediaRecensioni: null, numeroRecensioni: 0 });
+-  assert.deepEqual(senza.checks.slice(0, 2).map((c) => [c.ok, c.label]), [[false, "Situazione lavorativa da indicare"], [false, "Reddito da indicare"]]);
+-  assert.equal(con.checks.length, 5);
+-});
+-
+ // ============================================================ la ricerca e la Home: logica pura
+ test("ricerca in una riga: budget, taglio e zone; vuota senza criteri; le zone si accorciano e si contano", () => {
+   assert.deepEqual(hm.vociRicerca({ budgetMax: 1300, localiMin: 2, mqMin: 45, zone: ["Isola, Milano", "Navigli, Milano"] }), [`Fino a €${(1300).toLocaleString("it-IT")}`, "Da 2 locali", "Da 45 m²", "Isola, Navigli"]);
+@@ -135,10 +46,10 @@ test("collegamenti al Profilo: solo sezioni ammesse; qualunque altro valore non
+   for (const x of ["", "Verifica", "verifica ", " verifica", "account", "privacy", "faq", "__proto__", "constructor", "toString", "ricerca;x", "../x", "<script>", null, undefined, 5, {}, [], [""]]) assert.equal(hm.sezioneProfilo(x), null, JSON.stringify(x));
+ });
+ 
+-test("ogni voce del punteggio porta a una sezione ammessa, e quelle sezioni esistono davvero nel Profilo", () => {
+-  const ids = af.computeAffidabilita({ verificato: false, protestato: null, garante: null, fideiussione: null, professione: null, reddito_mensile: null, mediaRecensioni: null, numeroRecensioni: 0 }).voci.map((v) => v.id);
+-  for (const id of ids) assert.ok(hm.SEZIONI_PROFILO_APRIBILI.includes(hm.sezionePerVoce(id)), id); assert.deepEqual(["verifica", "protesti", "garanzia", "recensioni"].map(hm.sezionePerVoce), ["verifica", "dati", "dati", "invito"]);
+-  const p = leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx"); const unione = p.match(/useState<([\s\S]*?)\n  >\(aperturaIniziale\)/)[1]; for (const s of hm.SEZIONI_PROFILO_APRIBILI) { assert.ok(unione.includes(`"${s}"`), `la sezione «${s}» non è tra quelle del Profilo`); assert.match(p, new RegExp(`open=\\{sheetAperta === "${s}"\\}`), `nessuna scheda per «${s}»`); }
++test("le sezioni del Profilo che si possono aprire da un collegamento esistono davvero nel Profilo", () => {
++  const p = leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx"); const unione = p.match(/useState<([\s\S]*?)\n  >\(aperturaIniziale\)/)[1];
++  for (const s of hm.SEZIONI_PROFILO_APRIBILI) { assert.ok(unione.includes(`"${s}"`), `la sezione «${s}» non è tra quelle del Profilo`); assert.match(p, new RegExp(`open=\\{sheetAperta === "${s}"\\}`), `nessuna scheda per «${s}»`); }
++  assert.ok(typeof hm.sezionePerVoce === "undefined", "sezionePerVoce non serve più: ogni voce dice da sola la sua sezione");
+ });
+ 
+ // ============================================================ i collegamenti nel codice
+@@ -158,15 +69,25 @@ test("Home: la ricerca si cambia da qui (nessun collegamento al Profilo), la sch
+   assert.match(h, /onSalvata=\{\(\) => \{\s+setSchedaRicerca\(false\);\s+setAvviso\(\{ errore: false, testo: "Ricerca aggiornata\." \}\);/);
+ });
+ 
+-test("Home: il punteggio è un pulsante con un nome che dice cosa fa e apre la scheda; la pagina passa la ricerca", () => {
+-  const h = leggi("src", "app", "(app)", "HomeClient.tsx"); assert.match(h, /className="hi-punteggio"\s+onClick=\{\(\) => setSchedaPunteggio\(true\)\}\s+aria-label=\{`Affidabilità \$\{affidabilita\.punteggio\} su 100, \$\{affidabilita\.label\}\. Scopri come si calcola`\}/);
+-  assert.match(h, /router\.push\(`\/profilo\?apri=\$\{sezione\}`\)/); const pg = leggi("src", "app", "(app)", "page.tsx"); assert.match(pg, /ricerca=\{profiloRicerca\}/);
++test("Home: nel pannello dell'affidabilità ci sono DUE pulsanti veri («Come si calcola» e «Modifica dati»); l'anello non è un pulsante", () => {
++  const h = leggi("src", "app", "(app)", "HomeClient.tsx"); const pannello = h.slice(h.indexOf('<div className="hi-punteggio"'), h.indexOf('<div className="hi-ricerca">'));
++  assert.match(pannello, /<div className="hi-punteggio" role="group" aria-label=\{`Affidabilità \$\{affidabilita\.punteggio\} su 100, \$\{affidabilita\.label\}`\}>/);
++  assert.match(pannello, /<button type="button" className="hi-azione" onClick=\{\(\) => setSchedaPunteggio\(true\)\}>\s+Come si calcola\s+<\/button>/); assert.match(pannello, /<button type="button" className="hi-azione" onClick=\{\(\) => setSchedaDati\(true\)\}>\s+Modifica dati\s+<\/button>/);
++  assert.equal([...pannello.matchAll(/<button/g)].length, 2, "ci devono essere due pulsanti e non di più"); assert.ok(!/hi-punteggio-cta/.test(h), "resta la vecchia scritta «Come si calcola ›» dentro un pulsante unico");
++  const pg = leggi("src", "app", "(app)", "page.tsx"); assert.match(pg, /ricerca=\{profiloRicerca\}/); assert.match(pg, /recensioni=\{riepilogo\}\s+tenant=\{tenantProfile\}/);
++});
++
++test("Home: «Modifica dati» apre la scheda dei dati qui (stessa del Profilo), montata solo se aperta; salvando si chiude e lo dice; la verifica del reddito resta nel Profilo", () => {
++  const h = leggi("src", "app", "(app)", "HomeClient.tsx"); assert.match(h, /import \{ DatiPersonaliSheet \} from "@\/components\/DatiPersonaliSheet"/);
++  assert.match(h, /\{schedaDati && \(\s+<DatiPersonaliSheet\s+open\s+onClose=\{\(\) => setSchedaDati\(false\)\}\s+tenant=\{tenant\}\s+onSalvata=\{\(\) => \{\s+setSchedaDati\(false\);\s+setAvviso\(\{ errore: false, testo: "Dati aggiornati\." \}\);/);
++  assert.match(h, /if \(sezione === "dati"\) setSchedaDati\(true\);\s+else router\.push\("\/profilo\?apri=verifica"\);/); assert.ok(!/href="\/profilo"/.test(h));
+ });
+ 
+-test("Profilo: usa la scheda di ricerca e quella del punteggio condivise (non ne ha di proprie), e legge ?apri=", () => {
+-  const p = leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx"); assert.match(p, /import \{ RicercaSheet \} from "@\/components\/RicercaSheet"/); assert.ok(!/function RicercaSheet/.test(p), "il Profilo ha ancora una scheda di ricerca sua"); assert.ok(!/function SaveButton/.test(p));
+-  assert.match(p, /<SchedaAffidabilita affidabilita=\{affidabilita\} onApri=\{\(sezione\) => setSheetAperta\(sezione\)\} \/>/); assert.ok(!/affidabilita\.checks\.map/.test(p), "il Profilo mostra ancora i vecchi controlli");
+-  const pg = leggi("src", "app", "(app)", "profilo", "page.tsx"); assert.match(pg, /sezioneProfilo\(\(await searchParams\)\.apri\)/); assert.match(pg, /searchParams: Promise<\{ apri\?: string \| string\[\] \}>/);
++test("Profilo: usa le schede condivise (ricerca, dati, punteggio: nessuna copia), legge ?apri= e passa le recensioni a parte", () => {
++  const p = leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx"); assert.match(p, /import \{ RicercaSheet \} from "@\/components\/RicercaSheet"/); assert.match(p, /import \{ DatiPersonaliSheet \} from "@\/components\/DatiPersonaliSheet"/);
++  assert.ok(!/function RicercaSheet/.test(p) && !/function DatiPersonaliSheet/.test(p) && !/function SaveButton/.test(p), "il Profilo ha ancora una copia di una scheda");
++  assert.match(p, /<SchedaAffidabilita affidabilita=\{affidabilita\} recensioni=\{recensioni\} onApri=\{\(sezione\) => setSheetAperta\(sezione\)\} \/>/); assert.ok(!/hasRecensioni|\.checks/.test(p), "il Profilo usa ancora i campi vecchi");
++  const pg = leggi("src", "app", "(app)", "profilo", "page.tsx"); assert.match(pg, /sezioneProfilo\(\(await searchParams\)\.apri\)/); assert.match(pg, /searchParams: Promise<\{ apri\?: string \| string\[\] \}>/); assert.match(pg, /recensioni=\{riepilogo\}/);
+ });
+ 
+ test("scheda di ricerca condivisa: avvisa UNA volta per ogni salvataggio che finisce bene, e il salvataggio aggiorna anche la Home", () => {
+@@ -174,9 +95,9 @@ test("scheda di ricerca condivisa: avvisa UNA volta per ogni salvataggio che fin
+   const a = leggi("src", "app", "(app)", "profilo", "actions.ts"); const f = a.slice(a.indexOf("export async function updateRicerca")); assert.match(f, /revalidatePath\("\/profilo"\);\s+revalidatePath\("\/"\);/, "la Home non si aggiorna dopo il salvataggio");
+ });
+ 
+-test("scheda del punteggio: i punti vengono dalla funzione del punteggio (nessun numero scritto a mano), e il minus è un vero meno", () => {
+-  const c = leggi("src", "components", "SchedaAffidabilita.tsx").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, ""); assert.ok(!/[+-]\s?(20|15|10|12|30)\b/.test(c.replace(/\\u2212/g, "")), "un numero di punti scritto a mano"); assert.match(c, /\\u2212\$\{Math\.abs\(v\.punti\)\}/);
+-  assert.match(c, /voci\.map\(\(v\) =>/); assert.match(c, /punteggioPossibile\(affidabilita\)/); assert.match(c, /checks\.slice\(0, 2\)/);
++test("scheda del punteggio: i punti vengono dalla funzione del punteggio (nessun numero scritto a mano), con la voce, chi la controlla e le recensioni a parte", () => {
++  const c = leggi("src", "components", "SchedaAffidabilita.tsx").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
++  assert.ok(!/\b(60|25|15)\b/.test(c), "un numero di punti scritto a mano"); assert.match(c, /voci\.map\(\(v\) =>/); assert.match(c, /punteggioPossibile\(affidabilita\)/); assert.match(c, /Lo controlla lo staff/); assert.match(c, /Lo dichiari tu/); assert.match(c, /Le recensioni, a parte/); assert.ok(!/checks|limite|totaleGrezzo/.test(c), "usa campi che non esistono più");
+ });
+ 
+ test("CSS: il suggerimento sta sopra i pulsanti e la card sopra il suggerimento (prima il testo finiva dietro i pulsanti)", () => {
+diff --git a/scripts/test-match.mjs b/scripts/test-match.mjs
+index a2510fb..f7fd166 100644
+--- a/scripts/test-match.mjs
++++ b/scripts/test-match.mjs
+@@ -584,8 +584,7 @@ test("senza reddito del nucleo il criterio sul reddito risulta 'non indicato'",
+     criteri: [{ chiave: "redditoCanone", peso: 5, modo: "obbligatorio" }],
+     canone: 900,
+     profilo: profiloDb({ reddito_nucleo: 0 }),
+-    mediaRecensioni: null,
+-    numeroRecensioni: 0,
++    recensioni: { numero: 0, media: null },
+   }).match;
+   assert.equal(r.criteri[0].stato, "non_indicato");
+   assert.equal(r.bloccato, true);
+@@ -602,7 +601,7 @@ test("completezza del profilo personale: otto campi, nessuna zona, e animali e n
+ 
+ test("valutaCandidato: affidabilità accanto al match, mai dentro", () => {
+   const criteri = [{ chiave: "garante", peso: 5, modo: "preferenziale" }];
+-  const base = { criteri, canone: 1000, mediaRecensioni: null, numeroRecensioni: 0 };
++  const base = { criteri, canone: 1000, recensioni: { numero: 0, media: null } };
+   const senza = valutaCandidato({ ...base, profilo: profiloDb({ verificato: false }) });
+   const con = valutaCandidato({ ...base, profilo: profiloDb({ verificato: true }) });
+ 
+@@ -615,8 +614,7 @@ test("il canone reale dell'annuncio decide il criterio sul reddito", () => {
+     criteri: [{ chiave: "redditoCanone", peso: 5, modo: "preferenziale" }],
+     canone,
+     profilo: profiloDb({ reddito_nucleo: 3000 }),
+-    mediaRecensioni: null,
+-    numeroRecensioni: 0,
++    recensioni: { numero: 0, media: null },
+   }).match.criteri[0].stato;
+   assert.equal(val(900), "ok");   // 30%
+   assert.equal(val(1500), "no");  // 50%
+@@ -625,7 +623,7 @@ test("il canone reale dell'annuncio decide il criterio sul reddito", () => {
+ test("leggiFotografia: accetta quella salvata, rifiuta forme rovinate", () => {
+   const v = valutaCandidato({
+     criteri: [{ chiave: "garante", peso: 5, modo: "obbligatorio" }],
+-    canone: 1000, profilo: profiloDb(), mediaRecensioni: null, numeroRecensioni: 0,
++    canone: 1000, profilo: profiloDb(), recensioni: { numero: 0, media: null },
+   });
+   // come esce dal database: serializzata e riletta. JSON toglie le chiavi
+   // `undefined`, quindi il confronto è con la versione già serializzata.
+diff --git a/src/app/(app)/HomeClient.tsx b/src/app/(app)/HomeClient.tsx
+index 830eb3f..2205825 100644
+--- a/src/app/(app)/HomeClient.tsx
++++ b/src/app/(app)/HomeClient.tsx
+@@ -3,6 +3,9 @@
+ import { useRef, useState, useTransition } from "react";
+ import { useRouter } from "next/navigation";
+ import type { AffidabilitaResult } from "@/lib/affidabilita";
++import type { RiepilogoRecensioni } from "@/lib/recensioni";
++import type { TenantProfile } from "@/lib/types";
++import { DatiPersonaliSheet } from "@/components/DatiPersonaliSheet";
+ import type { ListingConMatch } from "@/lib/types";
+ import { TOLLERANZA_BUDGET, statoMazzo } from "@/lib/match";
+ import type { ProfiloRicerca } from "@/lib/match";
+@@ -42,6 +45,8 @@ const SOGLIA_TOCCO = 8; // sotto questo spostamento è un tocco, non un trascina
+ 
+ export function HomeClient({
+   affidabilita,
++  recensioni,
++  tenant,
+   listings,
+   esclusi,
+   mostraMatch,
+@@ -51,6 +56,10 @@ export function HomeClient({
+   nascostiPerNecessarie = 0,
+ }: {
+   affidabilita: AffidabilitaResult;
++  /** le recensioni dei proprietari, a parte dal punteggio */
++  recensioni: RiepilogoRecensioni;
++  /** i dati dell'inquilino (per la scheda «Modifica dati») */
++  tenant: TenantProfile;
+   /** la ricerca impostata: budget, taglio, zone e caratteristiche */
+   ricerca: ProfiloRicerca;
+   /** i luoghi che si possono cercare (provincia, città, quartiere) */
+@@ -89,6 +98,7 @@ export function HomeClient({
+   const startPos = useRef({ x: 0, y: 0 });
+   const router = useRouter();
+   const [schedaPunteggio, setSchedaPunteggio] = useState(false);
++  const [schedaDati, setSchedaDati] = useState(false);
+   const [schedaRicerca, setSchedaRicerca] = useState(false);
+ 
+   // Quando la ricerca CAMBIA (l'ha modificata la persona da qui) il mazzo si ricomincia con quello nuovo, in ordine.
+@@ -292,21 +302,21 @@ export function HomeClient({
+ 
+       {/* ---- In alto: il punteggio (si tocca per vedere da cosa è fatto) e le case della ricerca ---- */}
+       <div className="home-intro">
+-        <button
+-          type="button"
+-          className="hi-punteggio"
+-          onClick={() => setSchedaPunteggio(true)}
+-          aria-label={`Affidabilità ${affidabilita.punteggio} su 100, ${affidabilita.label}. Scopri come si calcola`}
+-        >
++        <div className="hi-punteggio" role="group" aria-label={`Affidabilità ${affidabilita.punteggio} su 100, ${affidabilita.label}`}>
+           <AnelloPunteggio punteggio={affidabilita.punteggio} />
+           <span className="hi-punteggio-testo">
+             <span className="hi-punteggio-titolo">La tua affidabilità</span>
+             <b>{affidabilita.label}</b>
+           </span>
+-          <span className="hi-punteggio-cta" aria-hidden>
+-            Come si calcola ›
++          <span className="hi-punteggio-azioni">
++            <button type="button" className="hi-azione" onClick={() => setSchedaPunteggio(true)}>
++              Come si calcola
++            </button>
++            <button type="button" className="hi-azione" onClick={() => setSchedaDati(true)}>
++              Modifica dati
++            </button>
+           </span>
+-        </button>
++        </div>
+         <div className="hi-ricerca">
+           <div className="hi-ricerca-testo">
+             <b>{testoCase.principale}</b>
+@@ -553,13 +563,29 @@ export function HomeClient({
+       <Sheet open={schedaPunteggio} onClose={() => setSchedaPunteggio(false)} title="Il tuo voto di affidabilità">
+         <SchedaAffidabilita
+           affidabilita={affidabilita}
++          recensioni={recensioni}
+           onApri={(sezione) => {
+             setSchedaPunteggio(false);
+-            router.push(`/profilo?apri=${sezione}`);
++            // i dati si cambiano qui; la verifica del reddito ha la sua pagina (carica i documenti)
++            if (sezione === "dati") setSchedaDati(true);
++            else router.push("/profilo?apri=verifica");
+           }}
+         />
+       </Sheet>
+ 
++      {/* Come la ricerca: montata solo quando è aperta, così ogni apertura parte dai dati di adesso. */}
++      {schedaDati && (
++        <DatiPersonaliSheet
++          open
++          onClose={() => setSchedaDati(false)}
++          tenant={tenant}
++          onSalvata={() => {
++            setSchedaDati(false);
++            setAvviso({ errore: false, testo: "Dati aggiornati." });
++          }}
++        />
++      )}
++
+       {/* Montata solo quando è aperta: ogni apertura parte dai valori di adesso, e quando i dati nuovi arrivano
+           non viene smontata prima di aver detto «salvato». */}
+       {schedaRicerca && (
+diff --git a/src/app/(app)/database/DatabaseClient.tsx b/src/app/(app)/database/DatabaseClient.tsx
+index 2459998..7369c12 100644
+--- a/src/app/(app)/database/DatabaseClient.tsx
++++ b/src/app/(app)/database/DatabaseClient.tsx
+@@ -1,5 +1,6 @@
+ "use client";
+ 
++import { stelleTesto, testoRecensioni } from "@/lib/recensioni";
+ import { useState, useTransition } from "react";
+ import Link from "next/link";
+ import { Sheet } from "@/components/Sheet";
+@@ -243,6 +244,17 @@ export function DatabaseClient({
+                 value={`${selezionata.valutazione.affidabilita}/100`}
+               />
+             )}
++            {/* le recensioni stanno a parte dal punteggio; le valutazioni vecchie non le hanno */}
++            {selezionata.valutazione?.recensioni && (
++              <DettaglioRow
++                label="Recensioni"
++                value={
++                  selezionata.valutazione.recensioni.numero > 0
++                    ? `${stelleTesto(selezionata.valutazione.recensioni.media)} ${testoRecensioni(selezionata.valutazione.recensioni)}`
++                    : testoRecensioni(selezionata.valutazione.recensioni)
++                }
++              />
++            )}
+             {selezionata.tenant_profiles?.presentazione && (
+               <div style={{ marginTop: 18 }}>
+                 <div className="pref-label">
+@@ -397,6 +409,7 @@ function SezioneAnnuncio({
+           c,
+           match: c.valutazione!.match,
+           affidabilita: c.valutazione!.affidabilita,
++          recensioni: c.valutazione!.recensioni ?? null,
+         }))
+       ).map((v) => v.c)
+     : attesa;
+@@ -484,6 +497,7 @@ function Scheda({
+         </div>
+         <div className="mc-meta">
+           {v ? `Affidabilità ${v.affidabilita}` : ""}
++          {v?.recensioni && v.recensioni.numero > 0 && ` · ★ ${v.recensioni.media?.toLocaleString("it-IT", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} (${v.recensioni.numero})`}
+           {v?.match.incompleto && inAttesa && " · dati incompleti"}
+           {!inAttesa && v?.match.punteggio != null && ` · compatibilità ${v.match.punteggio}%`}
+         </div>
+diff --git a/src/app/(app)/database/actions.ts b/src/app/(app)/database/actions.ts
+index 75cd7ca..6de4267 100644
+--- a/src/app/(app)/database/actions.ts
++++ b/src/app/(app)/database/actions.ts
+@@ -1,5 +1,6 @@
+ "use server";
+ 
++import { riepilogoRecensioni } from "@/lib/recensioni";
+ import { revalidatePath } from "next/cache";
+ import { createClient } from "@/lib/supabase/server";
+ import { criteriDaRighe, valutaCandidato } from "@/lib/match";
+@@ -63,8 +64,7 @@ export async function valutaCandidatura(
+           criteri: criteriDaRighe(righeCriteri as RigaCriterioDb[] | null),
+           canone: listing.prezzo,
+           profilo: profiloDaVista(vista),
+-          mediaRecensioni: voti.length > 0 ? voti.reduce((a, b) => a + b, 0) / voti.length : null,
+-          numeroRecensioni: voti.length,
++          recensioni: riepilogoRecensioni(voti),
+         });
+       }
+     }
+diff --git a/src/app/(app)/page.tsx b/src/app/(app)/page.tsx
+index 5c00fdb..e51bb5e 100644
+--- a/src/app/(app)/page.tsx
++++ b/src/app/(app)/page.tsx
+@@ -4,6 +4,7 @@ import { OwnerHomeClient } from "./OwnerHomeClient";
+ import { VerificaHome } from "./VerificaHome";
+ import type { ImmobileVerifica } from "@/lib/verifica";
+ import { computeAffidabilita } from "@/lib/affidabilita";
++import { riepilogoRecensioni } from "@/lib/recensioni";
+ import { campiMatchDaRiga, haCriteriDiRicerca, preparaMazzo, profiloRicercaDaRighe } from "@/lib/match";
+ import { mappaLuoghi, type Luogo } from "@/lib/luoghi";
+ import type { ProfiloRicerca } from "@/lib/match";
+@@ -53,11 +54,8 @@ async function TenantHome({ userId }: { userId: string }) {
+     supabase.rpc("annunci_nascosti"),
+   ]);
+ 
+-  const numeroRecensioni = recensioni?.length ?? 0;
+-  const mediaRecensioni =
+-    numeroRecensioni > 0
+-      ? recensioni!.reduce((s, r) => s + (r.voto as number), 0) / numeroRecensioni
+-      : null;
++  // Le recensioni dei proprietari stanno a parte dal punteggio di affidabilità: si mostrano accanto.
++  const riepilogo = riepilogoRecensioni((recensioni ?? []).map((r) => r.voto));
+ 
+   const tenantProfile = tenant as TenantProfile;
+ 
+@@ -66,10 +64,6 @@ async function TenantHome({ userId }: { userId: string }) {
+     protestato: tenantProfile.protestato,
+     garante: tenantProfile.garante,
+     fideiussione: tenantProfile.fideiussione,
+-    professione: tenantProfile.professione,
+-    reddito_mensile: tenantProfile.reddito_mensile,
+-    mediaRecensioni,
+-    numeroRecensioni,
+   });
+ 
+   // ---- Tutti gli annunci pubblicati che l'inquilino non ha già scelto ----
+@@ -133,6 +127,8 @@ async function TenantHome({ userId }: { userId: string }) {
+   return (
+     <HomeClient
+       affidabilita={affidabilita}
++      recensioni={riepilogo}
++      tenant={tenantProfile}
+       listings={mazzo as unknown as ListingConMatch[]}
+       esclusi={esclusiPerBudget}
+       nascostiPerNecessarie={nascostiPerNecessarie}
+diff --git a/src/app/(app)/profilo/ProfiloClient.tsx b/src/app/(app)/profilo/ProfiloClient.tsx
+index e7377dd..b031b80 100644
+--- a/src/app/(app)/profilo/ProfiloClient.tsx
++++ b/src/app/(app)/profilo/ProfiloClient.tsx
+@@ -1,31 +1,26 @@
+ "use client";
+ 
++import { useState } from "react";
+ import { RigaNovita } from "@/components/RigaNovita";
++import { DatiPersonaliSheet } from "@/components/DatiPersonaliSheet";
+ import { RigaPreferiti } from "@/components/RigaPreferiti";
+ import { rigaProfilo } from "@/lib/verifica-inquilino";
+-import { useActionState, useState } from "react";
+ import { Sheet } from "@/components/Sheet";
+-import { LAVORO_VOCAB } from "@/lib/constants";
+ import {
+   computeAffidabilita,
+   computeProfileCompleteness,
+ } from "@/lib/affidabilita";
+ import type { TenantProfile, Invito } from "@/lib/types";
+-import { updateDatiPersonali, type SaveState } from "./actions";
+ import { logout } from "@/app/login/actions";
+ import { PageContainer } from "@/components/ui/PageContainer";
+-import { Chip } from "@/components/ui/Chip";
+-import { Field } from "@/components/ui/Field";
+-import { Stepper } from "@/components/ui/Stepper";
+-import { SaveButton } from "@/components/ui/SaveButton";
+ import { RicercaSheet } from "@/components/RicercaSheet";
+ import { SchedaAffidabilita } from "@/components/SchedaAffidabilita";
++import { testoRecensioni, type RiepilogoRecensioni } from "@/lib/recensioni";
+ import type { SezioneProfilo } from "@/lib/home";
+ import type { Luogo } from "@/lib/luoghi";
+ import type { ProfiloRicerca } from "@/lib/match";
+ import { PrivacySheet } from "@/components/PrivacySheet";
+ import { FaqSheet } from "@/components/FaqSheet";
+-import { AvatarUpload } from "@/components/AvatarUpload";
+ import { AccountSheet } from "@/components/AccountSheet";
+ import { InvitaProprietarioSheet } from "@/components/InvitaProprietarioSheet";
+ import {
+@@ -57,8 +52,8 @@ type Props = {
+   ricerca: ProfiloRicerca;
+   /** i luoghi che si possono cercare */
+   luoghi: Luogo[];
+-  mediaRecensioni: number | null;
+-  numeroRecensioni: number;
++  /** le recensioni dei proprietari: la media e quante sono (a parte dal punteggio) */
++  recensioni: RiepilogoRecensioni;
+   consensoMarketingIniziale: boolean;
+   consensoTerziIniziale: boolean;
+   /** la scheda da aprire subito (da un collegamento con ?apri=...), se è tra quelle ammesse */
+@@ -77,8 +72,7 @@ export function ProfiloClient({
+   verificaPanel,
+   ricerca,
+   luoghi,
+-  mediaRecensioni,
+-  numeroRecensioni,
++  recensioni,
+   consensoMarketingIniziale,
+   consensoTerziIniziale,
+   aperturaIniziale = null,
+@@ -102,10 +96,6 @@ export function ProfiloClient({
+     protestato: tenant.protestato,
+     garante: tenant.garante,
+     fideiussione: tenant.fideiussione,
+-    professione: tenant.professione,
+-    reddito_mensile: tenant.reddito_mensile,
+-    mediaRecensioni,
+-    numeroRecensioni,
+   });
+ 
+   const completezza = computeProfileCompleteness({
+@@ -143,11 +133,7 @@ export function ProfiloClient({
+         color="var(--gold)"
+         icon={<IconStella className="fill-white stroke-none" />}
+         title={`${affidabilita.punteggio}/100 · Affidabilità ${affidabilita.label}`}
+-        subtitle={
+-          affidabilita.hasRecensioni
+-            ? "Basato su recensioni dei precedenti affitti e verifiche sul tuo stato economico."
+-            : "Nessuna recensione ancora: il punteggio si basa per ora solo sulle verifiche economiche."
+-        }
++        subtitle={`Reddito verificato, protesti e garante. Recensioni, a parte: ${testoRecensioni(recensioni)}.`}
+         cta="Vedi il dettaglio"
+         onClick={() => setSheetAperta("affidabilita")}
+       />
+@@ -272,7 +258,7 @@ export function ProfiloClient({
+         onClose={() => setSheetAperta(null)}
+         title="Il tuo voto di affidabilità"
+       >
+-        <SchedaAffidabilita affidabilita={affidabilita} onApri={(sezione) => setSheetAperta(sezione)} />
++        <SchedaAffidabilita affidabilita={affidabilita} recensioni={recensioni} onApri={(sezione) => setSheetAperta(sezione)} />
+       </Sheet>
+ 
+       {/* ---- Sheet: I tuoi dati ---- */}
+@@ -362,185 +348,3 @@ function Row({
+     </button>
+   );
+ }
+-
+-function DatiPersonaliSheet({
+-  open,
+-  onClose,
+-  tenant,
+-}: {
+-  open: boolean;
+-  onClose: () => void;
+-  tenant: TenantProfile;
+-}) {
+-  const [state, formAction, pending] = useActionState<SaveState, FormData>(
+-    updateDatiPersonali,
+-    null
+-  );
+-
+-  const [professione, setProfessione] = useState(tenant.professione ?? "");
+-  const [reddito, setReddito] = useState(tenant.reddito_mensile ?? 0);
+-  const [redditoNucleo, setRedditoNucleo] = useState(tenant.reddito_nucleo ?? 0);
+-  const [garante, setGarante] = useState<boolean | null>(tenant.garante);
+-  const [protestato, setProtestato] = useState<boolean | null>(
+-    tenant.protestato
+-  );
+-  const [fideiussione, setFideiussione] = useState<boolean | null>(
+-    tenant.fideiussione
+-  );
+-  const [nucleo, setNucleo] = useState(tenant.nucleo ?? "");
+-  const [figli, setFigli] = useState(tenant.figli);
+-  const [redditiNucleo, setRedditiNucleo] = useState(tenant.redditi_nucleo);
+-  const [animali, setAnimali] = useState<boolean | null>(tenant.animali);
+-  const [presentazione, setPresentazione] = useState(
+-    tenant.presentazione ?? ""
+-  );
+-  const [avatarUrl, setAvatarUrl] = useState<string | null>(
+-    tenant.avatar_url
+-  );
+-
+-  return (
+-    <Sheet open={open} onClose={onClose} title="I tuoi dati">
+-      <p className="sheet-sub">
+-        Queste informazioni aiutano i proprietari a valutare la tua
+-        candidatura.
+-      </p>
+-      <form action={formAction}>
+-        <input type="hidden" name="professione" value={professione} />
+-        <input type="hidden" name="reddito_mensile" value={reddito} />
+-        <input type="hidden" name="reddito_nucleo" value={redditoNucleo} />
+-        <input type="hidden" name="garante" value={String(garante)} />
+-        <input type="hidden" name="protestato" value={String(protestato)} />
+-        <input
+-          type="hidden"
+-          name="fideiussione"
+-          value={String(fideiussione)}
+-        />
+-        <input type="hidden" name="nucleo" value={nucleo} />
+-        <input type="hidden" name="figli" value={figli} />
+-        <input type="hidden" name="redditi_nucleo" value={redditiNucleo} />
+-        <input type="hidden" name="animali" value={String(animali)} />
+-        <input type="hidden" name="avatar_url" value={avatarUrl ?? ""} />
+-
+-        <Field label="La tua foto">
+-          <AvatarUpload value={avatarUrl} onChange={setAvatarUrl} />
+-        </Field>
+-
+-        <Field label="Situazione lavorativa">
+-          <div className="chip-row">
+-            {LAVORO_VOCAB.map((v) => (
+-              <Chip
+-                key={v}
+-                label={v}
+-                active={professione === v}
+-                onClick={() => setProfessione(v)}
+-              />
+-            ))}
+-          </div>
+-        </Field>
+-
+-        <Field label={`Reddito netto mensile · €${reddito.toLocaleString("it-IT")}`}>
+-          <input
+-            type="range"
+-            min={0}
+-            max={8000}
+-            step={50}
+-            value={reddito}
+-            onChange={(e) => setReddito(Number(e.target.value))}
+-            className="w-full"
+-          />
+-        </Field>
+-
+-        <Field label="Hai un garante disponibile?">
+-          <div className="chip-row">
+-            <Chip label="Sì" active={garante === true} onClick={() => setGarante(true)} />
+-            <Chip label="No" active={garante === false} onClick={() => setGarante(false)} />
+-          </div>
+-        </Field>
+-
+-        <Field label="Hai protesti o segnalazioni in centrale rischi?">
+-          <div className="chip-row">
+-            <Chip label="No" active={protestato === false} onClick={() => setProtestato(false)} />
+-            <Chip label="Sì" active={protestato === true} onClick={() => setProtestato(true)} />
+-          </div>
+-        </Field>
+-
+-        <Field label="Disponibile a firmare una fideiussione?">
+-          <div className="chip-row">
+-            <Chip label="Sì" active={fideiussione === true} onClick={() => setFideiussione(true)} />
+-            <Chip label="No" active={fideiussione === false} onClick={() => setFideiussione(false)} />
+-          </div>
+-        </Field>
+-
+-        <Field label="Nucleo familiare">
+-          <div className="chip-row">
+-            <Chip label="Single" active={nucleo === "single"} onClick={() => setNucleo("single")} />
+-            <Chip label="Coppia" active={nucleo === "coppia"} onClick={() => setNucleo("coppia")} />
+-          </div>
+-        </Field>
+-
+-        <Field label="Figli a carico">
+-          <Stepper value={figli} onChange={setFigli} min={0} max={8} />
+-        </Field>
+-
+-        <Field label="Persone con reddito nel nucleo familiare">
+-          <Stepper value={redditiNucleo} onChange={setRedditiNucleo} min={1} max={6} />
+-        </Field>
+-
+-        <Field
+-          label={
+-            redditoNucleo > 0
+-              ? `Reddito netto mensile di tutto il nucleo · €${redditoNucleo.toLocaleString("it-IT")}`
+-              : "Reddito netto mensile di tutto il nucleo · non indicato"
+-          }
+-        >
+-          <input
+-            type="range"
+-            min={0}
+-            max={15000}
+-            step={50}
+-            value={redditoNucleo}
+-            onChange={(e) => setRedditoNucleo(Number(e.target.value))}
+-            className="w-full"
+-          />
+-          <p className="field-note">
+-            La somma dei redditi di tutte le persone che vivono nella casa. I
+-            proprietari lo usano per capire quanto pesa l&apos;affitto sul
+-            vostro bilancio.
+-          </p>
+-          {reddito > 0 && redditoNucleo === 0 && (
+-            <button
+-              type="button"
+-              className="redo-link"
+-              style={{ marginTop: 8 }}
+-              onClick={() => setRedditoNucleo(reddito)}
+-            >
+-              Vivo da solo: uso €{reddito.toLocaleString("it-IT")}
+-            </button>
+-          )}
+-        </Field>
+-
+-        <Field label="Animali domestici?">
+-          <div className="chip-row">
+-            <Chip label="Sì" active={animali === true} onClick={() => setAnimali(true)} />
+-            <Chip label="No" active={animali === false} onClick={() => setAnimali(false)} />
+-          </div>
+-        </Field>
+-
+-        <Field label="Presentati ai proprietari">
+-          <textarea
+-            name="presentazione"
+-            value={presentazione}
+-            onChange={(e) => setPresentazione(e.target.value)}
+-            placeholder="Es. Coppia di professionisti, non fumatori, cerchiamo casa per fine mese..."
+-            rows={4}
+-            className="ob-textarea"
+-          />
+-        </Field>
+-
+-        {state?.error && <p className="note-error">{state.error}</p>}
+-        {state?.ok && <p className="note-saved">Salvato — puoi chiudere.</p>}
+-        <SaveButton pending={pending} />
+-      </form>
+-    </Sheet>
+-  );
+-}
+diff --git a/src/app/(app)/profilo/actions.ts b/src/app/(app)/profilo/actions.ts
+index 28022f8..add60b7 100644
+--- a/src/app/(app)/profilo/actions.ts
++++ b/src/app/(app)/profilo/actions.ts
+@@ -65,6 +65,7 @@ export async function updateDatiPersonali(
+   if (error) return { error: error.message };
+ 
+   revalidatePath("/profilo");
++  revalidatePath("/"); // la Home ricalcola il punteggio di affidabilità
+   return { ok: true };
+ }
+ 
+diff --git a/src/app/(app)/profilo/page.tsx b/src/app/(app)/profilo/page.tsx
+index 2854dfc..367826c 100644
+--- a/src/app/(app)/profilo/page.tsx
++++ b/src/app/(app)/profilo/page.tsx
+@@ -1,3 +1,4 @@
++import { riepilogoRecensioni } from "@/lib/recensioni";
+ import { VerificaRedditoPanel } from "@/components/VerificaRedditoPanel";
+ import type { DocumentoInquilino } from "@/lib/verifica-inquilino";
+ import { createClient } from "@/lib/supabase/server";
+@@ -81,11 +82,8 @@ export default async function ProfiloPage({ searchParams }: { searchParams: Prom
+   // La ricerca com'è salvata, e i luoghi che si possono cercare (per il completamento automatico)
+   const ricerca = profiloRicercaDaRighe(tenant, zoneRows, interessiRows);
+   const { data: luoghiRighe } = await supabase.from("luoghi").select("id, livello, nome, sigla, parent_id");
+-  const numeroRecensioni = recensioni?.length ?? 0;
+-  const mediaRecensioni =
+-    numeroRecensioni > 0
+-      ? recensioni!.reduce((s, r) => s + (r.voto as number), 0) / numeroRecensioni
+-      : null;
++  // le recensioni stanno a parte dal punteggio di affidabilità
++  const riepilogo = riepilogoRecensioni((recensioni ?? []).map((r) => r.voto));
+ 
+   // quanti annunci ha salvato (solo quelli ancora disponibili); se non si legge, zero
+   const { data: numeroPreferiti } = await supabase.rpc("numero_preferiti");
+@@ -122,8 +120,7 @@ export default async function ProfiloPage({ searchParams }: { searchParams: Prom
+       }
+       ricerca={ricerca}
+       luoghi={(luoghiRighe ?? []) as Luogo[]}
+-      mediaRecensioni={mediaRecensioni}
+-      numeroRecensioni={numeroRecensioni}
++      recensioni={riepilogo}
+       consensoMarketingIniziale={profile?.consenso_marketing ?? false}
+       consensoTerziIniziale={profile?.consenso_terzi ?? false}
+     />
+diff --git a/src/app/globals.css b/src/app/globals.css
+index 59c4173..c5f4776 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -983,24 +983,15 @@ input[type="range"]::-moz-range-thumb {
+   padding: 6px 14px 11px;
+   box-shadow: 0 14px 30px rgba(0, 0, 0, 0.35);
+ }
+-/* il punteggio: si tocca per vedere da cosa è fatto */
++/* il punteggio: anello, etichetta e i due pulsanti («Come si calcola», «Modifica dati») */
+ .home-intro .hi-punteggio {
+-  -webkit-appearance: none;
+-  appearance: none;
+   display: flex;
+   align-items: center;
+   gap: 12px;
+   width: 100%;
+   padding: 4px 0 7px;
+-  background: none;
+-  border: 0;
+-  color: inherit;
+-  font: inherit;
+-  text-align: left;
+-  cursor: pointer;
+-  -webkit-tap-highlight-color: transparent;
+ }
+-.home-intro .hi-punteggio:focus-visible,
++.home-intro .hi-azione:focus-visible,
+ .home-intro .hi-modifica:focus-visible {
+   outline: 2px solid var(--gold);
+   outline-offset: 3px;
+@@ -1045,12 +1036,28 @@ input[type="range"]::-moz-range-thumb {
+   line-height: 1.2;
+   color: var(--paper);
+ }
+-.home-intro .hi-punteggio-cta {
++.home-intro .hi-punteggio-azioni {
+   flex: none;
++  display: flex;
++  flex-direction: column;
++  gap: 5px;
++}
++.home-intro .hi-azione {
++  -webkit-appearance: none;
++  appearance: none;
++  min-width: 122px;
++  min-height: 32px;
++  padding: 6px 12px;
++  border-radius: 999px;
++  background: rgba(201, 161, 90, 0.16);
++  border: 1px solid var(--gold);
++  color: var(--gold);
++  font-family: var(--font-sans);
+   font-size: 12px;
+   font-weight: 700;
+-  color: var(--gold);
+   white-space: nowrap;
++  cursor: pointer;
++  -webkit-tap-highlight-color: transparent;
+ }
+ /* le case della ricerca, e il pulsante per cambiarla */
+ .home-intro .hi-ricerca {
+@@ -1160,20 +1167,45 @@ input[type="range"]::-moz-range-thumb {
+   background: rgba(16, 21, 26, 0.06);
+   color: var(--ink);
+ }
+-.aff-voce.is-ottenuta .aff-punti {
++.aff-voce.is-presa .aff-punti {
+   background: rgba(62, 107, 87, 0.14);
+   color: var(--moss);
+ }
+-.aff-voce.is-negativa .aff-punti {
+-  background: rgba(201, 105, 78, 0.16);
+-  color: var(--clay);
+-}
+-.aff-voce.is-mancante .aff-punti {
++.aff-voce.is-non-presa .aff-punti {
+   background: transparent;
+   border: 1px dashed var(--muted);
+   color: var(--body-soft);
+   font-weight: 600;
+ }
++.aff-origine {
++  display: inline-block;
++  margin-top: 4px;
++  padding: 1px 8px;
++  border-radius: 999px;
++  font-size: 11px;
++  font-weight: 700;
++  letter-spacing: 0.02em;
++}
++.aff-origine.is-verificato {
++  background: rgba(62, 107, 87, 0.14);
++  color: var(--moss);
++}
++.aff-origine.is-dichiarato {
++  background: rgba(16, 21, 26, 0.06);
++  color: var(--body-soft);
++}
++.aff-recensioni {
++  display: flex;
++  align-items: center;
++  gap: 10px;
++  font-size: 14px;
++  color: var(--ink);
++}
++.aff-stelle {
++  color: var(--gold);
++  letter-spacing: 2px;
++  font-size: 18px;
++}
+ .aff-possibile {
+   margin: 8px 0 0;
+   font-size: 13px;
+@@ -1183,7 +1215,7 @@ input[type="range"]::-moz-range-thumb {
+ .deck {
+   position: absolute;
+   inset: 0;
+-  top: 232px;
++  top: 244px;
+ }
+ .card {
+   position: absolute;
+@@ -1979,7 +2011,7 @@ input[type="range"]::-moz-range-thumb {
+      Resta una pila di card da sfogliare (il trascinamento funziona
+      anche col mouse), ma diventa un pannello centrato. */
+   .deck {
+-    inset: 232px auto 130px 50%;
++    inset: 244px auto 130px 50%;
+     width: 460px;
+     transform: translateX(-50%);
+   }
+diff --git a/src/components/DatiPersonaliSheet.tsx b/src/components/DatiPersonaliSheet.tsx
+new file mode 100644
+index 0000000..5b7f2f3
+--- /dev/null
++++ b/src/components/DatiPersonaliSheet.tsx
+@@ -0,0 +1,226 @@
++"use client";
++
++import { useActionState, useEffect, useRef, useState } from "react";
++import { Sheet } from "@/components/Sheet";
++import { LAVORO_VOCAB } from "@/lib/constants";
++import { PUNTI_AFFIDABILITA } from "@/lib/affidabilita";
++import type { TenantProfile } from "@/lib/types";
++import { updateDatiPersonali, type SaveState } from "@/app/(app)/profilo/actions";
++import { Chip } from "@/components/ui/Chip";
++import { Field } from "@/components/ui/Field";
++import { Stepper } from "@/components/ui/Stepper";
++import { SaveButton } from "@/components/ui/SaveButton";
++import { AvatarUpload } from "@/components/AvatarUpload";
++
++/**
++ * La scheda «I tuoi dati»: lavoro, reddito, garante, protesti, nucleo e presentazione. Si apre dal Profilo e dalla Home
++ * (è la stessa). Alcune di queste risposte valgono nel punteggio di affidabilità: le note sotto ogni domanda lo dicono.
++ */
++export function DatiPersonaliSheet({
++  open,
++  onClose,
++  tenant,
++  onSalvata,
++}: {
++  open: boolean;
++  onClose: () => void;
++  tenant: TenantProfile;
++  /** chiamata quando un salvataggio finisce bene (la Home la usa per chiudere la scheda e dirlo) */
++  onSalvata?: () => void;
++}) {
++  const [state, formAction, pending] = useActionState<SaveState, FormData>(
++    updateDatiPersonali,
++    null
++  );
++
++  // Un salvataggio è FINITO (da «in corso» a «non più in corso») ed è andato bene: lo si comunica una volta sola.
++  const eraInCorso = useRef(false);
++  useEffect(() => {
++    if (pending) {
++      eraInCorso.current = true;
++      return;
++    }
++    if (eraInCorso.current) {
++      eraInCorso.current = false;
++      if (state?.ok) onSalvata?.();
++    }
++  }, [pending, state, onSalvata]);
++
++  const [professione, setProfessione] = useState(tenant.professione ?? "");
++  const [reddito, setReddito] = useState(tenant.reddito_mensile ?? 0);
++  const [redditoNucleo, setRedditoNucleo] = useState(tenant.reddito_nucleo ?? 0);
++  const [garante, setGarante] = useState<boolean | null>(tenant.garante);
++  const [protestato, setProtestato] = useState<boolean | null>(
++    tenant.protestato
++  );
++  const [fideiussione, setFideiussione] = useState<boolean | null>(
++    tenant.fideiussione
++  );
++  const [nucleo, setNucleo] = useState(tenant.nucleo ?? "");
++  const [figli, setFigli] = useState(tenant.figli);
++  const [redditiNucleo, setRedditiNucleo] = useState(tenant.redditi_nucleo);
++  const [animali, setAnimali] = useState<boolean | null>(tenant.animali);
++  const [presentazione, setPresentazione] = useState(
++    tenant.presentazione ?? ""
++  );
++  const [avatarUrl, setAvatarUrl] = useState<string | null>(
++    tenant.avatar_url
++  );
++
++  return (
++    <Sheet open={open} onClose={onClose} title="I tuoi dati">
++      <p className="sheet-sub">
++        Queste informazioni aiutano i proprietari a valutare la tua
++        candidatura.
++      </p>
++      <form action={formAction}>
++        <input type="hidden" name="professione" value={professione} />
++        <input type="hidden" name="reddito_mensile" value={reddito} />
++        <input type="hidden" name="reddito_nucleo" value={redditoNucleo} />
++        <input type="hidden" name="garante" value={String(garante)} />
++        <input type="hidden" name="protestato" value={String(protestato)} />
++        <input
++          type="hidden"
++          name="fideiussione"
++          value={String(fideiussione)}
++        />
++        <input type="hidden" name="nucleo" value={nucleo} />
++        <input type="hidden" name="figli" value={figli} />
++        <input type="hidden" name="redditi_nucleo" value={redditiNucleo} />
++        <input type="hidden" name="animali" value={String(animali)} />
++        <input type="hidden" name="avatar_url" value={avatarUrl ?? ""} />
++
++        <Field label="La tua foto">
++          <AvatarUpload value={avatarUrl} onChange={setAvatarUrl} />
++        </Field>
++
++        <Field label="Situazione lavorativa">
++          <div className="chip-row">
++            {LAVORO_VOCAB.map((v) => (
++              <Chip
++                key={v}
++                label={v}
++                active={professione === v}
++                onClick={() => setProfessione(v)}
++              />
++            ))}
++          </div>
++        </Field>
++
++        <Field label={`Reddito netto mensile · €${reddito.toLocaleString("it-IT")}`}>
++          <input
++            type="range"
++            min={0}
++            max={8000}
++            step={50}
++            value={reddito}
++            onChange={(e) => setReddito(Number(e.target.value))}
++            className="w-full"
++          />
++          {tenant.verificato && (
++            <p className="field-note">
++              Il tuo reddito è verificato: se cambi lavoro o reddito (anche quello del nucleo) la verifica decade e va rifatta.
++            </p>
++          )}
++        </Field>
++
++        <Field label="Hai un garante disponibile?">
++          <div className="chip-row">
++            <Chip label="Sì" active={garante === true} onClick={() => setGarante(true)} />
++            <Chip label="No" active={garante === false} onClick={() => setGarante(false)} />
++          </div>
++          <p className="field-note">
++            Garante o fideiussione valgono +{PUNTI_AFFIDABILITA.garanzia} nel punteggio (basta una delle due). Lo dichiari tu: nessuno lo controlla.
++          </p>
++        </Field>
++
++        <Field label="Hai protesti o segnalazioni in centrale rischi?">
++          <div className="chip-row">
++            <Chip label="No" active={protestato === false} onClick={() => setProtestato(false)} />
++            <Chip label="Sì" active={protestato === true} onClick={() => setProtestato(true)} />
++          </div>
++          <p className="field-note">
++            Rispondere «No» vale +{PUNTI_AFFIDABILITA.protesti} nel punteggio; se non rispondi vale come «Sì». Lo dichiari tu: nessuno lo controlla.
++          </p>
++        </Field>
++
++        <Field label="Disponibile a firmare una fideiussione?">
++          <div className="chip-row">
++            <Chip label="Sì" active={fideiussione === true} onClick={() => setFideiussione(true)} />
++            <Chip label="No" active={fideiussione === false} onClick={() => setFideiussione(false)} />
++          </div>
++        </Field>
++
++        <Field label="Nucleo familiare">
++          <div className="chip-row">
++            <Chip label="Single" active={nucleo === "single"} onClick={() => setNucleo("single")} />
++            <Chip label="Coppia" active={nucleo === "coppia"} onClick={() => setNucleo("coppia")} />
++          </div>
++        </Field>
++
++        <Field label="Figli a carico">
++          <Stepper value={figli} onChange={setFigli} min={0} max={8} />
++        </Field>
++
++        <Field label="Persone con reddito nel nucleo familiare">
++          <Stepper value={redditiNucleo} onChange={setRedditiNucleo} min={1} max={6} />
++        </Field>
++
++        <Field
++          label={
++            redditoNucleo > 0
++              ? `Reddito netto mensile di tutto il nucleo · €${redditoNucleo.toLocaleString("it-IT")}`
++              : "Reddito netto mensile di tutto il nucleo · non indicato"
++          }
++        >
++          <input
++            type="range"
++            min={0}
++            max={15000}
++            step={50}
++            value={redditoNucleo}
++            onChange={(e) => setRedditoNucleo(Number(e.target.value))}
++            className="w-full"
++          />
++          <p className="field-note">
++            La somma dei redditi di tutte le persone che vivono nella casa. I
++            proprietari lo usano per capire quanto pesa l&apos;affitto sul
++            vostro bilancio.
++          </p>
++          {reddito > 0 && redditoNucleo === 0 && (
++            <button
++              type="button"
++              className="redo-link"
++              style={{ marginTop: 8 }}
++              onClick={() => setRedditoNucleo(reddito)}
++            >
++              Vivo da solo: uso €{reddito.toLocaleString("it-IT")}
++            </button>
++          )}
++        </Field>
++
++        <Field label="Animali domestici?">
++          <div className="chip-row">
++            <Chip label="Sì" active={animali === true} onClick={() => setAnimali(true)} />
++            <Chip label="No" active={animali === false} onClick={() => setAnimali(false)} />
++          </div>
++        </Field>
++
++        <Field label="Presentati ai proprietari">
++          <textarea
++            name="presentazione"
++            value={presentazione}
++            onChange={(e) => setPresentazione(e.target.value)}
++            placeholder="Es. Coppia di professionisti, non fumatori, cerchiamo casa per fine mese..."
++            rows={4}
++            className="ob-textarea"
++          />
++        </Field>
++
++        {state?.error && <p className="note-error">{state.error}</p>}
++        {state?.ok && <p className="note-saved">Salvato — puoi chiudere.</p>}
++        <SaveButton pending={pending} />
++      </form>
++    </Sheet>
++  );
++}
+diff --git a/src/components/SchedaAffidabilita.tsx b/src/components/SchedaAffidabilita.tsx
+index 6c17733..e1e1779 100644
+--- a/src/components/SchedaAffidabilita.tsx
++++ b/src/components/SchedaAffidabilita.tsx
+@@ -1,48 +1,56 @@
+-import { PUNTEGGIO_MASSIMO, PUNTEGGIO_MINIMO, PUNTI_BASE, punteggioPossibile, type AffidabilitaResult, type VoceAffidabilita } from "@/lib/affidabilita";
+-import { sezionePerVoce, type SezioneProfilo } from "@/lib/home";
++import { punteggioPossibile, PUNTEGGIO_MASSIMO, SOGLIE_ETICHETTA, type AffidabilitaResult } from "@/lib/affidabilita";
++import { stelleTesto, testoRecensioni, type RiepilogoRecensioni } from "@/lib/recensioni";
+ 
+-/** I punti di una voce, come si leggono: «+20», «−30», «45», o «+20 possibili» se manca. */
+-export function testoPunti(v: VoceAffidabilita): string {
+-  if (v.stato === "mancante") return `+${v.potenziale} possibili`;
+-  if (v.id === "base") return String(v.punti);
+-  if (v.punti > 0) return `+${v.punti}`;
+-  if (v.punti < 0) return `\u2212${Math.abs(v.punti)}`;
+-  return "0";
++/** I punti di una voce, come si leggono: «+60» se l'hai presa, «0 su 60» se no. */
++export function testoPunti(v: { presa: boolean; punti: number; massimo: number }): string {
++  return v.presa ? `+${v.punti}` : `0 su ${v.massimo}`;
+ }
+ 
+ /**
+- * Da cosa è fatto il punteggio di affidabilità, voce per voce. Si mostra nella Home e nel Profilo (stessa scheda,
+- * stessi numeri: i punti vengono dalla stessa funzione che calcola il punteggio).
++ * Come si calcola il punteggio di affidabilità: tre voci, quanto valgono e chi le controlla. Poi le recensioni, che
++ * stanno a parte. Si mostra nella Home e nel Profilo (stessa scheda, stessi numeri: i punti vengono dalla stessa
++ * funzione che calcola il punteggio).
+  */
+-export function SchedaAffidabilita({ affidabilita, onApri }: { affidabilita: AffidabilitaResult; onApri?: (sezione: SezioneProfilo) => void }) {
+-  const { punteggio, label, voci, limite, totaleGrezzo, checks } = affidabilita;
++export function SchedaAffidabilita({
++  affidabilita,
++  recensioni,
++  onApri,
++}: {
++  affidabilita: AffidabilitaResult;
++  recensioni: RiepilogoRecensioni;
++  /** si chiama con la sezione da aprire: la verifica del reddito, o i dati personali */
++  onApri?: (sezione: "verifica" | "dati") => void;
++}) {
++  const { punteggio, label, voci } = affidabilita;
+   const possibile = punteggioPossibile(affidabilita);
+-  // professione e reddito dichiarato sono i primi due controlli: si vedono, ma non entrano nel punteggio
+-  const datiIndicati = checks.slice(0, 2);
+ 
+   return (
+     <div className="aff-scheda">
+       <p className="sheet-sub">
+-        È il numero che i proprietari vedono quando valutano una tua candidatura. Parte da {PUNTI_BASE} e cresce con le verifiche.
++        È il numero che i proprietari vedono accanto alla tua candidatura. Va da 0 a {PUNTEGGIO_MASSIMO} e si costruisce con tre voci.
++        Chi non ha ancora niente parte da 0.
+       </p>
+ 
+-      <div className="aff-totale" aria-label={`Punteggio ${punteggio} su 100, ${label}`}>
++      <div className="aff-totale" aria-label={`Punteggio ${punteggio} su ${PUNTEGGIO_MASSIMO}, ${label}`}>
+         <b>{punteggio}</b>
+-        <span>/100</span>
++        <span>/{PUNTEGGIO_MASSIMO}</span>
+         <em>{label}</em>
+       </div>
+ 
+       <ul className="aff-voci">
+         {voci.map((v) => (
+-          <li key={v.id} className={`aff-voce is-${v.stato}`}>
++          <li key={v.id} className={`aff-voce ${v.presa ? "is-presa" : "is-non-presa"}`}>
+             <div className="aff-voce-riga">
+               <span>{v.etichetta}</span>
+               <b className="aff-punti">{testoPunti(v)}</b>
+             </div>
+-            {v.nota && <small>{v.nota}</small>}
+-            {v.stato === "mancante" && v.suggerimento &&
++            <span className={`aff-origine is-${v.origine}`}>{v.origine === "verificato" ? "Lo controlla lo staff" : "Lo dichiari tu"}</span>
++            <small>{v.nota}</small>
++            {!v.presa &&
++              v.suggerimento &&
++              v.sezione &&
+               (onApri ? (
+-                <button type="button" className="redo-link aff-azione" onClick={() => onApri(sezionePerVoce(v.id))}>
++                <button type="button" className="redo-link aff-azione" onClick={() => onApri(v.sezione!)}>
+                   {v.suggerimento}
+                 </button>
+               ) : (
+@@ -52,29 +60,28 @@ export function SchedaAffidabilita({ affidabilita, onApri }: { affidabilita: Aff
+         ))}
+       </ul>
+ 
+-      {limite && (
+-        <p className="field-note">
+-          La somma delle voci è {totaleGrezzo}: il punteggio va da {PUNTEGGIO_MINIMO} a {PUNTEGGIO_MASSIMO}.
+-        </p>
+-      )}
+       {possibile > punteggio && (
+         <p className="aff-possibile">
+-          Completando le voci mancanti puoi arrivare a <b>{possibile}</b>.
++          Completando le voci che puoi ottenere arrivi a <b>{possibile}</b>.
+         </p>
+       )}
++      <p className="field-note" style={{ marginTop: 8 }}>
++        Lo staff controlla solo il reddito. Protesti e garante sono dichiarazioni tue, e restano tali. Da {SOGLIE_ETICHETTA.moltoBuona} punti in su
++        l&apos;etichetta è «Molto buona», da {SOGLIE_ETICHETTA.eccellente} «Eccellente».
++      </p>
+ 
+-      <div className="pref-label" style={{ marginTop: 14 }}>
+-        <span>Dati che indichi</span>
++      <div className="pref-label" style={{ marginTop: 16 }}>
++        <span>Le recensioni, a parte</span>
+       </div>
+       <p className="field-note" style={{ margin: "0 0 6px 0" }}>
+-        Non cambiano il punteggio.
++        Non cambiano il punteggio: i proprietari le vedono accanto. Le lascia un proprietario verificato dopo un affitto confermato, con
++        1-5 stelle; qui si mostra la media e quante sono.
+       </p>
+-      <div className="match-checklist">
+-        {datiIndicati.map((c) => (
+-          <span key={c.label} className={c.ok ? "ok" : "no"}>
+-            {c.label}
+-          </span>
+-        ))}
++      <div className="aff-recensioni" aria-label={testoRecensioni(recensioni)}>
++        <span aria-hidden="true" className="aff-stelle">
++          {stelleTesto(recensioni.media)}
++        </span>
++        <b>{testoRecensioni(recensioni)}</b>
+       </div>
+     </div>
+   );
+diff --git a/src/lib/affidabilita.ts b/src/lib/affidabilita.ts
+index 9a2feb6..8e4e049 100644
+--- a/src/lib/affidabilita.ts
++++ b/src/lib/affidabilita.ts
+@@ -1,135 +1,92 @@
++/**
++ * Il punteggio di affidabilità: da 0 a 100, tre voci, nessun numero negativo.
++ *
++ *  - REDDITO VERIFICATO  +60  lo controlla lo staff sui documenti
++ *  - NESSUN PROTESTO     +25  lo dichiara la persona (non si verifica)
++ *  - GARANTE o FIDEIUSSIONE  +15  lo dichiara la persona (non si verifica)
++ *
++ * Chi non ha niente ha 0. «Protestato» e «non indicato» valgono lo stesso: niente punti. Le RECENSIONI non fanno
++ * parte del punteggio: si mostrano a parte, accanto (vedi recensioni.ts).
++ */
+ export type AffidabilitaInput = {
+   verificato: boolean;
+   protestato: boolean | null;
+   garante: boolean | null;
+   fideiussione: boolean | null;
+-  professione: string | null;
+-  reddito_mensile: number | null;
+-  mediaRecensioni: number | null; // null se nessuna recensione ancora
+-  numeroRecensioni: number;
+ };
+ 
++export const PUNTI_AFFIDABILITA = { reddito: 60, protesti: 25, garanzia: 15 } as const;
++export const PUNTEGGIO_MINIMO = 0;
++export const PUNTEGGIO_MASSIMO = PUNTI_AFFIDABILITA.reddito + PUNTI_AFFIDABILITA.protesti + PUNTI_AFFIDABILITA.garanzia;
++
+ /**
+- * Una voce del punteggio: quanto vale oggi e, se manca, quanto varrebbe. Il punteggio si CALCOLA sommando queste voci,
+- * quindi ciò che si mostra («+20 per il reddito verificato») e il numero non possono divergere.
++ * Da quale punteggio in su vale ogni etichetta. Con queste soglie le sole dichiarazioni (al massimo 40) non arrivano
++ * mai a «Molto buona»: ci vuole il reddito verificato.
+  */
++export const SOGLIE_ETICHETTA = { buona: 40, moltoBuona: 60, eccellente: 85 } as const;
++
++/** Una voce del punteggio: quanto vale, se l'hai presa, e come si sa (verificata dallo staff o dichiarata da te). */
+ export type VoceAffidabilita = {
+-  id: "base" | "verifica" | "protesti" | "garanzia" | "recensioni";
++  id: "reddito" | "protesti" | "garanzia";
+   etichetta: string;
+-  /** i punti che la voce dà (o toglie) oggi */
++  /** i punti che dà oggi (0 se non è presa) */
+   punti: number;
+-  /** `mancante`: non ancora ottenuta e ottenibile; `negativa`: toglie punti; `neutra`: la base o una media di 3 */
+-  stato: "ottenuta" | "mancante" | "negativa" | "neutra";
+-  /** i punti che si guadagnerebbero completandola (solo se `mancante`, altrimenti 0) */
++  /** quanto vale al massimo */
++  massimo: number;
++  presa: boolean;
++  /** `verificato`: lo ha controllato lo staff; `dichiarato`: lo dici tu e nessuno lo controlla */
++  origine: "verificato" | "dichiarato";
++  /** i punti che guadagneresti completandola (0 se è presa, o se non si può ottenere: i protesti dichiarati) */
+   potenziale: number;
+   /** cosa fare per ottenerla, se c'è qualcosa da fare */
+   suggerimento: string | null;
+-  /** una riga di dettaglio (per le recensioni: la media e quante sono) */
+-  nota: string | null;
++  /** dove si fa: la verifica del reddito, oppure la scheda dei dati personali */
++  sezione: "verifica" | "dati" | null;
++  /** una riga sulla situazione */
++  nota: string;
+ };
+ 
+-export const PUNTI_BASE = 45;
+-export const PUNTEGGIO_MINIMO = 5;
+-export const PUNTEGGIO_MASSIMO = 99;
+-
+ export type AffidabilitaResult = {
+   punteggio: number;
+   label: "Da costruire" | "Buona" | "Molto buona" | "Eccellente";
+-  hasRecensioni: boolean;
+-  checks: { ok: boolean; label: string }[];
+-  /** da cosa è fatto il punteggio, voce per voce */
++  /** le tre voci, sempre nello stesso ordine */
+   voci: VoceAffidabilita[];
+-  /** la somma delle voci, prima di tenerla tra il minimo e il massimo */
+-  totaleGrezzo: number;
+-  /** se la somma è stata riportata al minimo o al massimo */
+-  limite: "minimo" | "massimo" | null;
+ };
+ 
++export function etichettaPunteggio(punteggio: number): AffidabilitaResult["label"] {
++  if (punteggio >= SOGLIE_ETICHETTA.eccellente) return "Eccellente";
++  if (punteggio >= SOGLIE_ETICHETTA.moltoBuona) return "Molto buona";
++  if (punteggio >= SOGLIE_ETICHETTA.buona) return "Buona";
++  return "Da costruire";
++}
++
+ export function computeAffidabilita(p: AffidabilitaInput): AffidabilitaResult {
+-  const hasRecensioni = p.numeroRecensioni > 0;
++  const { reddito, protesti, garanzia } = PUNTI_AFFIDABILITA;
++
++  const voceReddito: VoceAffidabilita = p.verificato
++    ? { id: "reddito", etichetta: "Reddito verificato", punti: reddito, massimo: reddito, presa: true, origine: "verificato", potenziale: 0, suggerimento: null, sezione: null, nota: "Controllato dallo staff sui tuoi documenti." }
++    : { id: "reddito", etichetta: "Reddito verificato", punti: 0, massimo: reddito, presa: false, origine: "verificato", potenziale: reddito, suggerimento: "Verifica il tuo reddito", sezione: "verifica", nota: "Non ancora verificato: carica i documenti e lo controlla lo staff." };
+ 
+-  const voci: VoceAffidabilita[] = [
+-    { id: "base", etichetta: "Punto di partenza", punti: PUNTI_BASE, stato: "neutra", potenziale: 0, suggerimento: null, nota: null },
+-    p.verificato
+-      ? { id: "verifica", etichetta: "Reddito verificato", punti: 20, stato: "ottenuta", potenziale: 0, suggerimento: null, nota: null }
+-      : { id: "verifica", etichetta: "Verifica del reddito", punti: 0, stato: "mancante", potenziale: 20, suggerimento: "Verifica il tuo reddito", nota: null },
++  const voceProtesti: VoceAffidabilita =
+     p.protestato === false
+-      ? { id: "protesti", etichetta: "Nessun protesto o segnalazione", punti: 15, stato: "ottenuta", potenziale: 0, suggerimento: null, nota: null }
++      ? { id: "protesti", etichetta: "Nessun protesto", punti: protesti, massimo: protesti, presa: true, origine: "dichiarato", potenziale: 0, suggerimento: null, sezione: null, nota: "Nessuno lo controlla: vale quanto hai dichiarato." }
+       : p.protestato === true
+-        ? { id: "protesti", etichetta: "Segnalazioni in centrale rischi", punti: -30, stato: "negativa", potenziale: 0, suggerimento: null, nota: null }
+-        : { id: "protesti", etichetta: "Protesti e segnalazioni", punti: 0, stato: "mancante", potenziale: 15, suggerimento: "Indica i protesti nei tuoi dati", nota: null },
+-    p.garante === true || p.fideiussione === true
+-      ? { id: "garanzia", etichetta: "Garante o fideiussione", punti: 10, stato: "ottenuta", potenziale: 0, suggerimento: null, nota: null }
+-      : { id: "garanzia", etichetta: "Garante o fideiussione", punti: 0, stato: "mancante", potenziale: 10, suggerimento: "Indica un garante o una fideiussione nei tuoi dati", nota: null },
+-  ];
+-
+-  if (hasRecensioni && p.mediaRecensioni !== null) {
+-    const punti = Math.round((p.mediaRecensioni - 3) * 6);
+-    voci.push({
+-      id: "recensioni",
+-      etichetta: "Recensioni dei proprietari",
+-      punti,
+-      stato: punti > 0 ? "ottenuta" : punti < 0 ? "negativa" : "neutra",
+-      potenziale: 0,
+-      suggerimento: null,
+-      nota: `Media ${p.mediaRecensioni.toLocaleString("it-IT", { maximumFractionDigits: 1 })} su 5, ${p.numeroRecensioni} ${p.numeroRecensioni === 1 ? "recensione" : "recensioni"}`,
+-    });
+-  } else {
+-    // senza recensioni la voce non pesa; con tutte a 5 stelle varrebbe +12
+-    voci.push({ id: "recensioni", etichetta: "Recensioni dei proprietari", punti: 0, stato: "mancante", potenziale: 12, suggerimento: "Invita il tuo proprietario a lasciarti una recensione", nota: null });
+-  }
++        ? { id: "protesti", etichetta: "Nessun protesto", punti: 0, massimo: protesti, presa: false, origine: "dichiarato", potenziale: 0, suggerimento: null, sezione: null, nota: "Hai dichiarato dei protesti o segnalazioni: non danno punti." }
++        : { id: "protesti", etichetta: "Nessun protesto", punti: 0, massimo: protesti, presa: false, origine: "dichiarato", potenziale: protesti, suggerimento: "Indica i protesti nei tuoi dati", sezione: "dati", nota: "Non indicato: vale come se ci fossero." };
+ 
+-  const totaleGrezzo = voci.reduce((somma, v) => somma + v.punti, 0);
+-  const punteggio = Math.max(PUNTEGGIO_MINIMO, Math.min(PUNTEGGIO_MASSIMO, Math.round(totaleGrezzo)));
+-  const limite: AffidabilitaResult["limite"] = totaleGrezzo > PUNTEGGIO_MASSIMO ? "massimo" : totaleGrezzo < PUNTEGGIO_MINIMO ? "minimo" : null;
+-
+-  let label: AffidabilitaResult["label"] = "Da costruire";
+-  if (punteggio >= 85) label = "Eccellente";
+-  else if (punteggio >= 70) label = "Molto buona";
+-  else if (punteggio >= 50) label = "Buona";
+-
+-  const checks = [
+-    {
+-      ok: !!p.professione,
+-      label: p.professione || "Situazione lavorativa da indicare",
+-    },
+-    {
+-      ok: !!p.reddito_mensile,
+-      label: p.reddito_mensile
+-        ? `Reddito dichiarato €${p.reddito_mensile.toLocaleString("it-IT")}/mese`
+-        : "Reddito da indicare",
+-    },
+-    {
+-      ok: p.verificato,
+-      label: p.verificato
+-        ? "Reddito verificato"
+-        : "Verifica reddito non ancora effettuata",
+-    },
+-    {
+-      ok: p.protestato === false,
+-      label:
+-        p.protestato === null
+-          ? "Controllo protesti da avviare"
+-          : p.protestato
+-            ? "Segnalazioni in centrale rischi"
+-            : "Nessun protesto o segnalazione",
+-    },
+-    {
+-      ok: p.garante === true || p.fideiussione === true,
+-      label:
+-        p.garante || p.fideiussione
+-          ? "Garante o fideiussione disponibile"
+-          : "Nessun garante indicato",
+-    },
+-  ];
++  const haGaranzia = p.garante === true || p.fideiussione === true;
++  const voceGaranzia: VoceAffidabilita = haGaranzia
++    ? { id: "garanzia", etichetta: "Garante o fideiussione", punti: garanzia, massimo: garanzia, presa: true, origine: "dichiarato", potenziale: 0, suggerimento: null, sezione: null, nota: "Nessuno lo controlla: vale quanto hai dichiarato." }
++    : { id: "garanzia", etichetta: "Garante o fideiussione", punti: 0, massimo: garanzia, presa: false, origine: "dichiarato", potenziale: garanzia, suggerimento: "Indica un garante o una fideiussione", sezione: "dati", nota: "Non indicato." };
+ 
+-  return { punteggio, label, hasRecensioni, checks, voci, totaleGrezzo, limite };
++  const voci = [voceReddito, voceProtesti, voceGaranzia];
++  const punteggio = voci.reduce((somma, v) => somma + v.punti, 0);
++  return { punteggio, label: etichettaPunteggio(punteggio), voci };
+ }
+ 
+-/** Il punteggio che si raggiungerebbe completando tutte le voci mancanti (mai oltre il massimo). */
+-export function punteggioPossibile(r: Pick<AffidabilitaResult, "voci" | "totaleGrezzo">): number {
+-  const guadagno = r.voci.reduce((somma, v) => somma + (v.stato === "mancante" ? v.potenziale : 0), 0);
+-  return Math.max(PUNTEGGIO_MINIMO, Math.min(PUNTEGGIO_MASSIMO, Math.round(r.totaleGrezzo + guadagno)));
++/** Il punteggio che si raggiungerebbe completando tutte le voci ottenibili. */
++export function punteggioPossibile(r: Pick<AffidabilitaResult, "voci" | "punteggio">): number {
++  return Math.min(PUNTEGGIO_MASSIMO, r.punteggio + r.voci.reduce((somma, v) => somma + v.potenziale, 0));
+ }
+ 
+ export type CompletenessInput = {
+diff --git a/src/lib/candidati.ts b/src/lib/candidati.ts
+index 3f0ae9d..4e7a3bb 100644
+--- a/src/lib/candidati.ts
++++ b/src/lib/candidati.ts
+@@ -1,3 +1,4 @@
++import { riepilogoRecensioni } from "./recensioni";
+ import { leggiFotografia, valutaCandidato } from "@/lib/match";
+ import type { CriterioRichiesto, ProfiloCandidato } from "@/lib/match";
+ import type { CandidaturaRicevuta } from "@/lib/types";
+@@ -85,8 +86,7 @@ export function assemblaCandidature(input: {
+             criteri: input.criteriPerListing.get(c.listing_id) ?? [],
+             canone: c.listings?.prezzo ?? 0,
+             profilo: profiloDaVista(v),
+-            mediaRecensioni: voti.length > 0 ? voti.reduce((a, b) => a + b, 0) / voti.length : null,
+-            numeroRecensioni: voti.length,
++            recensioni: riepilogoRecensioni(voti),
+           }),
+           congelata: false,
+         };
+diff --git a/src/lib/home.ts b/src/lib/home.ts
+index 16b29bf..b1d1acb 100644
+--- a/src/lib/home.ts
++++ b/src/lib/home.ts
+@@ -17,12 +17,6 @@ export function sezioneProfilo(valore: unknown): SezioneProfilo | null {
+   return typeof v === "string" && (SEZIONI_PROFILO_APRIBILI as readonly string[]).includes(v) ? (v as SezioneProfilo) : null;
+ }
+ 
+-/** Dove si va per completare una voce del punteggio. */
+-export function sezionePerVoce(id: string): SezioneProfilo {
+-  if (id === "verifica") return "verifica";
+-  if (id === "recensioni") return "invito";
+-  return "dati";
+-}
+ 
+ /** Un intervallo in poche parole: «Da 2 locali», «2–3 locali», «Fino a 3 locali». */
+ function intervallo(min: number | null | undefined, max: number | null | undefined, unita: (n: number) => string, tra: (a: number, b: number) => string): string | null {
+diff --git a/src/lib/match/candidato.ts b/src/lib/match/candidato.ts
+index c8580d5..4bec35e 100644
+--- a/src/lib/match/candidato.ts
++++ b/src/lib/match/candidato.ts
+@@ -1,4 +1,5 @@
+ import { computeAffidabilita } from "../affidabilita";
++import { leggiRiepilogo, type RiepilogoRecensioni } from "../recensioni";
+ import { calcolaMatchProprietario } from "./proprietario";
+ import type {
+   CriterioRichiesto,
+@@ -71,6 +72,11 @@ export type ValutazioneCandidato = {
+   match: RisultatoProprietario;
+   /** punteggio di affidabilità della persona, valido per ogni casa */
+   affidabilita: number;
++  /**
++   * le recensioni dei proprietari, a parte dal punteggio. Mancano nelle fotografie scattate prima che esistessero
++   * separate: chi le legge deve gestire l'assenza.
++   */
++  recensioni?: RiepilogoRecensioni;
+ };
+ 
+ /**
+@@ -83,8 +89,7 @@ export function valutaCandidato(input: {
+   /** il canone dell'annuncio */
+   canone: number;
+   profilo: ProfiloCandidato;
+-  mediaRecensioni: number | null;
+-  numeroRecensioni: number;
++  recensioni: RiepilogoRecensioni;
+ }): ValutazioneCandidato {
+   const { profilo } = input;
+ 
+@@ -93,10 +98,6 @@ export function valutaCandidato(input: {
+     protestato: profilo.protestato,
+     garante: profilo.garante,
+     fideiussione: profilo.fideiussione,
+-    professione: profilo.professione,
+-    reddito_mensile: profilo.reddito_mensile,
+-    mediaRecensioni: input.mediaRecensioni,
+-    numeroRecensioni: input.numeroRecensioni,
+   }).punteggio;
+ 
+   return {
+@@ -106,6 +107,7 @@ export function valutaCandidato(input: {
+       input.canone
+     ),
+     affidabilita,
++    recensioni: input.recensioni,
+   };
+ }
+ 
+@@ -131,5 +133,7 @@ export function leggiFotografia(grezzo: unknown): ValutazioneCandidato | null {
+   ) {
+     return null;
+   }
+-  return { match: match as RisultatoProprietario, affidabilita };
++  // le recensioni sono facoltative (le fotografie vecchie non le hanno); se la forma non è giusta si ignorano
++  const recensioni = leggiRiepilogo((grezzo as Record<string, unknown>).recensioni);
++  return { match: match as RisultatoProprietario, affidabilita, ...(recensioni ? { recensioni } : {}) };
+ }
+diff --git a/src/lib/match/proprietario.ts b/src/lib/match/proprietario.ts
+index 0477003..1bb2056 100644
+--- a/src/lib/match/proprietario.ts
++++ b/src/lib/match/proprietario.ts
+@@ -192,12 +192,14 @@ export type VoceCandidato = {
+   match: RisultatoProprietario;
+   /** punteggio di affidabilità, solo per gli spareggi (D4) */
+   affidabilita: number | null;
++  /** le recensioni, a parità di tutto il resto: prima la media più alta, poi chi ne ha di più */
++  recensioni?: { numero: number; media: number | null } | null;
+ };
+ 
+ /**
+  * Ordine dei candidati di un annuncio: prima chi soddisfa tutti i
+- * criteri obbligatori, poi per percentuale decrescente, e a parità per
+- * affidabilità decrescente.
++ * criteri obbligatori, poi per percentuale decrescente, a parità per
++ * affidabilità decrescente e, ancora a parità, per recensioni.
+  *
+  * L'affidabilità qui NON entra nella percentuale: è una proprietà della
+  * persona, uguale per ogni casa, e si usa solo per decidere tra pari.
+@@ -212,7 +214,13 @@ export function confrontaCandidati(
+   const pb = b.match.punteggio ?? -1;
+   if (pa !== pb) return pb - pa;
+ 
+-  return (b.affidabilita ?? -1) - (a.affidabilita ?? -1);
++  if ((a.affidabilita ?? -1) !== (b.affidabilita ?? -1)) return (b.affidabilita ?? -1) - (a.affidabilita ?? -1);
++
++  // ultimo spareggio: le recensioni (stelle a parte dal punteggio)
++  const ma = a.recensioni?.media ?? -1;
++  const mb = b.recensioni?.media ?? -1;
++  if (ma !== mb) return mb - ma;
++  return (b.recensioni?.numero ?? 0) - (a.recensioni?.numero ?? 0);
+ }
+ 
+ export function ordinaCandidati<T extends VoceCandidato>(voci: T[]): T[] {
+diff --git a/src/lib/recensioni.ts b/src/lib/recensioni.ts
+new file mode 100644
+index 0000000..7b3f809
+--- /dev/null
++++ b/src/lib/recensioni.ts
+@@ -0,0 +1,49 @@
++/**
++ * Le recensioni dei proprietari su un inquilino: stelle intere da 1 a 5, e la loro media. Stanno A PARTE rispetto al
++ * punteggio di affidabilità: chi legge vede i due numeri affiancati.
++ *
++ * Si mostra SEMPRE anche quante sono («4,5 su 5 · 3 recensioni»): una sola recensione non è come dieci.
++ */
++export type RiepilogoRecensioni = {
++  numero: number;
++  /** la media arrotondata a un decimale; `null` se non ci sono recensioni */
++  media: number | null;
++};
++
++export const VOTO_MINIMO = 1;
++export const VOTO_MASSIMO = 5;
++
++const votoValido = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= VOTO_MINIMO && v <= VOTO_MASSIMO;
++
++/** Dai voti (le righe del database) al riepilogo. I valori che non sono stelle da 1 a 5 si ignorano. */
++export function riepilogoRecensioni(voti: readonly unknown[] | null | undefined): RiepilogoRecensioni {
++  const validi = (voti ?? []).filter(votoValido);
++  if (validi.length === 0) return { numero: 0, media: null };
++  const media = validi.reduce((somma, v) => somma + v, 0) / validi.length;
++  return { numero: validi.length, media: Math.round(media * 10) / 10 };
++}
++
++const unDecimale = (n: number) => n.toLocaleString("it-IT", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
++
++/** «4,5 su 5 · 3 recensioni», «5,0 su 5 · 1 recensione», «Nessuna recensione ancora». */
++export function testoRecensioni(r: RiepilogoRecensioni): string {
++  if (r.numero <= 0 || r.media === null) return "Nessuna recensione ancora";
++  return `${unDecimale(r.media)} su 5 · ${r.numero} ${r.numero === 1 ? "recensione" : "recensioni"}`;
++}
++
++/** Le stelle da disegnare: «★★★★☆» (la media si arrotonda alla stella intera più vicina). */
++export function stelleTesto(media: number | null): string {
++  if (media === null || !Number.isFinite(media)) return "☆☆☆☆☆";
++  const piene = Math.max(0, Math.min(VOTO_MASSIMO, Math.round(media)));
++  return "★".repeat(piene) + "☆".repeat(VOTO_MASSIMO - piene);
++}
++
++/** Rilegge un riepilogo salvato (per esempio nella fotografia di una valutazione): `null` se la forma non è giusta. */
++export function leggiRiepilogo(x: unknown): RiepilogoRecensioni | null {
++  if (typeof x !== "object" || x === null) return null;
++  const { numero, media } = x as Record<string, unknown>;
++  if (typeof numero !== "number" || !Number.isInteger(numero) || numero < 0) return null;
++  if (numero === 0) return media === null ? { numero: 0, media: null } : null;
++  if (typeof media !== "number" || !Number.isFinite(media) || media < VOTO_MINIMO || media > VOTO_MASSIMO) return null;
++  return { numero, media };
++}
+-- 
+2.43.0
+

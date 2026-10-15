@@ -1,0 +1,672 @@
+From 169bc59d9bbed18df0fe61631a3215a2feb05642 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 14 Oct 2026 20:21:07 +0000
+Subject: [PATCH] =?UTF-8?q?feat(match):=20=C2=ABI=20tuoi=20match=C2=BB=20c?=
+ =?UTF-8?q?on=20un=20simbolo=20nuovo,=20e=20la=20pagina=20divisa=20in=20ca?=
+ =?UTF-8?q?ndidature=20e=20richieste=20dei=20proprietari?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+DA APPLICARE DOPO schede-unite.patch. Nessuna migrazione. Non cambia nessuna azione sulle candidature.
+
+LA BARRA. La voce dell'inquilino 'Candidature' si chiama 'I tuoi match' (stessa pagina, stesso indirizzo) e ha un
+simbolo nuovo: due mani che si stringono, disegnato per l'app (IconMatch) sullo stesso reticolo e con lo stesso
+tratto degli altri. Prima era la nuvoletta della chat. Provate tre varianti a dimensione di barra: la stretta di mano
+con polsini larghi era affollata, quella con polsini sottili e mani grandi regge a 24 px. La barra del proprietario
+non cambia. I testi che nominavano la pagina (Home, Preferiti, commenti) dicono 'I tuoi match'.
+
+LA PAGINA. Due schede in cima: 'Le tue candidature' (con il numero) e 'Richieste dei proprietari'. Gruppo di schede
+accessibile: frecce destra/sinistra, una sola nel giro di tabulazione.
+- Le tue candidature: divise in Match, In attesa di risposta, Non andate a buon fine, Ritirate, SOLO quelle che hanno
+  qualcosa, in questo ordine. Ogni parte ha il titolo con il conteggio e si ripiega. Match e in attesa partono aperte,
+  le altre due chiuse (per non coprire ciò che conta); se non c'è altro che roba chiusa si apre tutto, perché una
+  pagina di soli titoli chiusi sembrerebbe vuota. Dettaglio, ritiro, chat e motivo del rifiuto sono come prima.
+  Senza candidature: 'Torna alla Home e scorri gli annunci' (prima rimandava a una voce 'Cerca' che non esiste).
+- Richieste dei proprietari: SCHEDA PRESENTE MA VUOTA, e lo dice: oggi un proprietario vede solo chi si candida alle
+  sue case e non può scrivere prima, quindi non esistono richieste da mostrare. Non è stata inventata nessuna funzione.
+  Visite offerte (solo a chi ha già un match) e conferme dei rapporti di locazione (per le recensioni) esistono ma
+  sono un'altra cosa: non sono state messe qui.
+
+DA DECIDERE. La scheda delle richieste ha senso solo se i proprietari potranno contattare chi non si è candidato:
+una funzione nuova, con conseguenze importanti (un proprietario vedrebbe dati di inquilini che non hanno fatto nessun
+passo; informativa, consensi e minimizzazione da rivedere con il legale). Finché non c'è, la scheda resta vuota.
+
+DIFETTI MIEI TROVATI PROVANDO
+- la variante B del simbolo aveva un puntino vagante (un cerchio invisibile che con gli estremi tondi diventa un punto)
+- l'attributo hidden perde contro un display impostato da una classe CSS: le parti 'chiuse' sarebbero rimaste visibili
+  (aggiunta la regola e un test che la richiede)
+- due alterazioni (scheda non attiva visibile, ritiro scomparso) non erano prese da nessun test: i controlli cercavano
+  solo che le stringhe esistessero; ora cercano la struttura
+
+Test: 963 in tutto (13 nuovi). Provato in Chrome col dito e col mouse con candidature in tutti gli stati: barra, schede,
+parti aperte e chiuse, apertura e chiusura al tocco, dettaglio con 'Apri chat', frecce, e le situazioni particolari
+(nessuna candidatura, solo chiuse, una sola parte). Difetti reintrodotti di proposito: 21 su 21 presi (18 al primo giro,
+3 dopo aver stretto i controlli).
+---
+ scripts/test-candidature.mjs                  |  76 ++++++++
+ src/app/(app)/HomeClient.tsx                  |   4 +-
+ src/app/(app)/actions.ts                      |   2 +-
+ .../(app)/candidature/CandidatureClient.tsx   | 179 ++++++++----------
+ src/app/globals.css                           |  86 +++++++++
+ src/components/Navigation.tsx                 |   4 +-
+ src/components/icons.tsx                      |  15 ++
+ src/lib/candidature.ts                        |  34 ++++
+ src/lib/scelte.ts                             |   4 +-
+ 9 files changed, 302 insertions(+), 102 deletions(-)
+
+diff --git a/scripts/test-candidature.mjs b/scripts/test-candidature.mjs
+index f43ac3c..274d9a7 100644
+--- a/scripts/test-candidature.mjs
++++ b/scripts/test-candidature.mjs
+@@ -211,3 +211,79 @@ test("migrazione: il ritiro non è chiamabile da chi non ha un account", () => {
+   assert.match(sql, /grant execute on function public\.ritira_candidatura\(uuid\) to authenticated;/);
+   assert.ok(!/ritira_candidatura\(uuid\) to anon/.test(sql));
+ });
++
++// ------------------------------------------------------------
++// «I tuoi match»: le schede, le parti in cui si dividono le candidature, la barra
++// ------------------------------------------------------------
++
++const leggiFile = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8").replace(/\r\n/g, "\n");
++const con = (stati) => stati.map((s, i) => ({ id: "c" + i, status: s }));
++
++test("schede: due, nell'ordine «le tue candidature» e «richieste dei proprietari»", () => {
++  assert.deepEqual(c.SCHEDE_MATCH.map((s) => s.id), ["candidature", "richieste"]); assert.deepEqual(c.SCHEDE_MATCH.map((s) => s.etichetta), ["Le tue candidature", "Richieste dei proprietari"]);
++});
++
++test("parti delle candidature: nell'ordine match, in attesa, non andate a buon fine, ritirate; coprono tutti gli stati e nessuno due volte", () => {
++  assert.deepEqual(c.SEZIONI_CANDIDATURE.map((s) => s.id), ["match", "in_attesa", "non_andate", "ritirate"]); assert.deepEqual(c.SEZIONI_CANDIDATURE.map((s) => s.titolo), ["Match", "In attesa di risposta", "Non andate a buon fine", "Ritirate"]);
++  assert.deepEqual(c.SEZIONI_CANDIDATURE.map((s) => s.stato).sort(), Object.keys(c.STATO_LABEL).sort(), "ogni stato di una candidatura deve avere la sua parte");
++});
++
++test("sezioniCandidature: ogni candidatura finisce nella parte del suo stato, e nessuna si perde né si duplica (anche con tante)", () => {
++  const stati = ["accettata", "in_attesa", "rifiutata", "ritirata"]; let seme = 5; const rnd = () => (seme = (seme * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
++  for (let n = 0; n < 200; n++) {
++    const e = con(Array.from({ length: Math.floor(rnd() * 15) }, () => stati[Math.floor(rnd() * 4)])); const parti = c.sezioniCandidature(e);
++    assert.equal(parti.reduce((s, p) => s + p.items.length, 0), e.length, "una candidatura è sparita o si è duplicata"); assert.ok(parti.every((p) => p.items.length > 0), "una parte vuota compare");
++    for (const p of parti) { const stato = c.SEZIONI_CANDIDATURE.find((d) => d.id === p.id).stato; assert.ok(p.items.every((x) => x.status === stato), `«${p.titolo}» contiene una candidatura di un altro stato`); }
++    assert.deepEqual(parti.map((p) => p.id), c.SEZIONI_CANDIDATURE.map((d) => d.id).filter((id) => parti.some((p) => p.id === id)), "ordine");
++  }
++});
++
++test("sezioniCandidature: nessuna candidatura = nessuna parte; uno stato sconosciuto non compare in nessuna parte e non rompe niente", () => {
++  assert.deepEqual(c.sezioniCandidature([]), []); const strano = c.sezioniCandidature(con(["stato_di_domani", "accettata"])); assert.equal(strano.length, 1); assert.equal(strano[0].id, "match");
++});
++
++test("sezioniCandidature: match e in attesa partono aperte, non andate e ritirate chiuse; se c'è solo roba chiusa si apre tutto (una pagina di soli titoli sembrerebbe vuota)", () => {
++  const aperte = (e) => Object.fromEntries(c.sezioniCandidature(con(e)).map((p) => [p.id, p.aperta]));
++  assert.deepEqual(aperte(["accettata", "in_attesa", "rifiutata", "ritirata"]), { match: true, in_attesa: true, non_andate: false, ritirate: false });
++  assert.deepEqual(aperte(["in_attesa", "rifiutata"]), { in_attesa: true, non_andate: false }); assert.deepEqual(aperte(["rifiutata", "ritirata"]), { non_andate: true, ritirate: true }, "senza match né attesa si aprono tutte"); assert.deepEqual(aperte(["ritirata"]), { ritirate: true });
++});
++
++test("sezioniCandidature: non modifica l'elenco ricevuto e rispetta l'ordine di arrivo dentro ogni parte", () => {
++  const e = [{ id: "z", status: "accettata" }, { id: "a", status: "accettata" }, { id: "m", status: "accettata" }]; const copia = JSON.stringify(e); const parti = c.sezioniCandidature(e);
++  assert.equal(JSON.stringify(e), copia); assert.deepEqual(parti[0].items.map((x) => x.id), ["z", "a", "m"]);
++});
++
++test("barra dell'inquilino: la voce si chiama «I tuoi match», porta alla stessa pagina di prima e ha il simbolo nuovo; quella del proprietario non cambia", () => {
++  const n = leggiFile("src", "components", "Navigation.tsx"); const tenant = n.slice(n.indexOf("const TENANT_TABS"), n.indexOf("const OWNER_TABS")); const owner = n.slice(n.indexOf("const OWNER_TABS"), n.indexOf("export function Navigation"));
++  assert.match(tenant, /\{ href: "\/candidature", label: "I tuoi match", Icon: IconMatch \}/); assert.ok(!/label: "Candidature"/.test(n), "resta la vecchia etichetta"); assert.ok(!/IconChat/.test(n), "la barra usa ancora il simbolo della chat");
++  assert.match(tenant, /\{ href: "\/messaggi", label: "Messaggi", Icon: IconBusta \}/, "il simbolo dei Messaggi non deve cambiare"); assert.match(owner, /label: "Database"/); assert.ok(!/I tuoi match/.test(owner), "la barra del proprietario non ha questa voce");
++});
++
++test("simbolo «I tuoi match»: esiste, è diverso da quello della chat e dalle altre voci della barra, e ha il solito reticolo 24x24", () => {
++  const i = leggiFile("src", "components", "icons.tsx"); const corpo = (nome) => i.slice(i.indexOf(`export function ${nome}(`), i.indexOf("\n}\n", i.indexOf(`export function ${nome}(`)));
++  const m = corpo("IconMatch"); assert.match(m, /viewBox="0 0 24 24"/); assert.match(m, /aria-hidden/); assert.ok([...m.matchAll(/<path /g)].length >= 5, "troppo semplice per una stretta di mano");
++  for (const altro of ["IconChat", "IconBusta", "IconCasa", "IconDocumento", "IconPersona"]) assert.notEqual(m.match(/<path d="([^"]+)"/)[1], corpo(altro).match(/<path d="([^"]+)"/)?.[1], `uguale a ${altro}`);
++  assert.ok(!/\bd="[^"]*(NaN|undefined)/.test(m), "un tratto rotto");
++});
++
++test("i testi che nominano la pagina dicono «I tuoi match» (Home, Preferiti e commenti), non più «Candidature»", () => {
++  assert.match(leggiFile("src", "lib", "scelte.ts"), /TESTO_CANDIDATURA_INVIATA = "Candidatura inviata — la trovi in I tuoi match\."/); assert.match(leggiFile("src", "app", "(app)", "HomeClient.tsx"), /la trovi in &quot;I tuoi match&quot;/);
++  for (const f of [["src", "lib", "scelte.ts"], ["src", "app", "(app)", "HomeClient.tsx"], ["src", "app", "(app)", "actions.ts"]]) assert.ok(!/in «?"?&?q?u?o?t?;?Candidature/.test(leggiFile(...f).replace(/Candidatur[ae] inviat/g, "")), `un testo cita ancora «Candidature» in ${f.join("/")}`);
++});
++
++test("pagina: due schede accessibili (gruppo di schede, frecce), le parti ripiegabili con il conteggio, la scheda delle richieste dice la verità e non finge dati", () => {
++  const p = leggiFile("src", "app", "(app)", "candidature", "CandidatureClient.tsx");
++  assert.match(p, /role="tablist"/); assert.match(p, /role="tab"[\s\S]*?aria-selected=\{scheda === s\.id\}[\s\S]*?aria-controls=/); assert.equal([...p.matchAll(/role="tabpanel"/g)].length, 2); assert.match(p, /e\.key !== "ArrowRight" && e\.key !== "ArrowLeft"/); assert.match(p, /tabIndex=\{scheda === s\.id \? 0 : -1\}/);
++  assert.match(p, /aria-labelledby=\{`\$\{idBase\}-candidature`\} hidden=\{scheda !== "candidature"\}/); assert.match(p, /aria-labelledby=\{`\$\{idBase\}-richieste`\} hidden=\{scheda !== "richieste"\}/, "una scheda non attiva deve essere nascosta"); assert.match(p, /<div id=\{id\} className="card-grid" hidden=\{!aperto\}>/, "una parte chiusa deve essere nascosta");
++  assert.match(p, /sezioniCandidature\(candidature\)/); assert.match(p, /aria-expanded=\{aperto\}/); assert.match(p, /\{titolo\} — \{items\.length\}/); assert.match(p, /useState\(apertaAllInizio\)/);
++  assert.match(p, /Nessuna richiesta dai proprietari/); assert.match(p, /Per ora i proprietari vedono solo chi si candida alle loro case, quindi non\s+ce ne sono/); assert.ok(!/IconChat/.test(p), "la pagina usa ancora il simbolo della chat");
++  assert.match(p, /Torna alla Home e scorri gli annunci/); assert.ok(!/Torna su &quot;Cerca&quot;/.test(p), "rimanda a una voce «Cerca» che non esiste");
++  const css = leggiFile("src", "app", "globals.css"); assert.match(css, /\.gruppo-match \.card-grid\[hidden\][\s\S]*?display: none !important;/, "una parte chiusa resterebbe visibile: la griglia vince sull'attributo hidden");
++});
++
++test("pagina: nessuna azione sulle candidature è cambiata (ritiro, chat, motivo del rifiuto, note)", () => {
++  const p = leggiFile("src", "app", "(app)", "candidature", "CandidatureClient.tsx");
++  assert.match(p, /\{puoRitirare\(selezionata\.status\) && \(\s+<RitiraCandidatura\s+key=\{selezionata\.id\}/, "il ritiro deve comparire dentro la candidatura in attesa");
++  for (const pezzo of ["puoRitirare(selezionata.status)", "<RitiraCandidatura", "router.refresh()", "href={`/chat/${selezionata.id}`}", "Apri chat", "messaggioMotivoRifiuto(selezionata.motivo_rifiuto)", "NOTA_RITIRATA", "Il proprietario ha accettato la tua candidatura.", "Il proprietario non ha ancora valutato questa candidatura."]) assert.ok(p.includes(pezzo), `manca «${pezzo}»`);
++  const pg = leggiFile("src", "app", "(app)", "candidature", "page.tsx"); assert.match(pg, /\.eq\("tenant_id", user!\.id\)/);
++});
+diff --git a/src/app/(app)/HomeClient.tsx b/src/app/(app)/HomeClient.tsx
+index ceb24f5..fbd5487 100644
+--- a/src/app/(app)/HomeClient.tsx
++++ b/src/app/(app)/HomeClient.tsx
+@@ -188,7 +188,7 @@ export function HomeClient({
+       if (!res?.error) {
+         setCandidatureInviate((prev) => new Set(prev).add(listing.id));
+       }
+-      // una candidatura non si annulla da qui (si ritira da «Candidature»): dopo,
++      // una candidatura non si annulla da qui (si ritira da «I tuoi match»): dopo,
+       // «annulla» non torna indietro oltre questo punto
+       setStoria(svuota());
+       setAvviso(null);
+@@ -605,7 +605,7 @@ export function HomeClient({
+ 
+       {!avviso && candidatureInviate.size > 0 && (
+         <div className="toast-inline">
+-          Candidatura inviata — la trovi in &quot;Candidature&quot;.
++          Candidatura inviata — la trovi in &quot;I tuoi match&quot;.
+         </div>
+       )}
+     </div>
+diff --git a/src/app/(app)/actions.ts b/src/app/(app)/actions.ts
+index 4942ac7..68c23d7 100644
+--- a/src/app/(app)/actions.ts
++++ b/src/app/(app)/actions.ts
+@@ -18,7 +18,7 @@ export async function candidati(listingId: string) {
+   if (!user) return { error: "Non autenticato." };
+ 
+   // Fotografia di quanto la casa andava bene all'inquilino nel momento in
+-  // cui ha scelto: è il numero che rivede in "Candidature". La candidatura
++  // cui ha scelto: è il numero che rivede in "I tuoi match". La candidatura
+   // non deve MAI fallire per colpa di questo calcolo: se qualcosa non va,
+   // parte comunque, senza percentuale.
+   let matchPct: number | null = null;
+diff --git a/src/app/(app)/candidature/CandidatureClient.tsx b/src/app/(app)/candidature/CandidatureClient.tsx
+index 55c5c5e..fb86c46 100644
+--- a/src/app/(app)/candidature/CandidatureClient.tsx
++++ b/src/app/(app)/candidature/CandidatureClient.tsx
+@@ -1,22 +1,24 @@
+ "use client";
+ 
+-import { useState } from "react";
++import { useId, useState } from "react";
+ import Link from "next/link";
+ import { useRouter } from "next/navigation";
+ import { Sheet } from "@/components/Sheet";
+ import type { CandidaturaConAnnuncio } from "@/lib/types";
+ import {
+   NOTA_RITIRATA,
++  SCHEDE_MATCH,
+   STATO_BADGE,
+   STATO_LABEL,
+   puoRitirare,
+-  raggruppaCandidature,
+   riepilogoCandidature,
++  sezioniCandidature,
++  type SchedaMatch,
+ } from "@/lib/candidature";
+ import { RitiraCandidatura } from "@/components/RitiraCandidatura";
+ import { PageContainer } from "@/components/ui/PageContainer";
+ import { messaggioMotivoRifiuto } from "@/lib/motivi-rifiuto";
+-import { IconChat } from "@/components/icons";
++import { IconChevronSu, IconMatch } from "@/components/icons";
+ 
+ export function CandidatureClient({
+   candidature,
+@@ -24,108 +26,101 @@ export function CandidatureClient({
+   candidature: CandidaturaConAnnuncio[];
+ }) {
+   const router = useRouter();
+-  const [selezionata, setSelezionata] = useState<CandidaturaConAnnuncio | null>(
+-    null
+-  );
++  const idBase = useId();
++  const [scheda, setScheda] = useState<SchedaMatch>("candidature");
++  const [selezionata, setSelezionata] = useState<CandidaturaConAnnuncio | null>(null);
++
++  const sezioni = sezioniCandidature(candidature);
+ 
+-  const { inAttesa, accettate, rifiutate, ritirate } = raggruppaCandidature(candidature);
++  // frecce destra/sinistra tra le due schede, come ci si aspetta da un gruppo di schede
++  function tastoScheda(e: React.KeyboardEvent) {
++    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
++    e.preventDefault();
++    const i = SCHEDE_MATCH.findIndex((s) => s.id === scheda);
++    const prossima = SCHEDE_MATCH[(i + (e.key === "ArrowRight" ? 1 : SCHEDE_MATCH.length - 1)) % SCHEDE_MATCH.length].id;
++    setScheda(prossima);
++    document.getElementById(`${idBase}-${prossima}`)?.focus();
++  }
+ 
+   return (
+     <PageContainer wide>
+       <h1 className="screen-title">I tuoi match</h1>
+-      <p className="screen-sub">
+-        {riepilogoCandidature(candidature)}
+-      </p>
+ 
+-      {candidature.length === 0 ? (
++      <div className="match-schede" role="tablist" aria-label="I tuoi match" onKeyDown={tastoScheda}>
++        {SCHEDE_MATCH.map((s) => (
++          <button
++            key={s.id}
++            id={`${idBase}-${s.id}`}
++            type="button"
++            role="tab"
++            aria-selected={scheda === s.id}
++            aria-controls={`${idBase}-pannello-${s.id}`}
++            tabIndex={scheda === s.id ? 0 : -1}
++            className={scheda === s.id ? "attiva" : ""}
++            onClick={() => setScheda(s.id)}
++          >
++            {s.etichetta}
++            {s.id === "candidature" && candidature.length > 0 && <span className="conteggio">{candidature.length}</span>}
++          </button>
++        ))}
++      </div>
++
++      {/* ---- Le tue candidature, divise per come sono andate ---- */}
++      <div role="tabpanel" id={`${idBase}-pannello-candidature`} aria-labelledby={`${idBase}-candidature`} hidden={scheda !== "candidature"}>
++        <p className="screen-sub">{riepilogoCandidature(candidature)}</p>
++
++        {candidature.length === 0 ? (
++          <div className="empty-inline">
++            <IconMatch className="icon-empty" />
++            <h3>Ancora nessuna candidatura</h3>
++            <p>Torna alla Home e scorri gli annunci: le tue candidature e gli eventuali match finiscono qui.</p>
++          </div>
++        ) : (
++          sezioni.map((s) => <Gruppo key={s.id} titolo={s.titolo} items={s.items} apertaAllInizio={s.aperta} onSelect={setSelezionata} />)
++        )}
++      </div>
++
++      {/* ---- Le richieste che arrivano dai proprietari ---- */}
++      <div role="tabpanel" id={`${idBase}-pannello-richieste`} aria-labelledby={`${idBase}-richieste`} hidden={scheda !== "richieste"}>
+         <div className="empty-inline">
+-          <IconChat className="icon-empty" />
+-          <h3>Ancora nessuna candidatura</h3>
++          <IconMatch className="icon-empty" />
++          <h3>Nessuna richiesta dai proprietari</h3>
+           <p>
+-            Torna su &quot;Cerca&quot; e scorri gli annunci: le tue candidature
+-            e gli eventuali match finiscono qui.
++            Qui compariranno le richieste che ti mandano i proprietari. Per ora i proprietari vedono solo chi si candida alle loro case, quindi non
++            ce ne sono: le tue candidature le trovi nell&apos;altra scheda.
+           </p>
+         </div>
+-      ) : (
+-        <>
+-          {accettate.length > 0 && (
+-            <Gruppo titolo="Match" items={accettate} onSelect={setSelezionata} />
+-          )}
+-          {inAttesa.length > 0 && (
+-            <Gruppo
+-              titolo="In attesa di risposta"
+-              items={inAttesa}
+-              onSelect={setSelezionata}
+-            />
+-          )}
+-          {rifiutate.length > 0 && (
+-            <Gruppo
+-              titolo="Non andate a buon fine"
+-              items={rifiutate}
+-              onSelect={setSelezionata}
+-            />
+-          )}
+-          {ritirate.length > 0 && (
+-            <Gruppo titolo="Ritirate" items={ritirate} onSelect={setSelezionata} />
+-          )}
+-        </>
+-      )}
++      </div>
+ 
+-      <Sheet
+-        open={selezionata !== null}
+-        onClose={() => setSelezionata(null)}
+-        title={selezionata?.listings?.titolo ?? "Candidatura"}
+-      >
++      <Sheet open={selezionata !== null} onClose={() => setSelezionata(null)} title={selezionata?.listings?.titolo ?? "Candidatura"}>
+         {selezionata && (
+           <>
+             <div className="mb-4">
+-              <span className={`mc-pct ${STATO_BADGE[selezionata.status]}`}>
+-                {STATO_LABEL[selezionata.status]}
+-              </span>
++              <span className={`mc-pct ${STATO_BADGE[selezionata.status]}`}>{STATO_LABEL[selezionata.status]}</span>
+             </div>
+ 
+             <DettaglioRow label="Zona" value={selezionata.listings?.zona ?? "—"} />
+             <DettaglioRow
+               label="Canone"
+-              value={
+-                selezionata.listings?.prezzo
+-                  ? `€${selezionata.listings.prezzo.toLocaleString("it-IT")}/mese`
+-                  : "—"
+-              }
++              value={selezionata.listings?.prezzo ? `€${selezionata.listings.prezzo.toLocaleString("it-IT")}/mese` : "—"}
+             />
+             <DettaglioRow
+               label="Taglio"
+-              value={
+-                selezionata.listings?.locali
+-                  ? `${selezionata.listings.locali} locali · ${selezionata.listings.mq ?? "—"} m²`
+-                  : "—"
+-              }
++              value={selezionata.listings?.locali ? `${selezionata.listings.locali} locali · ${selezionata.listings.mq ?? "—"} m²` : "—"}
+             />
+-            {selezionata.match_pct !== null && (
+-              <DettaglioRow
+-                label="Compatibilità"
+-                value={`${selezionata.match_pct}%`}
+-              />
+-            )}
++            {selezionata.match_pct !== null && <DettaglioRow label="Compatibilità" value={`${selezionata.match_pct}%`} />}
+ 
+             {selezionata.status === "accettata" && (
+               <div className="flex flex-col gap-3 mt-5">
+-                <div className="note-ok">
+-                  Il proprietario ha accettato la tua candidatura.
+-                </div>
+-                <Link
+-                  href={`/chat/${selezionata.id}`}
+-                  className="opp-cta block text-center"
+-                >
++                <div className="note-ok">Il proprietario ha accettato la tua candidatura.</div>
++                <Link href={`/chat/${selezionata.id}`} className="opp-cta block text-center">
+                   Apri chat
+                 </Link>
+               </div>
+             )}
+             {selezionata.status === "in_attesa" && (
+               <>
+-                <div className="note-box mt-5">
+-                  Il proprietario non ha ancora valutato questa candidatura.
+-                </div>
++                <div className="note-box mt-5">Il proprietario non ha ancora valutato questa candidatura.</div>
+                 {puoRitirare(selezionata.status) && (
+                   <RitiraCandidatura
+                     key={selezionata.id}
+@@ -139,14 +134,8 @@ export function CandidatureClient({
+                 )}
+               </>
+             )}
+-            {selezionata.status === "ritirata" && (
+-              <div className="note-box mt-5">{NOTA_RITIRATA}</div>
+-            )}
+-            {selezionata.status === "rifiutata" && (
+-              <div className="note-box mt-5">
+-                {messaggioMotivoRifiuto(selezionata.motivo_rifiuto)}
+-              </div>
+-            )}
++            {selezionata.status === "ritirata" && <div className="note-box mt-5">{NOTA_RITIRATA}</div>}
++            {selezionata.status === "rifiutata" && <div className="note-box mt-5">{messaggioMotivoRifiuto(selezionata.motivo_rifiuto)}</div>}
+           </>
+         )}
+       </Sheet>
+@@ -154,23 +143,29 @@ export function CandidatureClient({
+   );
+ }
+ 
++/** Una parte delle candidature: il titolo con il conteggio apre e chiude l'elenco. */
+ function Gruppo({
+   titolo,
+   items,
++  apertaAllInizio,
+   onSelect,
+ }: {
+   titolo: string;
+   items: CandidaturaConAnnuncio[];
++  apertaAllInizio: boolean;
+   onSelect: (c: CandidaturaConAnnuncio) => void;
+ }) {
++  const [aperto, setAperto] = useState(apertaAllInizio);
++  const id = useId();
+   return (
+-    <>
+-      <div className="pref-label" style={{ marginTop: 20 }}>
++    <section className="gruppo-match">
++      <button type="button" className="gruppo-testa" aria-expanded={aperto} aria-controls={id} onClick={() => setAperto((a) => !a)}>
+         <span>
+           {titolo} — {items.length}
+         </span>
+-      </div>
+-      <div className="card-grid">
++        <IconChevronSu className={`gruppo-freccia ${aperto ? "" : "chiuso"}`} />
++      </button>
++      <div id={id} className="card-grid" hidden={!aperto}>
+         {items.map((c) => (
+           <button
+             key={c.id}
+@@ -178,26 +173,20 @@ function Gruppo({
+             className="match-card"
+             style={c.status === "rifiutata" || c.status === "ritirata" ? { opacity: 0.55 } : undefined}
+           >
+-            <div className="mc-avatar">
+-              {(c.listings?.titolo ?? "IM").slice(0, 2).toUpperCase()}
+-            </div>
++            <div className="mc-avatar">{(c.listings?.titolo ?? "IM").slice(0, 2).toUpperCase()}</div>
+             <div className="mc-body">
+               <div className="mc-zona">{c.listings?.zona ?? ""}</div>
+               <div className="mc-title">{c.listings?.titolo ?? "Immobile"}</div>
+               <div className="mc-meta">
+-                {c.listings?.prezzo
+-                  ? `€${c.listings.prezzo.toLocaleString("it-IT")}/mese`
+-                  : "—"}
++                {c.listings?.prezzo ? `€${c.listings.prezzo.toLocaleString("it-IT")}/mese` : "—"}
+                 {c.match_pct !== null && ` · ${c.match_pct}% compatibile`}
+               </div>
+             </div>
+-            <div className={`mc-pct ${STATO_BADGE[c.status]}`}>
+-              {STATO_LABEL[c.status]}
+-            </div>
++            <div className={`mc-pct ${STATO_BADGE[c.status]}`}>{STATO_LABEL[c.status]}</div>
+           </button>
+         ))}
+       </div>
+-    </>
++    </section>
+   );
+ }
+ 
+diff --git a/src/app/globals.css b/src/app/globals.css
+index f4490ff..ef3a145 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -3532,3 +3532,89 @@ mark.segnaposto {
+   font-size: 13px;
+   white-space: nowrap;
+ }
++
++/* ---- «I tuoi match»: le due schede e le parti ripiegabili ---- */
++.match-schede {
++  display: flex;
++  gap: 4px;
++  margin: 4px 0 14px;
++  padding: 4px;
++  background: rgba(16, 21, 26, 0.06);
++  border-radius: 999px;
++}
++.match-schede button {
++  flex: 1;
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  gap: 6px;
++  padding: 9px 10px;
++  border: 0;
++  border-radius: 999px;
++  background: transparent;
++  color: var(--body-soft);
++  font-family: var(--font-sans);
++  font-size: 13px;
++  font-weight: 700;
++  line-height: 1.2;
++  cursor: pointer;
++  -webkit-tap-highlight-color: transparent;
++}
++.match-schede button.attiva {
++  background: var(--ink);
++  color: var(--paper);
++}
++.match-schede button:focus-visible {
++  outline: 2px solid var(--moss);
++  outline-offset: 2px;
++}
++.match-schede .conteggio {
++  min-width: 20px;
++  padding: 1px 6px;
++  border-radius: 999px;
++  background: rgba(201, 161, 90, 0.25);
++  font-size: 11px;
++}
++.gruppo-match {
++  margin-top: 8px;
++}
++.gruppo-testa {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  width: 100%;
++  padding: 14px 2px 8px;
++  border: 0;
++  background: none;
++  color: var(--muted);
++  font-family: var(--font-sans);
++  font-size: 12px;
++  font-weight: 700;
++  letter-spacing: 0.06em;
++  text-transform: uppercase;
++  text-align: left;
++  cursor: pointer;
++}
++.gruppo-testa:focus-visible {
++  outline: 2px solid var(--moss);
++  outline-offset: 2px;
++  border-radius: 8px;
++}
++.gruppo-freccia {
++  width: 18px;
++  height: 18px;
++  flex: none;
++  fill: none;
++  stroke: currentColor;
++  stroke-width: 2;
++  transition: transform 0.18s ease;
++}
++.gruppo-freccia.chiuso {
++  transform: rotate(180deg);
++}
++/* l'attributo hidden deve vincere sui display impostati dalle classi (griglie, schede) */
++.gruppo-match .card-grid[hidden],
++.gruppo-match [hidden],
++[role="tabpanel"][hidden] {
++  display: none !important;
++}
+diff --git a/src/components/Navigation.tsx b/src/components/Navigation.tsx
+index a212a5b..b5818f4 100644
+--- a/src/components/Navigation.tsx
++++ b/src/components/Navigation.tsx
+@@ -6,8 +6,8 @@ import { etichettaConteggio } from "@/lib/notifiche";
+ import {
+   IconCasa,
+   IconBusta,
+-  IconChat,
+   IconDocumento,
++  IconMatch,
+   IconPalazzo,
+   IconPersona,
+   IconPersone,
+@@ -21,7 +21,7 @@ type Tab = {
+ 
+ const TENANT_TABS: Tab[] = [
+   { href: "/", label: "Home", Icon: IconCasa },
+-  { href: "/candidature", label: "Candidature", Icon: IconChat },
++  { href: "/candidature", label: "I tuoi match", Icon: IconMatch },
+   { href: "/messaggi", label: "Messaggi", Icon: IconBusta },
+   { href: "/gestione", label: "Gestione affitto", Icon: IconDocumento },
+   { href: "/profilo", label: "Profilo", Icon: IconPersona },
+diff --git a/src/components/icons.tsx b/src/components/icons.tsx
+index 5ff109c..7e7bb62 100644
+--- a/src/components/icons.tsx
++++ b/src/components/icons.tsx
+@@ -23,6 +23,21 @@ export function IconChat({ className }: IconProps) {
+   );
+ }
+ 
++/** Due mani che si stringono: «i tuoi match». Disegnato qui, sullo stesso reticolo e con lo stesso tratto degli altri. */
++export function IconMatch({ className }: IconProps) {
++  return (
++    <svg viewBox="0 0 24 24" className={className} aria-hidden>
++      <path d="M1.5 8.2v8.2" />
++      <path d="M22.5 8.2v8.2" />
++      <path d="M1.5 9.8 7.4 7.6c1-.38 2.1-.2 2.9.5L12 9.6" />
++      <path d="M22.5 9.8l-5.9-2.2c-1-.38-2.1-.2-2.9.5l-4.4 4.1a1.2 1.2 0 0 0 1.7 1.7L12.5 12.4" />
++      <path d="M1.5 15.4l5.7 3.3c.8.5 1.9.4 2.6-.2l.7-.6" />
++      <path d="M22.5 15.4l-5.7 3.3c-.8.5-1.9.4-2.6-.2l-1.7-1.5" />
++      <path d="M11 14.4l2.6 2.4" />
++    </svg>
++  );
++}
++
+ export function IconDocumento({ className }: IconProps) {
+   return (
+     <svg viewBox="0 0 24 24" className={className} aria-hidden>
+diff --git a/src/lib/candidature.ts b/src/lib/candidature.ts
+index 0736b4e..ef87ce6 100644
+--- a/src/lib/candidature.ts
++++ b/src/lib/candidature.ts
+@@ -40,6 +40,40 @@ export function raggruppaCandidature<T extends { status: StatoCandidatura }>(
+   };
+ }
+ 
++/** Le due schede della pagina «I tuoi match»: ciò che hai fatto tu, e ciò che ti arriva dai proprietari. */
++export const SCHEDE_MATCH = [
++  { id: "candidature", etichetta: "Le tue candidature" },
++  { id: "richieste", etichetta: "Richieste dei proprietari" },
++] as const;
++export type SchedaMatch = (typeof SCHEDE_MATCH)[number]["id"];
++
++/** Le parti in cui si dividono le candidature, nell'ordine in cui compaiono. */
++export const SEZIONI_CANDIDATURE = [
++  { id: "match", titolo: "Match", stato: "accettata", aperta: true },
++  { id: "in_attesa", titolo: "In attesa di risposta", stato: "in_attesa", aperta: true },
++  { id: "non_andate", titolo: "Non andate a buon fine", stato: "rifiutata", aperta: false },
++  { id: "ritirate", titolo: "Ritirate", stato: "ritirata", aperta: false },
++] as const satisfies readonly { id: string; titolo: string; stato: StatoCandidatura; aperta: boolean }[];
++
++export type SezioneCandidature<T> = {
++  id: (typeof SEZIONI_CANDIDATURE)[number]["id"];
++  titolo: string;
++  items: T[];
++  /** si presenta aperta o chiusa all'inizio */
++  aperta: boolean;
++};
++
++/**
++ * Le candidature divise nelle loro parti, SOLO quelle che hanno qualcosa, nell'ordine fisso (match, in attesa, non
++ * andate a buon fine, ritirate). Match e in attesa partono aperte; le due che chiudono la storia partono chiuse, per
++ * non coprire ciò che conta, TRANNE quando non c'è altro: se non è aperta nessuna parte, si aprono tutte (una pagina
++ * con soli titoli chiusi sembrerebbe vuota).
++ */
++export function sezioniCandidature<T extends { status: StatoCandidatura }>(elenco: T[]): SezioneCandidature<T>[] {
++  const parti = SEZIONI_CANDIDATURE.map((d) => ({ id: d.id, titolo: d.titolo, items: elenco.filter((c) => c.status === d.stato), aperta: d.aperta as boolean })).filter((p) => p.items.length > 0);
++  return parti.some((p) => p.aperta) ? parti : parti.map((p) => ({ ...p, aperta: true }));
++}
++
+ /** La riga sotto il titolo della schermata. Le ritirate si contano ancora tra le inviate. */
+ export function riepilogoCandidature(
+   elenco: { status: StatoCandidatura }[]
+diff --git a/src/lib/scelte.ts b/src/lib/scelte.ts
+index a3f9720..8fc1835 100644
+--- a/src/lib/scelte.ts
++++ b/src/lib/scelte.ts
+@@ -25,7 +25,7 @@ export type Scelta = { listingId: string; tipo: TipoScelta };
+ 
+ /**
+  * Aggiunge una scelta alla storia. Una candidatura NON è una scelta annullabile
+- * (si ritira da «Candidature»): dopo averne inviata una, `svuota` riparte da
++ * (si ritira da «I tuoi match»): dopo averne inviata una, `svuota` riparte da
+  * zero, perché tornare indietro oltre quel punto riporterebbe sotto gli occhi
+  * un annuncio a cui ci si è già candidati.
+  */
+@@ -114,4 +114,4 @@ export function descrizionePreferito(p: Pick<Preferito, "prezzo" | "locali" | "m
+   return parti.join(" · ");
+ }
+ 
+-export const TESTO_CANDIDATURA_INVIATA = "Candidatura inviata — la trovi in Candidature.";
++export const TESTO_CANDIDATURA_INVIATA = "Candidatura inviata — la trovi in I tuoi match.";
+-- 
+2.43.0
+

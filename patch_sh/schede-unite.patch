@@ -1,0 +1,1051 @@
+From a1b7ae1f5aef54349744830638eb45637c538c49 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 14 Oct 2026 13:03:13 +0000
+Subject: [PATCH] =?UTF-8?q?feat(dati):=20una=20sola=20scheda=20=C2=ABI=20t?=
+ =?UTF-8?q?uoi=20dati=C2=BB=20(punteggio,=20dati,=20verifica=20del=20reddi?=
+ =?UTF-8?q?to)=20e=20un'informativa=20su=20come=20viene=20calcolato?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+DA APPLICARE DOPO punteggio-affidabilita.patch. Nessuna migrazione. Non cambia il calcolo del punteggio.
+
+LA HOME. Nel pannello dell'affidabilità resta UN solo pulsante, «Modifica dati» (sparisce «Come si calcola»).
+Apre la scheda unica nella Home, senza andare nel Profilo; salvando si chiude, dice 'Dati aggiornati.' e il
+punteggio si ricalcola. Il mazzo torna a partire dov'era (il pannello è di nuovo basso).
+
+LA SCHEDA UNICA «I TUOI DATI», in quest'ordine:
+  1. il punteggio in alto (numero, fascia) con il link 'Come viene calcolato il punteggio >', le tre voci (quanto
+     valgono, chi le controlla, cosa manca e un'azione che scorre alla parte giusta) e le recensioni a parte
+  2. 'Modifica i tuoi dati': il modulo di prima, con le note su cosa vale cosa nel punteggio
+  3. 'Verifica del reddito': il pannello con i documenti, che prima stava solo nel Profilo. La Home ora legge i
+     documenti dell'inquilino e lo costruisce come il Profilo
+Sulla Home e nel Profilo è la stessa scheda.
+
+L'INFORMATIVA «COME VIENE CALCOLATO». Si apre dal link, nella STESSA scheda, al posto dei dati: solo spiegazione,
+nessuna azione e nessun dato personale. Le tre voci con i punti e chi le controlla, le quattro fasce (0-39 Da
+costruire, 40-59 Buona, 60-84 Molto buona, 85-100 Eccellente), cinque esempi, le recensioni a parte e che il
+punteggio nell'elenco dei candidati conta solo a parità di compatibilità. Fasce ed esempi sono RICAVATI dalle
+regole (fasceAffidabilita, esempiAffidabilita): l'informativa non può contraddire la formula; provato che le
+fasce coprono 0-100 senza buchi né sovrapposizioni.
+Il modulo dei dati resta in memoria mentre si legge l'informativa (nascosto, non smontato): tornando indietro,
+con la freccia, con Esc o con la X, ciò che si stava scrivendo c'è ancora. Un secondo Esc chiude la scheda.
+
+IL PROFILO. Le tre righe (affidabilità, dati, verifica del reddito) e le tre schede diventano UNA riga e UNA
+scheda. I vecchi collegamenti /profilo?apri=dati, ?apri=affidabilita e ?apri=verifica aprono tutti la scheda
+unica; quello della verifica scorre fino al pannello dei documenti.
+
+Estratto il modulo dei dati in DatiForm (ancore dati-protesti e dati-garante per lo scorrimento); nuovi
+RiepilogoAffidabilita, ComeSiCalcola e DatiSheet; tolti SchedaAffidabilita e DatiPersonaliSheet e la funzione
+sezionePerVoce.
+
+DIFETTI MIEI TROVATI PROVANDO
+- il reset dello stato alla chiusura della scheda era fatto in un effetto (il lint lo segnala come causa di
+  render a cascata): ora si azzera nel gestore di chiusura
+- un controllo sullo scorrimento al pannello della verifica non esisteva: l'alterazione che lo toglieva non
+  veniva presa da nessun test
+- in alcune prove cercavo testo in minuscolo dove le etichette sono in maiuscolo via CSS (errore dello script)
+
+Test: 952 in tutto (le prove di comportamento disegnano davvero il riepilogo e l'informativa). Provato in
+Chrome col dito e col mouse: pannello con un solo pulsante, ordine della scheda, informativa che non fa perdere
+ciò che si stava scrivendo, freccia ed Esc, suggerimenti che scorrono a verifica/protesti/garante, salvataggio
+che porta il punteggio da 40 a 25, Profilo con riga unica e i tre collegamenti. Difetti reintrodotti di
+proposito: 22 su 22 presi (14 dopo un controllo aggiunto; molti solo dai controlli sul codice, ripresi poi in
+Chrome).
+---
+ scripts/test-affidabilita.mjs                 |  70 +++++++----
+ scripts/test-home.mjs                         |  41 ++++---
+ src/app/(app)/HomeClient.tsx                  |  34 ++----
+ src/app/(app)/page.tsx                        |  13 ++
+ src/app/(app)/profilo/ProfiloClient.tsx       |  67 ++---------
+ src/app/globals.css                           |  67 ++++++++++-
+ src/components/ComeSiCalcola.tsx              |  91 ++++++++++++++
+ .../{DatiPersonaliSheet.tsx => DatiForm.tsx}  |  19 ++-
+ src/components/DatiSheet.tsx                  | 111 ++++++++++++++++++
+ ...dabilita.tsx => RiepilogoAffidabilita.tsx} |  60 +++++-----
+ src/lib/affidabilita.ts                       |  26 ++++
+ 11 files changed, 439 insertions(+), 160 deletions(-)
+ create mode 100644 src/components/ComeSiCalcola.tsx
+ rename src/components/{DatiPersonaliSheet.tsx => DatiForm.tsx} (93%)
+ create mode 100644 src/components/DatiSheet.tsx
+ rename src/components/{SchedaAffidabilita.tsx => RiepilogoAffidabilita.tsx} (51%)
+
+diff --git a/scripts/test-affidabilita.mjs b/scripts/test-affidabilita.mjs
+index ee4dcaf..5698ddb 100644
+--- a/scripts/test-affidabilita.mjs
++++ b/scripts/test-affidabilita.mjs
+@@ -15,7 +15,8 @@ const { renderToStaticMarkup } = richiedi("react-dom/server");
+ 
+ const af = caricaTs(path.join(radice, "src", "lib", "affidabilita.ts"));
+ const rc = caricaTs(path.join(radice, "src", "lib", "recensioni.ts"));
+-const scheda = caricaTs(path.join(radice, "src", "components", "SchedaAffidabilita.tsx"));
++const riepilogo = caricaTs(path.join(radice, "src", "components", "RiepilogoAffidabilita.tsx"));
++const come = caricaTs(path.join(radice, "src", "components", "ComeSiCalcola.tsx"));
+ const cd = caricaTs(path.join(radice, "src", "lib", "match", "candidato.ts"));
+ const pr = caricaTs(path.join(radice, "src", "lib", "match", "proprietario.ts"));
+ const leggi = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8").replace(/\r\n/g, "\n");
+@@ -144,9 +145,10 @@ test("ordine dei candidati: a parità di tutto, prima la media di stelle più al
+ });
+ 
+ // ============================================================ i collegamenti nel codice
+-test("scheda dei dati condivisa: la usano Home e Profilo, avvisa UNA volta per salvataggio, e le note sul punteggio vengono dalle costanti", () => {
+-  const d = leggi("src", "components", "DatiPersonaliSheet.tsx"); assert.match(d, /export function DatiPersonaliSheet/); assert.match(d, /if \(pending\) \{\s+eraInCorso\.current = true;\s+return;\s+\}\s+if \(eraInCorso\.current\) \{\s+eraInCorso\.current = false;\s+if \(state\?\.ok\) onSalvata\?\.\(\);/);
++test("modulo dei dati: avvisa UNA volta per salvataggio, le note sul punteggio vengono dalle costanti, ha le ancore a cui porta il riepilogo; il salvataggio aggiorna anche la Home", () => {
++  const d = leggi("src", "components", "DatiForm.tsx"); assert.match(d, /export function DatiForm/); assert.match(d, /if \(pending\) \{\s+eraInCorso\.current = true;\s+return;\s+\}\s+if \(eraInCorso\.current\) \{\s+eraInCorso\.current = false;\s+if \(state\?\.ok\) onSalvata\?\.\(\);/);
+   assert.match(d, /\+\{PUNTI_AFFIDABILITA\.garanzia\}/); assert.match(d, /\+\{PUNTI_AFFIDABILITA\.protesti\}/); assert.ok(!/\b(60|25|15)\b/.test(d.replace(/max=\{[^}]*\}|step=\{[^}]*\}/g, "")), "un numero di punti scritto a mano nelle note"); assert.match(d, /tenant\.verificato && \(\s+<p className="field-note">\s+Il tuo reddito è verificato: se cambi lavoro o reddito/);
++  assert.match(d, /<div id="dati-garante" className="ancora-dati" \/>/); assert.match(d, /<div id="dati-protesti" className="ancora-dati" \/>/); assert.ok(!/<Sheet/.test(d), "il modulo non ha più un suo contenitore: sta dentro la scheda unica");
+   const a = leggi("src", "app", "(app)", "profilo", "actions.ts"); const f = a.slice(a.indexOf("export async function updateDatiPersonali"), a.indexOf("export async function updateRicerca")); assert.match(f, /revalidatePath\("\/profilo"\);\s+revalidatePath\("\/"\);/, "la Home non si aggiorna dopo il salvataggio dei dati");
+ });
+ 
+@@ -161,37 +163,61 @@ test("nessun posto del codice calcola ancora la media delle recensioni a mano n
+   visita(cartella); assert.deepEqual(trovati, [], "campi vecchi ancora in uso: " + trovati.join(", "));
+ });
+ 
+-// ============================================================ la scheda, disegnata davvero
+-const html = (input, recensioni, onApri = () => {}) => renderToStaticMarkup(React.createElement(scheda.SchedaAffidabilita, { affidabilita: af.computeAffidabilita(input), recensioni, onApri }));
++// ============================================================ le fasce e gli esempi
++test("fasce: coprono da 0 a 100 senza buchi né sovrapposizioni, e ogni estremo cade nell'etichetta giusta", () => {
++  const f = af.fasceAffidabilita(); assert.deepEqual(f.map((x) => x.label), ["Da costruire", "Buona", "Molto buona", "Eccellente"]); assert.equal(f[0].da, 0); assert.equal(f.at(-1).a, 100);
++  for (let i = 1; i < f.length; i++) assert.equal(f[i].da, f[i - 1].a + 1, "buco o sovrapposizione tra le fasce");
++  for (const x of f) { assert.ok(x.da <= x.a); assert.equal(af.etichettaPunteggio(x.da), x.label); assert.equal(af.etichettaPunteggio(x.a), x.label); }
++  for (let p = 0; p <= 100; p++) assert.equal(f.filter((x) => p >= x.da && p <= x.a).length, 1, `il ${p} sta in una sola fascia`);
++});
++
++test("esempi: ogni esempio ha il punteggio e l'etichetta che dà davvero il calcolo; il «Tutto» è 100 e «Nessun dato» è 0", () => {
++  const e = af.esempiAffidabilita(); assert.equal(e.length, 5); assert.equal(e[0].punteggio, 0); assert.equal(e.at(-1).punteggio, 100); assert.ok(e.every((x) => x.label === af.etichettaPunteggio(x.punteggio)));
++  assert.deepEqual(e.map((x) => x.punteggio), [0, 40, 60, 85, 100]); assert.equal(new Set(e.map((x) => x.descrizione)).size, 5);
++});
++
++// ============================================================ il riepilogo e l'informativa, disegnati davvero
++const html = (input, recensioni, gestori = { onCome: () => {}, onVai: () => {} }) => renderToStaticMarkup(React.createElement(riepilogo.RiepilogoAffidabilita, { affidabilita: af.computeAffidabilita(input), recensioni, ...gestori }));
+ const testoDi = (h) => h.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+ const NESSUNA = { numero: 0, media: null };
+ const nBottoni = (h) => (h.match(/<button/g) ?? []).length;
++const VUOTO = { verificato: false, protestato: null, garante: null, fideiussione: null };
+ 
+-test("scheda disegnata, senza niente: 0 su ogni voce, i tre suggerimenti sono pulsanti, e si dice a quanto si può arrivare", () => {
+-  const h = html({ verificato: false, protestato: null, garante: null, fideiussione: null }, NESSUNA); const t = testoDi(h);
+-  for (const x of ["0 /100", "Da costruire", "0 su 60", "0 su 25", "0 su 15", "Verifica il tuo reddito", "Indica i protesti nei tuoi dati", "Indica un garante o una fideiussione", "arrivi a 100", "Nessuna recensione ancora"]) assert.ok(t.includes(x), `manca «${x}»: ${t}`);
+-  assert.equal(nBottoni(h), 3, "i tre suggerimenti sono pulsanti"); for (const vietato of ["\u2212", "possibili", "Punto di partenza", "Dati che indichi"]) assert.ok(!t.includes(vietato), `non deve esserci «${vietato}»`);
++test("riepilogo, senza niente: 0 su ogni voce; i tre suggerimenti e il link «come viene calcolato» sono pulsanti; si dice a quanto si può arrivare", () => {
++  const h = html(VUOTO, NESSUNA); const t = testoDi(h);
++  for (const x of ["0 /100", "Da costruire", "Come viene calcolato il punteggio ›", "0 su 60", "0 su 25", "0 su 15", "Verifica il tuo reddito", "Indica i protesti nei tuoi dati", "Indica un garante o una fideiussione", "arrivi a 100", "Nessuna recensione ancora"]) assert.ok(t.includes(x), `manca «${x}»: ${t}`);
++  assert.equal(nBottoni(h), 4, "il link + i tre suggerimenti"); for (const vietato of ["\u2212", "possibili", "Punto di partenza", "Dati che indichi"]) assert.ok(!t.includes(vietato), `non deve esserci «${vietato}»`);
+ });
+ 
+-test("scheda disegnata, con tutto: +60 +25 +15, nessun pulsante, nessun invito a completare", () => {
++test("riepilogo, con tutto: +60 +25 +15, resta solo il link «come viene calcolato», nessun invito a completare", () => {
+   const h = html({ verificato: true, protestato: false, garante: true, fideiussione: null }, { numero: 3, media: 4.3 }); const t = testoDi(h);
+-  for (const x of ["100 /100", "Eccellente", "+60", "+25", "+15", "Controllato dallo staff sui tuoi documenti"]) assert.ok(t.includes(x), `manca «${x}»`); assert.equal(nBottoni(h), 0); assert.ok(!t.includes("arrivi a") && !t.includes("0 su"), "con tutto preso non c'è niente da completare");
++  for (const x of ["100 /100", "Eccellente", "+60", "+25", "+15", "Controllato dallo staff sui tuoi documenti"]) assert.ok(t.includes(x), `manca «${x}»`); assert.equal(nBottoni(h), 1); assert.ok(!t.includes("arrivi a") && !t.includes("0 su"), "con tutto preso non c'è niente da completare");
+ });
+ 
+-test("scheda disegnata: chi controlla cosa è scritto sotto ogni voce (una volta lo staff, due volte la persona); senza il gestore i suggerimenti non sono pulsanti", () => {
+-  const h = html({ verificato: false, protestato: null, garante: null, fideiussione: null }, NESSUNA); assert.equal((h.match(/Lo controlla lo staff/g) ?? []).length, 1); assert.equal((h.match(/Lo dichiari tu/g) ?? []).length, 2);
+-  const senza = renderToStaticMarkup(React.createElement(scheda.SchedaAffidabilita, { affidabilita: af.computeAffidabilita({ verificato: false, protestato: null, garante: null, fideiussione: null }), recensioni: NESSUNA })); assert.equal(nBottoni(senza), 0); assert.ok(testoDi(senza).includes("Verifica il tuo reddito"), "il suggerimento si legge anche senza pulsante");
++test("riepilogo: chi controlla cosa è scritto sotto ogni voce (una volta lo staff, due la persona); senza il gestore i suggerimenti non sono pulsanti ma il link sì", () => {
++  const h = html(VUOTO, NESSUNA); assert.equal((h.match(/Lo controlla lo staff/g) ?? []).length, 1); assert.equal((h.match(/Lo dichiari tu/g) ?? []).length, 2);
++  const senza = html(VUOTO, NESSUNA, { onCome: () => {} }); assert.equal(nBottoni(senza), 1, "solo il link"); assert.ok(testoDi(senza).includes("Verifica il tuo reddito"), "il suggerimento si legge anche senza pulsante");
+ });
+ 
+-test("scheda disegnata: le recensioni si VEDONO (stelle, media e quante sono), anche quando non ce ne sono, e non sono nascoste", () => {
+-  const con = html({ verificato: false, protestato: null, garante: null, fideiussione: null }, { numero: 3, media: 4.3 }); const senza = html({ verificato: false, protestato: null, garante: null, fideiussione: null }, NESSUNA);
+-  assert.ok(testoDi(con).includes("★★★★☆ 4,3 su 5 · 3 recensioni"), testoDi(con).slice(-160)); assert.ok(testoDi(senza).includes("☆☆☆☆☆ Nessuna recensione ancora"));
+-  for (const h of [con, senza]) { const blocco = h.slice(h.indexOf("aff-recensioni") - 20, h.indexOf("aff-recensioni") + 200); assert.ok(!/\shidden(=|\s|>)/.test(blocco), "il blocco delle recensioni è nascosto"); assert.ok(blocco.includes('aria-label="'), "senza un nome per chi usa un lettore di schermo"); assert.ok(testoDi(h).includes("Le recensioni, a parte") && testoDi(h).includes("Non cambiano il punteggio")); }
++test("riepilogo: le recensioni si VEDONO (stelle, media e quante sono), anche quando non ce ne sono, dicono che stanno a parte e non sono nascoste", () => {
++  const con = html(VUOTO, { numero: 3, media: 4.3 }); const senza = html(VUOTO, NESSUNA);
++  assert.ok(testoDi(con).includes("★★★★☆ 4,3 su 5 · 3 recensioni"), testoDi(con).slice(-200)); assert.ok(testoDi(senza).includes("☆☆☆☆☆ Nessuna recensione ancora"));
++  for (const h of [con, senza]) { const blocco = h.slice(h.indexOf("aff-recensioni") - 20, h.indexOf("aff-recensioni") + 260); assert.ok(!/\shidden(=|\s|>)/.test(blocco), "il blocco delle recensioni è nascosto"); assert.ok(blocco.includes('aria-label="Recensioni: '), "senza un nome per chi usa un lettore di schermo"); assert.ok(testoDi(h).includes("Le recensioni stanno a parte: non cambiano il punteggio.")); }
+ });
+ 
+-test("scheda disegnata: cliccare un suggerimento chiama il gestore con la sezione giusta (verifica oppure dati)", () => {
+-  const chiamate = []; const input = { verificato: false, protestato: null, garante: null, fideiussione: null };
+-  const albero = scheda.SchedaAffidabilita({ affidabilita: af.computeAffidabilita(input), recensioni: NESSUNA, onApri: (x) => chiamate.push(x) });
++test("riepilogo: il link apre l'informativa e ogni suggerimento porta all'ancora giusta della scheda (reddito → verifica, protesti, garante)", () => {
++  const eventi = []; const albero = riepilogo.RiepilogoAffidabilita({ affidabilita: af.computeAffidabilita(VUOTO), recensioni: NESSUNA, onCome: () => eventi.push("come"), onVai: (x) => eventi.push(x) });
+   const bottoni = []; const visita = (n) => { if (!n || typeof n !== "object") return; if (Array.isArray(n)) return n.forEach(visita); if (n.type === "button") bottoni.push(n); visita(n.props?.children); }; visita(albero);
+-  assert.equal(bottoni.length, 3); for (const b of bottoni) b.props.onClick(); assert.deepEqual(chiamate, ["verifica", "dati", "dati"]);
++  assert.equal(bottoni.length, 4); for (const b of bottoni) b.props.onClick(); assert.deepEqual(eventi, ["come", "dati-verifica", "dati-protesti", "dati-garante"]); assert.deepEqual(riepilogo.ANCORE_VOCI, { reddito: "dati-verifica", protesti: "dati-protesti", garanzia: "dati-garante" });
++});
++
++test("informativa «come viene calcolato»: tre voci con i punti, le quattro fasce con gli estremi, gli esempi, le recensioni a parte; nessun pulsante e nessun dato personale", () => {
++  const h = renderToStaticMarkup(React.createElement(come.ComeSiCalcola)); const t = testoDi(h);
++  for (const x of ["da 0 a 100", "Reddito verificato +60", "Nessun protesto +25", "Garante o fideiussione +15", "Lo controlla lo staff", "Lo dichiari tu", "Se cambi lavoro o reddito la verifica decade", "Le fasce", "Da costruire 0–39", "Buona 40–59", "Molto buona 60–84", "Eccellente 85–100", "Qualche esempio", "Nessun dato 0 · Da costruire", "Tutto 100 · Eccellente", "Le recensioni, a parte", "da 1 a 5 stelle", "conta solo a parità di compatibilità"]) assert.ok(t.includes(x), `manca «${x}»: ${t.slice(0, 300)}`);
++  assert.equal(nBottoni(h), 0, "è solo un'informativa: nessuna azione"); for (const personale of ["Il tuo punteggio", "Hai ", "Completando"]) assert.ok(!t.includes(personale), `contiene «${personale}»: non deve dipendere da chi la legge`);
++});
++
++test("informativa: i numeri vengono dalle regole del calcolo (nessun punteggio scritto a mano) e dice lo stesso di ciò che il calcolo fa", () => {
++  const c = leggi("src", "components", "ComeSiCalcola.tsx").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, ""); assert.ok(!/\b(60|25|15|40|85|99)\b/.test(c), "un numero di punteggio scritto a mano"); assert.match(c, /fasceAffidabilita\(\)/); assert.match(c, /esempiAffidabilita\(\)/); assert.match(c, /PUNTI_AFFIDABILITA\.reddito/);
++  const r = leggi("src", "components", "RiepilogoAffidabilita.tsx").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, ""); assert.ok(!/\b(60|25|15)\b/.test(r), "un numero di punti scritto a mano nel riepilogo");
+ });
+diff --git a/scripts/test-home.mjs b/scripts/test-home.mjs
+index 6d74638..0a26248 100644
+--- a/scripts/test-home.mjs
++++ b/scripts/test-home.mjs
+@@ -46,10 +46,12 @@ test("collegamenti al Profilo: solo sezioni ammesse; qualunque altro valore non
+   for (const x of ["", "Verifica", "verifica ", " verifica", "account", "privacy", "faq", "__proto__", "constructor", "toString", "ricerca;x", "../x", "<script>", null, undefined, 5, {}, [], [""]]) assert.equal(hm.sezioneProfilo(x), null, JSON.stringify(x));
+ });
+ 
+-test("le sezioni del Profilo che si possono aprire da un collegamento esistono davvero nel Profilo", () => {
++test("le sezioni del Profilo che si possono aprire da un collegamento esistono davvero nel Profilo (dati, affidabilità e verifica aprono la stessa scheda)", () => {
+   const p = leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx"); const unione = p.match(/useState<([\s\S]*?)\n  >\(aperturaIniziale\)/)[1];
+-  for (const s of hm.SEZIONI_PROFILO_APRIBILI) { assert.ok(unione.includes(`"${s}"`), `la sezione «${s}» non è tra quelle del Profilo`); assert.match(p, new RegExp(`open=\\{sheetAperta === "${s}"\\}`), `nessuna scheda per «${s}»`); }
+-  assert.ok(typeof hm.sezionePerVoce === "undefined", "sezionePerVoce non serve più: ogni voce dice da sola la sua sezione");
++  for (const s of hm.SEZIONI_PROFILO_APRIBILI) assert.ok(unione.includes(`"${s}"`), `la sezione «${s}» non è tra quelle del Profilo`);
++  for (const s of ["ricerca", "invito", "affitti"]) assert.match(p, new RegExp(`open=\\{sheetAperta === "${s}"\\}`), `nessuna scheda per «${s}»`);
++  assert.match(p, /open=\{sheetAperta === "dati" \|\| sheetAperta === "affidabilita" \|\| sheetAperta === "verifica"\}/, "le tre vecchie sezioni devono aprire la scheda unica");
++  assert.ok(typeof hm.sezionePerVoce === "undefined", "sezionePerVoce non serve più");
+ });
+ 
+ // ============================================================ i collegamenti nel codice
+@@ -69,24 +71,26 @@ test("Home: la ricerca si cambia da qui (nessun collegamento al Profilo), la sch
+   assert.match(h, /onSalvata=\{\(\) => \{\s+setSchedaRicerca\(false\);\s+setAvviso\(\{ errore: false, testo: "Ricerca aggiornata\." \}\);/);
+ });
+ 
+-test("Home: nel pannello dell'affidabilità ci sono DUE pulsanti veri («Come si calcola» e «Modifica dati»); l'anello non è un pulsante", () => {
++test("Home: nel pannello dell'affidabilità c'è UN solo pulsante, «Modifica dati»; l'anello non è un pulsante e «Come si calcola» non c'è più", () => {
+   const h = leggi("src", "app", "(app)", "HomeClient.tsx"); const pannello = h.slice(h.indexOf('<div className="hi-punteggio"'), h.indexOf('<div className="hi-ricerca">'));
+   assert.match(pannello, /<div className="hi-punteggio" role="group" aria-label=\{`Affidabilità \$\{affidabilita\.punteggio\} su 100, \$\{affidabilita\.label\}`\}>/);
+-  assert.match(pannello, /<button type="button" className="hi-azione" onClick=\{\(\) => setSchedaPunteggio\(true\)\}>\s+Come si calcola\s+<\/button>/); assert.match(pannello, /<button type="button" className="hi-azione" onClick=\{\(\) => setSchedaDati\(true\)\}>\s+Modifica dati\s+<\/button>/);
+-  assert.equal([...pannello.matchAll(/<button/g)].length, 2, "ci devono essere due pulsanti e non di più"); assert.ok(!/hi-punteggio-cta/.test(h), "resta la vecchia scritta «Come si calcola ›» dentro un pulsante unico");
+-  const pg = leggi("src", "app", "(app)", "page.tsx"); assert.match(pg, /ricerca=\{profiloRicerca\}/); assert.match(pg, /recensioni=\{riepilogo\}\s+tenant=\{tenantProfile\}/);
++  assert.match(pannello, /<button type="button" className="hi-azione" onClick=\{\(\) => setSchedaDati\(true\)\}>\s+Modifica dati\s+<\/button>/); assert.equal([...pannello.matchAll(/<button/g)].length, 1, "ci deve essere un solo pulsante");
++  assert.ok(!/Come si calcola/.test(h), "resta il vecchio pulsante «Come si calcola»"); assert.ok(!/schedaPunteggio|SchedaAffidabilita|DatiPersonaliSheet/.test(h), "restano pezzi delle schede vecchie");
++  const pg = leggi("src", "app", "(app)", "page.tsx"); assert.match(pg, /ricerca=\{profiloRicerca\}/); assert.match(pg, /recensioni=\{riepilogo\}\s+tenant=\{tenantProfile\}\s+verificaPanel=\{/);
+ });
+ 
+-test("Home: «Modifica dati» apre la scheda dei dati qui (stessa del Profilo), montata solo se aperta; salvando si chiude e lo dice; la verifica del reddito resta nel Profilo", () => {
+-  const h = leggi("src", "app", "(app)", "HomeClient.tsx"); assert.match(h, /import \{ DatiPersonaliSheet \} from "@\/components\/DatiPersonaliSheet"/);
+-  assert.match(h, /\{schedaDati && \(\s+<DatiPersonaliSheet\s+open\s+onClose=\{\(\) => setSchedaDati\(false\)\}\s+tenant=\{tenant\}\s+onSalvata=\{\(\) => \{\s+setSchedaDati\(false\);\s+setAvviso\(\{ errore: false, testo: "Dati aggiornati\." \}\);/);
+-  assert.match(h, /if \(sezione === "dati"\) setSchedaDati\(true\);\s+else router\.push\("\/profilo\?apri=verifica"\);/); assert.ok(!/href="\/profilo"/.test(h));
++test("Home: «Modifica dati» apre la scheda unica qui (punteggio, dati, verifica), montata solo se aperta; salvando si chiude e lo dice; niente più rimandi al Profilo", () => {
++  const h = leggi("src", "app", "(app)", "HomeClient.tsx"); assert.match(h, /import \{ DatiSheet \} from "@\/components\/DatiSheet"/);
++  assert.match(h, /\{schedaDati && \(\s+<DatiSheet\s+open\s+onClose=\{\(\) => setSchedaDati\(false\)\}\s+tenant=\{tenant\}\s+affidabilita=\{affidabilita\}\s+recensioni=\{recensioni\}\s+verificaPanel=\{verificaPanel\}\s+onSalvata=\{\(\) => \{\s+setSchedaDati\(false\);\s+setAvviso\(\{ errore: false, testo: "Dati aggiornati\." \}\);/);
++  assert.ok(!/useRouter|router\.push/.test(h), "la Home rimanda ancora altrove"); assert.ok(!/href="\/profilo"/.test(h));
++  const pg = leggi("src", "app", "(app)", "page.tsx"); assert.match(pg, /from\("documenti_inquilino"\)\.select\("id, tipo, percorso, nome_file"\)\.eq\("tenant_id", userId\)/); assert.match(pg, /<VerificaRedditoPanel\s+stato=\{tenantProfile\.verifica_stato\}/);
+ });
+ 
+-test("Profilo: usa le schede condivise (ricerca, dati, punteggio: nessuna copia), legge ?apri= e passa le recensioni a parte", () => {
+-  const p = leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx"); assert.match(p, /import \{ RicercaSheet \} from "@\/components\/RicercaSheet"/); assert.match(p, /import \{ DatiPersonaliSheet \} from "@\/components\/DatiPersonaliSheet"/);
++test("Profilo: una sola riga e una sola scheda per punteggio, dati e verifica (le altre schede condivise restano), legge ?apri= e passa le recensioni a parte", () => {
++  const p = leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx"); assert.match(p, /import \{ RicercaSheet \} from "@\/components\/RicercaSheet"/); assert.match(p, /import \{ DatiSheet \} from "@\/components\/DatiSheet"/);
+   assert.ok(!/function RicercaSheet/.test(p) && !/function DatiPersonaliSheet/.test(p) && !/function SaveButton/.test(p), "il Profilo ha ancora una copia di una scheda");
+-  assert.match(p, /<SchedaAffidabilita affidabilita=\{affidabilita\} recensioni=\{recensioni\} onApri=\{\(sezione\) => setSheetAperta\(sezione\)\} \/>/); assert.ok(!/hasRecensioni|\.checks/.test(p), "il Profilo usa ancora i campi vecchi");
++  assert.equal([...p.matchAll(/onClick=\{\(\) => setSheetAperta\("(dati|affidabilita|verifica)"\)\}/g)].length, 1, "ci deve essere una riga sola per punteggio, dati e verifica"); assert.match(p, /onClick=\{\(\) => setSheetAperta\("dati"\)\}/);
++  assert.match(p, /<DatiSheet[\s\S]*?recensioni=\{recensioni\}\s+verificaPanel=\{verificaPanel\}\s+scorriA=\{sheetAperta === "verifica" \? "verifica" : null\}/); assert.ok(!/SchedaAffidabilita|rigaProfilo|hasRecensioni|\.checks/.test(p), "il Profilo usa ancora pezzi vecchi");
+   const pg = leggi("src", "app", "(app)", "profilo", "page.tsx"); assert.match(pg, /sezioneProfilo\(\(await searchParams\)\.apri\)/); assert.match(pg, /searchParams: Promise<\{ apri\?: string \| string\[\] \}>/); assert.match(pg, /recensioni=\{riepilogo\}/);
+ });
+ 
+@@ -95,9 +99,12 @@ test("scheda di ricerca condivisa: avvisa UNA volta per ogni salvataggio che fin
+   const a = leggi("src", "app", "(app)", "profilo", "actions.ts"); const f = a.slice(a.indexOf("export async function updateRicerca")); assert.match(f, /revalidatePath\("\/profilo"\);\s+revalidatePath\("\/"\);/, "la Home non si aggiorna dopo il salvataggio");
+ });
+ 
+-test("scheda del punteggio: i punti vengono dalla funzione del punteggio (nessun numero scritto a mano), con la voce, chi la controlla e le recensioni a parte", () => {
+-  const c = leggi("src", "components", "SchedaAffidabilita.tsx").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+-  assert.ok(!/\b(60|25|15)\b/.test(c), "un numero di punti scritto a mano"); assert.match(c, /voci\.map\(\(v\) =>/); assert.match(c, /punteggioPossibile\(affidabilita\)/); assert.match(c, /Lo controlla lo staff/); assert.match(c, /Lo dichiari tu/); assert.match(c, /Le recensioni, a parte/); assert.ok(!/checks|limite|totaleGrezzo/.test(c), "usa campi che non esistono più");
++test("scheda unica «I tuoi dati»: l'ordine è punteggio → dati → verifica; l'informativa sta nella stessa scheda e i dati restano in memoria (nascosti, non smontati); si torna indietro con la freccia, Esc o la X", () => {
++  const d = leggi("src", "components", "DatiSheet.tsx"); const ordine = ["<RiepilogoAffidabilita", "Modifica i tuoi dati", "<DatiForm", 'id="dati-verifica"', "{verificaPanel}"].map((x) => d.indexOf(x)); assert.ok(ordine.every((x) => x > 0) && ordine.every((x, i) => i === 0 || x > ordine[i - 1]), "ordine delle parti: " + ordine.join(","));
++  assert.match(d, /<div hidden=\{inInformativa\}>/); assert.match(d, /\{inInformativa && \(\s+<>\s+<button type="button" className="redo-link aff-indietro" onClick=\{\(\) => setVista\("dati"\)\}>\s+‹ Torna ai tuoi dati/);
++  assert.match(d, /onClose=\{inInformativa \? \(\) => setVista\("dati"\) : chiudi\}/); assert.match(d, /const chiudi = \(\) => \{\s+setVista\("dati"\);\s+onClose\(\);/); assert.ok(!/useEffect\(\(\) => \{\s+if \(!open\) setVista/.test(d), "reset dello stato in un effetto");
++  assert.match(d, /onCome=\{\(\) => setVista\("come"\)\} onVai=\{vai\}/); assert.match(d, /title=\{inInformativa \? "Come viene calcolato" : "I tuoi dati"\}/); assert.match(d, /scrollIntoView\(\{ behavior: "smooth", block: "start" \}\)/); assert.match(d, /if \(open && scorriA === "verifica"\) \{\s+const t = setTimeout\(\(\) => vai\("dati-verifica"\), 60\);\s+return \(\) => clearTimeout\(t\);/, "un collegamento alla verifica deve scorrere fino al pannello");
++  assert.ok(!fs.existsSync(path.join(radice, "src", "components", "SchedaAffidabilita.tsx")) && !fs.existsSync(path.join(radice, "src", "components", "DatiPersonaliSheet.tsx")), "restano i file delle schede vecchie");
+ });
+ 
+ test("CSS: il suggerimento sta sopra i pulsanti e la card sopra il suggerimento (prima il testo finiva dietro i pulsanti)", () => {
+diff --git a/src/app/(app)/HomeClient.tsx b/src/app/(app)/HomeClient.tsx
+index 2205825..ceb24f5 100644
+--- a/src/app/(app)/HomeClient.tsx
++++ b/src/app/(app)/HomeClient.tsx
+@@ -1,19 +1,16 @@
+ "use client";
+ 
+ import { useRef, useState, useTransition } from "react";
+-import { useRouter } from "next/navigation";
+ import type { AffidabilitaResult } from "@/lib/affidabilita";
+ import type { RiepilogoRecensioni } from "@/lib/recensioni";
+ import type { TenantProfile } from "@/lib/types";
+-import { DatiPersonaliSheet } from "@/components/DatiPersonaliSheet";
++import { DatiSheet } from "@/components/DatiSheet";
+ import type { ListingConMatch } from "@/lib/types";
+ import { TOLLERANZA_BUDGET, statoMazzo } from "@/lib/match";
+ import type { ProfiloRicerca } from "@/lib/match";
+ import { chiaveRicerca as chiaveDellaRicerca, conteggioCase, suggerimentoCard, testoNascoste, vociRicerca } from "@/lib/home";
+ import type { Luogo } from "@/lib/luoghi";
+-import { Sheet } from "@/components/Sheet";
+ import { RicercaSheet } from "@/components/RicercaSheet";
+-import { SchedaAffidabilita } from "@/components/SchedaAffidabilita";
+ import { candidati } from "./actions";
+ import { createClient } from "@/lib/supabase/client";
+ import { messaggioErroreVerifica } from "@/lib/verifica";
+@@ -47,6 +44,7 @@ export function HomeClient({
+   affidabilita,
+   recensioni,
+   tenant,
++  verificaPanel,
+   listings,
+   esclusi,
+   mostraMatch,
+@@ -60,6 +58,8 @@ export function HomeClient({
+   recensioni: RiepilogoRecensioni;
+   /** i dati dell'inquilino (per la scheda «Modifica dati») */
+   tenant: TenantProfile;
++  /** il pannello per verificare il reddito con i documenti, costruito dal server */
++  verificaPanel: React.ReactNode;
+   /** la ricerca impostata: budget, taglio, zone e caratteristiche */
+   ricerca: ProfiloRicerca;
+   /** i luoghi che si possono cercare (provincia, città, quartiere) */
+@@ -96,8 +96,6 @@ export function HomeClient({
+   const [drag, setDrag] = useState({ x: 0, y: 0, dragging: false });
+   const [exiting, setExiting] = useState<"left" | "right" | null>(null);
+   const startPos = useRef({ x: 0, y: 0 });
+-  const router = useRouter();
+-  const [schedaPunteggio, setSchedaPunteggio] = useState(false);
+   const [schedaDati, setSchedaDati] = useState(false);
+   const [schedaRicerca, setSchedaRicerca] = useState(false);
+ 
+@@ -309,9 +307,6 @@ export function HomeClient({
+             <b>{affidabilita.label}</b>
+           </span>
+           <span className="hi-punteggio-azioni">
+-            <button type="button" className="hi-azione" onClick={() => setSchedaPunteggio(true)}>
+-              Come si calcola
+-            </button>
+             <button type="button" className="hi-azione" onClick={() => setSchedaDati(true)}>
+               Modifica dati
+             </button>
+@@ -560,25 +555,16 @@ export function HomeClient({
+         </div>
+       )}
+ 
+-      <Sheet open={schedaPunteggio} onClose={() => setSchedaPunteggio(false)} title="Il tuo voto di affidabilità">
+-        <SchedaAffidabilita
+-          affidabilita={affidabilita}
+-          recensioni={recensioni}
+-          onApri={(sezione) => {
+-            setSchedaPunteggio(false);
+-            // i dati si cambiano qui; la verifica del reddito ha la sua pagina (carica i documenti)
+-            if (sezione === "dati") setSchedaDati(true);
+-            else router.push("/profilo?apri=verifica");
+-          }}
+-        />
+-      </Sheet>
+-
+-      {/* Come la ricerca: montata solo quando è aperta, così ogni apertura parte dai dati di adesso. */}
++      {/* La scheda unica «I tuoi dati»: punteggio, dati da modificare, verifica del reddito. Come la ricerca, è montata solo
++          quando è aperta: ogni apertura parte dai dati di adesso. */}
+       {schedaDati && (
+-        <DatiPersonaliSheet
++        <DatiSheet
+           open
+           onClose={() => setSchedaDati(false)}
+           tenant={tenant}
++          affidabilita={affidabilita}
++          recensioni={recensioni}
++          verificaPanel={verificaPanel}
+           onSalvata={() => {
+             setSchedaDati(false);
+             setAvviso({ errore: false, testo: "Dati aggiornati." });
+diff --git a/src/app/(app)/page.tsx b/src/app/(app)/page.tsx
+index e51bb5e..30eed71 100644
+--- a/src/app/(app)/page.tsx
++++ b/src/app/(app)/page.tsx
+@@ -10,6 +10,8 @@ import { mappaLuoghi, type Luogo } from "@/lib/luoghi";
+ import type { ProfiloRicerca } from "@/lib/match";
+ import type { TenantProfile, ListingConMatch, ListingProprietario } from "@/lib/types";
+ import { idsNascosti } from "@/lib/scelte";
++import { VerificaRedditoPanel } from "@/components/VerificaRedditoPanel";
++import type { DocumentoInquilino } from "@/lib/verifica-inquilino";
+ 
+ export default async function Home() {
+   const supabase = await createClient();
+@@ -40,6 +42,7 @@ async function TenantHome({ userId }: { userId: string }) {
+     { data: recensioni },
+     { data: giaCandidato },
+     { data: nascostiRighe },
++    { data: documentiRows },
+   ] = await Promise.all([
+     supabase.from("tenant_profiles").select("*").eq("profile_id", userId).single(),
+     supabase.from("tenant_zone_interesse").select("zona, luogo_id").eq("tenant_id", userId),
+@@ -52,6 +55,8 @@ async function TenantHome({ userId }: { userId: string }) {
+     // i preferiti e gli scarti degli ultimi 30 giorni: non si rimettono nel mazzo.
+     // Se la lettura non riesce, il mazzo si vede intero: meglio un annuncio in più che nessuno.
+     supabase.rpc("annunci_nascosti"),
++    // i documenti della verifica del reddito (per il pannello dentro «I tuoi dati»)
++    supabase.from("documenti_inquilino").select("id, tipo, percorso, nome_file").eq("tenant_id", userId).order("created_at", { ascending: true }),
+   ]);
+ 
+   // Le recensioni dei proprietari stanno a parte dal punteggio di affidabilità: si mostrano accanto.
+@@ -129,6 +134,14 @@ async function TenantHome({ userId }: { userId: string }) {
+       affidabilita={affidabilita}
+       recensioni={riepilogo}
+       tenant={tenantProfile}
++      verificaPanel={
++        <VerificaRedditoPanel
++          stato={tenantProfile.verifica_stato}
++          nota={tenantProfile.verifica_esito_note}
++          dati={{ professione: tenantProfile.professione, reddito_mensile: tenantProfile.reddito_mensile }}
++          documenti={(documentiRows ?? []) as DocumentoInquilino[]}
++        />
++      }
+       listings={mazzo as unknown as ListingConMatch[]}
+       esclusi={esclusiPerBudget}
+       nascostiPerNecessarie={nascostiPerNecessarie}
+diff --git a/src/app/(app)/profilo/ProfiloClient.tsx b/src/app/(app)/profilo/ProfiloClient.tsx
+index b031b80..f2656f5 100644
+--- a/src/app/(app)/profilo/ProfiloClient.tsx
++++ b/src/app/(app)/profilo/ProfiloClient.tsx
+@@ -2,9 +2,8 @@
+ 
+ import { useState } from "react";
+ import { RigaNovita } from "@/components/RigaNovita";
+-import { DatiPersonaliSheet } from "@/components/DatiPersonaliSheet";
++import { DatiSheet } from "@/components/DatiSheet";
+ import { RigaPreferiti } from "@/components/RigaPreferiti";
+-import { rigaProfilo } from "@/lib/verifica-inquilino";
+ import { Sheet } from "@/components/Sheet";
+ import {
+   computeAffidabilita,
+@@ -14,7 +13,6 @@ import type { TenantProfile, Invito } from "@/lib/types";
+ import { logout } from "@/app/login/actions";
+ import { PageContainer } from "@/components/ui/PageContainer";
+ import { RicercaSheet } from "@/components/RicercaSheet";
+-import { SchedaAffidabilita } from "@/components/SchedaAffidabilita";
+ import { testoRecensioni, type RiepilogoRecensioni } from "@/lib/recensioni";
+ import type { SezioneProfilo } from "@/lib/home";
+ import type { Luogo } from "@/lib/luoghi";
+@@ -27,7 +25,6 @@ import {
+   IconDomanda,
+   IconLente,
+   IconLucchetto,
+-  IconPersona,
+   IconPersone,
+   IconScudo,
+   IconStella,
+@@ -90,7 +87,6 @@ export function ProfiloClient({
+     | null
+   >(aperturaIniziale);
+ 
+-  const rigaVerifica = rigaProfilo(tenant.verifica_stato, tenant.verifica_esito_note);
+   const affidabilita = computeAffidabilita({
+     verificato: tenant.verificato,
+     protestato: tenant.protestato,
+@@ -128,14 +124,14 @@ export function ProfiloClient({
+         </div>
+       </div>
+ 
+-      {/* Affidabilità */}
++      {/* I tuoi dati e la tua affidabilità: un'unica scheda (punteggio, dati, verifica del reddito) */}
+       <Row
+         color="var(--gold)"
+         icon={<IconStella className="fill-white stroke-none" />}
+         title={`${affidabilita.punteggio}/100 · Affidabilità ${affidabilita.label}`}
+-        subtitle={`Reddito verificato, protesti e garante. Recensioni, a parte: ${testoRecensioni(recensioni)}.`}
+-        cta="Vedi il dettaglio"
+-        onClick={() => setSheetAperta("affidabilita")}
++        subtitle={`Il tuo punteggio, i tuoi dati e la verifica del reddito. Recensioni, a parte: ${testoRecensioni(recensioni)}.`}
++        cta="Vedi e modifica i tuoi dati"
++        onClick={() => setSheetAperta("dati")}
+       />
+ 
+       {/* Completezza */}
+@@ -152,26 +148,6 @@ export function ProfiloClient({
+       <div className="card-grid">
+         <RigaNovita nonLette={nonLette} />
+         <RigaPreferiti preferiti={preferiti} />
+-        {/* I tuoi dati */}
+-        <Row
+-          color="var(--ink)"
+-          icon={<IconPersona className="fill-none stroke-white stroke-2" />}
+-          title="I tuoi dati"
+-          subtitle="Lavoro, reddito, garante, protesti e presentazione: quello che vedono i proprietari."
+-          cta="Vedi il dettaglio"
+-          onClick={() => setSheetAperta("dati")}
+-        />
+-
+-        {/* Verifica del reddito */}
+-        <Row
+-          color={tenant.verifica_stato === "verificato" ? "var(--moss)" : "var(--gold)"}
+-          icon={<IconScudo className={tenant.verifica_stato === "verificato" ? "fill-white stroke-none" : "fill-[var(--ink)] stroke-none"} />}
+-          title={rigaVerifica.titolo}
+-          subtitle={rigaVerifica.sottotitolo}
+-          cta={rigaVerifica.cta}
+-          onClick={() => setSheetAperta("verifica")}
+-        />
+-
+         {/* La tua ricerca */}
+         <Row
+           color="var(--clay)"
+@@ -239,33 +215,16 @@ export function ProfiloClient({
+         </button>
+       </form>
+ 
+-      {/* ---- Sheet: Verifica del reddito ---- */}
+-      <Sheet
+-        open={sheetAperta === "verifica"}
+-        onClose={() => setSheetAperta(null)}
+-        title="Verifica del reddito"
+-      >
+-        <p className="sheet-sub">
+-          Carica un documento d&apos;identità e una prova del reddito. Se li confermiamo, i proprietari
+-          vedono «Reddito verificato» e il tuo punteggio di affidabilità sale.
+-        </p>
+-        {verificaPanel}
+-      </Sheet>
+-
+-      {/* ---- Sheet: Affidabilità: da cosa è fatto il punteggio ---- */}
+-      <Sheet
+-        open={sheetAperta === "affidabilita"}
+-        onClose={() => setSheetAperta(null)}
+-        title="Il tuo voto di affidabilità"
+-      >
+-        <SchedaAffidabilita affidabilita={affidabilita} recensioni={recensioni} onApri={(sezione) => setSheetAperta(sezione)} />
+-      </Sheet>
+-
+-      {/* ---- Sheet: I tuoi dati ---- */}
+-      <DatiPersonaliSheet
+-        open={sheetAperta === "dati"}
++      {/* ---- Sheet: I tuoi dati (punteggio, dati da modificare, verifica del reddito) ----
++          Le vecchie sezioni «dati», «affidabilita» e «verifica» (collegamenti, notifiche) aprono tutte questa. */}
++      <DatiSheet
++        open={sheetAperta === "dati" || sheetAperta === "affidabilita" || sheetAperta === "verifica"}
+         onClose={() => setSheetAperta(null)}
+         tenant={tenant}
++        affidabilita={affidabilita}
++        recensioni={recensioni}
++        verificaPanel={verificaPanel}
++        scorriA={sheetAperta === "verifica" ? "verifica" : null}
+       />
+ 
+       {/* ---- Sheet: La tua ricerca ---- */}
+diff --git a/src/app/globals.css b/src/app/globals.css
+index c5f4776..f4490ff 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -1215,7 +1215,7 @@ input[type="range"]::-moz-range-thumb {
+ .deck {
+   position: absolute;
+   inset: 0;
+-  top: 244px;
++  top: 232px;
+ }
+ .card {
+   position: absolute;
+@@ -2011,7 +2011,7 @@ input[type="range"]::-moz-range-thumb {
+      Resta una pila di card da sfogliare (il trascinamento funziona
+      anche col mouse), ma diventa un pannello centrato. */
+   .deck {
+-    inset: 244px auto 130px 50%;
++    inset: 232px auto 130px 50%;
+     width: 460px;
+     transform: translateX(-50%);
+   }
+@@ -3469,3 +3469,66 @@ mark.segnaposto {
+   opacity: 0.4;
+   cursor: not-allowed;
+ }
++
++/* ---- scheda unica «I tuoi dati»: punteggio in alto, informativa a parte ---- */
++.aff-riepilogo .aff-come {
++  display: block;
++  margin: -4px 0 10px;
++  font-size: 13px;
++  font-weight: 700;
++  color: var(--moss);
++  text-decoration: underline;
++  text-underline-offset: 3px;
++  text-align: left;
++}
++.aff-riepilogo .aff-recensioni {
++  margin-top: 14px;
++  align-items: flex-start;
++}
++.aff-riepilogo .aff-recensioni small {
++  display: block;
++  margin-top: 2px;
++  font-size: 12px;
++  font-weight: 400;
++  color: var(--body-soft);
++}
++.aff-indietro {
++  display: block;
++  margin: 0 0 10px;
++  font-size: 13px;
++  font-weight: 700;
++}
++.ancora-dati {
++  scroll-margin-top: 12px;
++}
++.come-voci,
++.come-fasce {
++  list-style: none;
++  margin: 0 0 6px;
++  padding: 0;
++}
++.come-voci li {
++  padding: 9px 0;
++  border-bottom: 1px solid rgba(16, 21, 26, 0.09);
++}
++.come-voci small {
++  display: block;
++  margin-top: 3px;
++  font-size: 12px;
++  color: var(--body-soft);
++}
++.come-fasce li {
++  display: flex;
++  align-items: baseline;
++  justify-content: space-between;
++  gap: 12px;
++  padding: 6px 0;
++  font-size: 14px;
++  color: var(--ink);
++  border-bottom: 1px dashed rgba(16, 21, 26, 0.12);
++}
++.come-fasce b {
++  flex: none;
++  font-size: 13px;
++  white-space: nowrap;
++}
+diff --git a/src/components/ComeSiCalcola.tsx b/src/components/ComeSiCalcola.tsx
+new file mode 100644
+index 0000000..df90d12
+--- /dev/null
++++ b/src/components/ComeSiCalcola.tsx
+@@ -0,0 +1,91 @@
++import { esempiAffidabilita, fasceAffidabilita, PUNTEGGIO_MASSIMO, PUNTI_AFFIDABILITA } from "@/lib/affidabilita";
++
++/**
++ * L'informativa su come viene calcolato il punteggio di affidabilità: solo spiegazione, nessun dato personale e nessuna
++ * azione. Ogni numero viene dalle regole del calcolo (costanti e funzioni di affidabilita.ts): l'informativa non può
++ * dire una cosa diversa dalla formula.
++ */
++export function ComeSiCalcola() {
++  const fasce = fasceAffidabilita();
++  const esempi = esempiAffidabilita();
++
++  return (
++    <div className="come-scheda">
++      <p className="sheet-sub">
++        L&apos;affidabilità è un numero da 0 a {PUNTEGGIO_MASSIMO} che i proprietari vedono accanto alla tua candidatura. Si costruisce con tre
++        voci; chi non ha ancora niente parte da 0. Non entra nella percentuale di compatibilità con la casa: nell&apos;elenco dei candidati
++        conta solo a parità di compatibilità.
++      </p>
++
++      <div className="pref-label">
++        <span>Le tre voci</span>
++      </div>
++      <ul className="come-voci">
++        <li>
++          <div className="aff-voce-riga">
++            <span>Reddito verificato</span>
++            <b className="aff-punti">+{PUNTI_AFFIDABILITA.reddito}</b>
++          </div>
++          <small>
++            Lo controlla lo staff, su un documento d&apos;identità e una prova del reddito. Se cambi lavoro o reddito la verifica decade e va rifatta.
++          </small>
++        </li>
++        <li>
++          <div className="aff-voce-riga">
++            <span>Nessun protesto</span>
++            <b className="aff-punti">+{PUNTI_AFFIDABILITA.protesti}</b>
++          </div>
++          <small>
++            Lo dichiari tu e nessuno lo controlla. Se dichiari dei protesti o non rispondi, la voce non dà punti.
++          </small>
++        </li>
++        <li>
++          <div className="aff-voce-riga">
++            <span>Garante o fideiussione</span>
++            <b className="aff-punti">+{PUNTI_AFFIDABILITA.garanzia}</b>
++          </div>
++          <small>Lo dichiari tu e nessuno lo controlla. Basta una delle due: non si sommano.</small>
++        </li>
++      </ul>
++
++      <div className="pref-label" style={{ marginTop: 16 }}>
++        <span>Le fasce</span>
++      </div>
++      <ul className="come-fasce">
++        {fasce.map((f) => (
++          <li key={f.label}>
++            <span>{f.label}</span>
++            <b>
++              {f.da}–{f.a}
++            </b>
++          </li>
++        ))}
++      </ul>
++
++      <div className="pref-label" style={{ marginTop: 16 }}>
++        <span>Qualche esempio</span>
++      </div>
++      <ul className="come-fasce">
++        {esempi.map((e) => (
++          <li key={e.descrizione}>
++            <span>{e.descrizione}</span>
++            <b>
++              {e.punteggio} · {e.label}
++            </b>
++          </li>
++        ))}
++      </ul>
++      <p className="field-note" style={{ marginTop: 8 }}>
++        Il reddito verificato pesa più delle dichiarazioni: con le sole dichiarazioni non si arriva mai oltre la fascia «Buona».
++      </p>
++
++      <div className="pref-label" style={{ marginTop: 16 }}>
++        <span>Le recensioni, a parte</span>
++      </div>
++      <p className="field-note" style={{ margin: 0 }}>
++        Le recensioni non fanno parte del punteggio. Le lascia un proprietario verificato dopo un affitto confermato, con da 1 a 5 stelle.
++        Accanto al punteggio si vede la media e quante sono, perché una sola recensione non pesa come dieci.
++      </p>
++    </div>
++  );
++}
+diff --git a/src/components/DatiPersonaliSheet.tsx b/src/components/DatiForm.tsx
+similarity index 93%
+rename from src/components/DatiPersonaliSheet.tsx
+rename to src/components/DatiForm.tsx
+index 5b7f2f3..5d5ec7e 100644
+--- a/src/components/DatiPersonaliSheet.tsx
++++ b/src/components/DatiForm.tsx
+@@ -1,7 +1,6 @@
+ "use client";
+ 
+ import { useActionState, useEffect, useRef, useState } from "react";
+-import { Sheet } from "@/components/Sheet";
+ import { LAVORO_VOCAB } from "@/lib/constants";
+ import { PUNTI_AFFIDABILITA } from "@/lib/affidabilita";
+ import type { TenantProfile } from "@/lib/types";
+@@ -13,17 +12,15 @@ import { SaveButton } from "@/components/ui/SaveButton";
+ import { AvatarUpload } from "@/components/AvatarUpload";
+ 
+ /**
+- * La scheda «I tuoi dati»: lavoro, reddito, garante, protesti, nucleo e presentazione. Si apre dal Profilo e dalla Home
+- * (è la stessa). Alcune di queste risposte valgono nel punteggio di affidabilità: le note sotto ogni domanda lo dicono.
++ * Il modulo dei dati personali: lavoro, reddito, garante, protesti, nucleo e presentazione. Sta dentro la scheda
++ * «I tuoi dati» (DatiSheet), che sulla Home e nel Profilo è la stessa. Alcune risposte valgono nel punteggio di
++ * affidabilità: le note sotto ogni domanda lo dicono. Le domande che il punteggio usa hanno un'ancora (`dati-protesti`,
++ * `dati-garante`) a cui il riepilogo in alto può far scorrere.
+  */
+-export function DatiPersonaliSheet({
+-  open,
+-  onClose,
++export function DatiForm({
+   tenant,
+   onSalvata,
+ }: {
+-  open: boolean;
+-  onClose: () => void;
+   tenant: TenantProfile;
+   /** chiamata quando un salvataggio finisce bene (la Home la usa per chiudere la scheda e dirlo) */
+   onSalvata?: () => void;
+@@ -68,7 +65,7 @@ export function DatiPersonaliSheet({
+   );
+ 
+   return (
+-    <Sheet open={open} onClose={onClose} title="I tuoi dati">
++    <>
+       <p className="sheet-sub">
+         Queste informazioni aiutano i proprietari a valutare la tua
+         candidatura.
+@@ -124,6 +121,7 @@ export function DatiPersonaliSheet({
+           )}
+         </Field>
+ 
++        <div id="dati-garante" className="ancora-dati" />
+         <Field label="Hai un garante disponibile?">
+           <div className="chip-row">
+             <Chip label="Sì" active={garante === true} onClick={() => setGarante(true)} />
+@@ -134,6 +132,7 @@ export function DatiPersonaliSheet({
+           </p>
+         </Field>
+ 
++        <div id="dati-protesti" className="ancora-dati" />
+         <Field label="Hai protesti o segnalazioni in centrale rischi?">
+           <div className="chip-row">
+             <Chip label="No" active={protestato === false} onClick={() => setProtestato(false)} />
+@@ -221,6 +220,6 @@ export function DatiPersonaliSheet({
+         {state?.ok && <p className="note-saved">Salvato — puoi chiudere.</p>}
+         <SaveButton pending={pending} />
+       </form>
+-    </Sheet>
++    </>
+   );
+ }
+diff --git a/src/components/DatiSheet.tsx b/src/components/DatiSheet.tsx
+new file mode 100644
+index 0000000..a9818f7
+--- /dev/null
++++ b/src/components/DatiSheet.tsx
+@@ -0,0 +1,111 @@
++"use client";
++
++import { useEffect, useRef, useState } from "react";
++import { Sheet } from "@/components/Sheet";
++import { DatiForm } from "@/components/DatiForm";
++import { RiepilogoAffidabilita } from "@/components/RiepilogoAffidabilita";
++import { ComeSiCalcola } from "@/components/ComeSiCalcola";
++import type { AffidabilitaResult } from "@/lib/affidabilita";
++import type { RiepilogoRecensioni } from "@/lib/recensioni";
++import type { TenantProfile } from "@/lib/types";
++
++/**
++ * La scheda «I tuoi dati»: in alto il punteggio di affidabilità (con il link a «come viene calcolato»), poi i dati da
++ * modificare e la verifica del reddito. Sulla Home e nel Profilo è la stessa.
++ *
++ * Il link «come viene calcolato» mostra, nella stessa scheda, l'informativa al posto dei dati: i dati restano in
++ * memoria (nascosti, non smontati), quindi tornando indietro non si perde ciò che si stava scrivendo.
++ */
++export function DatiSheet({
++  open,
++  onClose,
++  tenant,
++  affidabilita,
++  recensioni,
++  verificaPanel,
++  onSalvata,
++  scorriA = null,
++}: {
++  open: boolean;
++  onClose: () => void;
++  tenant: TenantProfile;
++  affidabilita: AffidabilitaResult;
++  recensioni: RiepilogoRecensioni;
++  /** il pannello per verificare il reddito con i documenti, costruito dal server */
++  verificaPanel: React.ReactNode;
++  /** chiamata quando i dati vengono salvati (la Home chiude la scheda e lo dice) */
++  onSalvata?: () => void;
++  /** all'apertura scorre a questa parte (da un collegamento che porta alla verifica del reddito) */
++  scorriA?: "verifica" | null;
++}) {
++  const [vista, setVista] = useState<"dati" | "come">("dati");
++  const radice = useRef<HTMLDivElement>(null);
++  const posizione = useRef(0);
++
++  const contenitore = () => radice.current?.closest(".sheet-scroll") as HTMLElement | null;
++
++  // dall'informativa si torna ai dati dove si era rimasti
++  useEffect(() => {
++    const c = contenitore();
++    if (!c) return;
++    if (vista === "come") {
++      posizione.current = c.scrollTop;
++      c.scrollTop = 0;
++    } else {
++      c.scrollTop = posizione.current;
++    }
++  }, [vista]);
++
++  // un collegamento alla verifica del reddito porta direttamente lì
++  useEffect(() => {
++    if (open && scorriA === "verifica") {
++      const t = setTimeout(() => vai("dati-verifica"), 60);
++      return () => clearTimeout(t);
++    }
++  }, [open, scorriA]);
++
++  function vai(ancora: string) {
++    document.getElementById(ancora)?.scrollIntoView({ behavior: "smooth", block: "start" });
++  }
++
++  const inInformativa = vista === "come";
++  // chiusa la scheda, la prossima apertura riparte dai dati (si azzera qui, non in un effetto)
++  const chiudi = () => {
++    setVista("dati");
++    onClose();
++  };
++
++  return (
++    <Sheet open={open} onClose={inInformativa ? () => setVista("dati") : chiudi} title={inInformativa ? "Come viene calcolato" : "I tuoi dati"}>
++      <div ref={radice}>
++        {inInformativa && (
++          <>
++            <button type="button" className="redo-link aff-indietro" onClick={() => setVista("dati")}>
++              ‹ Torna ai tuoi dati
++            </button>
++            <ComeSiCalcola />
++          </>
++        )}
++        {/* nascosto, non smontato: così i dati scritti a metà restano */}
++        <div hidden={inInformativa}>
++          <RiepilogoAffidabilita affidabilita={affidabilita} recensioni={recensioni} onCome={() => setVista("come")} onVai={vai} />
++
++          <div className="pref-label" style={{ marginTop: 18 }}>
++            <span>Modifica i tuoi dati</span>
++          </div>
++          <DatiForm tenant={tenant} onSalvata={onSalvata} />
++
++          <div id="dati-verifica" className="ancora-dati" />
++          <div className="pref-label" style={{ marginTop: 22 }}>
++            <span>Verifica del reddito</span>
++          </div>
++          <p className="sheet-sub">
++            Carica un documento d&apos;identità e una prova del reddito. Se li confermiamo, i proprietari vedono «Reddito verificato» e il tuo
++            punteggio di affidabilità sale.
++          </p>
++          {verificaPanel}
++        </div>
++      </div>
++    </Sheet>
++  );
++}
+diff --git a/src/components/SchedaAffidabilita.tsx b/src/components/RiepilogoAffidabilita.tsx
+similarity index 51%
+rename from src/components/SchedaAffidabilita.tsx
+rename to src/components/RiepilogoAffidabilita.tsx
+index e1e1779..2175693 100644
+--- a/src/components/SchedaAffidabilita.tsx
++++ b/src/components/RiepilogoAffidabilita.tsx
+@@ -1,4 +1,4 @@
+-import { punteggioPossibile, PUNTEGGIO_MASSIMO, SOGLIE_ETICHETTA, type AffidabilitaResult } from "@/lib/affidabilita";
++import { PUNTEGGIO_MASSIMO, punteggioPossibile, type AffidabilitaResult, type VoceAffidabilita } from "@/lib/affidabilita";
+ import { stelleTesto, testoRecensioni, type RiepilogoRecensioni } from "@/lib/recensioni";
+ 
+ /** I punti di una voce, come si leggono: «+60» se l'hai presa, «0 su 60» se no. */
+@@ -6,36 +6,44 @@ export function testoPunti(v: { presa: boolean; punti: number; massimo: number }
+   return v.presa ? `+${v.punti}` : `0 su ${v.massimo}`;
+ }
+ 
++/** A quale parte della scheda «I tuoi dati» porta il suggerimento di ogni voce. */
++export const ANCORE_VOCI: Record<VoceAffidabilita["id"], string> = {
++  reddito: "dati-verifica",
++  protesti: "dati-protesti",
++  garanzia: "dati-garante",
++};
++
+ /**
+- * Come si calcola il punteggio di affidabilità: tre voci, quanto valgono e chi le controlla. Poi le recensioni, che
+- * stanno a parte. Si mostra nella Home e nel Profilo (stessa scheda, stessi numeri: i punti vengono dalla stessa
+- * funzione che calcola il punteggio).
++ * Il punteggio in cima alla scheda «I tuoi dati»: il numero, il link a «come viene calcolato», le tre voci (quanto
++ * valgono, chi le controlla, cosa manca) e le recensioni, che stanno a parte. Non spiega le regole: lo fa la scheda
++ * «Come viene calcolato».
+  */
+-export function SchedaAffidabilita({
++export function RiepilogoAffidabilita({
+   affidabilita,
+   recensioni,
+-  onApri,
++  onCome,
++  onVai,
+ }: {
+   affidabilita: AffidabilitaResult;
+   recensioni: RiepilogoRecensioni;
+-  /** si chiama con la sezione da aprire: la verifica del reddito, o i dati personali */
+-  onApri?: (sezione: "verifica" | "dati") => void;
++  /** apre l'informativa su come viene calcolato il punteggio */
++  onCome: () => void;
++  /** scorre alla parte della scheda dove si completa una voce (l'id dell'ancora) */
++  onVai?: (ancora: string) => void;
+ }) {
+   const { punteggio, label, voci } = affidabilita;
+   const possibile = punteggioPossibile(affidabilita);
+ 
+   return (
+-    <div className="aff-scheda">
+-      <p className="sheet-sub">
+-        È il numero che i proprietari vedono accanto alla tua candidatura. Va da 0 a {PUNTEGGIO_MASSIMO} e si costruisce con tre voci.
+-        Chi non ha ancora niente parte da 0.
+-      </p>
+-
++    <div className="aff-riepilogo">
+       <div className="aff-totale" aria-label={`Punteggio ${punteggio} su ${PUNTEGGIO_MASSIMO}, ${label}`}>
+         <b>{punteggio}</b>
+         <span>/{PUNTEGGIO_MASSIMO}</span>
+         <em>{label}</em>
+       </div>
++      <button type="button" className="redo-link aff-come" onClick={onCome}>
++        Come viene calcolato il punteggio ›
++      </button>
+ 
+       <ul className="aff-voci">
+         {voci.map((v) => (
+@@ -48,9 +56,8 @@ export function SchedaAffidabilita({
+             <small>{v.nota}</small>
+             {!v.presa &&
+               v.suggerimento &&
+-              v.sezione &&
+-              (onApri ? (
+-                <button type="button" className="redo-link aff-azione" onClick={() => onApri(v.sezione!)}>
++              (onVai ? (
++                <button type="button" className="redo-link aff-azione" onClick={() => onVai(ANCORE_VOCI[v.id])}>
+                   {v.suggerimento}
+                 </button>
+               ) : (
+@@ -59,29 +66,20 @@ export function SchedaAffidabilita({
+           </li>
+         ))}
+       </ul>
+-
+       {possibile > punteggio && (
+         <p className="aff-possibile">
+           Completando le voci che puoi ottenere arrivi a <b>{possibile}</b>.
+         </p>
+       )}
+-      <p className="field-note" style={{ marginTop: 8 }}>
+-        Lo staff controlla solo il reddito. Protesti e garante sono dichiarazioni tue, e restano tali. Da {SOGLIE_ETICHETTA.moltoBuona} punti in su
+-        l&apos;etichetta è «Molto buona», da {SOGLIE_ETICHETTA.eccellente} «Eccellente».
+-      </p>
+ 
+-      <div className="pref-label" style={{ marginTop: 16 }}>
+-        <span>Le recensioni, a parte</span>
+-      </div>
+-      <p className="field-note" style={{ margin: "0 0 6px 0" }}>
+-        Non cambiano il punteggio: i proprietari le vedono accanto. Le lascia un proprietario verificato dopo un affitto confermato, con
+-        1-5 stelle; qui si mostra la media e quante sono.
+-      </p>
+-      <div className="aff-recensioni" aria-label={testoRecensioni(recensioni)}>
++      <div className="aff-recensioni" aria-label={`Recensioni: ${testoRecensioni(recensioni)}`}>
+         <span aria-hidden="true" className="aff-stelle">
+           {stelleTesto(recensioni.media)}
+         </span>
+-        <b>{testoRecensioni(recensioni)}</b>
++        <span>
++          <b>{testoRecensioni(recensioni)}</b>
++          <small>Le recensioni stanno a parte: non cambiano il punteggio.</small>
++        </span>
+       </div>
+     </div>
+   );
+diff --git a/src/lib/affidabilita.ts b/src/lib/affidabilita.ts
+index 8e4e049..52e4011 100644
+--- a/src/lib/affidabilita.ts
++++ b/src/lib/affidabilita.ts
+@@ -60,6 +60,32 @@ export function etichettaPunteggio(punteggio: number): AffidabilitaResult["label
+   return "Da costruire";
+ }
+ 
++/** Le fasce di punteggio, con gli estremi: ricavate dalle soglie, così l'informativa non può contraddire la formula. */
++export function fasceAffidabilita(): { label: AffidabilitaResult["label"]; da: number; a: number }[] {
++  const { buona, moltoBuona, eccellente } = SOGLIE_ETICHETTA;
++  return [
++    { label: "Da costruire", da: PUNTEGGIO_MINIMO, a: buona - 1 },
++    { label: "Buona", da: buona, a: moltoBuona - 1 },
++    { label: "Molto buona", da: moltoBuona, a: eccellente - 1 },
++    { label: "Eccellente", da: eccellente, a: PUNTEGGIO_MASSIMO },
++  ];
++}
++
++/** Qualche caso tipico, con il punteggio che dà e l'etichetta (anche questi ricavati dalle regole). */
++export function esempiAffidabilita(): { descrizione: string; punteggio: number; label: AffidabilitaResult["label"] }[] {
++  const casi: [string, AffidabilitaInput][] = [
++    ["Nessun dato", { verificato: false, protestato: null, garante: null, fideiussione: null }],
++    ["Solo le dichiarazioni (nessun protesto, garante)", { verificato: false, protestato: false, garante: true, fideiussione: null }],
++    ["Solo il reddito verificato", { verificato: true, protestato: null, garante: null, fideiussione: null }],
++    ["Reddito verificato e nessun protesto", { verificato: true, protestato: false, garante: null, fideiussione: null }],
++    ["Tutto", { verificato: true, protestato: false, garante: true, fideiussione: null }],
++  ];
++  return casi.map(([descrizione, input]) => {
++    const r = computeAffidabilita(input);
++    return { descrizione, punteggio: r.punteggio, label: r.label };
++  });
++}
++
+ export function computeAffidabilita(p: AffidabilitaInput): AffidabilitaResult {
+   const { reddito, protesti, garanzia } = PUNTI_AFFIDABILITA;
+ 
+-- 
+2.43.0
+
