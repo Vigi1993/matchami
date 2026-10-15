@@ -77,6 +77,11 @@ export type ValutazioneCandidato = {
    * separate: chi le legge deve gestire l'assenza.
    */
   recensioni?: RiepilogoRecensioni;
+  /**
+   * «Inquilino raccomandato» (due recensioni positive da due proprietari diversi). Manca nelle fotografie scattate prima:
+   * chi non ha il dato non risulta raccomandato.
+   */
+  raccomandato?: boolean;
 };
 
 /**
@@ -90,6 +95,7 @@ export function valutaCandidato(input: {
   canone: number;
   profilo: ProfiloCandidato;
   recensioni: RiepilogoRecensioni;
+  raccomandato?: boolean;
 }): ValutazioneCandidato {
   const { profilo } = input;
 
@@ -108,6 +114,7 @@ export function valutaCandidato(input: {
     ),
     affidabilita,
     recensioni: input.recensioni,
+    raccomandato: input.raccomandato === true,
   };
 }
 
@@ -135,5 +142,6 @@ export function leggiFotografia(grezzo: unknown): ValutazioneCandidato | null {
   }
   // le recensioni sono facoltative (le fotografie vecchie non le hanno); se la forma non è giusta si ignorano
   const recensioni = leggiRiepilogo((grezzo as Record<string, unknown>).recensioni);
-  return { match: match as RisultatoProprietario, affidabilita, ...(recensioni ? { recensioni } : {}) };
+  const raccomandato = (grezzo as Record<string, unknown>).raccomandato;
+  return { match: match as RisultatoProprietario, affidabilita, ...(recensioni ? { recensioni } : {}), ...(typeof raccomandato === "boolean" ? { raccomandato } : {}) };
 }

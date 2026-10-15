@@ -4,7 +4,7 @@ import { OwnerHomeClient } from "./OwnerHomeClient";
 import { VerificaHome } from "./VerificaHome";
 import type { ImmobileVerifica } from "@/lib/verifica";
 import { computeAffidabilita } from "@/lib/affidabilita";
-import { riepilogoRecensioni } from "@/lib/recensioni";
+import { riepilogoRecensioni, statoRaccomandazione } from "@/lib/recensioni";
 import { campiMatchDaRiga, haCriteriDiRicerca, preparaMazzo, profiloRicercaDaRighe } from "@/lib/match";
 import { mappaLuoghi, type Luogo } from "@/lib/luoghi";
 import type { ProfiloRicerca } from "@/lib/match";
@@ -50,7 +50,7 @@ async function TenantHome({ userId }: { userId: string }) {
       .from("tenant_interessi")
       .select("attributo_key, peso, valore, necessaria")
       .eq("tenant_id", userId),
-    supabase.from("recensioni").select("voto").eq("tenant_id", userId),
+    supabase.from("recensioni").select("voto, autore_id, created_at").eq("tenant_id", userId),
     supabase.from("candidature").select("listing_id").eq("tenant_id", userId),
     // i preferiti e gli scarti degli ultimi 30 giorni: non si rimettono nel mazzo.
     // Se la lettura non riesce, il mazzo si vede intero: meglio un annuncio in più che nessuno.
@@ -61,6 +61,8 @@ async function TenantHome({ userId }: { userId: string }) {
 
   // Le recensioni dei proprietari stanno a parte dal punteggio di affidabilità: si mostrano accanto.
   const riepilogo = riepilogoRecensioni((recensioni ?? []).map((r) => r.voto));
+  // il badge «Inquilino raccomandato»: due recensioni positive da due proprietari diversi
+  const raccomandazione = statoRaccomandazione(recensioni ?? []);
 
   const tenantProfile = tenant as TenantProfile;
 
@@ -133,6 +135,7 @@ async function TenantHome({ userId }: { userId: string }) {
     <HomeClient
       affidabilita={affidabilita}
       recensioni={riepilogo}
+      raccomandazione={raccomandazione}
       tenant={tenantProfile}
       verificaPanel={
         <VerificaRedditoPanel

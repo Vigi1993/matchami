@@ -1,6 +1,7 @@
 "use client";
 
 import { stelleTesto, testoRecensioni } from "@/lib/recensioni";
+import { BadgeRaccomandato } from "@/components/BadgeRaccomandato";
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { Sheet } from "@/components/Sheet";
@@ -244,6 +245,15 @@ export function DatabaseClient({
                 value={`${selezionata.valutazione.affidabilita}/100`}
               />
             )}
+            {/* il badge: due recensioni positive da due proprietari diversi (le valutazioni vecchie non lo hanno) */}
+            {selezionata.valutazione?.raccomandato === true && (
+              <div className="feat-row">
+                <span className="k">Inquilino raccomandato</span>
+                <span className="v">
+                  <BadgeRaccomandato compatto />
+                </span>
+              </div>
+            )}
             {/* le recensioni stanno a parte dal punteggio; le valutazioni vecchie non le hanno */}
             {selezionata.valutazione?.recensioni && (
               <DettaglioRow
@@ -410,6 +420,7 @@ function SezioneAnnuncio({
           match: c.valutazione!.match,
           affidabilita: c.valutazione!.affidabilita,
           recensioni: c.valutazione!.recensioni ?? null,
+          raccomandato: c.valutazione!.raccomandato === true,
         }))
       ).map((v) => v.c)
     : attesa;
@@ -495,6 +506,11 @@ function Scheda({
         <div className="mc-title">
           {c.nome} {c.cognome}
         </div>
+        {v?.raccomandato === true && (
+          <div style={{ margin: "3px 0" }}>
+            <BadgeRaccomandato compatto />
+          </div>
+        )}
         <div className="mc-meta">
           {v ? `Affidabilità ${v.affidabilita}` : ""}
           {v?.recensioni && v.recensioni.numero > 0 && ` · ★ ${v.recensioni.media?.toLocaleString("it-IT", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} (${v.recensioni.numero})`}

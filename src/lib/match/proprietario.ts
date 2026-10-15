@@ -194,12 +194,15 @@ export type VoceCandidato = {
   affidabilita: number | null;
   /** le recensioni, a parità di tutto il resto: prima la media più alta, poi chi ne ha di più */
   recensioni?: { numero: number; media: number | null } | null;
+  /** «Inquilino raccomandato»: a parità di compatibilità passa avanti, prima ancora dell'affidabilità */
+  raccomandato?: boolean;
 };
 
 /**
  * Ordine dei candidati di un annuncio: prima chi soddisfa tutti i
  * criteri obbligatori, poi per percentuale decrescente, a parità per
- * affidabilità decrescente e, ancora a parità, per recensioni.
+ * chi è un inquilino raccomandato, poi per affidabilità decrescente e, ancora a
+ * parità, per recensioni.
  *
  * L'affidabilità qui NON entra nella percentuale: è una proprietà della
  * persona, uguale per ogni casa, e si usa solo per decidere tra pari.
@@ -213,6 +216,9 @@ export function confrontaCandidati(
   const pa = a.match.punteggio ?? -1;
   const pb = b.match.punteggio ?? -1;
   if (pa !== pb) return pb - pa;
+
+  // a parità di compatibilità, prima chi è un inquilino raccomandato (non cambia la percentuale)
+  if ((a.raccomandato === true) !== (b.raccomandato === true)) return a.raccomandato === true ? -1 : 1;
 
   if ((a.affidabilita ?? -1) !== (b.affidabilita ?? -1)) return (b.affidabilita ?? -1) - (a.affidabilita ?? -1);
 

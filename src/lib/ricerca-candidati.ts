@@ -21,6 +21,8 @@ export type Filtri = {
   testo: string;
   stato: FiltroStato;
   soloVerificati: boolean;
+  /** solo gli «inquilini raccomandati» (due recensioni positive da due proprietari diversi) */
+  soloRaccomandati: boolean;
   senzaBlocchi: boolean;
   minimo: MinimoCompatibilita;
   /** un solo annuncio, o tutti (nullo) */
@@ -31,6 +33,7 @@ export const FILTRI_VUOTI: Filtri = Object.freeze({
   testo: "",
   stato: "tutte",
   soloVerificati: false,
+  soloRaccomandati: false,
   senzaBlocchi: false,
   minimo: 0,
   annuncioId: null,
@@ -90,6 +93,9 @@ export function corrisponde(
   // risulta verificato, e lo dice la schermata stessa.
   if (f.soloVerificati && c.tenant_profiles?.verificato !== true) return false;
 
+  // Chi non ha il dato (valutazione assente o scattata prima del badge) non risulta raccomandato.
+  if (f.soloRaccomandati && c.valutazione?.raccomandato !== true) return false;
+
   // Senza una valutazione non si può dire che sia bloccato: resta.
   if (f.senzaBlocchi && c.valutazione?.match.bloccato === true) return false;
 
@@ -124,6 +130,7 @@ export function numeroFiltriAttivi(f: Filtri): number {
     (normalizzaRicerca(f.testo) ? 1 : 0) +
     (f.stato !== "tutte" ? 1 : 0) +
     (f.soloVerificati ? 1 : 0) +
+    (f.soloRaccomandati ? 1 : 0) +
     (f.senzaBlocchi ? 1 : 0) +
     (f.minimo > 0 ? 1 : 0) +
     (f.annuncioId !== null ? 1 : 0)

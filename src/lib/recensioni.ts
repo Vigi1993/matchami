@@ -47,3 +47,51 @@ export function leggiRiepilogo(x: unknown): RiepilogoRecensioni | null {
   if (typeof media !== "number" || !Number.isFinite(media) || media < VOTO_MINIMO || media > VOTO_MASSIMO) return null;
   return { numero, media };
 }
+
+// ============================================================ «Inquilino raccomandato»
+/**
+ * Il badge «Inquilino raccomandato»: si ottiene con almeno DUE recensioni positive da DUE proprietari DIVERSI, e nessuna
+ * recensione negativa. Non cambia il punteggio di affidabilità (le recensioni restano a parte): dà visibilità ai proprietari.
+ *
+ *  - positiva: da 4 stelle in su; negativa: da 2 stelle in giù; 3 stelle è neutra (non toglie il badge, non conta per averlo);
+ *  - conta chi ha scritto, non quante recensioni: due recensioni dello stesso proprietario (per due affitti) valgono una;
+ *  - contano solo le recensioni degli ultimi ANNI_VALIDITA anni: col tempo il badge si perde se non si rinnova, e una
+ *    recensione negativa vecchia smette di pesare;
+ *  - basta UNA recensione negativa recente, di chiunque, per perderlo.
+ */
+export const VOTO_POSITIVO_MINIMO = 4;
+export const VOTO_NEGATIVO_MASSIMO = 2;
+export const AUTORI_DIVERSI_MINIMI = 2;
+export const ANNI_VALIDITA = 4;
+export const NOME_BADGE_RACCOMANDATO = "Inquilino raccomandato";
+
+/** Una recensione come arriva dal database; ogni campo può mancare o essere rotto. */
+export type RecensioneGrezza = { voto?: unknown; autore_id?: unknown; created_at?: unknown };
+
+export type StatoRaccomandazione = {
+  raccomandato: boolean;
+  /** quanti proprietari diversi hanno scritto una recensione positiva (recente) */
+  autoriPositivi: number;
+  /** quanti ne mancano per il badge (0 se ci sei) */
+  mancano: number;
+  /** c'è una recensione negativa recente: finché c'è, il badge non si ha */
+  negativa: boolean;
+};
+
+const MS_ANNO = 365.25 * 24 * 60 * 60 * 1000;
+
+/** `ora` si può passare per provarla. Una data illeggibile o futura non esclude la recensione. */
+export function statoRaccomandazione(righe: readonly RecensioneGrezza[] | null | undefined, ora: number = Date.now()): StatoRaccomandazione {
+  const autori = new Set<string>();
+  let negativa = false;
+  // un valore che non è una lista (dati rotti) vale «nessuna recensione», non un errore
+  for (const r of Array.isArray(righe) ? righe : []) {
+    if (typeof r !== "object" || r === null || !votoValido(r.voto)) continue;
+    const t = typeof r.created_at === "string" ? Date.parse(r.created_at) : NaN;
+    if (!Number.isNaN(t) && ora - t > ANNI_VALIDITA * MS_ANNO) continue; // troppo vecchia: non conta, né in bene né in male
+    if (r.voto <= VOTO_NEGATIVO_MASSIMO) negativa = true;
+    else if (r.voto >= VOTO_POSITIVO_MINIMO && typeof r.autore_id === "string" && r.autore_id.trim() !== "") autori.add(r.autore_id);
+  }
+  const mancano = Math.max(0, AUTORI_DIVERSI_MINIMI - autori.size);
+  return { raccomandato: !negativa && autori.size >= AUTORI_DIVERSI_MINIMI, autoriPositivi: autori.size, mancano, negativa };
+}

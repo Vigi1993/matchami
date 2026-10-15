@@ -13,7 +13,7 @@ import type { TenantProfile } from "@/lib/types";
 import { logout } from "@/app/login/actions";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { RicercaSheet } from "@/components/RicercaSheet";
-import { testoRecensioni, type RiepilogoRecensioni } from "@/lib/recensioni";
+import { testoRecensioni, type RiepilogoRecensioni, type StatoRaccomandazione } from "@/lib/recensioni";
 import type { SezioneProfilo } from "@/lib/home";
 import type { Luogo } from "@/lib/luoghi";
 import type { ProfiloRicerca } from "@/lib/match";
@@ -45,6 +45,8 @@ type Props = {
   luoghi: Luogo[];
   /** le recensioni dei proprietari: la media e quante sono (a parte dal punteggio) */
   recensioni: RiepilogoRecensioni;
+  /** il badge «Inquilino raccomandato» */
+  raccomandazione: StatoRaccomandazione;
   consensoMarketingIniziale: boolean;
   consensoTerziIniziale: boolean;
   /** la scheda da aprire subito (da un collegamento con ?apri=...), se è tra quelle ammesse */
@@ -62,6 +64,7 @@ export function ProfiloClient({
   ricerca,
   luoghi,
   recensioni,
+  raccomandazione,
   consensoMarketingIniziale,
   consensoTerziIniziale,
   aperturaIniziale = null,
@@ -135,7 +138,7 @@ export function ProfiloClient({
         color="var(--gold)"
         icon={<IconStella className="fill-white stroke-none" />}
         title={`${affidabilita.punteggio}/100 · Affidabilità ${affidabilita.label}`}
-        subtitle={`Il tuo punteggio, i tuoi dati e la verifica del reddito. Recensioni, a parte: ${testoRecensioni(recensioni)}.`}
+        subtitle={`Il tuo punteggio, i tuoi dati e la verifica del reddito. Recensioni, a parte: ${testoRecensioni(recensioni)}.${raccomandazione.raccomandato ? " Sei un inquilino raccomandato." : ""}`}
         cta="Vedi e modifica i tuoi dati"
         onClick={() => setSheetAperta("dati")}
       />
@@ -195,6 +198,7 @@ export function ProfiloClient({
         tenant={tenant}
         affidabilita={affidabilita}
         recensioni={recensioni}
+        raccomandazione={raccomandazione}
         verificaPanel={verificaPanel}
         scorriA={sheetAperta === "verifica" ? "verifica" : null}
       />

@@ -1,5 +1,22 @@
 import { PUNTEGGIO_MASSIMO, punteggioPossibile, type AffidabilitaResult, type VoceAffidabilita } from "@/lib/affidabilita";
-import { stelleTesto, testoRecensioni, type RiepilogoRecensioni } from "@/lib/recensioni";
+import {
+  ANNI_VALIDITA,
+  AUTORI_DIVERSI_MINIMI,
+  NOME_BADGE_RACCOMANDATO,
+  stelleTesto,
+  testoRecensioni,
+  type RiepilogoRecensioni,
+  type StatoRaccomandazione,
+} from "@/lib/recensioni";
+import { BadgeRaccomandato } from "@/components/BadgeRaccomandato";
+
+/** Cosa si dice sul badge: ce l'hai, quanto ti manca, o perché per ora non si può avere. */
+export function testoRaccomandazione(r: StatoRaccomandazione): string {
+  if (r.raccomandato) return "I proprietari lo vedono sulla tua candidatura e, a parità di compatibilità, ti vedono prima.";
+  if (r.negativa) return `Per ora non si può ottenere: c'è una recensione negativa degli ultimi ${ANNI_VALIDITA} anni.`;
+  if (r.autoriPositivi === 0) return `Ti servono ${AUTORI_DIVERSI_MINIMI} recensioni positive da ${AUTORI_DIVERSI_MINIMI} proprietari diversi.`;
+  return `Ne hai ${r.autoriPositivi} su ${AUTORI_DIVERSI_MINIMI}: te ne manc${r.mancano === 1 ? "a" : "ano"} ${r.mancano} da ${r.mancano === 1 ? "un altro proprietario" : "altri proprietari"}.`;
+}
 
 /** I punti di una voce, come si leggono: «+60» se l'hai presa, «0 su 60» se no. */
 export function testoPunti(v: { presa: boolean; punti: number; massimo: number }): string {
@@ -21,11 +38,13 @@ export const ANCORE_VOCI: Record<VoceAffidabilita["id"], string> = {
 export function RiepilogoAffidabilita({
   affidabilita,
   recensioni,
+  raccomandazione,
   onCome,
   onVai,
 }: {
   affidabilita: AffidabilitaResult;
   recensioni: RiepilogoRecensioni;
+  raccomandazione: StatoRaccomandazione;
   /** apre l'informativa su come viene calcolato il punteggio */
   onCome: () => void;
   /** scorre alla parte della scheda dove si completa una voce (l'id dell'ancora) */
@@ -80,6 +99,19 @@ export function RiepilogoAffidabilita({
           <b>{testoRecensioni(recensioni)}</b>
           <small>Le recensioni stanno a parte: non cambiano il punteggio.</small>
         </span>
+      </div>
+
+      {/* il badge: si ottiene con le recensioni, e dà visibilità ai proprietari */}
+      <div className={`aff-raccomandato ${raccomandazione.raccomandato ? "ottenuto" : ""}`}>
+        {raccomandazione.raccomandato ? (
+          <BadgeRaccomandato />
+        ) : (
+          <b className="aff-raccomandato-titolo">{NOME_BADGE_RACCOMANDATO}</b>
+        )}
+        <small>{testoRaccomandazione(raccomandazione)}</small>
+        <button type="button" className="redo-link aff-azione" onClick={onCome}>
+          Come funziona
+        </button>
       </div>
     </div>
   );

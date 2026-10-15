@@ -1,4 +1,5 @@
 import { esempiAffidabilita, fasceAffidabilita, PUNTEGGIO_MASSIMO, PUNTI_AFFIDABILITA } from "@/lib/affidabilita";
+import { ANNI_VALIDITA, AUTORI_DIVERSI_MINIMI, NOME_BADGE_RACCOMANDATO, VOTO_NEGATIVO_MASSIMO, VOTO_POSITIVO_MINIMO } from "@/lib/recensioni";
 
 /**
  * L'informativa su come viene calcolato il punteggio di affidabilità: solo spiegazione, nessun dato personale e nessuna
@@ -14,7 +15,7 @@ export function ComeSiCalcola() {
       <p className="sheet-sub">
         L&apos;affidabilità è un numero da 0 a {PUNTEGGIO_MASSIMO} che i proprietari vedono accanto alla tua candidatura. Si costruisce con tre
         voci; chi non ha ancora niente parte da 0. Non entra nella percentuale di compatibilità con la casa: nell&apos;elenco dei candidati
-        conta solo a parità di compatibilità.
+        conta solo a parità di compatibilità: prima passa chi ha il badge «{NOME_BADGE_RACCOMANDATO}», poi chi ha l&apos;affidabilità più alta.
       </p>
 
       <div className="pref-label">
@@ -85,6 +86,26 @@ export function ComeSiCalcola() {
       <p className="field-note" style={{ margin: 0 }}>
         Le recensioni non fanno parte del punteggio. Le lascia un proprietario verificato dopo un affitto confermato, con da 1 a 5 stelle.
         Accanto al punteggio si vede la media e quante sono, perché una sola recensione non pesa come dieci.
+      </p>
+
+      <div className="pref-label" style={{ marginTop: 16 }}>
+        <span>{NOME_BADGE_RACCOMANDATO}</span>
+      </div>
+      <p className="field-note" style={{ margin: "0 0 6px 0" }}>
+        È un badge, non un punteggio: non cambia il numero da 0 a {PUNTEGGIO_MASSIMO}. Si ottiene con almeno {AUTORI_DIVERSI_MINIMI} recensioni positive (da{" "}
+        {VOTO_POSITIVO_MINIMO} stelle in su) di {AUTORI_DIVERSI_MINIMI} proprietari diversi.
+      </p>
+      <ul className="come-regole">
+        <li>Due recensioni dello stesso proprietario valgono una sola.</li>
+        <li>Una recensione da 3 stelle non conta per ottenerlo, ma non lo toglie.</li>
+        <li>
+          Basta una recensione negativa (da {VOTO_NEGATIVO_MASSIMO} stelle in giù) per non averlo, o per perderlo. Contano solo le recensioni degli ultimi{" "}
+          {ANNI_VALIDITA} anni: col tempo il badge va rinnovato.
+        </li>
+      </ul>
+      <p className="field-note" style={{ margin: "6px 0 0 0" }}>
+        Cosa cambia: i proprietari vedono il badge sulla tua candidatura, possono cercare solo gli «Inquilini raccomandati» e, a parità di compatibilità, chi
+        ce l&apos;ha compare prima. Per avere delle recensioni, dichiara un affitto o invita il tuo proprietario da «Gestione affitto».
       </p>
     </div>
   );

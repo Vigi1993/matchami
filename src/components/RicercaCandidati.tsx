@@ -78,6 +78,9 @@ export function RicercaCandidati({
         <Interruttore acceso={filtri.soloVerificati} onClick={() => imposta({ soloVerificati: !filtri.soloVerificati })}>
           Reddito verificato
         </Interruttore>
+        <Interruttore acceso={filtri.soloRaccomandati} onClick={() => imposta({ soloRaccomandati: !filtri.soloRaccomandati })}>
+          Inquilini raccomandati
+        </Interruttore>
         <Interruttore acceso={filtri.senzaBlocchi} onClick={() => imposta({ senzaBlocchi: !filtri.senzaBlocchi })}>
           Senza blocchi
         </Interruttore>

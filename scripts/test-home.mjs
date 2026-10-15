@@ -77,12 +77,12 @@ test("Home: nel pannello dell'affidabilità c'è UN solo pulsante, «Modifica da
   assert.match(pannello, /<div className="hi-punteggio" role="group" aria-label=\{`Affidabilità \$\{affidabilita\.punteggio\} su 100, \$\{affidabilita\.label\}`\}>/);
   assert.match(pannello, /<button type="button" className="hi-azione" onClick=\{\(\) => setSchedaDati\(true\)\}>\s+Modifica dati\s+<\/button>/); assert.equal([...pannello.matchAll(/<button/g)].length, 1, "ci deve essere un solo pulsante");
   assert.ok(!/Come si calcola/.test(h), "resta il vecchio pulsante «Come si calcola»"); assert.ok(!/schedaPunteggio|SchedaAffidabilita|DatiPersonaliSheet/.test(h), "restano pezzi delle schede vecchie");
-  const pg = leggi("src", "app", "(app)", "page.tsx"); assert.match(pg, /ricerca=\{profiloRicerca\}/); assert.match(pg, /recensioni=\{riepilogo\}\s+tenant=\{tenantProfile\}\s+verificaPanel=\{/);
+  const pg = leggi("src", "app", "(app)", "page.tsx"); assert.match(pg, /ricerca=\{profiloRicerca\}/); assert.match(pg, /recensioni=\{riepilogo\}\s+raccomandazione=\{raccomandazione\}\s+tenant=\{tenantProfile\}\s+verificaPanel=\{/);
 });
 
 test("Home: «Modifica dati» apre la scheda unica qui (punteggio, dati, verifica), montata solo se aperta; salvando si chiude e lo dice; niente più rimandi al Profilo", () => {
   const h = leggi("src", "app", "(app)", "HomeClient.tsx"); assert.match(h, /import \{ DatiSheet \} from "@\/components\/DatiSheet"/);
-  assert.match(h, /\{schedaDati && \(\s+<DatiSheet\s+open\s+onClose=\{\(\) => setSchedaDati\(false\)\}\s+tenant=\{tenant\}\s+affidabilita=\{affidabilita\}\s+recensioni=\{recensioni\}\s+verificaPanel=\{verificaPanel\}\s+onSalvata=\{\(\) => \{\s+setSchedaDati\(false\);\s+setAvviso\(\{ errore: false, testo: "Dati aggiornati\." \}\);/);
+  assert.match(h, /\{schedaDati && \(\s+<DatiSheet\s+open\s+onClose=\{\(\) => setSchedaDati\(false\)\}\s+tenant=\{tenant\}\s+affidabilita=\{affidabilita\}\s+recensioni=\{recensioni\}\s+raccomandazione=\{raccomandazione\}\s+verificaPanel=\{verificaPanel\}\s+onSalvata=\{\(\) => \{\s+setSchedaDati\(false\);\s+setAvviso\(\{ errore: false, testo: "Dati aggiornati\." \}\);/);
   assert.ok(!/useRouter|router\.push/.test(h), "la Home rimanda ancora altrove"); assert.ok(!/href="\/profilo"/.test(h));
   const pg = leggi("src", "app", "(app)", "page.tsx"); assert.match(pg, /from\("documenti_inquilino"\)\.select\("id, tipo, percorso, nome_file"\)\.eq\("tenant_id", userId\)/); assert.match(pg, /<VerificaRedditoPanel\s+stato=\{tenantProfile\.verifica_stato\}/);
 });
@@ -91,7 +91,7 @@ test("Profilo: una sola riga e una sola scheda per punteggio, dati e verifica (l
   const p = leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx"); assert.match(p, /import \{ RicercaSheet \} from "@\/components\/RicercaSheet"/); assert.match(p, /import \{ DatiSheet \} from "@\/components\/DatiSheet"/);
   assert.ok(!/function RicercaSheet/.test(p) && !/function DatiPersonaliSheet/.test(p) && !/function SaveButton/.test(p), "il Profilo ha ancora una copia di una scheda");
   assert.equal([...p.matchAll(/onClick=\{\(\) => setSheetAperta\("(dati|affidabilita|verifica)"\)\}/g)].length, 1, "ci deve essere una riga sola per punteggio, dati e verifica"); assert.match(p, /onClick=\{\(\) => setSheetAperta\("dati"\)\}/);
-  assert.match(p, /<DatiSheet[\s\S]*?recensioni=\{recensioni\}\s+verificaPanel=\{verificaPanel\}\s+scorriA=\{sheetAperta === "verifica" \? "verifica" : null\}/); assert.ok(!/SchedaAffidabilita|rigaProfilo|hasRecensioni|\.checks/.test(p), "il Profilo usa ancora pezzi vecchi");
+  assert.match(p, /<DatiSheet[\s\S]*?recensioni=\{recensioni\}\s+raccomandazione=\{raccomandazione\}\s+verificaPanel=\{verificaPanel\}\s+scorriA=\{sheetAperta === "verifica" \? "verifica" : null\}/); assert.ok(!/SchedaAffidabilita|rigaProfilo|hasRecensioni|\.checks/.test(p), "il Profilo usa ancora pezzi vecchi");
   const pg = leggi("src", "app", "(app)", "profilo", "page.tsx"); assert.match(pg, /sezioneProfilo\(\(await searchParams\)\.apri\)/); assert.match(pg, /searchParams: Promise<\{ apri\?: string \| string\[\] \}>/); assert.match(pg, /recensioni=\{riepilogo\}/);
 });
 

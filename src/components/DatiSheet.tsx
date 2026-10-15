@@ -6,7 +6,7 @@ import { DatiForm } from "@/components/DatiForm";
 import { RiepilogoAffidabilita } from "@/components/RiepilogoAffidabilita";
 import { ComeSiCalcola } from "@/components/ComeSiCalcola";
 import type { AffidabilitaResult } from "@/lib/affidabilita";
-import type { RiepilogoRecensioni } from "@/lib/recensioni";
+import type { RiepilogoRecensioni, StatoRaccomandazione } from "@/lib/recensioni";
 import type { TenantProfile } from "@/lib/types";
 
 /**
@@ -22,6 +22,7 @@ export function DatiSheet({
   tenant,
   affidabilita,
   recensioni,
+  raccomandazione,
   verificaPanel,
   onSalvata,
   scorriA = null,
@@ -31,6 +32,7 @@ export function DatiSheet({
   tenant: TenantProfile;
   affidabilita: AffidabilitaResult;
   recensioni: RiepilogoRecensioni;
+  raccomandazione: StatoRaccomandazione;
   /** il pannello per verificare il reddito con i documenti, costruito dal server */
   verificaPanel: React.ReactNode;
   /** chiamata quando i dati vengono salvati (la Home chiude la scheda e lo dice) */
@@ -88,7 +90,7 @@ export function DatiSheet({
         )}
         {/* nascosto, non smontato: così i dati scritti a metà restano */}
         <div hidden={inInformativa}>
-          <RiepilogoAffidabilita affidabilita={affidabilita} recensioni={recensioni} onCome={() => setVista("come")} onVai={vai} />
+          <RiepilogoAffidabilita affidabilita={affidabilita} recensioni={recensioni} raccomandazione={raccomandazione} onCome={() => setVista("come")} onVai={vai} />
 
           <div className="pref-label" style={{ marginTop: 18 }}>
             <span>Modifica i tuoi dati</span>

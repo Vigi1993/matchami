@@ -25,7 +25,10 @@ const vista = (id, o = {}) => ({ candidatura_id: id, nome: "Tina", cognome: "Ros
   garante: true, fideiussione: false, protestato: false, verificato: false, presentazione: "Una presentazione lunga.", avatar_url: "http://a/x.jpg",
   animali_compilato: true, nucleo_compilato: true, ...o });
 const criteri = new Map([["L1", [{ chiave: "redditoCanone", peso: 8, modo: "obbligatorio", sogliaPct: 33 }, { chiave: "garante", peso: 5, modo: "preferenziale" }]]]);
-const base = { criteriPerListing: criteri, votiPerTenant: new Map(), valutazioni: [] };
+const base = { criteriPerListing: criteri, recensioniPerTenant: new Map(), valutazioni: [] };
+/** le recensioni come arrivano dal database: voto, chi l'ha scritta, quando */
+const rec = (voto, autore, quando = "2026-06-01T10:00:00Z") => ({ voto, autore_id: autore, created_at: quando });
+const ORA = Date.parse("2026-10-15T12:00:00Z");
 const assembla = (candidature, v, extra = {}) => assemblaCandidature({ ...base, candidature, vista: v, ...extra });
 
 test("profiloDaVista: animali e nucleo arrivano solo come 'compilato', mai come valore", () => {
@@ -117,8 +120,8 @@ test("l'ordine delle candidature e i loro dati restano quelli di arrivo", () => 
 });
 
 test("le recensioni sono quelle dell'inquilino giusto, e NON cambiano il punteggio di affidabilità", () => {
-  const voti = new Map([["t1", [5, 5, 5]], ["t2", [1]]]);
-  const out = assembla([riga("1"), riga("2")], [vista("1"), vista("2")], { votiPerTenant: voti });
+  const voti = new Map([["t1", [rec(5, "o1"), rec(5, "o2"), rec(5, "o3")]], ["t2", [rec(1, "o1")]]]);
+  const out = assembla([riga("1"), riga("2")], [vista("1"), vista("2")], { recensioniPerTenant: voti, ora: ORA });
   assert.deepEqual(out[0].valutazione.recensioni, { numero: 3, media: 5 }); assert.deepEqual(out[1].valutazione.recensioni, { numero: 1, media: 1 });
   assert.equal(out[0].valutazione.affidabilita, out[1].valutazione.affidabilita, "due persone con gli stessi dati hanno lo stesso punteggio, qualunque recensione abbiano");
   const senza = assembla([riga("1")], [vista("1")]); assert.deepEqual(senza[0].valutazione.recensioni, { numero: 0, media: null });
@@ -130,4 +133,19 @@ test("l'output non contiene nessun campo che il proprietario non deve vedere", (
   for (const vietato of ["figli", "\"animali\"", "\"nucleo\"", "consenso", "privacy_accettata", "redditi_nucleo", "match_proprietario"]) {
     assert.ok(!testo.includes(vietato), `compare "${vietato}"`);
   }
+});
+
+test("badge «Inquilino raccomandato»: due recensioni positive da due proprietari DIVERSI; lo stesso proprietario due volte non basta; una negativa lo toglie", () => {
+  const raccomandato = (recensioni) => assembla([riga("1")], [vista("1")], { recensioniPerTenant: new Map([["t1", recensioni]]), ora: ORA })[0].valutazione.raccomandato;
+  assert.equal(raccomandato([rec(5, "o1"), rec(4, "o2")]), true); assert.equal(raccomandato([rec(5, "o1"), rec(5, "o1")]), false, "lo stesso proprietario due volte conta una"); assert.equal(raccomandato([rec(5, "o1")]), false);
+  assert.equal(raccomandato([rec(5, "o1"), rec(5, "o2"), rec(2, "o3")]), false, "una negativa recente lo toglie"); assert.equal(raccomandato([rec(5, "o1"), rec(5, "o2"), rec(3, "o3")]), true, "3 stelle è neutra"); assert.equal(raccomandato([]), false);
+  assert.equal(assembla([riga("1")], [vista("1")])[0].valutazione.raccomandato, false, "senza recensioni non c'è badge, e il campo c'è comunque");
+});
+
+test("badge: la fotografia lo conserva dopo la decisione e non lo ricalcola; quelle vecchie (senza) non lo mostrano", () => {
+  const dec = (valutazione) => assembla([{ ...riga("1"), status: "accettata" }], [vista("1")], { valutazioni: [{ candidatura_id: "1", valutazione }], recensioniPerTenant: new Map([["t1", [rec(5, "o1"), rec(5, "o2")]]]), ora: ORA })[0].valutazione;
+  const viva = assembla([riga("1")], [vista("1")], { recensioniPerTenant: new Map([["t1", [rec(5, "o1"), rec(5, "o2")]]]), ora: ORA })[0].valutazione;
+  const foto = JSON.parse(JSON.stringify({ match: viva.match, affidabilita: viva.affidabilita, recensioni: viva.recensioni, raccomandato: false }));
+  assert.equal(viva.raccomandato, true); assert.equal(dec(foto).raccomandato, false, "decisa quando non lo era: resta come allora, anche se oggi lo è"); assert.equal(dec(foto).congelata, true);
+  const vecchia = { match: viva.match, affidabilita: viva.affidabilita }; assert.equal("raccomandato" in dec(vecchia), false, "una fotografia senza il dato non lo inventa");
 });

@@ -1,4 +1,4 @@
-import { riepilogoRecensioni } from "./recensioni";
+import { riepilogoRecensioni, statoRaccomandazione, type RecensioneGrezza } from "./recensioni";
 import { leggiFotografia, valutaCandidato } from "@/lib/match";
 import type { CriterioRichiesto, ProfiloCandidato } from "@/lib/match";
 import type { CandidaturaRicevuta } from "@/lib/types";
@@ -68,14 +68,17 @@ export function assemblaCandidature(input: {
   vista: RigaVistaCandidato[];
   valutazioni: { candidatura_id: string; valutazione: unknown }[];
   criteriPerListing: Map<string, CriterioRichiesto[]>;
-  votiPerTenant: Map<string, number[]>;
+  /** le recensioni di ogni inquilino (voto, chi l'ha scritta, quando): servono per le stelle e per il badge */
+  recensioniPerTenant: Map<string, RecensioneGrezza[]>;
+  /** per provarla; di solito è adesso */
+  ora?: number;
 }): CandidaturaRicevuta[] {
   const vistaPer = new Map(input.vista.map((v) => [v.candidatura_id, v]));
   const valutazionePer = new Map(input.valutazioni.map((v) => [v.candidatura_id, v.valutazione]));
 
   return input.candidature.map((c) => {
     const v = vistaPer.get(c.id);
-    const voti = input.votiPerTenant.get(c.tenant_id) ?? [];
+    const recensioniGrezze = input.recensioniPerTenant.get(c.tenant_id) ?? [];
 
     const registrata = c.status !== "in_attesa" ? leggiFotografia(valutazionePer.get(c.id)) : null;
 
@@ -86,7 +89,8 @@ export function assemblaCandidature(input: {
             criteri: input.criteriPerListing.get(c.listing_id) ?? [],
             canone: c.listings?.prezzo ?? 0,
             profilo: profiloDaVista(v),
-            recensioni: riepilogoRecensioni(voti),
+            recensioni: riepilogoRecensioni(recensioniGrezze.map((r) => r.voto)),
+            raccomandato: statoRaccomandazione(recensioniGrezze, input.ora).raccomandato,
           }),
           congelata: false,
         };

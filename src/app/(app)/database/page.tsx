@@ -1,3 +1,4 @@
+import type { RecensioneGrezza } from "@/lib/recensioni";
 import { createClient } from "@/lib/supabase/server";
 import { DatabaseClient } from "./DatabaseClient";
 import { criteriDaRighe } from "@/lib/match";
@@ -45,7 +46,7 @@ export default async function DatabasePage() {
             .in("listing_id", listingIds)
         : { data: [] },
       tenantIds.length > 0
-        ? supabase.from("recensioni").select("tenant_id, voto").in("tenant_id", tenantIds)
+        ? supabase.from("recensioni").select("tenant_id, voto, autore_id, created_at").in("tenant_id", tenantIds)
         : { data: [] },
     ]);
 
@@ -58,10 +59,11 @@ export default async function DatabasePage() {
     [...righePerListing].map(([id, rows]) => [id, criteriDaRighe(rows)])
   );
 
-  const votiPerTenant = new Map<string, number[]>();
+  // le recensioni di ogni inquilino: servono per le stelle e per il badge (chi le ha scritte, e quando)
+  const recensioniPerTenant = new Map<string, RecensioneGrezza[]>();
   for (const r of recensioni ?? []) {
     const id = r.tenant_id as string;
-    votiPerTenant.set(id, [...(votiPerTenant.get(id) ?? []), r.voto as number]);
+    recensioniPerTenant.set(id, [...(recensioniPerTenant.get(id) ?? []), { voto: r.voto, autore_id: r.autore_id, created_at: r.created_at }]);
   }
 
   return (
@@ -71,7 +73,7 @@ export default async function DatabasePage() {
         vista: (vista ?? []) as unknown as RigaVistaCandidato[],
         valutazioni: (valutazioni ?? []) as { candidatura_id: string; valutazione: unknown }[],
         criteriPerListing,
-        votiPerTenant,
+        recensioniPerTenant,
       })}
     />
   );

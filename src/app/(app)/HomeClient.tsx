@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import type { AffidabilitaResult } from "@/lib/affidabilita";
-import type { RiepilogoRecensioni } from "@/lib/recensioni";
+import type { RiepilogoRecensioni, StatoRaccomandazione } from "@/lib/recensioni";
+import { BadgeRaccomandato } from "@/components/BadgeRaccomandato";
 import type { TenantProfile } from "@/lib/types";
 import { DatiSheet } from "@/components/DatiSheet";
 import type { ListingConMatch } from "@/lib/types";
@@ -45,6 +46,7 @@ const SOGLIA_TOCCO = 8; // sotto questo spostamento è un tocco, non un trascina
 export function HomeClient({
   affidabilita,
   recensioni,
+  raccomandazione,
   tenant,
   verificaPanel,
   listings,
@@ -58,6 +60,8 @@ export function HomeClient({
   affidabilita: AffidabilitaResult;
   /** le recensioni dei proprietari, a parte dal punteggio */
   recensioni: RiepilogoRecensioni;
+  /** il badge «Inquilino raccomandato»: se c'è, si mostra accanto all'affidabilità */
+  raccomandazione: StatoRaccomandazione;
   /** i dati dell'inquilino (per la scheda «Modifica dati») */
   tenant: TenantProfile;
   /** il pannello per verificare il reddito con i documenti, costruito dal server */
@@ -289,7 +293,7 @@ export function HomeClient({
   const fotoSuccessivaUrl = foto[fotoIdx + 1]?.url;
 
   return (
-    <div className="screen-dark">
+    <div className={`screen-dark ${raccomandazione.raccomandato ? "con-badge" : ""}`}>
       {/* ---- Barra in alto: il marchio. Niente contatore: il pannello dice già quante case sono in linea ---- */}
       <div className="topbar">
         <div className="brand">
@@ -317,6 +321,11 @@ export function HomeClient({
             </button>
           </span>
         </div>
+        {raccomandazione.raccomandato && (
+          <div className="hi-badge">
+            <BadgeRaccomandato />
+          </div>
+        )}
         <div className="hi-ricerca">
           <div className="hi-ricerca-testo">
             <b>{testoCase.principale}</b>
@@ -569,6 +578,7 @@ export function HomeClient({
           tenant={tenant}
           affidabilita={affidabilita}
           recensioni={recensioni}
+          raccomandazione={raccomandazione}
           verificaPanel={verificaPanel}
           onSalvata={() => {
             setSchedaDati(false);

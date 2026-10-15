@@ -3741,3 +3741,95 @@ button.contratto-testa:focus-visible {
 .completezza .completeness-bar {
   width: 100%;
 }
+
+/* ---- badge «Inquilino raccomandato» ---- */
+.badge-raccomandato {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px 4px 8px;
+  border-radius: 999px;
+  background: rgba(201, 161, 90, 0.2);
+  border: 1px solid var(--gold);
+  color: #7a5a1f;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.badge-raccomandato-icona {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  fill: rgba(201, 161, 90, 0.35);
+  stroke: #7a5a1f;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.badge-raccomandato.compatto {
+  padding: 2px 8px 2px 6px;
+  font-size: 11px;
+  gap: 4px;
+}
+.badge-raccomandato.compatto .badge-raccomandato-icona {
+  width: 13px;
+  height: 13px;
+}
+.screen-dark .badge-raccomandato {
+  background: rgba(201, 161, 90, 0.18);
+  color: var(--gold);
+}
+.screen-dark .badge-raccomandato-icona {
+  stroke: var(--gold);
+}
+
+/* badge nella Home: sotto l'affidabilità. Il mazzo scende solo quando il badge c'è. */
+.home-intro .hi-badge {
+  padding: 0 0 8px;
+}
+.screen-dark.con-badge .deck {
+  top: 266px;
+}
+@media (min-width: 768px) {
+  .screen-dark.con-badge .deck {
+    inset: 266px auto 130px 50%;
+  }
+}
+/* il blocco del badge nella scheda dei dati */
+.aff-raccomandato {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(16, 21, 26, 0.04);
+  border: 1px dashed rgba(16, 21, 26, 0.18);
+}
+.aff-raccomandato.ottenuto {
+  background: rgba(201, 161, 90, 0.12);
+  border: 1px solid rgba(201, 161, 90, 0.5);
+}
+.aff-raccomandato-titolo {
+  display: block;
+  font-size: 14px;
+  color: var(--ink);
+}
+.aff-raccomandato small {
+  display: block;
+  margin: 6px 0 2px;
+  font-size: 12.5px;
+  color: var(--body-soft);
+}
+.come-regole {
+  list-style: disc outside;
+  margin: 0 0 6px;
+  padding-left: 20px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--body-soft);
+}
+.come-regole li {
+  margin-bottom: 4px;
+}
+.come-regole li::marker {
+  color: var(--gold);
+}

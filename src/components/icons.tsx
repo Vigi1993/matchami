@@ -38,6 +38,16 @@ export function IconMatch({ className }: IconProps) {
   );
 }
 
+/** Un sigillo con la spunta: il badge «Inquilino raccomandato». Disegnato qui, sul reticolo 24x24 degli altri simboli. */
+export function IconRaccomandato({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden>
+      <path d="M12 2.8l2.3 1.6 2.8-.1 1 2.6 2.3 1.7-.9 2.7.9 2.7-2.3 1.7-1 2.6-2.8-.1L12 20.4l-2.3-1.6-2.8.1-1-2.6-2.3-1.7.9-2.7-.9-2.7 2.3-1.7 1-2.6 2.8.1z" />
+      <path d="M8.4 12.1l2.5 2.5 4.8-5" fill="none" />
+    </svg>
+  );
+}
+
 export function IconDocumento({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" className={className} aria-hidden>

@@ -1,6 +1,6 @@
 "use server";
 
-import { riepilogoRecensioni } from "@/lib/recensioni";
+import { riepilogoRecensioni, statoRaccomandazione, type RecensioneGrezza } from "@/lib/recensioni";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { criteriDaRighe, valutaCandidato } from "@/lib/match";
@@ -55,16 +55,17 @@ export async function valutaCandidatura(
           .from("listing_criteri")
           .select("chiave, peso, modo, soglia_pct")
           .eq("listing_id", c.listing_id),
-        supabase.from("recensioni").select("voto").eq("tenant_id", c.tenant_id),
+        supabase.from("recensioni").select("voto, autore_id, created_at").eq("tenant_id", c.tenant_id),
       ]);
-      const voti = (recensioni ?? []).map((r) => r.voto as number);
+      const recensioniGrezze = (recensioni ?? []) as RecensioneGrezza[];
 
       if (vista) {
         valutazione = valutaCandidato({
           criteri: criteriDaRighe(righeCriteri as RigaCriterioDb[] | null),
           canone: listing.prezzo,
           profilo: profiloDaVista(vista),
-          recensioni: riepilogoRecensioni(voti),
+          recensioni: riepilogoRecensioni(recensioniGrezze.map((r) => r.voto)),
+          raccomandato: statoRaccomandazione(recensioniGrezze).raccomandato,
         });
       }
     }

@@ -154,7 +154,7 @@ test("modulo dei dati: avvisa UNA volta per salvataggio, le note sul punteggio v
 
 test("proprietario: vede le recensioni a parte dal punteggio (lista e dettaglio) e le usa solo come ultimo spareggio", () => {
   const d = leggi("src", "app", "(app)", "database", "DatabaseClient.tsx"); assert.match(d, /label="Recensioni"/); assert.match(d, /selezionata\.valutazione\?\.recensioni/); assert.match(d, /recensioni: c\.valutazione!\.recensioni \?\? null/);
-  const c = leggi("src", "lib", "candidati.ts"); assert.match(c, /recensioni: riepilogoRecensioni\(voti\)/); const x = leggi("src", "app", "(app)", "database", "actions.ts"); assert.match(x, /recensioni: riepilogoRecensioni\(voti\)/);
+  const c = leggi("src", "lib", "candidati.ts"); assert.match(c, /recensioni: riepilogoRecensioni\(recensioniGrezze\.map\(\(r\) => r\.voto\)\)/); const x = leggi("src", "app", "(app)", "database", "actions.ts"); assert.match(x, /recensioni: riepilogoRecensioni\(recensioniGrezze\.map\(\(r\) => r\.voto\)\)/);
 });
 
 test("nessun posto del codice calcola ancora la media delle recensioni a mano né le dà al punteggio", () => {
@@ -177,7 +177,8 @@ test("esempi: ogni esempio ha il punteggio e l'etichetta che dà davvero il calc
 });
 
 // ============================================================ il riepilogo e l'informativa, disegnati davvero
-const html = (input, recensioni, gestori = { onCome: () => {}, onVai: () => {} }) => renderToStaticMarkup(React.createElement(riepilogo.RiepilogoAffidabilita, { affidabilita: af.computeAffidabilita(input), recensioni, ...gestori }));
+const SENZA_BADGE = { raccomandato: false, autoriPositivi: 0, mancano: 2, negativa: false };
+const html = (input, recensioni, gestori = { onCome: () => {}, onVai: () => {} }, raccomandazione = SENZA_BADGE) => renderToStaticMarkup(React.createElement(riepilogo.RiepilogoAffidabilita, { affidabilita: af.computeAffidabilita(input), recensioni, raccomandazione, ...gestori }));
 const testoDi = (h) => h.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 const NESSUNA = { numero: 0, media: null };
 const nBottoni = (h) => (h.match(/<button/g) ?? []).length;
@@ -186,17 +187,17 @@ const VUOTO = { verificato: false, protestato: null, garante: null, fideiussione
 test("riepilogo, senza niente: 0 su ogni voce; i tre suggerimenti e il link «come viene calcolato» sono pulsanti; si dice a quanto si può arrivare", () => {
   const h = html(VUOTO, NESSUNA); const t = testoDi(h);
   for (const x of ["0 /100", "Da costruire", "Come viene calcolato il punteggio ›", "0 su 60", "0 su 25", "0 su 15", "Verifica il tuo reddito", "Indica i protesti nei tuoi dati", "Indica un garante o una fideiussione", "arrivi a 100", "Nessuna recensione ancora"]) assert.ok(t.includes(x), `manca «${x}»: ${t}`);
-  assert.equal(nBottoni(h), 4, "il link + i tre suggerimenti"); for (const vietato of ["\u2212", "possibili", "Punto di partenza", "Dati che indichi"]) assert.ok(!t.includes(vietato), `non deve esserci «${vietato}»`);
+  assert.equal(nBottoni(h), 5, "il link + i tre suggerimenti + «Come funziona» del badge"); for (const vietato of ["\u2212", "possibili", "Punto di partenza", "Dati che indichi"]) assert.ok(!t.includes(vietato), `non deve esserci «${vietato}»`);
 });
 
 test("riepilogo, con tutto: +60 +25 +15, resta solo il link «come viene calcolato», nessun invito a completare", () => {
   const h = html({ verificato: true, protestato: false, garante: true, fideiussione: null }, { numero: 3, media: 4.3 }); const t = testoDi(h);
-  for (const x of ["100 /100", "Eccellente", "+60", "+25", "+15", "Controllato dallo staff sui tuoi documenti"]) assert.ok(t.includes(x), `manca «${x}»`); assert.equal(nBottoni(h), 1); assert.ok(!t.includes("arrivi a") && !t.includes("0 su"), "con tutto preso non c'è niente da completare");
+  for (const x of ["100 /100", "Eccellente", "+60", "+25", "+15", "Controllato dallo staff sui tuoi documenti"]) assert.ok(t.includes(x), `manca «${x}»`); assert.equal(nBottoni(h), 2, "il link e «Come funziona» del badge: nessun suggerimento"); assert.ok(!t.includes("arrivi a") && !t.includes("0 su"), "con tutto preso non c'è niente da completare");
 });
 
 test("riepilogo: chi controlla cosa è scritto sotto ogni voce (una volta lo staff, due la persona); senza il gestore i suggerimenti non sono pulsanti ma il link sì", () => {
   const h = html(VUOTO, NESSUNA); assert.equal((h.match(/Lo controlla lo staff/g) ?? []).length, 1); assert.equal((h.match(/Lo dichiari tu/g) ?? []).length, 2);
-  const senza = html(VUOTO, NESSUNA, { onCome: () => {} }); assert.equal(nBottoni(senza), 1, "solo il link"); assert.ok(testoDi(senza).includes("Verifica il tuo reddito"), "il suggerimento si legge anche senza pulsante");
+  const senza = html(VUOTO, NESSUNA, { onCome: () => {} }); assert.equal(nBottoni(senza), 2, "il link e «Come funziona»: i suggerimenti non sono pulsanti"); assert.ok(testoDi(senza).includes("Verifica il tuo reddito"), "il suggerimento si legge anche senza pulsante");
 });
 
 test("riepilogo: le recensioni si VEDONO (stelle, media e quante sono), anche quando non ce ne sono, dicono che stanno a parte e non sono nascoste", () => {
@@ -206,9 +207,9 @@ test("riepilogo: le recensioni si VEDONO (stelle, media e quante sono), anche qu
 });
 
 test("riepilogo: il link apre l'informativa e ogni suggerimento porta all'ancora giusta della scheda (reddito → verifica, protesti, garante)", () => {
-  const eventi = []; const albero = riepilogo.RiepilogoAffidabilita({ affidabilita: af.computeAffidabilita(VUOTO), recensioni: NESSUNA, onCome: () => eventi.push("come"), onVai: (x) => eventi.push(x) });
+  const eventi = []; const albero = riepilogo.RiepilogoAffidabilita({ affidabilita: af.computeAffidabilita(VUOTO), recensioni: NESSUNA, raccomandazione: SENZA_BADGE, onCome: () => eventi.push("come"), onVai: (x) => eventi.push(x) });
   const bottoni = []; const visita = (n) => { if (!n || typeof n !== "object") return; if (Array.isArray(n)) return n.forEach(visita); if (n.type === "button") bottoni.push(n); visita(n.props?.children); }; visita(albero);
-  assert.equal(bottoni.length, 4); for (const b of bottoni) b.props.onClick(); assert.deepEqual(eventi, ["come", "dati-verifica", "dati-protesti", "dati-garante"]); assert.deepEqual(riepilogo.ANCORE_VOCI, { reddito: "dati-verifica", protesti: "dati-protesti", garanzia: "dati-garante" });
+  assert.equal(bottoni.length, 5); for (const b of bottoni) b.props.onClick(); assert.deepEqual(eventi, ["come", "dati-verifica", "dati-protesti", "dati-garante", "come"], "il link, i tre suggerimenti e «Come funziona» (che apre la stessa informativa)"); assert.deepEqual(riepilogo.ANCORE_VOCI, { reddito: "dati-verifica", protesti: "dati-protesti", garanzia: "dati-garante" });
 });
 
 test("informativa «come viene calcolato»: tre voci con i punti, le quattro fasce con gli estremi, gli esempi, le recensioni a parte; nessun pulsante e nessun dato personale", () => {
