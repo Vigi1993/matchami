@@ -17,12 +17,13 @@ const sql = fs.readFileSync(path.join(radice, "supabase", "migrations", "0019_no
 const sql0020 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0020_ritira_candidatura.sql"), "utf8");
 const sql0022 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0022_visite.sql"), "utf8");
 const sql0032 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0032_richieste_proprietari.sql"), "utf8");
+const sql0034 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0034_riapri_candidatura.sql"), "utf8");
 
 /** I tipi che il vincolo sulla tabella ammette. */
 function tipiDelDatabase() {
   // l'ultima definizione del vincolo, in ordine di migrazione
-  const tutte = [...(sql + "\n" + sql0020 + "\n" + sql0022 + "\n" + sql0032).matchAll(/check \(tipo in \(([\s\S]*?)\)\)/g)];
-  assert.ok(tutte.length >= 4, "dovrei trovare il vincolo della 0019, quello della 0020, quello della 0022 e quello della 0032");
+  const tutte = [...(sql + "\n" + sql0020 + "\n" + sql0022 + "\n" + sql0032 + "\n" + sql0034).matchAll(/check \(tipo in \(([\s\S]*?)\)\)/g)];
+  assert.ok(tutte.length >= 5, "dovrei trovare il vincolo della 0019, quello della 0020, quello della 0022, quello della 0032 e quello della 0034");
   return [...tutte[tutte.length - 1][1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
 }
 
@@ -37,7 +38,10 @@ const trigger =
   sql0022.slice(sql0022.indexOf("create or replace function public.notifica_visita()"), sql0022.indexOf("drop trigger if exists notifica_visita")) +
   "\n" +
   // la 0032: le due funzioni che mandano e accettano una richiesta creano le notifiche (non sono trigger, ma producono i tipi)
-  sql0032.slice(sql0032.indexOf("create or replace function public.invia_richiesta_proprietario"));
+  sql0032.slice(sql0032.indexOf("create or replace function public.invia_richiesta_proprietario")) +
+  "\n" +
+  // la 0034: la funzione che annulla una decisione crea la notifica «candidatura riaperta»
+  sql0034.slice(sql0034.indexOf("create or replace function public.riapri_candidatura"));
 
 // ------------------------------------------------------------
 // I tipi

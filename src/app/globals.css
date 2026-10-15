@@ -4291,91 +4291,243 @@ button.contratto-testa:focus-visible {
   color: var(--body-soft);
 }
 
-/* ---- Database: le schede dei possibili inquilini e la richiesta ---- */
-.possibili-casa + .possibili-casa {
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 2px solid rgba(16, 21, 26, 0.08);
+/* ---- Database: le case, le schede delle persone e le richieste ---- */
+.gruppo-casa {
+  margin: 0 0 30px;
 }
-.possibili-avviso {
-  margin: 0 0 10px;
-  padding: 10px 14px;
-  border-radius: 14px;
-  background: rgba(62, 107, 87, 0.14);
-  font-size: 16px;
-  font-weight: 700;
+.gruppo-testa {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+.gruppo-foto {
+  flex: none;
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
+  object-fit: cover;
+}
+.gruppo-foto-vuota {
+  background: linear-gradient(135deg, var(--moss), var(--moss-light));
+}
+.gruppo-titolo h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.1;
   color: var(--ink);
 }
-.schede-inquilini {
-  list-style: none;
-  margin: 8px 0 0;
-  padding: 0;
+.gruppo-titolo span {
+  font-size: 16px;
+  color: var(--body-soft);
 }
-.scheda-inquilino {
+
+/* le sezioni: candidature spontanee, possibili match, già valutati */
+.sezione-apribile {
   margin-bottom: 12px;
-  padding: 14px;
-  border-radius: 20px;
-  background: var(--paper);
-  border: 1px solid rgba(16, 21, 26, 0.08);
+  scroll-margin-top: 16px;
+  overflow: hidden;
+  border-radius: 22px;
+  background: #fff;
+  box-shadow: 0 8px 22px rgba(16, 21, 26, 0.07);
 }
-.scheda-testa {
+.sezione-testa {
   display: flex;
   align-items: center;
   gap: 12px;
+  width: 100%;
+  min-height: 64px;
+  padding: 12px 18px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
-.scheda-foto {
+.sezione-testa:focus-visible {
+  outline: 3px solid var(--moss);
+  outline-offset: -3px;
+}
+.sezione-titolo {
+  flex: 1;
+  font-size: 19px;
+  font-weight: 800;
+}
+.sezione-numero {
+  min-width: 34px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(16, 21, 26, 0.08);
+  color: var(--body-soft);
+  font-size: 16px;
+  font-weight: 800;
+  text-align: center;
+}
+.sezione-numero.pieno {
+  background: var(--gold);
+  color: var(--ink);
+}
+.sezione-freccia {
+  color: var(--body-soft);
+  font-size: 26px;
+  line-height: 1;
+  transition: transform 0.15s;
+}
+.sezione-freccia.su {
+  transform: rotate(90deg);
+}
+.sezione-corpo {
+  padding: 2px 14px 16px;
+}
+.sezione-vuota {
+  margin: 6px 4px 0;
+  font-size: 16px;
+  line-height: 1.45;
+  color: var(--body-text);
+}
+.sotto-titolo {
+  margin: 14px 0 8px;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--body-soft);
+}
+.schede-lista {
+  display: grid;
+  gap: 14px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.risultato-casa {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--body-soft);
+}
+
+/* la scheda di una persona: in alto affidabilità e match, sotto foto e informazioni, in fondo i pulsanti */
+.persona {
+  padding: 14px;
+  border: 1px solid rgba(16, 21, 26, 0.1);
+  border-radius: 22px;
+  background: var(--paper);
+}
+.persona-stato {
+  display: inline-block;
+  margin: 0 0 10px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 800;
+}
+.persona-stato.is-ok {
+  background: rgba(62, 107, 87, 0.16);
+  color: var(--moss);
+}
+.persona-stato.is-no {
+  background: rgba(201, 105, 78, 0.16);
+  color: var(--clay);
+}
+.persona-stato.is-neutro {
+  background: rgba(16, 21, 26, 0.08);
+  color: var(--body-soft);
+}
+.persona-cifre {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.cifra {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 8px;
+  border-radius: 16px;
+  background: rgba(16, 21, 26, 0.06);
+  text-align: center;
+}
+.cifra-numero {
+  font-family: var(--font-display);
+  font-size: 36px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--ink);
+}
+.cifra-nome {
+  margin-top: 4px;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.2;
+  color: var(--body-soft);
+}
+.cifra-match.is-match {
+  background: rgba(62, 107, 87, 0.16);
+}
+.cifra-match.is-match .cifra-numero {
+  color: var(--moss);
+}
+.cifra-match.is-wait {
+  background: rgba(201, 161, 90, 0.22);
+}
+.cifra-match.is-wait .cifra-numero {
+  color: var(--gold-ink);
+}
+.cifra-match.is-off,
+.cifra-match.is-alert {
+  background: rgba(201, 105, 78, 0.16);
+}
+.cifra-match.is-off .cifra-numero,
+.cifra-match.is-alert .cifra-numero {
+  color: var(--clay);
+}
+.persona-testa {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+}
+.persona-foto {
   flex: none;
-  width: 56px;
-  height: 56px;
+  width: 64px;
+  height: 64px;
   border-radius: 50%;
   object-fit: cover;
 }
-.scheda-iniziale {
+.persona-iniziale {
   display: flex;
   align-items: center;
   justify-content: center;
   background: linear-gradient(135deg, var(--moss), var(--moss-light));
   color: #fff;
   font-family: var(--font-display);
-  font-size: 24px;
+  font-size: 28px;
   font-weight: 600;
 }
-.scheda-chi {
+.persona-chi {
   display: flex;
-  flex: 1;
   flex-direction: column;
   min-width: 0;
   font-size: 17px;
   color: var(--body-text);
 }
-.scheda-chi b {
+.persona-chi b {
   font-family: var(--font-display);
-  font-size: 20px;
+  font-size: 22px;
   color: var(--ink);
 }
-.scheda-compat {
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  font-family: var(--font-display);
-  font-size: 24px;
-  font-weight: 600;
-  color: var(--moss);
-}
-.scheda-compat small {
-  font-family: var(--font-sans);
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--body-soft);
-}
-.scheda-etichette {
+.persona-etichette {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin: 10px 0 6px;
+  margin: 10px 0 4px;
 }
-.scheda-chip {
+.persona-chip {
   padding: 4px 10px;
   border-radius: 999px;
   background: rgba(16, 21, 26, 0.06);
@@ -4383,18 +4535,75 @@ button.contratto-testa:focus-visible {
   font-weight: 600;
   color: var(--body-text);
 }
-.scheda-presentazione {
-  margin: 6px 0 10px;
+.persona-etichette .badge-raccomandato {
+  padding: 5px 12px 5px 9px;
+  font-size: 15px;
+}
+.persona-etichette .badge-raccomandato-icona {
+  width: 18px;
+  height: 18px;
+}
+.persona-avviso {
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(201, 105, 78, 0.14);
+  font-size: 15px;
+  line-height: 1.35;
+  color: var(--ink);
+}
+.persona-presentazione {
+  margin: 8px 0 4px;
   font-size: 16px;
   line-height: 1.4;
   color: var(--body-text);
 }
-.scheda-match {
+.persona-azioni {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+.persona-primario {
   width: 100%;
   min-height: 56px;
-  margin: 4px 0 0;
+  margin: 0;
   font-size: 18px;
 }
+.persona-secondario {
+  width: 100%;
+  min-height: 52px;
+  font-size: 17px;
+}
+.persona-dettagli {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 12px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--moss);
+  font-size: 16px;
+  font-weight: 700;
+  text-align: center;
+  cursor: pointer;
+}
+
+/* la ricerca sta in fondo */
+.ricerca-fondo {
+  margin-top: 36px;
+  padding-top: 18px;
+  border-top: 2px solid rgba(16, 21, 26, 0.1);
+}
+.ricerca-fondo-titolo {
+  margin: 0 0 8px;
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* la conferma e le richieste mandate */
 .possibili-conferma {
   display: flex;
   flex-direction: column;
@@ -4438,12 +4647,20 @@ button.contratto-testa:focus-visible {
   text-decoration: underline;
 }
 
-/* nelle schede dei possibili inquilini il badge è leggibile come il resto (per chi non è pratico) */
-.scheda-etichette .badge-raccomandato {
-  padding: 5px 12px 5px 9px;
+/* la ricerca in fondo: stessi caratteri leggibili del resto della pagina */
+.ricerca-fondo .chip {
+  min-height: 44px;
+  padding: 8px 16px;
   font-size: 15px;
 }
-.scheda-etichette .badge-raccomandato-icona {
-  width: 18px;
-  height: 18px;
+.ricerca-fondo .ricerca-input,
+.ricerca-fondo .ricerca-select {
+  min-height: 52px;
+  font-size: 17px;
+}
+.ricerca-fondo .ricerca-riepilogo {
+  font-size: 15px;
+}
+.ricerca-fondo .redo-link {
+  font-size: 16px;
 }

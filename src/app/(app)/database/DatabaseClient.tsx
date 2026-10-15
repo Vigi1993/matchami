@@ -1,207 +1,311 @@
 "use client";
 
-import { stelleTesto, testoRecensioni } from "@/lib/recensioni";
-import { BadgeRaccomandato } from "@/components/BadgeRaccomandato";
-import { PossibiliInquilini } from "@/components/PossibiliInquilini";
-import type { PossibiliPerCasa } from "@/lib/proprietario/possibili-server";
-import { useState, useTransition } from "react";
+import { Fragment, useState, useTransition } from "react";
 import Link from "next/link";
 import { Sheet } from "@/components/Sheet";
-import type { CandidaturaRicevuta } from "@/lib/types";
-import { ordinaCandidati } from "@/lib/match";
-import { valutaCandidatura } from "./actions";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { Chip } from "@/components/ui/Chip";
+import { IconPersone } from "@/components/icons";
+import { BadgeRaccomandato } from "@/components/BadgeRaccomandato";
+import { PossibiliMatch } from "@/components/PossibiliMatch";
+import { RicercaCandidati } from "@/components/RicercaCandidati";
+import { SchedaPersona } from "@/components/SchedaPersona";
+import { SezioneApribile } from "@/components/SezioneApribile";
+import { stelleTesto, testoRecensioni } from "@/lib/recensioni";
 import { MOTIVI_RIFIUTO } from "@/lib/motivi-rifiuto";
 import type { ChiaveMotivoRifiuto } from "@/lib/motivi-rifiuto";
-import { IconPersone } from "@/components/icons";
-import { RicercaCandidati } from "@/components/RicercaCandidati";
-import {
-  FILTRI_VUOTI,
-  TESTO_NESSUN_RISULTATO,
-  filtraCandidature,
-  filtriValidi,
-  haPunteggi,
-  opzioniAnnunci,
-  type Filtri,
-} from "@/lib/ricerca-candidati";
+import { azioniPerStato } from "@/lib/decisioni";
+import { conteggiGruppo, datiSchedaCandidato, raggruppaPerAnnuncio, type CasaDatabase, type GruppoAnnuncio } from "@/lib/database-proprietario";
+import { testoPrezzo } from "@/lib/proprietario/home";
+import type { PossibiliPerCasa } from "@/lib/proprietario/possibili-server";
+import type { CandidaturaRicevuta } from "@/lib/types";
+import { FILTRI_VUOTI, TESTO_NESSUN_RISULTATO, filtraCandidature, filtriValidi, haPunteggi, numeroFiltriAttivi, opzioniAnnunci, type Filtri } from "@/lib/ricerca-candidati";
+import { riapriCandidatura, valutaCandidatura } from "./actions";
 
-const BADGE: Record<string, string> = {
-  in_attesa: "is-wait",
-  accettata: "is-match",
-  rifiutata: "is-off",
-};
-const LABEL: Record<string, string> = {
-  in_attesa: "Da valutare",
-  accettata: "Accettata",
-  rifiutata: "Rifiutata",
-};
 const SIMBOLO = { ok: "✓", no: "–", non_indicato: "?" } as const;
 
-/** Colore del badge in base alla percentuale, con le stesse soglie delle etichette. */
-function classePercentuale(pct: number): string {
-  if (pct >= 70) return "is-match";
-  if (pct >= 50) return "is-wait";
-  return "is-off";
-}
+type Stato = "in_attesa" | "accettata" | "rifiutata";
+type Dialogo = { tipo: "match" | "scarta" | "annulla_match"; c: CandidaturaRicevuta };
 
-type Annuncio = {
-  id: string;
-  titolo: string;
-  zona: string;
-  candidature: CandidaturaRicevuta[];
-};
-
+/**
+ * Il Database inquilini: diviso per CASA. Dentro ogni casa tre sezioni: le candidature spontanee (chi si è candidato da solo),
+ * i possibili match (chi cerca una casa come la tua ma non si è candidato) e i già valutati (match e scartati). Ogni persona ha
+ * la sua scheda con i pulsanti giusti: «Fai match» e «Scarta» per chi aspetta, «Apri chat» e «Annulla match» per chi è un match,
+ * «Annulla scarto» per chi è stato scartato. In fondo la ricerca.
+ */
 export function DatabaseClient({
   candidature,
+  case_ = [],
   possibili = [],
 }: {
   candidature: CandidaturaRicevuta[];
-  /** per ogni casa che gli inquilini vedono: quanti inquilini cercano una casa come quella (un numero, mai un elenco) */
+  /** le case del proprietario, con la prima foto */
+  case_?: CasaDatabase[];
+  /** per ogni casa che gli inquilini vedono: quanti cercano una casa come quella, chi si può contattare, le richieste mandate */
   possibili?: PossibiliPerCasa[];
 }) {
-  const [selezionata, setSelezionata] = useState<CandidaturaRicevuta | null>(
-    null
-  );
+  const [selezionata, setSelezionata] = useState<CandidaturaRicevuta | null>(null);
   const [pending, startTransition] = useTransition();
   const [errore, setErrore] = useState<string | null>(null);
-  // Accettare e rifiutare non si annullano: prima si chiede conferma, e per
-  // il rifiuto anche il motivo, che l'inquilino leggerà.
-  const [confermando, setConfermando] = useState<"accettata" | "rifiutata" | null>(null);
+  const [dialogo, setDialogo] = useState<Dialogo | null>(null);
   const [motivo, setMotivo] = useState<ChiaveMotivoRifiuto | null>(null);
-  const [aggiornate, setAggiornate] = useState<
-    Record<string, "accettata" | "rifiutata">
-  >({});
+  // Lo stato che il proprietario ha appena dato (finché la pagina si ricarica con i dati nuovi)
+  const [aggiornate, setAggiornate] = useState<Record<string, Stato>>({});
+  const [avviso, setAvviso] = useState<{ testo: string; chat?: string } | null>(null);
   // La ricerca e i filtri restano in questa pagina: non si salvano né si inviano.
   const [filtriScelti, setFiltriScelti] = useState<Filtri>(FILTRI_VUOTI);
 
-  function stato(c: CandidaturaRicevuta): string {
-    return aggiornate[c.id] ?? c.status;
-  }
+  const stato = (c: CandidaturaRicevuta): string => aggiornate[c.id] ?? c.status;
 
-  function chiudi() {
+  function chiudiDialogo() {
+    setDialogo(null);
+    setErrore(null);
+    setMotivo(null);
+  }
+  function apriDialogo(tipo: Dialogo["tipo"], c: CandidaturaRicevuta) {
+    setErrore(null);
+    setMotivo(null);
     setSelezionata(null);
-    setErrore(null);
-    setConfermando(null);
-    setMotivo(null);
+    setDialogo({ tipo, c });
   }
 
-  function apri(c: CandidaturaRicevuta) {
-    setErrore(null);
-    setConfermando(null);
-    setMotivo(null);
-    setSelezionata(c);
+  function dopo(c: CandidaturaRicevuta, nuovo: Stato, testo: string, chat?: string) {
+    setAggiornate((prev) => ({ ...prev, [c.id]: nuovo }));
+    setAvviso({ testo, chat });
   }
 
-  function valuta(c: CandidaturaRicevuta, nuovo: "accettata" | "rifiutata") {
+  function conferma() {
+    if (!dialogo) return;
+    const { tipo, c } = dialogo;
+    const nome = datiSchedaCandidato(c).nome;
     setErrore(null);
     startTransition(async () => {
-      const res = await valutaCandidatura(
-        c.id,
-        nuovo,
-        nuovo === "rifiutata" ? (motivo ?? undefined) : undefined
-      );
-      if (res?.error) {
-        setErrore(res.error);
-        return;
+      if (tipo === "annulla_match") {
+        const r = await riapriCandidatura(c.id);
+        if (!r.ok) return setErrore(r.error);
+        dopo(c, "in_attesa", `Match annullato: ${nome} è di nuovo tra le candidature da valutare.`);
+      } else {
+        const res = await valutaCandidatura(c.id, tipo === "match" ? "accettata" : "rifiutata", tipo === "scarta" ? (motivo ?? undefined) : undefined);
+        if (res?.error) return setErrore(res.error);
+        if (tipo === "match") dopo(c, "accettata", `Match fatto con ${nome}: ora potete scrivervi.`, `/chat/${c.id}`);
+        else dopo(c, "rifiutata", `Hai scartato ${nome}: se cambi idea, puoi annullare lo scarto.`);
       }
-      setAggiornate((prev) => ({ ...prev, [c.id]: nuovo }));
-      chiudi();
+      chiudiDialogo();
     });
   }
 
-  // ---- ricerca e filtri ----
-  // L'elenco si ricarica quando si decide: i filtri che non hanno più senso
-  // (un annuncio sparito, una soglia senza percentuali) si ripuliscono, altrimenti
-  // la schermata resterebbe vuota senza che si capisca perché.
-  const filtri = filtriValidi(filtriScelti, candidature);
-  const visibili = filtraCandidature(candidature, filtri, stato);
-
-  // ---- raggruppo per annuncio (solo ciò che passa i filtri) ----
-  const perAnnuncio = new Map<string, Annuncio>();
-  for (const c of visibili) {
-    const gruppo = perAnnuncio.get(c.listing_id) ?? {
-      id: c.listing_id,
-      titolo: c.listings?.titolo ?? "Annuncio",
-      zona: c.listings?.zona ?? "",
-      candidature: [],
-    };
-    gruppo.candidature.push(c);
-    perAnnuncio.set(c.listing_id, gruppo);
+  function annullaScarto(c: CandidaturaRicevuta) {
+    setErrore(null);
+    startTransition(async () => {
+      const r = await riapriCandidatura(c.id);
+      if (!r.ok) return setAvviso({ testo: r.error });
+      dopo(c, "in_attesa", `Scarto annullato: ${datiSchedaCandidato(c).nome} è di nuovo tra le candidature da valutare.`);
+    });
   }
 
-  const daValutare = (a: Annuncio) =>
-    a.candidature.filter((c) => stato(c) === "in_attesa").length;
+  // ---- i gruppi, per casa ----
+  const gruppi = raggruppaPerAnnuncio({ case_, candidature, possibili, stato });
+  const totaleDaValutare = gruppi.reduce((s, g) => s + g.spontanei.length, 0);
+  const totalePossibili = gruppi.reduce((s, g) => s + conteggiGruppo(g).possibili, 0);
+  const primoConPossibili = gruppi.find((g) => g.possibili !== null)?.casa.id ?? null;
 
-  // prima gli annunci con più candidati in attesa
-  const annunci = [...perAnnuncio.values()].sort(
-    (a, b) => daValutare(b) - daValutare(a) || a.titolo.localeCompare(b.titolo)
-  );
+  // ---- ricerca: sta in fondo, e mostra i suoi risultati sotto la barra ----
+  const filtri = filtriValidi(filtriScelti, candidature);
+  const visibili = filtraCandidature(candidature, filtri, stato);
+  const cercando = numeroFiltriAttivi(filtri) > 0;
 
-  const totaleInAttesa = candidature.filter((c) => stato(c) === "in_attesa").length;
+  /** I pulsanti di una candidatura, secondo il suo stato */
+  function azioni(c: CandidaturaRicevuta) {
+    const a = azioniPerStato(stato(c));
+    return (
+      <>
+        {a.faiMatch && (
+          <button type="button" className="opp-cta persona-primario" disabled={pending} onClick={() => apriDialogo("match", c)}>
+            Fai match
+          </button>
+        )}
+        {a.apriChat && (
+          <Link href={`/chat/${c.id}`} className="opp-cta persona-primario block text-center">
+            Apri chat
+          </Link>
+        )}
+        {a.scarta && (
+          <button type="button" className="richieste-secondario persona-secondario" disabled={pending} onClick={() => apriDialogo("scarta", c)}>
+            Scarta
+          </button>
+        )}
+        {a.annullaMatch && (
+          <button type="button" className="richieste-secondario persona-secondario" disabled={pending} onClick={() => apriDialogo("annulla_match", c)}>
+            Annulla match
+          </button>
+        )}
+        {a.annullaScarto && (
+          <button type="button" className="richieste-secondario persona-secondario" disabled={pending} onClick={() => annullaScarto(c)}>
+            Annulla scarto
+          </button>
+        )}
+      </>
+    );
+  }
+
+  function scheda(c: CandidaturaRicevuta) {
+    const s = stato(c);
+    const etichetta = s === "accettata" ? { testo: "Match fatto", tono: "ok" as const } : s === "rifiutata" ? { testo: "Scartato", tono: "no" as const } : s === "ritirata" ? { testo: "Ha ritirato la candidatura", tono: "neutro" as const } : null;
+    return (
+      <SchedaPersona dati={datiSchedaCandidato(c)} stato={etichetta} onApri={() => setSelezionata(c)}>
+        {azioni(c)}
+      </SchedaPersona>
+    );
+  }
+
+  function casa(g: GruppoAnnuncio) {
+    const n = conteggiGruppo(g);
+    const zona = g.casa.zona.replace(", Milano", "");
+    return (
+      <article className="gruppo-casa" aria-label={`Casa: ${g.casa.titolo}`}>
+        <header className="gruppo-testa">
+          {g.casa.foto ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={g.casa.foto} alt="" className="gruppo-foto" />
+          ) : (
+            <span className="gruppo-foto gruppo-foto-vuota" aria-hidden="true" />
+          )}
+          <div className="gruppo-titolo">
+            <h2>{g.casa.titolo}</h2>
+            <span>
+              {[zona, g.casa.prezzo ? testoPrezzo(g.casa.prezzo) : ""].filter(Boolean).join(" · ")}
+            </span>
+          </div>
+        </header>
+
+        <SezioneApribile titolo="Candidature spontanee" conteggio={n.daValutare} vuoto="Nessuno si è ancora candidato a questa casa.">
+          {g.spontanei.length > 0 && (
+            <ul className="schede-lista">
+              {g.spontanei.map((c) => (
+                <li key={c.id}>
+                  {scheda(c)}
+                </li>
+              ))}
+            </ul>
+          )}
+        </SezioneApribile>
+
+        {g.possibili !== null && (
+          <SezioneApribile id={g.casa.id === primoConPossibili ? "possibili" : undefined} titolo="Possibili match" conteggio={n.possibili}>
+            <PossibiliMatch casa={g.possibili} />
+          </SezioneApribile>
+        )}
+
+        <SezioneApribile titolo="Già valutati" conteggio={n.valutati} aperta={n.daValutare === 0 && n.possibili === 0} vuoto="Quando fai un match o scarti qualcuno, lo trovi qui.">
+          {g.match.length > 0 && (
+            <>
+              <h3 className="sotto-titolo">Match</h3>
+              <ul className="schede-lista">
+                {g.match.map((c) => (
+                  <li key={c.id}>
+                    {scheda(c)}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {g.scartati.length > 0 && (
+            <>
+              <h3 className="sotto-titolo">Scartati</h3>
+              <ul className="schede-lista">
+                {g.scartati.map((c) => (
+                  <li key={c.id}>
+                    {scheda(c)}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {g.ritirati.length > 0 && (
+            <>
+              <h3 className="sotto-titolo">Hanno ritirato la candidatura</h3>
+              <ul className="schede-lista">
+                {g.ritirati.map((c) => (
+                  <li key={c.id}>
+                    {scheda(c)}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </SezioneApribile>
+      </article>
+    );
+  }
 
   return (
     <PageContainer wide>
       <h1 className="screen-title">Database inquilini</h1>
-
-      {/* Dove porta la tessera «Possibili inquilini» della Home */}
-      <PossibiliInquilini possibili={possibili} />
       <p className="screen-sub">
-        {candidature.length === 0
-          ? "Le candidature ricevute sui tuoi annunci arrivano qui."
-          : `${candidature.length} candidatur${candidature.length === 1 ? "a ricevuta" : "e ricevute"} · ${totaleInAttesa} da valutare.`}
+        {candidature.length === 0 && totalePossibili === 0
+          ? "Le candidature e i possibili match delle tue case arrivano qui."
+          : `${totaleDaValutare} candidatur${totaleDaValutare === 1 ? "a" : "e"} da valutare · ${totalePossibili} possibil${totalePossibili === 1 ? "e match" : "i match"}.`}
       </p>
 
-      {candidature.length === 0 && (
-        <div className="empty-inline">
-          <IconPersone className="icon-empty" />
-          <h3>Nessuna candidatura ancora</h3>
-          <p>
-            Appena qualcuno si candiderà su un tuo annuncio pubblicato, lo
-            vedrai qui.
-          </p>
+      {avviso && (
+        <div className="possibili-avviso" role="status">
+          {avviso.testo}
+          {avviso.chat && (
+            <Link href={avviso.chat} className="richieste-link">
+              Apri la chat ›
+            </Link>
+          )}
         </div>
       )}
 
-      {candidature.length > 0 && (
-        <RicercaCandidati
-          filtri={filtri}
-          onCambia={setFiltriScelti}
-          annunci={opzioniAnnunci(candidature)}
-          conPunteggi={haPunteggi(candidature)}
-          visibili={visibili.length}
-          totale={candidature.length}
-        />
-      )}
-
-      {candidature.length > 0 && visibili.length === 0 && (
+      {gruppi.length === 0 && (
         <div className="empty-inline">
           <IconPersone className="icon-empty" />
-          <h3>{TESTO_NESSUN_RISULTATO}</h3>
-          <button type="button" className="redo-link" onClick={() => setFiltriScelti(FILTRI_VUOTI)}>
-            Azzera filtri
-          </button>
+          <h3>Ancora nessuna casa da mostrare</h3>
+          <p>Appena una tua casa sarà pubblicata, qui vedrai chi si candida e chi potrebbe fare al caso tuo.</p>
         </div>
       )}
 
-      {annunci.map((a) => (
-        <SezioneAnnuncio
-          key={a.id}
-          annuncio={a}
-          stato={stato}
-          onSelect={apri}
-        />
+      {gruppi.map((g) => (
+        <Fragment key={g.casa.id}>{casa(g)}</Fragment>
       ))}
 
-      <Sheet
-        open={selezionata !== null}
-        onClose={chiudi}
-        title={
-          selezionata
-            ? `${selezionata.nome ?? "Inquilino"} ${selezionata.cognome ?? ""}`
-            : "Candidatura"
-        }
-      >
+      {/* ---- la ricerca sta in fondo ---- */}
+      {candidature.length > 0 && (
+        <section className="ricerca-fondo" aria-label="Cerca tra i candidati">
+          <h2 className="ricerca-fondo-titolo">Cerca tra i candidati</h2>
+          <RicercaCandidati
+            filtri={filtri}
+            onCambia={setFiltriScelti}
+            annunci={opzioniAnnunci(candidature)}
+            conPunteggi={haPunteggi(candidature)}
+            visibili={visibili.length}
+            totale={candidature.length}
+          />
+          {cercando && visibili.length === 0 && (
+            <div className="empty-inline">
+              <IconPersone className="icon-empty" />
+              <h3>{TESTO_NESSUN_RISULTATO}</h3>
+              <button type="button" className="redo-link" onClick={() => setFiltriScelti(FILTRI_VUOTI)}>
+                Azzera filtri
+              </button>
+            </div>
+          )}
+          {cercando && visibili.length > 0 && (
+            <ul className="schede-lista" aria-label="Risultati della ricerca">
+              {visibili.map((c) => (
+                <li key={c.id}>
+                  <p className="risultato-casa">{c.listings?.titolo ?? "Annuncio"}</p>
+                  {scheda(c)}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+
+      {/* ---- la scheda completa ---- */}
+      <Sheet open={selezionata !== null} onClose={() => setSelezionata(null)} title={selezionata ? `${selezionata.nome ?? "Inquilino"} ${selezionata.cognome ?? ""}` : "Candidatura"}>
         {selezionata && (
           <>
             {selezionata.tenant_profiles?.avatar_url && (
@@ -284,250 +388,76 @@ export function DatabaseClient({
               </div>
             )}
 
+            <div className="persona-azioni" style={{ marginTop: 18 }}>
+              {azioni(selezionata)}
+            </div>
+          </>
+        )}
+      </Sheet>
+
+      {/* ---- le conferme: fai match, scarta, annulla match ---- */}
+      <Sheet
+        open={dialogo !== null}
+        onClose={chiudiDialogo}
+        title={
+          dialogo
+            ? dialogo.tipo === "match"
+              ? `Fai match con ${datiSchedaCandidato(dialogo.c).nome}?`
+              : dialogo.tipo === "scarta"
+                ? `Perché scarti ${datiSchedaCandidato(dialogo.c).nome}?`
+                : `Annullare il match con ${datiSchedaCandidato(dialogo.c).nome}?`
+            : "Conferma"
+        }
+      >
+        {dialogo && (
+          <>
+            {dialogo.tipo === "match" && (
+              <>
+                <p className="conferma-testo">Si apre la chat e la persona riceve una notifica. Se cambi idea, potrai annullare il match.</p>
+                {dialogo.c.valutazione?.match.bloccato && (
+                  <div className="note-stop">Attenzione: non soddisfa un criterio obbligatorio che hai chiesto ({dialogo.c.valutazione.match.mancanti.join(", ")}).</div>
+                )}
+              </>
+            )}
+            {dialogo.tipo === "scarta" && (
+              <>
+                <p className="conferma-testo">La persona leggerà il motivo che scegli. Se cambi idea, potrai annullare lo scarto.</p>
+                <div className="chip-row" style={{ marginBottom: 16 }}>
+                  {MOTIVI_RIFIUTO.map((m) => (
+                    <Chip key={m.chiave} label={m.scelta} active={motivo === m.chiave} onClick={() => setMotivo(m.chiave)} />
+                  ))}
+                </div>
+              </>
+            )}
+            {dialogo.tipo === "annulla_match" && (
+              <p className="conferma-testo">
+                La chat si chiude e la persona riceve un avviso: la candidatura torna tra quelle da valutare. I messaggi non si perdono. Se c&apos;è già un contratto o una
+                visita in programma, il match non si può annullare.
+              </p>
+            )}
             {errore && (
-              <p className="note-error" style={{ marginTop: 14 }}>
+              <p className="note-error" role="alert">
                 {errore}
               </p>
             )}
-
-            {stato(selezionata) === "in_attesa" ? (
-              confermando === null ? (
-                <div className="flex gap-3 mt-6">
-                  <button
-                    onClick={() => setConfermando("rifiutata")}
-                    className="btn-danger-outline"
-                  >
-                    Rifiuta
-                  </button>
-                  <button
-                    onClick={() => setConfermando("accettata")}
-                    className="opp-cta"
-                  >
-                    Accetta
-                  </button>
-                </div>
-              ) : confermando === "accettata" ? (
-                <div className="conferma">
-                  <p className="conferma-titolo">
-                    Accettare {selezionata.nome ?? "questo candidato"}?
-                  </p>
-                  <p className="conferma-testo">
-                    Si apre la chat con il candidato. La decisione non si può
-                    annullare.
-                  </p>
-                  {selezionata.valutazione?.match.bloccato && (
-                    <div className="note-stop">
-                      Attenzione: non soddisfa un criterio obbligatorio che hai
-                      chiesto ({selezionata.valutazione.match.mancanti.join(", ")}).
-                    </div>
-                  )}
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => setConfermando(null)}
-                      disabled={pending}
-                      className="btn-danger-outline"
-                      style={{ borderColor: "rgba(16,21,26,.14)", color: "var(--ink)" }}
-                    >
-                      Annulla
-                    </button>
-                    <button
-                      onClick={() => valuta(selezionata, "accettata")}
-                      disabled={pending}
-                      className="opp-cta"
-                    >
-                      {pending ? "Un momento..." : "Sì, accetta"}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="conferma">
-                  <p className="conferma-titolo">Perché rifiuti?</p>
-                  <p className="conferma-testo">
-                    L&apos;inquilino leggerà il motivo che scegli. La decisione
-                    non si può annullare.
-                  </p>
-                  <div className="chip-row" style={{ marginBottom: 16 }}>
-                    {MOTIVI_RIFIUTO.map((m) => (
-                      <Chip
-                        key={m.chiave}
-                        label={m.scelta}
-                        active={motivo === m.chiave}
-                        onClick={() => setMotivo(m.chiave)}
-                      />
-                    ))}
-                  </div>
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => setConfermando(null)}
-                      disabled={pending}
-                      className="btn-danger-outline"
-                      style={{ borderColor: "rgba(16,21,26,.14)", color: "var(--ink)" }}
-                    >
-                      Annulla
-                    </button>
-                    <button
-                      onClick={() => valuta(selezionata, "rifiutata")}
-                      disabled={pending || motivo === null}
-                      className="opp-cta"
-                      style={{ background: motivo ? "var(--clay)" : undefined }}
-                    >
-                      {pending ? "Un momento..." : "Conferma il rifiuto"}
-                    </button>
-                  </div>
-                </div>
-              )
-            ) : (
-              <div className="flex flex-col gap-3 mt-6">
-                <div
-                  className={
-                    stato(selezionata) === "accettata" ? "note-ok" : "note-box"
-                  }
-                  style={{ marginTop: 0 }}
-                >
-                  {stato(selezionata) === "accettata"
-                    ? "Hai accettato questa candidatura."
-                    : "Hai rifiutato questa candidatura."}
-                </div>
-                {stato(selezionata) === "accettata" && (
-                  <Link
-                    href={`/chat/${selezionata.id}`}
-                    className="opp-cta block text-center"
-                  >
-                    Apri chat
-                  </Link>
-                )}
-              </div>
-            )}
+            <div className="possibili-conferma">
+              <button
+                type="button"
+                className="opp-cta"
+                disabled={pending || (dialogo.tipo === "scarta" && motivo === null)}
+                style={dialogo.tipo === "scarta" && motivo ? { background: "var(--clay)" } : undefined}
+                onClick={conferma}
+              >
+                {pending ? "Un momento..." : dialogo.tipo === "match" ? "Sì, fai match" : dialogo.tipo === "scarta" ? "Conferma lo scarto" : "Sì, annulla il match"}
+              </button>
+              <button type="button" className="richieste-secondario" disabled={pending} onClick={chiudiDialogo}>
+                No, torna indietro
+              </button>
+            </div>
           </>
         )}
       </Sheet>
     </PageContainer>
-  );
-}
-
-// ------------------------------------------------------------
-
-function SezioneAnnuncio({
-  annuncio,
-  stato,
-  onSelect,
-}: {
-  annuncio: Annuncio;
-  stato: (c: CandidaturaRicevuta) => string;
-  onSelect: (c: CandidaturaRicevuta) => void;
-}) {
-  const attesa = annuncio.candidature.filter((c) => stato(c) === "in_attesa");
-  const valutate = annuncio.candidature.filter((c) => stato(c) !== "in_attesa");
-
-  // In attesa: prima chi soddisfa i criteri obbligatori, poi per percentuale,
-  // a parità per affidabilità. Se manca la valutazione resta l'ordine di arrivo.
-  const ordinate = attesa.every((c) => c.valutazione)
-    ? ordinaCandidati(
-        attesa.map((c) => ({
-          c,
-          match: c.valutazione!.match,
-          affidabilita: c.valutazione!.affidabilita,
-          recensioni: c.valutazione!.recensioni ?? null,
-          raccomandato: c.valutazione!.raccomandato === true,
-        }))
-      ).map((v) => v.c)
-    : attesa;
-
-  return (
-    <>
-      <div className="pref-label" style={{ marginTop: 26 }}>
-        <span>
-          {annuncio.titolo}
-          {annuncio.zona && ` · ${annuncio.zona.replace(", Milano", "")}`}
-        </span>
-        <b>
-          {attesa.length} da valutare
-        </b>
-      </div>
-
-      {ordinate.length > 0 && (
-        <div className="card-grid">
-          {ordinate.map((c) => (
-            <Scheda key={c.id} c={c} stato={stato(c)} onSelect={onSelect} />
-          ))}
-        </div>
-      )}
-
-      {valutate.length > 0 && (
-        <>
-          <div className="sotto-label">Già valutate — {valutate.length}</div>
-          <div className="card-grid">
-            {valutate.map((c) => (
-              <Scheda key={c.id} c={c} stato={stato(c)} onSelect={onSelect} />
-            ))}
-          </div>
-        </>
-      )}
-    </>
-  );
-}
-
-function Scheda({
-  c,
-  stato,
-  onSelect,
-}: {
-  c: CandidaturaRicevuta;
-  stato: string;
-  onSelect: (c: CandidaturaRicevuta) => void;
-}) {
-  const iniziali = `${c.nome?.[0] ?? ""}${c.cognome?.[0] ?? ""}`.toUpperCase();
-  const v = c.valutazione;
-  const inAttesa = stato === "in_attesa";
-
-  let badge = (
-    <div className={`mc-pct ${BADGE[stato]}`}>{LABEL[stato]}</div>
-  );
-  if (inAttesa && v) {
-    if (v.match.bloccato) {
-      badge = (
-        <div className="mc-pct is-alert">
-          Bloccato<span>obbligatorio</span>
-        </div>
-      );
-    } else if (v.match.punteggio !== null) {
-      badge = (
-        <div className={`mc-pct ${classePercentuale(v.match.punteggio)}`}>
-          {v.match.punteggio}%<span>compatibile</span>
-        </div>
-      );
-    }
-  }
-
-  return (
-    <button onClick={() => onSelect(c)} className="match-card">
-      {c.tenant_profiles?.avatar_url ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={c.tenant_profiles.avatar_url} alt="" />
-      ) : (
-        <div className="mc-avatar">{iniziali || "IN"}</div>
-      )}
-      <div className="mc-body">
-        <div className="mc-zona">
-          {c.tenant_profiles?.professione ?? "Profilo inquilino"}
-        </div>
-        <div className="mc-title">
-          {c.nome} {c.cognome}
-        </div>
-        {v?.raccomandato === true && (
-          <div style={{ margin: "3px 0" }}>
-            <BadgeRaccomandato compatto />
-          </div>
-        )}
-        <div className="mc-meta">
-          {v ? `Affidabilità ${v.affidabilita}` : ""}
-          {v?.recensioni && v.recensioni.numero > 0 && ` · ★ ${v.recensioni.media?.toLocaleString("it-IT", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} (${v.recensioni.numero})`}
-          {v?.match.incompleto && inAttesa && " · dati incompleti"}
-          {!inAttesa && v?.match.punteggio != null && ` · compatibilità ${v.match.punteggio}%`}
-        </div>
-      </div>
-      {badge}
-    </button>
   );
 }
 

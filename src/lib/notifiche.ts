@@ -29,6 +29,7 @@ export const TIPI_NOTIFICA = [
   "visita_annullata",
   "richiesta_ricevuta",
   "richiesta_accettata",
+  "candidatura_riaperta",
 ] as const;
 
 export type TipoNotifica = (typeof TIPI_NOTIFICA)[number];
@@ -141,6 +142,11 @@ export function descriviNotifica(
         testo: `${nome || "Un proprietario"} ha scelto il tuo profilo per ${annuncio(dati, "la sua casa")}. Se ti interessa, rispondi da «I tuoi match».`,
       };
     }
+    case "candidatura_riaperta":
+      return {
+        titolo: "La tua candidatura è di nuovo in attesa",
+        testo: `Il proprietario di ${annuncio(dati, "una casa")} ha annullato la sua decisione: sta rivalutando la tua candidatura.`,
+      };
     case "richiesta_accettata":
       return {
         titolo: "Hai un nuovo match",

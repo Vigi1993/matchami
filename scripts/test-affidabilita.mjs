@@ -193,7 +193,7 @@ test("modulo dei dati: avvisa UNA volta per salvataggio, le note sul punteggio v
 });
 
 test("proprietario: vede le recensioni a parte dal punteggio (lista e dettaglio) e le usa solo come ultimo spareggio", () => {
-  const d = leggi("src", "app", "(app)", "database", "DatabaseClient.tsx"); assert.match(d, /label="Recensioni"/); assert.match(d, /selezionata\.valutazione\?\.recensioni/); assert.match(d, /recensioni: c\.valutazione!\.recensioni \?\? null/);
+  const d = leggi("src", "app", "(app)", "database", "DatabaseClient.tsx"); assert.match(d, /label="Recensioni"/); assert.match(d, /selezionata\.valutazione\?\.recensioni/); assert.match(leggi("src", "lib", "database-proprietario.ts"), /recensioni: c\.valutazione!\.recensioni \?\? null/); assert.match(leggi("src", "lib", "database-proprietario.ts"), /recensioni: v\?\.recensioni \?\? null/, "la scheda mostra le recensioni a parte");
   const c = leggi("src", "lib", "candidati.ts"); assert.match(c, /recensioni: riepilogoRecensioni\(recensioniGrezze\.map\(\(r\) => r\.voto\)\)/); const x = leggi("src", "app", "(app)", "database", "actions.ts"); assert.match(x, /recensioni: riepilogoRecensioni\(recensioniGrezze\.map\(\(r\) => r\.voto\)\)/);
 });
 

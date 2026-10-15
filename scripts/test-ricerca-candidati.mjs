@@ -261,7 +261,8 @@ test("testi: etichette dei filtri e della soglia", () => {
 // ------------------------------------------------------------
 
 test("le soglie sono quelle con cui la schermata colora le percentuali (70 e 50)", () => {
-  const schermata = leggi("src", "app", "(app)", "database", "DatabaseClient.tsx");
+  // il colore della percentuale sulla scheda sta in classeMatch (lib/database-proprietario.ts)
+  const schermata = leggi("src", "lib", "database-proprietario.ts");
   assert.match(schermata, /pct >= 70/);
   assert.match(schermata, /pct >= 50/);
   assert.deepEqual([...r.SOGLIE_COMPATIBILITA].filter((x) => x > 0), [50, 70]);

@@ -191,7 +191,7 @@ test("saluto e titolo: senza nome solo il saluto; l'ora cambia il saluto", () =>
 
 // ============================================================ per chi non è pratico
 function bloccoCss() {
-  const css = leggi("src", "app", "globals.css"); const a = css.indexOf("Home del proprietario: la casa in grande e due tessere grandi."); const fineHome = css.indexOf("/* ---- «Richieste dei proprietari» (inquilino) ---- */"); const schede = css.indexOf("/* ---- Database: le schede dei possibili inquilini e la richiesta ---- */");
+  const css = leggi("src", "app", "globals.css"); const a = css.indexOf("Home del proprietario: la casa in grande e due tessere grandi."); const fineHome = css.indexOf("/* ---- «Richieste dei proprietari» (inquilino) ---- */"); const schede = css.indexOf("/* ---- Database: le case, le schede delle persone e le richieste ---- */");
   assert.ok(a > 0 && fineHome > a && schede > fineHome, "blocchi di stile non trovati");
   // la Home e la sezione del Database, poi le schede dei possibili inquilini e la richiesta: tutto ciò che legge il proprietario. Le richieste dell'inquilino stanno in mezzo e restano fuori.
   return css.slice(a, fineHome) + css.slice(schede);
@@ -237,10 +237,12 @@ test("la chiave di servizio manca: la Home non crolla e non mostra numeri invent
   const s = leggi("src", "lib", "proprietario", "possibili-server.ts"); assert.match(s, /const admin = clienteAmministratore\(\);\s+if \(!admin\) return null;/); assert.match(s, /if \(tenant\.error \|\| zone\.error \|\| interessi\.error\) \{[\s\S]*?return null;/); assert.match(s, /if \(annunci\.length === 0\) return new Map\(\);/);
 });
 
-test("Database: la sezione «Possibili inquilini» c'è, ha l'ancora a cui porta la tessera, dice che non si vede chi sono, e funziona anche senza numeri", () => {
-  const d = leggi("src", "app", "(app)", "database", "DatabaseClient.tsx"); const c = leggi("src", "components", "PossibiliInquilini.tsx"); assert.match(d, /<PossibiliInquilini possibili=\{possibili\} \/>/); assert.match(c, /<section id="possibili" className="possibili" aria-labelledby="possibili-titolo">/); assert.match(c, /Chi ha scelto di non farsi trovare non compare, e i contatti di nessuno sono/); assert.match(c, /Il numero non è disponibile in questo momento/); assert.match(c, /Quando la tua casa sarà pubblicata vedrai qui quanti inquilini cercano una casa come la tua\./);
-  assert.ok(d.indexOf("<PossibiliInquilini") > 0 && d.indexOf("<PossibiliInquilini") < d.indexOf("<RicercaCandidati"), "la sezione sta prima della ricerca delle candidature"); const p = leggi("src", "app", "(app)", "database", "page.tsx"); assert.match(p, /const possibili = await possibiliPerCasaDelProprietario\(supabase, user!\.id\);/); assert.match(p, /<DatabaseClient\s+possibili=\{possibili\}/);
-  assert.match(leggi("src", "app", "globals.css"), /\.possibili \{[^}]*scroll-margin-top: 16px;/);
+test("Database: ogni casa ha la sezione «Possibili match», con l'ancora a cui porta la tessera della Home (sulla prima casa), dice che non si vede chi sono, e funziona anche senza numeri", () => {
+  const d = leggi("src", "app", "(app)", "database", "DatabaseClient.tsx"); const c = leggi("src", "components", "PossibiliMatch.tsx");
+  assert.match(d, /<SezioneApribile id=\{g\.casa\.id === primoConPossibili \? "possibili" : undefined\} titolo="Possibili match" conteggio=\{n\.possibili\}>\s+<PossibiliMatch casa=\{g\.possibili\} \/>/); assert.match(d, /const primoConPossibili = gruppi\.find\(\(g\) => g\.possibili !== null\)\?\.casa\.id \?\? null;/);
+  assert.match(c, /Chi ha scelto di non farsi trovare non compare, e i contatti di nessuno sono/); assert.match(c, /Il numero non è disponibile in questo momento/); assert.match(d, /Appena una tua casa sarà pubblicata, qui vedrai chi si candida e chi potrebbe fare al caso tuo\./);
+  assert.ok(d.indexOf("{gruppi.map") > 0 && d.indexOf("{gruppi.map") < d.indexOf("<RicercaCandidati"), "le case stanno PRIMA della ricerca (la ricerca è in fondo)"); const p = leggi("src", "app", "(app)", "database", "page.tsx"); assert.match(p, /const possibili = await possibiliPerCasaDelProprietario\(supabase, user!\.id\);/); assert.match(p, /<DatabaseClient\s+case_=\{case_\}\s+possibili=\{possibili\}/);
+  assert.match(leggi("src", "app", "globals.css"), /\.sezione-apribile \{[^}]*scroll-margin-top: 16px;/, "la sezione a cui porta l'ancora non deve finire sotto il bordo");
 });
 
 test("informativa: dice che ai proprietari si mostra solo un NUMERO anonimo di inquilini compatibili, con la nuova versione; chi aveva le precedenti non deve riaccettare", () => {

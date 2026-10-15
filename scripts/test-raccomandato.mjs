@@ -159,7 +159,8 @@ test("pagine: leggono chi ha scritto le recensioni e quando (servono per il badg
 });
 
 test("proprietario: il badge compare sulla scheda e nel dettaglio solo se c'è, entra nell'ordine, e il filtro è nella ricerca", () => {
-  const d = leggi("src", "app", "(app)", "database", "DatabaseClient.tsx"); assert.match(d, /\{v\?\.raccomandato === true && \(\s+<div style=\{\{ margin: "3px 0" \}\}>\s+<BadgeRaccomandato compatto \/>/); assert.match(d, /selezionata\.valutazione\?\.raccomandato === true && \(\s+<div className="feat-row">/); assert.match(d, /raccomandato: c\.valutazione!\.raccomandato === true,/);
+  const d = leggi("src", "app", "(app)", "database", "DatabaseClient.tsx"); // la scheda in lista è SchedaPersona (badge intero, 15 px); il dettaglio ha la riga con il badge compatto; l'ordine lo usa dopo la percentuale
+  assert.match(leggi("src", "components", "SchedaPersona.tsx"), /\{dati\.raccomandato && <BadgeRaccomandato \/>\}/); assert.match(leggi("src", "lib", "database-proprietario.ts"), /raccomandato: v\?\.raccomandato === true,/); assert.match(d, /selezionata\.valutazione\?\.raccomandato === true && \(\s+<div className="feat-row">/); assert.match(leggi("src", "lib", "database-proprietario.ts"), /raccomandato: c\.valutazione!\.raccomandato === true,/);
   assert.match(leggi("src", "components", "RicercaCandidati.tsx"), /<Interruttore acceso=\{filtri\.soloRaccomandati\} onClick=\{\(\) => imposta\(\{ soloRaccomandati: !filtri\.soloRaccomandati \}\)\}>\s+Inquilini raccomandati/);
 });
 

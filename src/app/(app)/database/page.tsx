@@ -1,6 +1,7 @@
 import type { RecensioneGrezza } from "@/lib/recensioni";
 import { createClient } from "@/lib/supabase/server";
 import { DatabaseClient } from "./DatabaseClient";
+import type { CasaDatabase } from "@/lib/database-proprietario";
 import { possibiliPerCasaDelProprietario } from "@/lib/proprietario/possibili-server";
 import { criteriDaRighe } from "@/lib/match";
 import type { CriterioRichiesto, RigaCriterioDb } from "@/lib/match";
@@ -28,8 +29,24 @@ export default async function DatabasePage() {
     .eq("listings.owner_id", user!.id)
     .order("created_at", { ascending: false });
 
-  // Quanti inquilini cercano una casa come le mie (un numero, mai un elenco)
+  // Per ogni casa: quanti inquilini cercano una casa come quella, le persone che si possono contattare e le richieste già mandate
   const possibili = await possibiliPerCasaDelProprietario(supabase, user!.id);
+
+  // Le mie case, con la prima foto: il Database è diviso per casa
+  const { data: caseRighe } = await supabase
+    .from("listings")
+    .select("id, titolo, zona, prezzo, pubblicato, verifica_stato, listing_photos(url, ordine)")
+    .eq("owner_id", user!.id)
+    .order("created_at", { ascending: false });
+  const case_: CasaDatabase[] = (caseRighe ?? []).map((l) => ({
+    id: l.id as string,
+    titolo: l.titolo as string,
+    zona: l.zona as string,
+    prezzo: l.prezzo as number,
+    foto: [...(l.listing_photos ?? [])].sort((a, b) => (a.ordine ?? 0) - (b.ordine ?? 0))[0]?.url ?? null,
+    pubblicata: l.pubblicato === true,
+    verificata: l.verifica_stato === "verificato",
+  }));
 
   const righe = (candidature ?? []) as unknown as RigaCandidatura[];
   const tenantIds = [...new Set(righe.map((c) => c.tenant_id))];
@@ -72,6 +89,7 @@ export default async function DatabasePage() {
 
   return (
     <DatabaseClient
+      case_={case_}
       possibili={possibili}
       candidature={assemblaCandidature({
         candidature: righe,

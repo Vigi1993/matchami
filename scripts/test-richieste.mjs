@@ -175,19 +175,20 @@ test("NESSUNA schermata chiede più di «rendersi disponibili»: la parola non c
 
 // ============================================================ le schermate
 test("Database (proprietario): «Fai match» NON invia subito: apre una conferma con le parole giuste, e solo «Sì, invia la richiesta» chiama il server", () => {
-  const c = senzaCommenti(leggi("src", "components", "PossibiliInquilini.tsx"));
-  assert.match(c, /onClick=\{\(\) => setScelta\(\{ casa: p, scheda: s \}\)\}>\s+Fai match/); assert.equal([...c.matchAll(/faiMatch\(/g)].length, 1, "faiMatch si chiama in un solo punto"); assert.ok(c.indexOf("faiMatch(") > c.indexOf("function invia()") && c.indexOf("faiMatch(") < c.indexOf("function invia()") + 400, "solo dentro «invia»");
-  for (const x of ["Fai match con ${scelta.scheda.nome}?", "Le arriverà una richiesta per", "Se non risponde o dice di no, non succede\n              niente", "Sì, invia la richiesta", "No, torna indietro", "Vuoi aggiungere due parole? (facoltativo)"]) assert.ok(c.includes(x) || c.replace(/\s+/g, " ").includes(x.replace(/\s+/g, " ")), `manca «${x}»`);
-  for (const x of ["Queste persone hanno scelto di non farsi trovare dai proprietari: se una di loro si candida, la trovi tra le candidature.", "Puoi contattare questa persona:", "Puoi contattare ${p.disponibili.length} di queste persone:", "Sono persone iscritte che cercano una casa adatta alla tua."]) assert.ok(c.replace(/\s+/g, " ").includes(x), `manca la frase «${x}»`);
+  const c = senzaCommenti(leggi("src", "components", "PossibiliMatch.tsx"));
+  assert.match(c, /onClick=\{\(\) => setScelta\(s\)\}>\s+Fai match/); assert.equal([...c.matchAll(/faiMatch\(/g)].length, 1, "faiMatch si chiama in un solo punto"); assert.ok(c.indexOf("faiMatch(") > c.indexOf("function invia()") && c.indexOf("faiMatch(") < c.indexOf("function invia()") + 400, "solo dentro «invia»");
+  for (const x of ["Fai match con ${scelta.nome}?", "Le arriverà una richiesta per", "Se non risponde o dice di no, non succede\n              niente", "Sì, invia la richiesta", "No, torna indietro", "Vuoi aggiungere due parole? (facoltativo)"]) assert.ok(c.includes(x) || c.replace(/\s+/g, " ").includes(x.replace(/\s+/g, " ")), `manca «${x}»`);
+  for (const x of ["Hanno scelto di non farsi trovare dai proprietari: se una di loro si candida, la trovi tra le candidature.", "Puoi contattare questa persona:", "Puoi contattare ${disponibili.length} di queste persone:", "Sono persone iscritte che cercano una casa adatta alla tua."]) assert.ok(c.replace(/\s+/g, " ").includes(x), `manca la frase «${x}»`);
   for (const vecchia of ["si è ancora reso disponibile", "si sono rese disponibili", "si è resa disponibile", "Vedi solo chi ha scelto di farsi trovare"]) assert.ok(!c.includes(vecchia), `c'è ancora la frase vecchia «${vecchia}»`);
   assert.match(c, /className="ob-textarea"/, "il campo del messaggio deve usare la classe che esiste (con bordo e sfondo)"); assert.ok(!/textarea-base/.test(c)); assert.match(leggi("src", "app", "globals.css"), /\.ob-textarea \{/, "la classe del campo di testo deve esistere nel CSS");
   assert.match(c, /maxLength=\{MESSAGGIO_RICHIESTA_MAX\}/); assert.match(c, /\{messaggio\.length\}\/\{MESSAGGIO_RICHIESTA_MAX\}/);
 });
 
-test("Database (proprietario): la scheda non mostra reddito né contatti; mostra il badge, l'affidabilità e le recensioni; un rifiuto non dice chi è", () => {
-  const c = senzaCommenti(leggi("src", "components", "PossibiliInquilini.tsx")); for (const vietato of ["reddito_mensile", "reddito_nucleo", "email", "telefono", "cognome", "protestato"]) assert.ok(!c.includes(vietato), `la scheda usa «${vietato}»`);
-  for (const x of ["<BadgeRaccomandato />", "Reddito verificato", "Affidabilità {s.affidabilita} · {s.etichettaAffidabilita}", "testoRecensioni(s.recensioni)"]) assert.ok(c.includes(x), `manca «${x}»`);
-  assert.match(c, /\{rifiutate === 1 \? "1 persona non ha accettato" : `\$\{rifiutate\} persone non hanno accettato`\}/); const s = senzaCommenti(leggi("src", "lib", "proprietario", "possibili-server.ts")); assert.match(s, /nome: r\.stato === "inviata" \? nomiRichieste\.get\(r\.id as string\) \?\? null : null,/);
+test("Database (proprietario): la scheda non mostra reddito né contatti; mostra il badge, l'affidabilità, il match e le recensioni; un rifiuto non dice chi è", () => {
+  const sch = senzaCommenti(leggi("src", "components", "SchedaPersona.tsx")); const c = senzaCommenti(leggi("src", "components", "PossibiliMatch.tsx"));
+  for (const vietato of ["reddito_mensile", "reddito_nucleo", "email", "telefono", "cognome", "protestato"]) { assert.ok(!sch.includes(vietato), `la scheda usa «${vietato}»`); assert.ok(!c.includes(vietato), `i possibili match usano «${vietato}»`); }
+  for (const x of ["<BadgeRaccomandato />", "Reddito verificato", "Affidabilità", "Match", "testoRecensioni(dati.recensioni)"]) assert.ok(sch.includes(x), `manca «${x}»`);
+  assert.match(c, /\{rifiutate === 1 \? "1 persona non ha accettato" : `\$\{rifiutate\} persone non hanno accettato`\}/); const s2 = senzaCommenti(leggi("src", "lib", "proprietario", "possibili-server.ts")); assert.match(s2, /nome: r\.stato === "inviata" \? nomiRichieste\.get\(r\.id as string\) \?\? null : null,/);
 });
 
 test("«I tuoi match» (inquilino): una nota dice cosa vedono i proprietari e come nascondersi, chi si è nascosto può tornare visibile, si risponde con «Sì, mi interessa» / «No, grazie», accettando si apre la chat; il numero sulla scheda e sulla barra conta solo le richieste in attesa", () => {
@@ -217,7 +218,7 @@ test("una candidatura nata da una richiesta si riconosce («Ti ha scelto il prop
 });
 
 test("stile del proprietario: i pulsanti «Fai match» e di conferma sono grandi (almeno 56 px), e i testi delle schede sono da 15 px in su", () => {
-  const css = leggi("src", "app", "globals.css"); const h = (c) => Number((css.match(new RegExp(`${c.replace(/\./g, "\\.")} \\{[^}]*min-height:\\s*(\\d+)px`)) ?? [])[1]); assert.ok(h(".scheda-match") >= 56 && h(".possibili-conferma .opp-cta") >= 56, `${h(".scheda-match")}, ${h(".possibili-conferma .opp-cta")}`);
-  assert.match(css, /\.scheda-etichette \.badge-raccomandato \{[^}]*font-size: 15px;/, "il badge nelle schede è piccolo: per il proprietario deve essere da 15 px"); assert.ok(!/<BadgeRaccomandato compatto/.test(leggi("src", "components", "PossibiliInquilini.tsx")), "nelle schede non si usa la versione compatta (11 px)");
-  const blocco = css.slice(css.indexOf("/* ---- Database: le schede dei possibili inquilini e la richiesta ---- */")); const misure = [...blocco.matchAll(/font-size:\s*(\d+(?:\.\d+)?)px/g)].map((m) => Number(m[1])); assert.ok(misure.length >= 10 && Math.min(...misure) >= 15, `caratteri: ${Math.min(...misure)} px`);
+  const css = leggi("src", "app", "globals.css"); const h = (c) => Number((css.match(new RegExp(`${c.replace(/\./g, "\\.")} \\{[^}]*min-height:\\s*(\\d+)px`)) ?? [])[1]); assert.ok(h(".persona-primario") >= 56 && h(".persona-secondario") >= 52 && h(".possibili-conferma .opp-cta") >= 56 && h(".sezione-testa") >= 64, `${h(".persona-primario")}, ${h(".persona-secondario")}, ${h(".possibili-conferma .opp-cta")}, ${h(".sezione-testa")}`);
+  assert.match(css, /\.persona-etichette \.badge-raccomandato \{[^}]*font-size: 15px;/, "il badge nelle schede è piccolo: per il proprietario deve essere da 15 px"); assert.ok(!/<BadgeRaccomandato compatto/.test(leggi("src", "components", "SchedaPersona.tsx")) && !/<BadgeRaccomandato compatto/.test(leggi("src", "components", "PossibiliMatch.tsx")), "nelle schede non si usa la versione compatta (11 px)");
+  const blocco = css.slice(css.indexOf("/* ---- Database: le case, le schede delle persone e le richieste ---- */")); const misure = [...blocco.matchAll(/font-size:\s*(\d+(?:\.\d+)?)px/g)].map((m) => Number(m[1])); assert.ok(misure.length >= 10 && Math.min(...misure) >= 15, `caratteri: ${Math.min(...misure)} px`);
 });

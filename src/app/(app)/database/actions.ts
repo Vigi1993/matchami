@@ -9,6 +9,7 @@ import { motivoRifiutoValido } from "@/lib/motivi-rifiuto";
 import { profiloDaVista } from "@/lib/candidati";
 import { messaggioErroreVerifica } from "@/lib/verifica";
 import { eUuid, messaggioErroreRichiesta, messaggioPulito } from "@/lib/richieste";
+import { messaggioErroreRiapertura } from "@/lib/decisioni";
 
 export async function valutaCandidatura(
   candidaturaId: string,
@@ -118,5 +119,26 @@ export async function faiMatch(listingId: string, tenantId: string, messaggio?: 
 
   revalidatePath("/database");
   revalidatePath("/");
+  return { ok: true };
+}
+
+/**
+ * Annullare una decisione: un match o uno scarto. La candidatura torna «in attesa» e l'inquilino riceve un avviso. Le regole (è tua,
+ * è stata decisa, non c'è un contratto né una visita in programma) le controlla il database; qui si traduce l'errore in parole.
+ */
+export async function riapriCandidatura(candidaturaId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!eUuid(candidaturaId)) return { ok: false, error: messaggioErroreRiapertura("CANDIDATURA_NON_TUA: x") };
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: messaggioErroreRiapertura("NON_AUTENTICATO: x") };
+
+  const { error } = await supabase.rpc("riapri_candidatura", { p_candidatura: candidaturaId });
+  if (error) return { ok: false, error: messaggioErroreRiapertura(error.message) };
+
+  revalidatePath("/database");
+  revalidatePath("/");
+  revalidatePath("/messaggi");
   return { ok: true };
 }
