@@ -1,5 +1,7 @@
 "use client";
 
+import { ConfermaAffitto } from "@/components/ConfermaAffitto";
+import { daConfermare } from "@/lib/affitto-contratto";
 import { useState } from "react";
 import { Sheet } from "@/components/Sheet";
 import type { ContrattoConAnnuncio } from "@/lib/types";
@@ -61,6 +63,11 @@ export function GestioneClient({
       <div className="pref-label">
         <span>I tuoi contratti</span>
       </div>
+
+      {/* il proprietario ha segnato un contratto «firmato»: l'inquilino conferma con un tocco che l'affitto è cominciato */}
+      {contratti.filter(daConfermare).map((c) => (
+        <ConfermaAffitto key={c.id} contratto={c} />
+      ))}
 
       {contratti.length === 0 ? (
         <div className="empty-inline" style={{ paddingTop: 30 }}>

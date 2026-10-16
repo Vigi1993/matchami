@@ -67,3 +67,16 @@ test("migrazione 0034 su PostgreSQL vero: annullare un match o uno scarto, i cas
     const riusciti = (r.stderr.match(/NOTICE:\s+OK:/g) ?? []).length; assert.equal(riusciti, 44, `controlli riusciti: ${riusciti}`);
   } finally { fs.rmSync(nullo, { force: true }); esegui(["-d", "postgres", "-c", `drop database if exists ${db}`]); }
 });
+
+test("migrazione 0035 su PostgreSQL vero: l'affitto nasce dal contratto con la conferma dell'inquilino, il documento per lo staff e il feedback (61 controlli)", { skip: psqlCmd ? false : "imposta MATCHAMI_PSQL per eseguire le prove SQL su un PostgreSQL vero" }, () => {
+  const [bin, ...args] = psqlCmd.split(/\s+/); const db = "matchami_test_affitto"; const esegui = (extra) => spawnSync(bin, [...args, "-X", "-q", ...extra], { encoding: "utf8" });
+  const migrazioni = fs.readdirSync(path.join(radice, "supabase", "migrations")).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort(); assert.ok(migrazioni.includes("0035_affitto_da_contratto.sql"), "manca la migrazione 0035");
+  const nullo = path.join(os.tmpdir(), `matchami-affitto-${process.pid}.txt`);
+  try {
+    let r = esegui(["-d", "postgres", "-c", `drop database if exists ${db}`, "-c", `create database ${db}`]); assert.equal(r.status, 0, r.stderr);
+    r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "scripts", "db", "stub-supabase.sql")]); assert.equal(r.status, 0, r.stderr);
+    for (const m of migrazioni) { r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m)]); assert.equal(r.status, 0, `la migrazione ${m} non si applica: ${r.stderr.slice(0, 300)}`); }
+    r = esegui(["-d", db, "-o", nullo, "-f", path.join(radice, "scripts", "db", "affitto-contratto.sql")]); assert.ok(!/CONTROLLO FALLITO/.test(r.stderr), r.stderr.split("\n").filter((l) => /FALLITO|ERROR/.test(l)).slice(0, 4).join("\n")); assert.equal(r.status, 0, r.stderr.slice(0, 500));
+    const riusciti = (r.stderr.match(/NOTICE:\s+OK:/g) ?? []).length; assert.equal(riusciti, 61, `controlli riusciti: ${riusciti}`);
+  } finally { fs.rmSync(nullo, { force: true }); esegui(["-d", "postgres", "-c", `drop database if exists ${db}`]); }
+});

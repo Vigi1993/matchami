@@ -19,7 +19,7 @@ export default async function GestionePage({ searchParams }: { searchParams: Pro
   const { data: contratti } = await supabase
     .from("contratti")
     .select(
-      "id, stato, canone, durata_mesi, data_inizio, data_firma, candidature!inner(tenant_id, listings(titolo, zona))"
+      "id, stato, canone, durata_mesi, data_inizio, data_firma, inquilino_conferma_at, inquilino_rifiuta_at, candidature!inner(tenant_id, listings(titolo, zona))"
     )
     .eq("candidature.tenant_id", user!.id)
     .order("created_at", { ascending: false });
@@ -50,7 +50,6 @@ export default async function GestionePage({ searchParams }: { searchParams: Pro
         <RapportiPanel
           ruolo="inquilino"
           nomeCreatore={rapporti.nome}
-          immobili={[]}
           richieste={rapporti.richieste}
           rapporti={rapporti.rapporti}
         />

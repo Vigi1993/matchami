@@ -17,7 +17,7 @@ export default async function StaffRapportoPage({ params }: { params: Promise<{ 
 
   const { data: rapporto } = await supabase
     .from("rapporti_locazione")
-    .select("id, owner_id, tenant_id, creato_da, listing_id, periodo_da, periodo_a, documento_path, stato, esito_note, listings(titolo, zona)")
+    .select("id, owner_id, tenant_id, creato_da, listing_id, contratto_id, periodo_da, periodo_a, documento_path, stato, esito_note, listings(titolo, zona)")
     .eq("id", id)
     .single();
   if (!rapporto) notFound();
@@ -45,6 +45,7 @@ export default async function StaffRapportoPage({ params }: { params: Promise<{ 
     | null;
   const decidibile = rapporto.stato === "da_verificare";
   const dichiaratoDa = rapporto.creato_da === rapporto.owner_id ? "il proprietario" : "l'inquilino";
+  const daContratto = typeof rapporto.contratto_id === "string";
 
   return (
     <>
@@ -71,8 +72,12 @@ export default async function StaffRapportoPage({ params }: { params: Promise<{ 
         <span className="v">{l ? `${l.titolo} (${l.zona})` : "—"}</span>
       </div>
       <div className="feat-row">
-        <span className="k">Dichiarato da</span>
-        <span className="v">{dichiaratoDa}, poi confermato dall&apos;altra persona</span>
+        <span className="k">{daContratto ? "Origine" : "Dichiarato da"}</span>
+        <span className="v">
+          {daContratto
+            ? "nato da un contratto fatto su MatchAmI: il proprietario lo ha segnato come firmato e l'inquilino ha confermato"
+            : `${dichiaratoDa}, poi confermato dall'altra persona`}
+        </span>
       </div>
       <div className="feat-row">
         <span className="k">Stato</span>

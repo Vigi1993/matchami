@@ -18,12 +18,13 @@ const sql0020 = fs.readFileSync(path.join(radice, "supabase", "migrations", "002
 const sql0022 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0022_visite.sql"), "utf8");
 const sql0032 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0032_richieste_proprietari.sql"), "utf8");
 const sql0034 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0034_riapri_candidatura.sql"), "utf8");
+const sql0035 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0035_affitto_da_contratto.sql"), "utf8");
 
 /** I tipi che il vincolo sulla tabella ammette. */
 function tipiDelDatabase() {
   // l'ultima definizione del vincolo, in ordine di migrazione
-  const tutte = [...(sql + "\n" + sql0020 + "\n" + sql0022 + "\n" + sql0032 + "\n" + sql0034).matchAll(/check \(tipo in \(([\s\S]*?)\)\)/g)];
-  assert.ok(tutte.length >= 5, "dovrei trovare il vincolo della 0019, quello della 0020, quello della 0022, quello della 0032 e quello della 0034");
+  const tutte = [...(sql + "\n" + sql0020 + "\n" + sql0022 + "\n" + sql0032 + "\n" + sql0034 + "\n" + sql0035).matchAll(/check \(tipo in \(([\s\S]*?)\)\)/g)];
+  assert.ok(tutte.length >= 6, "dovrei trovare il vincolo della 0019, quello della 0020, quello della 0022, quello della 0032, quello della 0034 e quello della 0035");
   return [...tutte[tutte.length - 1][1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
 }
 
@@ -41,7 +42,10 @@ const trigger =
   sql0032.slice(sql0032.indexOf("create or replace function public.invia_richiesta_proprietario")) +
   "\n" +
   // la 0034: la funzione che annulla una decisione crea la notifica «candidatura riaperta»
-  sql0034.slice(sql0034.indexOf("create or replace function public.riapri_candidatura"));
+  sql0034.slice(sql0034.indexOf("create or replace function public.riapri_candidatura")) +
+  "\n" +
+  // la 0035: il trigger sul contratto e le due funzioni dell'affitto da contratto creano le notifiche «da confermare», «confermato», «non confermato»
+  sql0035.slice(sql0035.indexOf("create or replace function public.avvisa_affitto_da_contratto"));
 
 // ------------------------------------------------------------
 // I tipi
@@ -78,6 +82,7 @@ const ROTTE = {
   "/candidature": ["src", "app", "(app)", "candidature", "page.tsx"],
   "/profilo": ["src", "app", "(app)", "profilo", "page.tsx"],
   "/gestione-affitti": ["src", "app", "(app)", "gestione-affitti", "page.tsx"],
+  "/gestione": ["src", "app", "(app)", "gestione", "page.tsx"],
   "/chat/": ["src", "app", "chat", "[id]", "page.tsx"],
   "/immobili": ["src", "app", "(app)", "immobili", "page.tsx"],
 };

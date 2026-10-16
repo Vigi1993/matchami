@@ -163,6 +163,7 @@ const MESSAGGI: Record<string, string> = {
   IMMOBILE_INESISTENTE: "Immobile non trovato.",
   // rapporti di locazione
   RAPPORTO_INESISTENTE: "Affitto non trovato.",
+  MANCA_DOCUMENTO: "Questo affitto è nato da un contratto su MatchAmI e le parti non hanno ancora caricato la copia del contratto: non si può verificare.",
   INDIRIZZO_NON_VALIDO: "Scrivi l'indirizzo dell'immobile, in poche parole.",
   PERIODO_NON_VALIDO:
     "Il periodo non è valido: l'affitto deve essere già cominciato e la fine non può precedere l'inizio.",

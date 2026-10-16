@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Field } from "@/components/ui/Field";
 import { FormFeedback } from "@/components/FormFeedback";
+import { CaricaContrattoRapporto } from "@/components/CaricaContrattoRapporto";
 import {
   descriviRapporto,
   descriviRichiesta,
@@ -14,7 +15,6 @@ import {
   validaPeriodo,
 } from "@/lib/rapporti";
 import type {
-  ImmobileScelta,
   RapportoMio,
   RichiestaMia,
   RuoloRapporto,
@@ -45,14 +45,12 @@ function periodoTesto(da: string, a: string | null): string {
 export function RapportiPanel({
   ruolo,
   nomeCreatore,
-  immobili,
   richieste,
   rapporti,
   puoLasciareFeedback = false,
 }: {
   ruolo: RuoloRapporto;
   nomeCreatore: string | null;
-  immobili: ImmobileScelta[];
   richieste: RichiestaMia[];
   rapporti: RapportoMio[];
   /** il proprietario è verificato: solo allora può lasciare un feedback */
@@ -65,7 +63,6 @@ export function RapportiPanel({
   const [linkAperto, setLinkAperto] = useState<string | null>(null);
   const [feedbackPer, setFeedbackPer] = useState<string | null>(null);
 
-  const [immobileId, setImmobileId] = useState("");
   const [indirizzo, setIndirizzo] = useState("");
   const [da, setDa] = useState("");
   const [a, setA] = useState("");
@@ -77,14 +74,10 @@ export function RapportiPanel({
   async function dichiara() {
     setErrore(null);
 
-    if (ruolo === "proprietario" && !immobileId) {
-      setErrore("Scegli di quale immobile si tratta.");
-      return;
-    }
-    if (ruolo === "inquilino") {
-      const e = validaIndirizzo(indirizzo);
-      if (e) return setErrore(e);
-    }
+    // Solo l'inquilino dichiara un affitto: il proprietario non ne ha bisogno (non gli serve un feedback) e conferma quello dell'inquilino.
+    if (ruolo !== "inquilino") return;
+    const e = validaIndirizzo(indirizzo);
+    if (e) return setErrore(e);
     const ep = validaPeriodo(da, a, oggi);
     if (ep) return setErrore(ep);
     if (!file) return setErrore("Carica il contratto: serve a controllare l'affitto.");
@@ -115,8 +108,8 @@ export function RapportiPanel({
       if (eFile) return setErrore("Non sono riuscito a caricare il contratto. Riprova.");
 
       const { data: token, error: eRpc } = await supabase.rpc("crea_richiesta_rapporto", {
-        p_listing: ruolo === "proprietario" ? immobileId : null,
-        p_indirizzo: ruolo === "inquilino" ? indirizzo.trim() : null,
+        p_listing: null,
+        p_indirizzo: indirizzo.trim(),
         p_da: da,
         p_a: a.trim() === "" ? null : a,
         p_path: percorso,
@@ -129,7 +122,6 @@ export function RapportiPanel({
       setForm(false);
       setLinkAperto(token);
       setIndirizzo("");
-      setImmobileId("");
       setDa("");
       setA("");
       setFile(null);
@@ -157,9 +149,9 @@ export function RapportiPanel({
   return (
     <div>
       <p className="field-note" style={{ margin: "0 0 14px 0", lineHeight: 1.6 }}>
-        Un affitto dichiarato vale per i feedback solo se l&apos;altra persona
-        lo conferma e se il contratto, che vediamo solo noi, risulta in regola.
-        L&apos;altra persona vede i dati principali, non il contratto.
+        {ruolo === "inquilino"
+          ? "Un affitto dichiarato vale per i feedback solo se l'altra persona lo conferma e se il contratto, che vediamo solo noi, risulta in regola. L'altra persona vede i dati principali, non il contratto."
+          : "Qui trovi gli affitti che i tuoi inquilini ti hanno chiesto di confermare. Dopo il controllo del contratto, che vediamo solo noi, puoi lasciare un feedback: aiuta chi ha affittato bene a trovare casa."}
       </p>
 
       {errore && (
@@ -172,11 +164,11 @@ export function RapportiPanel({
       {rapporti.length > 0 && (
         <>
           <div className="pref-label">
-            <span>Affitti dichiarati</span>
+            <span>I tuoi affitti</span>
           </div>
           <div className="rapporti-lista">
             {rapporti.map((r) => {
-              const d = descriviRapporto(r.stato, r.esito_note);
+              const d = descriviRapporto(r.stato, r.esito_note, { daContratto: r.daContratto, senzaDocumento: r.senzaDocumento });
               return (
                 <div key={r.id} className="verifica-card">
                   <div className="verifica-card-testa">
@@ -210,7 +202,12 @@ export function RapportiPanel({
                       }}
                     />
                   )}
-                  {r.creatoDaMe && r.stato !== "verificato" && (
+                  {/* nato da un contratto su MatchAmI: una delle due parti carica la copia del contratto per lo staff */}
+                  {r.daContratto && r.stato !== "verificato" && (r.senzaDocumento || r.stato === "respinto") && (
+                    <CaricaContrattoRapporto rapportoId={r.id} onFatto={() => router.refresh()} />
+                  )}
+                  {/* un affitto nato da un contratto non si ritira a mano: la sua origine è il contratto */}
+                  {r.creatoDaMe && !r.daContratto && r.stato !== "verificato" && (
                     <button type="button" className="redo-link" style={{ marginTop: 8 }} onClick={() => ritiraRapporto(r.id)}>
                       Ritira
                     </button>
@@ -269,113 +266,93 @@ export function RapportiPanel({
         />
       )}
 
-      {/* ---- Nuova dichiarazione ---- */}
-      {!form ? (
-        <button
-          type="button"
-          className="opp-cta"
-          style={{ marginTop: 20 }}
-          onClick={() => {
-            setForm(true);
-            setLinkAperto(null);
-          }}
-        >
-          Dichiara un affitto
-        </button>
-      ) : (
-        <div className="passo-verifica" style={{ marginTop: 20 }}>
-          <div className="pref-label">
-            <span>Dichiara un affitto</span>
-          </div>
-
-          {ruolo === "proprietario" ? (
-            <Field label="Quale tuo immobile">
-              {immobili.length === 0 ? (
-                <p className="field-note">
-                  Non hai ancora aggiunto nessun immobile: aggiungilo da Immobili e poi torna qui.
-                </p>
-              ) : (
-                <select
-                  className="contract-input"
-                  value={immobileId}
-                  onChange={(e) => setImmobileId(e.target.value)}
-                  aria-label="Quale tuo immobile"
-                >
-                  <option value="">Scegli…</option>
-                  {immobili.map((i) => (
-                    <option key={i.id} value={i.id}>
-                      {i.titolo} · {i.zona}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </Field>
-          ) : (
-            <Field label="Indirizzo dell'immobile">
-              <input
-                className="contract-input"
-                value={indirizzo}
-                onChange={(e) => setIndirizzo(e.target.value)}
-                placeholder="Via, numero, città"
-                aria-label="Indirizzo dell'immobile"
-              />
-            </Field>
-          )}
-
-          <Field label="Quando è cominciato">
-            <input
-              type="date"
-              className="contract-input"
-              value={da}
-              max={oggi}
-              onChange={(e) => setDa(e.target.value)}
-              aria-label="Quando è cominciato"
-            />
-          </Field>
-          <Field label="Quando è finito (vuoto se è ancora in corso)">
-            <input
-              type="date"
-              className="contract-input"
-              value={a}
-              onChange={(e) => setA(e.target.value)}
-              aria-label="Quando è finito"
-            />
-          </Field>
-
-          <Field label="Il contratto">
-            <label className="chip selettore-file">
-              {file ? file.name : "Scegli il file"}
-              <input
-                type="file"
-                accept="application/pdf,image/jpeg,image/png"
-                aria-label="Il contratto"
-                className="hidden"
-                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              />
-            </label>
-            <p className="field-note">
-              PDF o foto, fino a 10 MB. Lo vedono solo il team di MatchAmI e tu: non l&apos;altra persona.
-            </p>
-          </Field>
-
-          <div className="flex gap-3" style={{ marginTop: 6 }}>
+      {/* ---- Nuova dichiarazione: solo per l'inquilino ---- */}
+      {ruolo === "inquilino" && (
+        <>
+          {!form ? (
             <button
               type="button"
-              className="btn-danger-outline"
-              style={{ borderColor: "rgba(16,21,26,.14)", color: "var(--ink)" }}
+              className="opp-cta"
+              style={{ marginTop: 20 }}
               onClick={() => {
-                setForm(false);
-                setErrore(null);
+                setForm(true);
+                setLinkAperto(null);
               }}
-              disabled={occupato}
             >
-              Annulla
+              Dichiara un affitto
             </button>
-            <button type="button" className="opp-cta" disabled={occupato} onClick={dichiara}>
-              {occupato ? "Invio..." : "Crea il link"}
-            </button>
-          </div>
-        </div>
+          ) : (
+            <div className="passo-verifica" style={{ marginTop: 20 }}>
+              <div className="pref-label">
+                <span>Dichiara un affitto</span>
+              </div>
+
+              <Field label="Indirizzo dell'immobile">
+                <input
+                  className="contract-input"
+                  value={indirizzo}
+                  onChange={(e) => setIndirizzo(e.target.value)}
+                  placeholder="Via, numero, città"
+                  aria-label="Indirizzo dell'immobile"
+                />
+              </Field>
+
+              <Field label="Quando è cominciato">
+                <input
+                  type="date"
+                  className="contract-input"
+                  value={da}
+                  max={oggi}
+                  onChange={(e) => setDa(e.target.value)}
+                  aria-label="Quando è cominciato"
+                />
+              </Field>
+              <Field label="Quando è finito (vuoto se è ancora in corso)">
+                <input
+                  type="date"
+                  className="contract-input"
+                  value={a}
+                  onChange={(e) => setA(e.target.value)}
+                  aria-label="Quando è finito"
+                />
+              </Field>
+
+              <Field label="Il contratto">
+                <label className="chip selettore-file">
+                  {file ? file.name : "Scegli il file"}
+                  <input
+                    type="file"
+                    accept="application/pdf,image/jpeg,image/png"
+                    aria-label="Il contratto"
+                    className="hidden"
+                    onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                  />
+                </label>
+                <p className="field-note">
+                  PDF o foto, fino a 10 MB. Lo vedono solo il team di MatchAmI e tu: non l&apos;altra persona.
+                </p>
+              </Field>
+
+              <div className="flex gap-3" style={{ marginTop: 6 }}>
+                <button
+                  type="button"
+                  className="btn-danger-outline"
+                  style={{ borderColor: "rgba(16,21,26,.14)", color: "var(--ink)" }}
+                  onClick={() => {
+                    setForm(false);
+                    setErrore(null);
+                  }}
+                  disabled={occupato}
+                >
+                  Annulla
+                </button>
+                <button type="button" className="opp-cta" disabled={occupato} onClick={dichiara}>
+                  {occupato ? "Invio..." : "Crea il link"}
+                </button>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

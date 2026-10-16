@@ -93,6 +93,9 @@ export type ContrattoProprietario = {
   durata_mesi: number | null;
   data_inizio: string | null;
   data_firma: string | null;
+  /** la risposta dell'inquilino quando il contratto è firmato: ha confermato che l'affitto è cominciato, o ha detto che non è corretto */
+  inquilino_conferma_at?: string | null;
+  inquilino_rifiuta_at?: string | null;
   candidature: {
     listings: { titolo: string; zona: string } | null;
     tenant_id: string;
@@ -181,6 +184,8 @@ export type ContrattoConAnnuncio = {
   durata_mesi: number | null;
   data_inizio: string | null;
   data_firma: string | null;
+  inquilino_conferma_at?: string | null;
+  inquilino_rifiuta_at?: string | null;
   candidature: {
     listings: { titolo: string; zona: string } | null;
   } | null;

@@ -43,6 +43,8 @@ export default async function StaffPage() {
     .from("rapporti_locazione")
     .select("id, owner_id, tenant_id, periodo_da, periodo_a, created_at, listings(titolo, zona)")
     .eq("stato", "da_verificare")
+    // un affitto nato da un contratto entra nella coda solo quando le parti hanno caricato la copia del contratto
+    .or("contratto_id.is.null,documento_path.not.is.null")
     .order("created_at", { ascending: true });
   const rapporti = (rapportiData ?? []) as unknown as {
     id: string; owner_id: string; tenant_id: string; periodo_da: string; periodo_a: string | null;

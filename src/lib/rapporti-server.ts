@@ -26,7 +26,7 @@ export async function caricaRapportiMiei(supabase: Supabase, userId: string) {
       .order("created_at", { ascending: false }),
     supabase
       .from("rapporti_locazione")
-      .select("id, owner_id, tenant_id, creato_da, stato, esito_note, periodo_da, periodo_a, listings(titolo, zona)")
+      .select("id, owner_id, tenant_id, creato_da, stato, esito_note, periodo_da, periodo_a, contratto_id, documento_path, listings(titolo, zona)")
       .order("created_at", { ascending: false }),
     supabase.from("profiles").select("nome, cognome").eq("id", userId).single(),
   ]);
@@ -86,6 +86,8 @@ export async function caricaRapportiMiei(supabase: Supabase, userId: string) {
       creatoDaMe: r.creato_da === userId,
       recensito: votoPerRapporto.has(r.id as string),
       votoDato: r.owner_id === userId ? (votoPerRapporto.get(r.id as string) ?? null) : null,
+      daContratto: typeof r.contratto_id === "string",
+      senzaDocumento: !r.documento_path,
     };
   });
 

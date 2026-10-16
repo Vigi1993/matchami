@@ -33,6 +33,10 @@ export type RapportoMio = {
   recensito: boolean;
   /** il voto, solo per chi l'ha dato (il proprietario); l'inquilino non lo vede */
   votoDato: number | null;
+  /** nato da un contratto fatto su MatchAmI (non dichiarato a mano) */
+  daContratto: boolean;
+  /** nessuna delle due parti ha ancora caricato la copia del contratto per lo staff */
+  senzaDocumento: boolean;
 };
 
 export type ImmobileScelta = { id: string; titolo: string; zona: string };
@@ -44,7 +48,8 @@ export type Descrizione = {
 };
 
 /** Come si presenta un rapporto già confermato dall'altra persona. */
-export function descriviRapporto(stato: StatoRapporto, note: string | null): Descrizione {
+export function descriviRapporto(stato: StatoRapporto, note: string | null, origine: { daContratto?: boolean; senzaDocumento?: boolean } = {}): Descrizione {
+  const daContratto = origine.daContratto === true;
   if (stato === "verificato") {
     return {
       etichetta: "Verificato",
@@ -56,10 +61,23 @@ export function descriviRapporto(stato: StatoRapporto, note: string | null): Des
     return {
       etichetta: "Respinto",
       tono: "respinto",
-      testo: note?.trim()
-        ? "Il controllo non è andato a buon fine. Puoi ritirare la richiesta e dichiararla di nuovo."
-        : "Il controllo non è andato a buon fine.",
+      testo: daContratto
+        ? "Il controllo non è andato a buon fine. Puoi caricare di nuovo la copia del contratto."
+        : note?.trim()
+          ? "Il controllo non è andato a buon fine. Puoi ritirare la richiesta e dichiararla di nuovo."
+          : "Il controllo non è andato a buon fine.",
     };
+  }
+  // un affitto nato da un contratto su MatchAmI: lo staff ha bisogno della copia del contratto, che le parti caricano apposta
+  if (daContratto && origine.senzaDocumento === true) {
+    return {
+      etichetta: "Manca il contratto",
+      tono: "da_fare",
+      testo: "L'affitto è nato da un contratto su MatchAmI. Carica una copia del contratto registrato: serve al nostro team per verificarlo.",
+    };
+  }
+  if (daContratto) {
+    return { etichetta: "In verifica", tono: "attesa", testo: "Il nostro team sta controllando la copia del contratto." };
   }
   return {
     etichetta: "In verifica",

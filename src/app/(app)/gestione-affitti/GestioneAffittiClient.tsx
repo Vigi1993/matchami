@@ -1,5 +1,6 @@
 "use client";
 
+import { statoPerProprietario } from "@/lib/affitto-contratto";
 import { BozzaContratto } from "@/components/BozzaContratto";
 import { ArchivioContratto } from "@/components/ArchivioContratto";
 import { FirmaContratto } from "@/components/FirmaContratto";
@@ -330,6 +331,8 @@ function SchedaContratto({
           {c.nome} {c.cognome}
         </div>
         <div className="mc-meta">{c.canone ? `€${c.canone.toLocaleString("it-IT")}/mese` : "—"}</div>
+        {/* con il contratto firmato: l'inquilino ha confermato l'affitto? */}
+        {statoPerProprietario(c) && <div className={`mc-affitto is-${statoPerProprietario(c)!.chiave}`}>{statoPerProprietario(c)!.testo}</div>}
       </div>
       <div className={`mc-pct ${badgeStato(c.stato)}`}>{etichettaStato(c.stato)}</div>
     </button>

@@ -30,6 +30,9 @@ export const TIPI_NOTIFICA = [
   "richiesta_ricevuta",
   "richiesta_accettata",
   "candidatura_riaperta",
+  "affitto_da_confermare",
+  "affitto_confermato",
+  "affitto_non_confermato",
 ] as const;
 
 export type TipoNotifica = (typeof TIPI_NOTIFICA)[number];
@@ -142,6 +145,21 @@ export function descriviNotifica(
         testo: `${nome || "Un proprietario"} ha scelto il tuo profilo per ${annuncio(dati, "la sua casa")}. Se ti interessa, rispondi da «I tuoi match».`,
       };
     }
+    case "affitto_da_confermare":
+      return {
+        titolo: "Conferma il tuo affitto",
+        testo: `Il proprietario di ${annuncio(dati, "una casa")} ha segnato il contratto come firmato. Se è tutto giusto, confermalo dalla pagina Gestione affitto.`,
+      };
+    case "affitto_confermato":
+      return {
+        titolo: "L'inquilino ha confermato l'affitto",
+        testo: `L'affitto di ${annuncio(dati, "una tua casa")} è confermato. Carica una copia del contratto per farlo verificare: poi potrai lasciare il feedback.`,
+      };
+    case "affitto_non_confermato":
+      return {
+        titolo: "L'inquilino non ha confermato",
+        testo: `Per ${annuncio(dati, "una tua casa")} l'inquilino dice che c'è qualcosa che non va nel contratto. Correggi i dati e gli verrà chiesto di nuovo.`,
+      };
     case "candidatura_riaperta":
       return {
         titolo: "La tua candidatura è di nuovo in attesa",

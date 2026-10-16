@@ -23,7 +23,7 @@ export default async function GestioneAffittiPage() {
   const { data: contratti } = await supabase
     .from("contratti")
     .select(
-      "id, candidatura_id, stato, canone, durata_mesi, data_inizio, data_firma, candidature!inner(listing_id, tenant_id, listings(owner_id, titolo, zona))"
+      "id, candidatura_id, stato, canone, durata_mesi, data_inizio, data_firma, inquilino_conferma_at, inquilino_rifiuta_at, candidature!inner(listing_id, tenant_id, listings(owner_id, titolo, zona))"
     )
     .eq("candidature.listings.owner_id", user!.id)
     .order("created_at", { ascending: false });
@@ -87,16 +87,11 @@ export default async function GestioneAffittiPage() {
     };
   });
 
-  // Gli affitti dichiarati fuori da MatchAmI (o prima), con la conferma
-  // dell'altra persona: servono per poter lasciare un feedback.
-  const [rapporti, { data: verificato }, { data: immobili }] = await Promise.all([
+  // Gli affitti che i miei inquilini mi hanno chiesto di confermare (dichiarati da loro): servono per poter lasciare un feedback.
+  // Il proprietario non dichiara più un affitto: lo dichiara chi ne ha bisogno, cioè l'inquilino.
+  const [rapporti, { data: verificato }] = await Promise.all([
     caricaRapportiMiei(supabase, user!.id),
     supabase.rpc("proprietario_verificato", { p_owner: user!.id }),
-    supabase
-      .from("listings")
-      .select("id, titolo, zona")
-      .eq("owner_id", user!.id)
-      .order("created_at", { ascending: false }),
   ]);
 
   // I documenti di TUTTI i miei contratti, in una chiamata sola (mai il percorso dei file)
@@ -115,7 +110,6 @@ export default async function GestioneAffittiPage() {
         <RapportiPanel
           ruolo="proprietario"
           nomeCreatore={rapporti.nome}
-          immobili={(immobili ?? []) as { id: string; titolo: string; zona: string }[]}
           richieste={rapporti.richieste}
           rapporti={rapporti.rapporti}
           // se la domanda non riesce si presume NON verificato: meglio un
