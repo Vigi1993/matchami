@@ -26,8 +26,9 @@ export function OwnerHomeClient({ case_, nome, ora }: { case_: CasaHome[]; nome:
 
   return (
     <PageContainer wide>
-      <p className="casa-saluto">{saluto(nome, ora)}</p>
       <h1 className="screen-title">{case_.length === 1 ? "La tua casa" : "Le tue case"}</h1>
+      {/* il saluto sta nel sottotitolo grigio, come in tutte le altre pagine */}
+      <p className="screen-sub">{saluto(nome, ora)}.</p>
 
       {/* Se c'è qualcosa da fare lo si dice per primo, con un pulsante grande */}
       {invito && (

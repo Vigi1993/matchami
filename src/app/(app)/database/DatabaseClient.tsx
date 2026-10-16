@@ -163,18 +163,18 @@ export function DatabaseClient({
     const zona = g.casa.zona.replace(", Milano", "");
     return (
       <article className="gruppo-casa" aria-label={`Casa: ${g.casa.titolo}`}>
-        <header className="gruppo-testa">
+        {/* la stessa scheda della pagina Immobili: foto, zona, titolo, prezzo */}
+        <header className="match-card casa-intestazione">
           {g.casa.foto ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={g.casa.foto} alt="" className="gruppo-foto" />
+            <img src={g.casa.foto} alt="" />
           ) : (
-            <span className="gruppo-foto gruppo-foto-vuota" aria-hidden="true" />
+            <div className="mc-avatar">{g.casa.titolo.slice(0, 2).toUpperCase()}</div>
           )}
-          <div className="gruppo-titolo">
-            <h2>{g.casa.titolo}</h2>
-            <span>
-              {[zona, g.casa.prezzo ? testoPrezzo(g.casa.prezzo) : ""].filter(Boolean).join(" · ")}
-            </span>
+          <div className="mc-body">
+            <div className="mc-zona">{zona}</div>
+            <div className="mc-title">{g.casa.titolo}</div>
+            <div className="mc-meta">{g.casa.prezzo ? testoPrezzo(g.casa.prezzo) : "—"}</div>
           </div>
         </header>
 

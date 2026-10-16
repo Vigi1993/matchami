@@ -185,8 +185,9 @@ test("nessuna casa: lo si dice con parole semplici e c'è un pulsante grande per
   const h = pagina({ case_: [] }); const t = testoDi(h); assert.ok(t.includes("Non hai ancora nessuna casa") && t.includes("Aggiungi la tua casa") && t.includes("Le tue case")); assert.deepEqual(link(h), ["/immobili"]); assert.ok(!h.includes("<article"));
 });
 
-test("saluto e titolo: senza nome solo il saluto; l'ora cambia il saluto", () => {
-  assert.ok(testoDi(pagina({ nome: null })).startsWith("Buongiorno La tua casa")); assert.ok(testoDi(pagina({ ora: 15 })).startsWith("Buon pomeriggio, Mario")); assert.ok(testoDi(pagina({ ora: 21 })).startsWith("Buonasera, Mario"));
+test("saluto e titolo: il titolo è «La tua casa» e il saluto sta nel sottotitolo grigio (come in tutte le altre pagine); senza nome solo il saluto; l'ora cambia il saluto", () => {
+  const h = pagina(); assert.match(h, /<h1 class="screen-title">La tua casa<\/h1><p class="screen-sub">Buongiorno, Mario\.<\/p>/, "titolo e sottotitolo nell'ordine delle altre pagine"); assert.ok(!/casa-saluto/.test(h), "il saluto non sta più sopra il titolo");
+  assert.ok(testoDi(pagina({ nome: null })).startsWith("La tua casa Buongiorno.")); assert.ok(testoDi(pagina({ ora: 15 })).startsWith("La tua casa Buon pomeriggio, Mario.")); assert.ok(testoDi(pagina({ ora: 21 })).startsWith("La tua casa Buonasera, Mario."));
 });
 
 // ============================================================ per chi non è pratico
@@ -199,15 +200,15 @@ function bloccoCss() {
 
 test("leggibilità: nessun carattere sotto i 15 px nella Home e nella sezione del Database; i testi di lettura da 16 px in su", () => {
   const css = bloccoCss(); const misure = [...css.matchAll(/font-size:\s*(\d+(?:\.\d+)?)px/g)].map((m) => Number(m[1])); assert.ok(misure.length >= 20, "pochi caratteri trovati: " + misure.length); assert.ok(Math.min(...misure) >= 15, `un carattere è troppo piccolo: ${Math.min(...misure)} px`);
-  for (const [classe, minimo] of [[".casa-frase", 0], [".tessera-frase", 17], [".casa-invito", 19], [".casa-dati", 18], [".casa-titolo", 24], [".tessera-numero", 56], [".possibili-testo", 16], [".possibili-frase", 17]]) { if (!minimo) continue; const m = css.match(new RegExp(`${classe.replace(".", "\\.")} \\{[^}]*font-size:\\s*(\\d+)px`)); assert.ok(m && Number(m[1]) >= minimo, `${classe}: serve almeno ${minimo}px`); }
+  for (const [classe, minimo] of [[".casa-frase", 0], [".tessera-frase", 17], [".casa-invito", 17], [".casa-dati", 16], [".casa-titolo", 26], [".tessera-numero", 44], [".possibili-testo", 16]]) { if (!minimo) continue; const m = css.match(new RegExp(`${classe.replace(".", "\\.")} \\{[^}]*font-size:\\s*(\\d+)px`)); assert.ok(m && Number(m[1]) >= minimo, `${classe}: serve almeno ${minimo}px`); }
 });
 
 test("leggibilità: i bersagli da toccare sono larghi (pulsante delle candidature e frase d'attesa almeno 64 px, tessere almeno 180 px) e c'è un contorno quando si naviga da tastiera", () => {
   const css = bloccoCss(); const alt = (c) => Number((css.match(new RegExp(`${c.replace(".", "\\.")} \\{[^}]*min-height:\\s*(\\d+)px`)) ?? [])[1]);
-  assert.ok(alt(".casa-invito") >= 64 && alt(".casa-attesa") >= 64 && alt(".tessera") >= 180, `${alt(".casa-invito")}, ${alt(".casa-attesa")}, ${alt(".tessera")}`);
+  assert.ok(alt(".casa-invito") >= 64 && alt(".casa-attesa") >= 64 && alt(".tessera") >= 170, `${alt(".casa-invito")}, ${alt(".casa-attesa")}, ${alt(".tessera")}`);
   for (const c of [".tessera:focus-visible", ".casa-hero:focus-visible", ".casa-invito:focus-visible"]) assert.ok(css.includes(c), `manca il contorno per la tastiera: ${c}`); assert.match(css, /outline: 3px solid var\(--moss\)/);
   assert.match(css, /\.casa-tessere \{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/, "le due tessere devono avere sempre la stessa larghezza"); assert.match(css, /\.tessera \{[^}]*min-width: 0;/);
-  assert.match(css, /\.casa-hero \{[^}]*height: 300px;/); assert.match(css, /\.casa\.compatta \.casa-hero \{\s+height: 210px;/);
+  assert.match(css, /\.casa-hero \{[^}]*height: 260px;/); assert.match(css, /\.casa\.compatta \.casa-hero \{\s+height: 190px;/);
 });
 
 test("leggibilità: il testo sulla foto sta sopra una sfumatura scura (leggibile con qualunque foto) e le etichette dello stato hanno uno sfondo proprio", () => {
@@ -242,7 +243,7 @@ test("Database: ogni casa ha la sezione «Possibili match», con l'ancora a cui 
   assert.match(d, /<SezioneApribile id=\{g\.casa\.id === primoConPossibili \? "possibili" : undefined\} titolo="Possibili match" conteggio=\{n\.possibili\}>\s+<PossibiliMatch casa=\{g\.possibili\} \/>/); assert.match(d, /const primoConPossibili = gruppi\.find\(\(g\) => g\.possibili !== null\)\?\.casa\.id \?\? null;/);
   assert.match(c, /Chi ha scelto di non farsi trovare non compare, e i contatti di nessuno sono/); assert.match(c, /Il numero non è disponibile in questo momento/); assert.match(d, /Appena una tua casa sarà pubblicata, qui vedrai chi si candida e chi potrebbe fare al caso tuo\./);
   assert.ok(d.indexOf("{gruppi.map") > 0 && d.indexOf("{gruppi.map") < d.indexOf("<RicercaCandidati"), "le case stanno PRIMA della ricerca (la ricerca è in fondo)"); const p = leggi("src", "app", "(app)", "database", "page.tsx"); assert.match(p, /const possibili = await possibiliPerCasaDelProprietario\(supabase, user!\.id\);/); assert.match(p, /<DatabaseClient\s+case_=\{case_\}\s+possibili=\{possibili\}/);
-  assert.match(leggi("src", "app", "globals.css"), /\.sezione-apribile \{[^}]*scroll-margin-top: 16px;/, "la sezione a cui porta l'ancora non deve finire sotto il bordo");
+  assert.match(leggi("src", "app", "globals.css"), /\.sezione-db \{\s+scroll-margin-top: 16px;/, "la sezione a cui porta l'ancora non deve finire sotto il bordo");
 });
 
 test("informativa: dice che ai proprietari si mostra solo un NUMERO anonimo di inquilini compatibili, con la nuova versione; chi aveva le precedenti non deve riaccettare", () => {

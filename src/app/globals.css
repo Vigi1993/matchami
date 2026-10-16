@@ -3845,37 +3845,30 @@ button.contratto-testa:focus-visible {
    Pensata per chi non è pratico: caratteri grandi (mai sotto 15px), bersagli larghi
    (almeno 64px), molto contrasto, una sola cosa da fare per volta.
    ============================================================ */
-.casa-saluto {
-  margin: 0 0 2px;
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--body-soft);
-}
 .casa-invito {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  min-height: 68px;
-  margin: 6px 0 20px;
-  padding: 12px 14px 12px 20px;
-  border-radius: 22px;
-  background: var(--gold);
-  color: var(--ink);
-  font-size: 19px;
+  min-height: 64px;
+  margin: 0 0 16px;
+  padding: 12px 14px 12px 18px;
+  border-radius: 16px;
+  background: var(--moss);
+  color: var(--paper);
+  font-size: 17px;
   font-weight: 700;
   line-height: 1.25;
   text-decoration: none;
-  box-shadow: 0 10px 24px rgba(201, 161, 90, 0.35);
   -webkit-tap-highlight-color: transparent;
 }
 .casa-invito b {
   flex: none;
-  padding: 11px 18px;
+  padding: 10px 16px;
   border-radius: 999px;
-  background: var(--ink);
-  color: var(--paper);
-  font-size: 18px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 16px;
 }
 .casa-invito:focus-visible,
 .casa-attesa:focus-visible,
@@ -3884,22 +3877,22 @@ button.contratto-testa:focus-visible {
   outline-offset: 3px;
 }
 .casa {
-  margin-bottom: 28px;
+  margin-bottom: 24px;
 }
 .casa-hero {
   position: relative;
   display: block;
-  height: 300px;
+  height: 260px;
   overflow: hidden;
-  border-radius: 28px;
+  border-radius: 20px;
   background: var(--ink-soft);
   color: #fff;
   text-decoration: none;
-  box-shadow: 0 18px 40px rgba(16, 21, 26, 0.22);
+  box-shadow: 0 8px 20px rgba(16, 21, 26, 0.12);
   -webkit-tap-highlight-color: transparent;
 }
 .casa.compatta .casa-hero {
-  height: 210px;
+  height: 190px;
 }
 .casa-foto {
   position: absolute;
@@ -3980,15 +3973,15 @@ button.contratto-testa:focus-visible {
 }
 .casa-titolo {
   font-family: var(--font-display);
-  font-size: 30px;
+  font-size: 26px;
   font-weight: 600;
   line-height: 1.1;
 }
 .casa.compatta .casa-titolo {
-  font-size: 24px;
+  font-size: 22px;
 }
 .casa-dati {
-  font-size: 18px;
+  font-size: 16px;
   line-height: 1.3;
 }
 .casa-tessere {
@@ -4006,13 +3999,13 @@ button.contratto-testa:focus-visible {
   flex-direction: column;
   gap: 6px;
   min-width: 0;
-  min-height: 190px;
-  padding: 18px 16px 16px;
-  border-radius: 24px;
+  min-height: 170px;
+  padding: 14px;
+  border-radius: 20px;
   background: #fff;
   color: var(--ink);
   text-decoration: none;
-  box-shadow: 0 10px 26px rgba(16, 21, 26, 0.08);
+  box-shadow: 0 8px 20px rgba(16, 21, 26, 0.06);
   -webkit-tap-highlight-color: transparent;
 }
 .tessera:focus-visible {
@@ -4040,7 +4033,7 @@ button.contratto-testa:focus-visible {
 }
 .tessera-numero {
   font-family: var(--font-display);
-  font-size: 56px;
+  font-size: 44px;
   font-weight: 600;
   line-height: 1;
   color: var(--moss);
@@ -4070,10 +4063,10 @@ button.contratto-testa:focus-visible {
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  min-height: 72px;
-  margin-top: 14px;
-  padding: 14px 20px;
-  border-radius: 22px;
+  min-height: 64px;
+  margin-top: 12px;
+  padding: 12px 16px;
+  border-radius: 16px;
   background: var(--paper-dim);
   color: var(--ink);
   font-size: 17px;
@@ -4087,63 +4080,20 @@ button.contratto-testa:focus-visible {
 }
 @media (min-width: 768px) {
   .casa-hero {
-    height: 380px;
+    height: 320px;
   }
   .casa.compatta .casa-hero {
-    height: 250px;
+    height: 220px;
   }
   .casa-titolo {
-    font-size: 38px;
+    font-size: 32px;
   }
   .tessera-numero {
-    font-size: 68px;
+    font-size: 52px;
   }
 }
 
-/* Database: la sezione «Possibili inquilini» */
-.possibili {
-  margin: 4px 0 22px;
-  padding: 18px 18px 14px;
-  border-radius: 24px;
-  background: #fff;
-  box-shadow: 0 10px 26px rgba(16, 21, 26, 0.08);
-  scroll-margin-top: 16px;
-}
-.possibili-titolo {
-  margin: 0 0 10px;
-  font-family: var(--font-display);
-  font-size: 24px;
-  font-weight: 600;
-  color: var(--ink);
-}
-.possibili-riga {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 10px 0;
-  border-top: 1px solid rgba(16, 21, 26, 0.08);
-}
-.possibili-numero {
-  flex: none;
-  min-width: 56px;
-  font-family: var(--font-display);
-  font-size: 44px;
-  font-weight: 600;
-  line-height: 1;
-  color: var(--moss);
-  text-align: center;
-}
-.possibili-frase {
-  font-size: 17px;
-  line-height: 1.3;
-  color: var(--ink);
-}
-.possibili-frase small {
-  display: block;
-  margin-top: 2px;
-  font-size: 15px;
-  color: var(--body-soft);
-}
+/* Database: testi dei possibili match */
 .possibili-testo {
   margin: 10px 0 0;
   font-size: 16px;
@@ -4293,97 +4243,27 @@ button.contratto-testa:focus-visible {
 
 /* ---- Database: le case, le schede delle persone e le richieste ---- */
 .gruppo-casa {
-  margin: 0 0 30px;
+  margin: 0 0 26px;
 }
-.gruppo-testa {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-bottom: 12px;
-}
-.gruppo-foto {
-  flex: none;
-  width: 72px;
-  height: 72px;
-  border-radius: 18px;
-  object-fit: cover;
-}
-.gruppo-foto-vuota {
-  background: linear-gradient(135deg, var(--moss), var(--moss-light));
-}
-.gruppo-titolo h2 {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: 26px;
-  font-weight: 600;
-  line-height: 1.1;
-  color: var(--ink);
-}
-.gruppo-titolo span {
-  font-size: 16px;
-  color: var(--body-soft);
+/* l'intestazione della casa è la scheda di «Immobili» (match-card): qui solo si toglie ciò che la fa sembrare un pulsante */
+.casa-intestazione {
+  cursor: default;
 }
 
-/* le sezioni: candidature spontanee, possibili match, già valutati */
-.sezione-apribile {
-  margin-bottom: 12px;
+/* i gruppi (candidature spontanee, possibili match, già valutati) usano l'intestazione dei gruppi dell'inquilino; qui solo il carattere, più grande */
+.sezione-db {
   scroll-margin-top: 16px;
-  overflow: hidden;
-  border-radius: 22px;
-  background: #fff;
-  box-shadow: 0 8px 22px rgba(16, 21, 26, 0.07);
 }
-.sezione-testa {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  min-height: 64px;
-  padding: 12px 18px;
-  border: 0;
-  background: transparent;
+.sezione-db .gruppo-testa {
+  padding: 12px 2px 8px;
   color: var(--ink);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.sezione-testa:focus-visible {
-  outline: 3px solid var(--moss);
-  outline-offset: -3px;
-}
-.sezione-titolo {
-  flex: 1;
-  font-size: 19px;
-  font-weight: 800;
-}
-.sezione-numero {
-  min-width: 34px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: rgba(16, 21, 26, 0.08);
-  color: var(--body-soft);
-  font-size: 16px;
-  font-weight: 800;
-  text-align: center;
-}
-.sezione-numero.pieno {
-  background: var(--gold);
-  color: var(--ink);
-}
-.sezione-freccia {
-  color: var(--body-soft);
-  font-size: 26px;
-  line-height: 1;
-  transition: transform 0.15s;
-}
-.sezione-freccia.su {
-  transform: rotate(90deg);
+  font-size: 15px;
 }
 .sezione-corpo {
-  padding: 2px 14px 16px;
+  padding: 2px 0 8px;
 }
 .sezione-vuota {
-  margin: 6px 4px 0;
+  margin: 6px 2px 0;
   font-size: 16px;
   line-height: 1.45;
   color: var(--body-text);
@@ -4398,7 +4278,7 @@ button.contratto-testa:focus-visible {
 }
 .schede-lista {
   display: grid;
-  gap: 14px;
+  gap: 12px;
   margin: 8px 0 0;
   padding: 0;
   list-style: none;
@@ -4413,9 +4293,9 @@ button.contratto-testa:focus-visible {
 /* la scheda di una persona: in alto affidabilità e match, sotto foto e informazioni, in fondo i pulsanti */
 .persona {
   padding: 14px;
-  border: 1px solid rgba(16, 21, 26, 0.1);
-  border-radius: 22px;
-  background: var(--paper);
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(16, 21, 26, 0.06);
 }
 .persona-stato {
   display: inline-block;
@@ -4670,7 +4550,7 @@ button.contratto-testa:focus-visible {
   margin: 12px 0 14px;
   padding: 16px;
   border: 2px solid var(--gold);
-  border-radius: 22px;
+  border-radius: 20px;
   background: rgba(201, 161, 90, 0.14);
 }
 .conferma-affitto.fatto {
