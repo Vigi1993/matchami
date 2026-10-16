@@ -7,6 +7,7 @@ import { SelettoreFile } from "@/components/SelettoreFile";
 import { datiMancanti } from "@/lib/annunci/obbligatori";
 import {
   cosaManca,
+  dataDocumento,
   descriviStato,
   estensioneDa,
   messaggioErroreVerifica,
@@ -99,7 +100,33 @@ export function useVerificaDocumenti() {
     }
   }
 
-  return { errore, setErrore, inCorso, carica, invia };
+  /**
+   * Rivedere o riscaricare un documento già caricato. L'indirizzo è temporaneo (un minuto) e si crea al momento del tocco con la sessione del proprietario:
+   * il file non ha mai un indirizzo pubblico e un indirizzo vecchio non resta in giro. «apri» lo mostra in una nuova scheda, «scarica» lo salva con il suo nome.
+   */
+  async function vedi(percorso: string, nome: string, modo: "apri" | "scarica") {
+    setErrore(null);
+    // per «apri» la finestra si apre SUBITO, nel gesto del tocco, e si riempie dopo: altrimenti il telefono può bloccarla
+    const finestra = modo === "apri" ? window.open("", "_blank") : null;
+    if (finestra) finestra.opener = null;
+    setInCorso(`doc-${modo}-${percorso}`);
+    try {
+      const { data, error } = await createClient()
+        .storage.from("documenti-verifica")
+        .createSignedUrl(percorso, 60, modo === "scarica" ? { download: nome } : undefined);
+      if (error || !data?.signedUrl) {
+        finestra?.close();
+        setErrore("Non riesco ad aprire il documento. Riprova.");
+        return;
+      }
+      if (finestra) finestra.location.href = data.signedUrl;
+      else window.location.assign(data.signedUrl);
+    } finally {
+      setInCorso(null);
+    }
+  }
+
+  return { errore, setErrore, inCorso, carica, invia, vedi };
 }
 
 /**
@@ -116,7 +143,8 @@ export function VerificaImmobile({
   haIdentita: boolean;
   conIdentita?: boolean;
 }) {
-  const { errore, inCorso, carica, invia } = useVerificaDocumenti();
+  const { errore, inCorso, carica, invia, vedi } = useVerificaDocumenti();
+  const documenti = immobile.documenti ?? [];
   const d = descriviStato(immobile.stato, immobile.note);
   const manca = cosaManca(haIdentita, immobile);
   const daCompilare = datiMancanti(immobile.dati).length > 0;
@@ -131,23 +159,57 @@ export function VerificaImmobile({
       {immobile.stato === "non_avviata" && immobile.note && <div className="note-stop">Motivo del rifiuto: {immobile.note}</div>}
       <p className="field-note">{d.testo}</p>
 
+      {/* i documenti già caricati: si rivedono e si riscaricano in qualunque momento, anche a casa verificata */}
+      <div className="documenti-caricati">
+        <div className="documenti-titolo">
+          Documenti caricati: <b>{documenti.length}</b>
+        </div>
+        {documenti.length === 0 ? (
+          <p className="field-note">Non hai ancora caricato nessun documento per questa casa.</p>
+        ) : (
+          <ul className="documenti-lista">
+            {documenti.map((doc) => (
+              <li key={doc.id} className="documento">
+                <div className="documento-nome">{doc.nome}</div>
+                {dataDocumento(doc.creatoIl) && <div className="documento-data">Caricato il {dataDocumento(doc.creatoIl)}</div>}
+                <div className="documento-azioni">
+                  <button
+                    type="button"
+                    className="documento-bottone"
+                    aria-label={`Apri ${doc.nome}`}
+                    disabled={inCorso !== null}
+                    onClick={() => vedi(doc.percorso, doc.nome, "apri")}
+                  >
+                    Apri
+                  </button>
+                  <button
+                    type="button"
+                    className="documento-bottone primario"
+                    aria-label={`Scarica ${doc.nome}`}
+                    disabled={inCorso !== null}
+                    onClick={() => vedi(doc.percorso, doc.nome, "scarica")}
+                  >
+                    Scarica
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="riga-doc">
+          <span>Visura catastale o atto di proprietà, in PDF o foto.</span>
+          <SelettoreFile
+            etichetta={documenti.length > 0 ? "Carica un altro documento" : "Carica visura o atto"}
+            aria={`Carica un documento di proprietà di ${immobile.titolo}`}
+            occupato={inCorso === `proprieta-${immobile.id}`}
+            onFile={(f) => carica("proprieta", immobile.id, f, `proprieta-${immobile.id}`)}
+          />
+        </div>
+        <p className="field-note">Li vede solo il team di MatchAmI: mai gli inquilini.</p>
+      </div>
+
       {immobile.stato === "non_avviata" && (
         <>
-          <p className="field-note">
-            Per far verificare la casa carica la visura catastale o l&apos;atto di proprietà, in PDF o foto. Li vede solo il team di MatchAmI: mai gli inquilini.
-          </p>
-          <div className="riga-doc">
-            <span>
-              Prove caricate: <b>{immobile.nProprieta}</b>
-            </span>
-            <SelettoreFile
-              etichetta={immobile.nProprieta > 0 ? "Aggiungine un'altra" : "Carica visura o atto"}
-              aria={`Carica la prova di proprietà di ${immobile.titolo}`}
-              occupato={inCorso === `proprieta-${immobile.id}`}
-              onFile={(f) => carica("proprieta", immobile.id, f, `proprieta-${immobile.id}`)}
-            />
-          </div>
-
           {conIdentita && !haIdentita && (
             <div className="riga-doc">
               <span>Il tuo documento d&apos;identità: serve per controllare che il nome coincida.</span>

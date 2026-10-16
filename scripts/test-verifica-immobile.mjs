@@ -23,7 +23,7 @@ const casa = (o = {}) => ({ id: "a1", titolo: "Bilocale", zona: "Isola, Milano",
 // ============================================================ la logica
 test("dalla scheda di un immobile ai dati della verifica: tutti i campi, i vuoti diventano null, le prove di proprietà partono da zero", () => {
   const v = vf.immobileVerificaDa(casa({ nProprieta: 2, verifica_esito_note: "il nome non coincide" }));
-  assert.deepEqual(v, { id: "a1", titolo: "Bilocale", zona: "Isola, Milano", stato: "non_avviata", note: "il nome non coincide", nProprieta: 2, dati: { classe_energetica: "C", luogo_id: "q1", bagni: 1, piano: 2, riscaldamento: "autonomo", tipo_contratto: "libero_4_4", disponibile_dal: "2026-12-01" } });
+  assert.deepEqual(v, { id: "a1", titolo: "Bilocale", zona: "Isola, Milano", stato: "non_avviata", note: "il nome non coincide", nProprieta: 2, documenti: [], dati: { classe_energetica: "C", luogo_id: "q1", bagni: 1, piano: 2, riscaldamento: "autonomo", tipo_contratto: "libero_4_4", disponibile_dal: "2026-12-01" } });
   const vuota = vf.immobileVerificaDa({ id: "a2", titolo: "X", zona: "Y", verifica_stato: "non_avviata", verifica_esito_note: null }); assert.equal(vuota.nProprieta, 0); assert.deepEqual(Object.values(vuota.dati), [null, null, null, null, null, null, null]);
   assert.equal(vf.immobileVerificaDa(casa({ verifica_esito_note: undefined })).note, null);
 });
@@ -71,8 +71,8 @@ test("scheda dell'immobile: non rimanda più alla Home (con una casa già verifi
 });
 
 test("pagina Immobili: legge i documenti di verifica del proprietario (solo i suoi) e dice a ogni casa quante prove ha e se c'è il documento d'identità", () => {
-  const p = senzaCommenti(leggi("src", "app", "(app)", "immobili", "page.tsx")); assert.match(p, /supabase\.from\("documenti_verifica"\)\.select\("tipo, listing_id"\)\.eq\("owner_id", user!\.id\)/);
-  assert.match(p, /const haIdentita = \(documenti \?\? \[\]\)\.some\(\(d\) => d\.tipo === "identita"\);/); assert.match(p, /if \(d\.tipo === "proprieta" && d\.listing_id\) proprietaPerImmobile\.set\(/); assert.match(p, /nProprieta: proprietaPerImmobile\.get\(l\.id as string\) \?\? 0,/); assert.match(p, /<ImmobiliClient immobili=\{immobili\} haIdentita=\{haIdentita\}/);
+  const p = senzaCommenti(leggi("src", "app", "(app)", "immobili", "page.tsx")); assert.match(p, /supabase\.from\("documenti_verifica"\)\.select\("id, tipo, listing_id, nome_file, percorso, created_at"\)\.eq\("owner_id", user!\.id\)/);
+  assert.match(p, /const haIdentita = \(documenti \?\? \[\]\)\.some\(\(d\) => d\.tipo === "identita"\);/); assert.match(p, /documenti: documentiProprieta\(documenti, l\.id as string\),\s+nProprieta: documentiProprieta\(documenti, l\.id as string\)\.length,/); assert.match(p, /<ImmobiliClient immobili=\{immobili\} haIdentita=\{haIdentita\}/);
 });
 
 // ============================================================ le scritte che si sovrapponevano
@@ -96,4 +96,55 @@ test("stile della prova di proprietà: caratteri da 15 px in su, pulsanti alti, 
 
 test("il controllo dei dati dimostrativi si salta (non fallisce) se il file facoltativo non c'è in questa copia del progetto", () => {
   const t = leggi("scripts", "test-rapporti.mjs"); assert.match(t, /const FILE_SEED = path\.join\(radice, "supabase", "migrations", "seed_demo_data\.sql"\);/); assert.match(t, /\{ skip: fs\.existsSync\(FILE_SEED\) \? false : "il file dei dati dimostrativi \(seed_demo_data\.sql\) non c'è in questa copia del progetto" \}/); assert.match(t, /fs\.readFileSync\(FILE_SEED, "utf8"\)/);
+});
+
+// ============================================================ i documenti già caricati: si rivedono e si riscaricano
+const riga = (o) => ({ id: "d1", tipo: "proprieta", listing_id: "a1", nome_file: "visura.pdf", percorso: "u/proprieta-a1-1.pdf", created_at: "2026-10-12T10:00:00Z", ...o });
+
+test("i documenti di una casa: solo le prove di proprietà di QUELLA casa (non l'identità, non le altre case), dalla più recente, con un nome sempre leggibile", () => {
+  const righe = [riga({ id: "1", created_at: "2026-10-01T10:00:00Z", nome_file: "vecchia.pdf" }), riga({ id: "2", created_at: "2026-10-20T10:00:00Z", nome_file: "  nuova.pdf  " }), riga({ id: "3", tipo: "identita", listing_id: null }), riga({ id: "4", listing_id: "a2" }), riga({ id: "5", created_at: "2026-10-10T10:00:00Z", nome_file: "" }), riga({ id: "6", created_at: null, nome_file: null })];
+  const d = vf.documentiProprieta(righe, "a1"); assert.deepEqual(d.map((x) => x.id), ["2", "5", "1", "6"], "dalla più recente; senza data in fondo"); assert.deepEqual(d.map((x) => x.nome), ["nuova.pdf", "Documento", "vecchia.pdf", "Documento"]);
+  assert.deepEqual(d[0], { id: "2", nome: "nuova.pdf", percorso: "u/proprieta-a1-1.pdf", creatoIl: "2026-10-20T10:00:00Z" }); assert.deepEqual(vf.documentiProprieta(righe, "a2").map((x) => x.id), ["4"]);
+  for (const vuoto of [null, undefined, []]) assert.deepEqual(vf.documentiProprieta(vuoto, "a1"), []); assert.deepEqual(vf.documentiProprieta(righe, "non-esiste"), []);
+});
+
+test("la data di un documento si legge in italiano («12 ott 2026», ora italiana) e se non si legge non si scrive niente", () => {
+  assert.equal(vf.dataDocumento("2026-10-12T10:00:00Z"), "12 ott 2026"); assert.equal(vf.dataDocumento("2026-01-03T23:30:00Z"), "4 gen 2026", "alle 00:30 italiane è già il giorno dopo"); assert.equal(vf.dataDocumento("2026-03-05T12:00:00+02:00"), "5 mar 2026");
+  for (const x of [null, undefined, "", "boh", "2026-13-45"]) assert.equal(vf.dataDocumento(x), "", String(x)); assert.ok(!/\./.test(vf.dataDocumento("2026-09-12T10:00:00Z")), "senza il punto dopo il mese");
+  assert.equal(vf.nomeDocumento(null), "Documento"); assert.equal(vf.nomeDocumento("   "), "Documento"); assert.equal(vf.nomeDocumento(" atto.pdf "), "atto.pdf");
+});
+
+test("dalla scheda ai dati della verifica: i documenti passano, e il loro numero è quello delle prove caricate (altrimenti vale il numero dato)", () => {
+  const docs = vf.documentiProprieta([riga({ id: "1" }), riga({ id: "2" })], "a1"); const v = vf.immobileVerificaDa(casa({ documenti: docs, nProprieta: 99 })); assert.equal(v.nProprieta, 2, "il numero è quello dei documenti"); assert.equal(v.documenti.length, 2);
+  const senza = vf.immobileVerificaDa(casa({ nProprieta: 3 })); assert.equal(senza.nProprieta, 3); assert.deepEqual(senza.documenti, []);
+});
+
+test("il componente: l'elenco dei documenti si vede in OGNI stato (anche verificato e in verifica), con «Apri» e «Scarica» per ognuno; non dipende dallo stato della verifica", () => {
+  const a = comp.indexOf('<div className="documenti-caricati">'); const b = comp.indexOf('{immobile.stato === "non_avviata" && (\n        <>'); assert.ok(a > 0 && b > a, "l'elenco sta PRIMA del blocco che vale solo se la verifica non è partita");
+  const blocco = comp.slice(a, b); assert.match(blocco, /Documenti caricati: <b>\{documenti\.length\}<\/b>/); assert.match(blocco, /Non hai ancora caricato nessun documento per questa casa\./);
+  assert.match(blocco, /\{documenti\.map\(\(doc\) => \(\s+<li key=\{doc\.id\} className="documento">\s+<div className="documento-nome">\{doc\.nome\}<\/div>/); assert.match(blocco, /Caricato il \{dataDocumento\(doc\.creatoIl\)\}/);
+  assert.match(blocco, /aria-label=\{`Apri \$\{doc\.nome\}`\}[\s\S]*?onClick=\{\(\) => vedi\(doc\.percorso, doc\.nome, "apri"\)\}[\s\S]*?>\s+Apri\s+<\/button>/); assert.match(blocco, /aria-label=\{`Scarica \$\{doc\.nome\}`\}[\s\S]*?onClick=\{\(\) => vedi\(doc\.percorso, doc\.nome, "scarica"\)\}[\s\S]*?>\s+Scarica\s+<\/button>/);
+  assert.ok(!/immobile\.stato/.test(blocco), "l'elenco e il caricamento non dipendono dallo stato della verifica");
+});
+
+test("il componente: «Carica un altro documento» c'è sempre (anche a casa verificata); «Carica visura o atto» solo se non c'è ancora nessun documento; i documenti restano visibili solo al proprietario e allo staff", () => {
+  const a = comp.indexOf('<div className="documenti-caricati">'); const b = comp.indexOf('{immobile.stato === "non_avviata" && (\n        <>'); const blocco = comp.slice(a, b);
+  assert.match(blocco, /etichetta=\{documenti\.length > 0 \? "Carica un altro documento" : "Carica visura o atto"\}/); assert.match(blocco, /onFile=\{\(f\) => carica\("proprieta", immobile\.id, f, `proprieta-\$\{immobile\.id\}`\)\}/); assert.match(blocco, /Li vede solo il team di MatchAmI: mai gli inquilini\./);
+  const dopo = comp.slice(b); assert.ok(!/Carica un altro documento|Carica visura o atto/.test(dopo), "il caricamento non deve più dipendere dallo stato"); assert.match(dopo, /Invia per la verifica/, "l'invio resta solo con la verifica non partita");
+});
+
+test("rivedere e riscaricare: l'indirizzo è TEMPORANEO (un minuto), si crea al tocco con la sessione del proprietario, non è mai pubblico; «scarica» salva con il nome del file; «apri» si apre in una nuova scheda aperta SUBITO (il telefono non la blocca)", () => {
+  assert.match(comp, /\.storage\.from\("documenti-verifica"\)\s+\.createSignedUrl\(percorso, 60, modo === "scarica" \? \{ download: nome \} : undefined\)/); assert.ok(!/getPublicUrl|createSignedUrls|createSignedUrl\(percorso, (?!60)/.test(comp), "indirizzi pubblici o di durata diversa");
+  assert.match(comp, /const finestra = modo === "apri" \? window\.open\("", "_blank"\) : null;\s+if \(finestra\) finestra\.opener = null;/); assert.ok(comp.indexOf('window.open("", "_blank")') < comp.indexOf("await createClient()") || comp.indexOf('window.open("", "_blank")') < comp.indexOf(".createSignedUrl("), "la finestra si apre prima di aspettare il database");
+  assert.match(comp, /if \(error \|\| !data\?\.signedUrl\) \{\s+finestra\?\.close\(\);\s+setErrore\("Non riesco ad aprire il documento\. Riprova\."\);\s+return;\s+\}/); assert.match(comp, /if \(finestra\) finestra\.location\.href = data\.signedUrl;\s+else window\.location\.assign\(data\.signedUrl\);/);
+});
+
+test("la Home di verifica e la pagina Immobili passano i documenti di ogni casa con la stessa funzione", () => {
+  const home = senzaCommenti(leggi("src", "app", "(app)", "page.tsx")); assert.match(home, /supabase\.from\("documenti_verifica"\)\.select\("id, tipo, listing_id, nome_file, percorso, created_at"\)\.eq\("owner_id", userId\)/); assert.match(home, /documenti: documentiProprieta\(documenti, l\.id as string\),\s+nProprieta: documentiProprieta\(documenti, l\.id as string\)\.length,/);
+  assert.match(home, /import \{ documentiProprieta, type ImmobileVerifica \} from "@\/lib\/verifica";/); assert.match(senzaCommenti(leggi("src", "app", "(app)", "immobili", "page.tsx")), /import \{ documentiProprieta \} from "@\/lib\/verifica";/);
+});
+
+test("stile dei documenti: caratteri da 15 px in su, pulsanti alti almeno 48 px e larghi uguali, scheda come le altre, nome a capo anche se lungo", () => {
+  const m = css.slice(css.indexOf("/* ---- I documenti già caricati per un immobile")); const misure = [...m.matchAll(/font-size:\s*(\d+)px/g)].map((x) => Number(x[1])); assert.ok(misure.length >= 4 && Math.min(...misure) >= 15, `caratteri: ${Math.min(...misure)} px`);
+  assert.match(m, /\.documento-bottone \{\s+flex: 1;\s+min-height: 48px;/); assert.match(m, /\.documento \{\s+padding: 12px 14px;\s+border-radius: 16px;\s+background: #fff;\s+box-shadow: 0 8px 20px rgba\(16, 21, 26, 0\.06\);/); assert.match(m, /\.documento-nome \{[^}]*overflow-wrap: anywhere;/); assert.match(m, /\.documento-azioni \{\s+display: flex;/);
 });

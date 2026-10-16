@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { HomeClient } from "./HomeClient";
 import { OwnerHomeClient } from "./OwnerHomeClient";
 import { VerificaHome } from "./VerificaHome";
-import type { ImmobileVerifica } from "@/lib/verifica";
+import { documentiProprieta, type ImmobileVerifica } from "@/lib/verifica";
 import { computeAffidabilita } from "@/lib/affidabilita";
 import { riepilogoRecensioni, statoRaccomandazione } from "@/lib/recensioni";
 import { campiMatchDaRiga, haCriteriDiRicerca, preparaMazzo, profiloRicercaDaRighe } from "@/lib/match";
@@ -176,18 +176,8 @@ async function OwnerHome({ userId }: { userId: string }) {
         .select("id, titolo, zona, verifica_stato, verifica_esito_note, classe_energetica, luogo_id, bagni, piano, riscaldamento, tipo_contratto, disponibile_dal")
         .eq("owner_id", userId)
         .order("created_at", { ascending: false }),
-      supabase.from("documenti_verifica").select("tipo, listing_id").eq("owner_id", userId),
+      supabase.from("documenti_verifica").select("id, tipo, listing_id, nome_file, percorso, created_at").eq("owner_id", userId),
     ]);
-
-    const proprietaPerImmobile = new Map<string, number>();
-    for (const d of documenti ?? []) {
-      if (d.tipo === "proprieta" && d.listing_id) {
-        proprietaPerImmobile.set(
-          d.listing_id as string,
-          (proprietaPerImmobile.get(d.listing_id as string) ?? 0) + 1
-        );
-      }
-    }
 
     const immobili: ImmobileVerifica[] = (miei ?? []).map((l) => ({
       id: l.id as string,
@@ -195,7 +185,8 @@ async function OwnerHome({ userId }: { userId: string }) {
       zona: l.zona as string,
       stato: l.verifica_stato as ImmobileVerifica["stato"],
       note: (l.verifica_esito_note as string | null) ?? null,
-      nProprieta: proprietaPerImmobile.get(l.id as string) ?? 0,
+      documenti: documentiProprieta(documenti, l.id as string),
+      nProprieta: documentiProprieta(documenti, l.id as string).length,
       dati: {
         classe_energetica: (l.classe_energetica as string | null) ?? null,
         luogo_id: (l.luogo_id as string | null) ?? null,

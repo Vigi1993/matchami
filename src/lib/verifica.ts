@@ -21,7 +21,43 @@ export type ImmobileVerifica = {
   nProprieta: number;
   /** i dati obbligatori dell'annuncio (classe energetica, luogo, bagni…): senza, non si può chiedere la verifica */
   dati: Partial<Record<ChiaveDatoObbligatorio, unknown>>;
+  /** le prove di proprietà già caricate, dalla più recente: il proprietario le rivede e le riscarica */
+  documenti?: DocumentoVerifica[];
 };
+
+/** Un documento che il proprietario ha caricato per la verifica (il file sta nell'archivio privato, mai con un indirizzo pubblico). */
+export type DocumentoVerifica = {
+  id: string;
+  /** il nome del file com'era quando l'ha caricato */
+  nome: string;
+  /** dove sta il file nell'archivio di verifica */
+  percorso: string;
+  creatoIl: string | null;
+};
+
+type RigaDocumento = { id: string; tipo: string; listing_id: string | null; nome_file: string | null; percorso: string; created_at: string | null };
+
+/** Le prove di proprietà di UN immobile, dalla più recente. Gli altri documenti (identità, altre case) non c'entrano. */
+export function documentiProprieta(righe: readonly RigaDocumento[] | null | undefined, listingId: string): DocumentoVerifica[] {
+  return (righe ?? [])
+    .filter((r) => r.tipo === "proprieta" && r.listing_id === listingId)
+    .map((r) => ({ id: r.id, nome: nomeDocumento(r.nome_file), percorso: r.percorso, creatoIl: r.created_at ?? null }))
+    .sort((a, b) => (b.creatoIl ?? "").localeCompare(a.creatoIl ?? ""));
+}
+
+/** Il nome da mostrare: quello del file, o «Documento» se manca. */
+export function nomeDocumento(nome: string | null | undefined): string {
+  const n = (nome ?? "").trim();
+  return n.length > 0 ? n : "Documento";
+}
+
+/** «12 ott 2026» (ora italiana); vuoto se la data non si legge. */
+export function dataDocumento(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const t = new Date(iso);
+  if (Number.isNaN(t.getTime())) return "";
+  return t.toLocaleDateString("it-IT", { day: "numeric", month: "short", year: "numeric", timeZone: "Europe/Rome" }).replace(/\./g, "");
+}
 
 export type DescrizioneStato = {
   etichetta: string;
@@ -80,6 +116,7 @@ export function immobileVerificaDa(im: {
   verifica_stato: StatoImmobile;
   verifica_esito_note: string | null;
   nProprieta?: number;
+  documenti?: DocumentoVerifica[];
   classe_energetica?: string | null;
   luogo_id?: string | null;
   bagni?: number | null;
@@ -94,7 +131,8 @@ export function immobileVerificaDa(im: {
     zona: im.zona,
     stato: im.verifica_stato,
     note: im.verifica_esito_note ?? null,
-    nProprieta: im.nProprieta ?? 0,
+    nProprieta: im.documenti ? im.documenti.length : (im.nProprieta ?? 0),
+    documenti: im.documenti ?? [],
     dati: {
       classe_energetica: im.classe_energetica ?? null,
       luogo_id: im.luogo_id ?? null,

@@ -72,6 +72,8 @@ export type ImmobileDettaglio = {
   nCandidature: number;
   /** quante prove di proprietà (visura, atto) ha già caricato per questo immobile */
   nProprieta?: number;
+  /** le prove di proprietà già caricate, dalla più recente */
+  documenti?: import("@/lib/verifica").DocumentoVerifica[];
 };
 
 export type CandidaturaSenzaContratto = {
