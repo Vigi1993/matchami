@@ -80,3 +80,18 @@ test("migrazione 0035 su PostgreSQL vero: l'affitto nasce dal contratto con la c
     const riusciti = (r.stderr.match(/NOTICE:\s+OK:/g) ?? []).length; assert.equal(riusciti, 61, `controlli riusciti: ${riusciti}`);
   } finally { fs.rmSync(nullo, { force: true }); esegui(["-d", "postgres", "-c", `drop database if exists ${db}`]); }
 });
+
+test("migrazione 0036 su PostgreSQL vero: si perdono solo i tre dati del proprietario e il loro tipo; il proprietario resta, i nuovi si creano come prima; rieseguirla non dà errori", { skip: psqlCmd ? false : "imposta MATCHAMI_PSQL per eseguire le prove SQL su un PostgreSQL vero" }, () => {
+  const [bin, ...args] = psqlCmd.split(/\s+/); const db = "matchami_test_dati_proprietario"; const esegui = (extra) => spawnSync(bin, [...args, "-X", "-q", ...extra], { encoding: "utf8" });
+  const migrazioni = fs.readdirSync(path.join(radice, "supabase", "migrations")).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort(); const m36 = migrazioni.find((f) => f.startsWith("0036_")); assert.ok(m36, "manca la migrazione 0036");
+  const nullo = path.join(os.tmpdir(), `matchami-dati-proprietario-${process.pid}.txt`);
+  try {
+    let r = esegui(["-d", "postgres", "-c", `drop database if exists ${db}`, "-c", `create database ${db}`]); assert.equal(r.status, 0, r.stderr);
+    r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "scripts", "db", "stub-supabase.sql")]); assert.equal(r.status, 0, r.stderr);
+    for (const m of migrazioni.filter((f) => f < "0036")) { r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m)]); assert.equal(r.status, 0, `${m}: ${r.stderr.slice(0, 300)}`); }
+    r = esegui(["-d", db, "-o", nullo, "-f", path.join(radice, "scripts", "db", "dati-proprietario-prima.sql")]); assert.equal(r.status, 0, "prima della 0036: " + r.stderr.slice(0, 300));
+    r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m36)]); assert.equal(r.status, 0, "la 0036 non si applica: " + r.stderr.slice(0, 300));
+    r = esegui(["-d", db, "-o", nullo, "-f", path.join(radice, "scripts", "db", "dati-proprietario-dopo.sql")]); assert.ok(!/CONTROLLO FALLITO/.test(r.stderr), r.stderr.split("\n").filter((l) => /FALLITO/.test(l)).join("\n")); assert.equal(r.status, 0, r.stderr.slice(0, 300)); assert.equal((r.stderr.match(/NOTICE:\s+OK:/g) ?? []).length, 7);
+    r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m36)]); assert.equal(r.status, 0, "rieseguire la 0036 non deve dare errori: " + r.stderr.slice(0, 300));
+  } finally { fs.rmSync(nullo, { force: true }); esegui(["-d", "postgres", "-c", `drop database if exists ${db}`]); }
+});

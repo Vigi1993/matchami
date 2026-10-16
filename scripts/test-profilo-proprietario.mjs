@@ -43,3 +43,10 @@ test("informativa: non elenca più tipo di proprietario, numero di immobili e ob
   const t = JSON.stringify(inf.INFORMATIVA); assert.ok(!/tipo di proprietario|numero di immobili|obiettivo/.test(t), "l'informativa nomina ancora quei dati"); assert.ok(t.includes("Se sei proprietario: gli annunci con titolo, descrizione, zona, prezzo, caratteristiche, classe energetica e foto;"));
   const n = Number(inf.INFORMATIVA.versione.match(/-(\d+)$/)[1]); assert.ok(n >= 21, inf.INFORMATIVA.versione); assert.ok(inf.INFORMATIVA.equivalenti.includes("2026-10-provvisoria-20"), "la 20 deve restare equivalente");
 });
+
+test("migrazione 0036: toglie ESATTAMENTE le tre colonne e il loro tipo (niente altro), è rieseguibile e dice che è irreversibile", () => {
+  const m = leggi("supabase", "migrations", "0036_togli_dati_proprietario.sql"); const sql = m.replace(/--[^\n]*/g, "");
+  assert.match(sql, /alter table owner_profiles\s+drop column if exists proprietario_tipo,\s+drop column if exists num_immobili,\s+drop column if exists obiettivo;/); assert.match(sql, /drop type if exists tipo_proprietario;/);
+  assert.equal([...sql.matchAll(/drop column/g)].length, 3, "devono essere solo tre colonne"); assert.ok(!/drop table|truncate|delete from|drop column (profile_id|updated_at)|cascade/i.test(sql), "la migrazione tocca altro"); assert.match(m, /è IRREVERSIBILE/); assert.match(m, /Rieseguirla non dà errori/);
+  const sqlTesti = ["scripts/db/dati-proprietario-prima.sql", "scripts/db/dati-proprietario-dopo.sql"].map((f) => leggi(...f.split("/"))).join("\n"); for (const tema of ["D1 le tre colonne non ci sono più", "D3 la tabella ha solo ciò che serve", "D4 il proprietario che aveva i dati c'è ancora", "D5 chi si iscrive come proprietario dopo la 0036"]) assert.ok(sqlTesti.replaceAll("''", "'").includes(tema), `manca il controllo «${tema}»`);
+});
