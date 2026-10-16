@@ -55,6 +55,8 @@ export default async function StaffDettaglioPage({
 
   const nome = [profilo?.nome, profilo?.cognome].filter(Boolean).join(" ") || "Senza nome";
   const decidibile = immobile.verifica_stato === "in_verifica";
+  // una casa si verifica solo con una prova di proprietà: senza, non si offre nemmeno il pulsante (e il database lo rifiuterebbe)
+  const haProva = docProprieta.length > 0;
 
   return (
     <>
@@ -96,7 +98,9 @@ export default async function StaffDettaglioPage({
       </p>
 
       <div style={{ marginTop: 26 }}>
-        {decidibile ? (
+        {decidibile && !haProva ? (
+          <div className="note-error">Non si può verificare: il proprietario non ha caricato nessuna prova di proprietà per questo immobile.</div>
+        ) : decidibile ? (
           <EsitoForm id={id} />
         ) : (
           <div className="note-box">

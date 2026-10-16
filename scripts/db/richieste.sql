@@ -53,10 +53,16 @@ select t.utente('22222222-0000-0000-0000-000000000001', 'o1@x.it', 'proprietario
 select t.utente('22222222-0000-0000-0000-000000000002', 'o2@x.it', 'proprietario', 'Luisa');
 
 insert into listings (id, owner_id, titolo, zona, prezzo, pubblicato, verifica_stato) values
- ('aaaaaaaa-0000-0000-0000-000000000001', '22222222-0000-0000-0000-000000000001', 'Bilocale luminoso', 'Isola, Milano', 1250, true, 'verificato'),
- ('aaaaaaaa-0000-0000-0000-000000000002', '22222222-0000-0000-0000-000000000002', 'Trilocale del sole', 'Navigli, Milano', 1500, true, 'verificato'),
- ('aaaaaaaa-0000-0000-0000-000000000003', '22222222-0000-0000-0000-000000000001', 'Monolocale non pubblicato', 'Isola, Milano', 800, false, 'verificato'),
+ ('aaaaaaaa-0000-0000-0000-000000000001', '22222222-0000-0000-0000-000000000001', 'Bilocale luminoso', 'Isola, Milano', 1250, true, 'non_avviata'),
+ ('aaaaaaaa-0000-0000-0000-000000000002', '22222222-0000-0000-0000-000000000002', 'Trilocale del sole', 'Navigli, Milano', 1500, true, 'non_avviata'),
+ ('aaaaaaaa-0000-0000-0000-000000000003', '22222222-0000-0000-0000-000000000001', 'Monolocale non pubblicato', 'Isola, Milano', 800, false, 'non_avviata'),
  ('aaaaaaaa-0000-0000-0000-000000000004', '22222222-0000-0000-0000-000000000001', 'Casa in verifica', 'Isola, Milano', 900, true, 'in_verifica');
+-- una casa si verifica solo DOPO che c'è la prova di proprietà
+insert into documenti_verifica (owner_id, listing_id, tipo, percorso, nome_file) values
+ ('22222222-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001', 'proprieta', '22222222-0000-0000-0000-000000000001/proprieta-1.pdf', 'visura.pdf'),
+ ('22222222-0000-0000-0000-000000000002', 'aaaaaaaa-0000-0000-0000-000000000002', 'proprieta', '22222222-0000-0000-0000-000000000002/proprieta-2.pdf', 'visura.pdf'),
+ ('22222222-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000003', 'proprieta', '22222222-0000-0000-0000-000000000001/proprieta-3.pdf', 'visura.pdf');
+update listings set verifica_stato = 'verificato' where id in ('aaaaaaaa-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000002', 'aaaaaaaa-0000-0000-0000-000000000003');
 
 select t.ok((select count(*) from tenant_profiles where visibile_ai_proprietari is true) = 4, '01 chi si iscrive come inquilino è VISIBILE ai proprietari di partenza (tutti e quattro)');
 select t.ok((select count(*) from tenant_profiles where visibile_dal is not null) = 4, '02 e c''è la data da cui lo è');

@@ -234,6 +234,7 @@ const MESSAGGI: Record<string, string> = {
   NON_IN_VERIFICA: "Questo immobile non è in attesa di verifica.",
   NOTA_OBBLIGATORIA: "Per respingere scrivi cosa non va: il proprietario la leggerà.",
   IMMOBILE_INESISTENTE: "Immobile non trovato.",
+  PROVA_PROPRIETA_MANCANTE: "Questo immobile non ha nessuna prova di proprietà caricata: non si può verificare.",
   // rapporti di locazione
   RAPPORTO_INESISTENTE: "Affitto non trovato.",
   MANCA_DOCUMENTO: "Questo affitto è nato da un contratto su MatchAmI e le parti non hanno ancora caricato la copia del contratto: non si può verificare.",

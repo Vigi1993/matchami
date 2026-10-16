@@ -185,9 +185,13 @@ test("nessuna casa: lo si dice con parole semplici e c'è un pulsante grande per
   const h = pagina({ case_: [] }); const t = testoDi(h); assert.ok(t.includes("Non hai ancora nessuna casa") && t.includes("Aggiungi la tua casa") && t.includes("Le tue case")); assert.deepEqual(link(h), ["/immobili"]); assert.ok(!h.includes("<article"));
 });
 
-test("saluto e titolo: il titolo è «La tua casa» e il saluto sta nel sottotitolo grigio (come in tutte le altre pagine); senza nome solo il saluto; l'ora cambia il saluto", () => {
-  const h = pagina(); assert.match(h, /<h1 class="screen-title">La tua casa<\/h1><p class="screen-sub">Buongiorno, Mario\.<\/p>/, "titolo e sottotitolo nell'ordine delle altre pagine"); assert.ok(!/casa-saluto/.test(h), "il saluto non sta più sopra il titolo");
-  assert.ok(testoDi(pagina({ nome: null })).startsWith("La tua casa Buongiorno.")); assert.ok(testoDi(pagina({ ora: 15 })).startsWith("La tua casa Buon pomeriggio, Mario.")); assert.ok(testoDi(pagina({ ora: 21 })).startsWith("La tua casa Buonasera, Mario."));
+test("apertura: il marchio MatchAmI in alto (come nella Home dell'inquilino), poi il pannello con il saluto e il titolo «La tua casa»; senza nome solo il saluto; l'ora cambia il saluto", () => {
+  const h = pagina(); assert.match(h, /<div class="topbar casa-topbar"><div class="brand">Match<b>AmI<\/b><\/div><\/div>/, "il marchio, uguale a quello dell'inquilino");
+  assert.match(h, /<div class="casa-intro"><p class="casa-intro-saluto">Buongiorno, Mario\.<\/p><h1 class="casa-intro-titolo">La tua casa<\/h1>/);
+  // il marchio è scritto in due pezzi (Match + <b>AmI</b>, con AmI in oro): nel testo estratto dai tag restano separati da uno spazio, nel browser sono attaccati
+  const t = (o) => testoDi(pagina(o)).replace("Match AmI", "MatchAmI"); assert.ok(t({ nome: null }).startsWith("MatchAmI Buongiorno. La tua casa")); assert.ok(t({ ora: 15 }).startsWith("MatchAmI Buon pomeriggio, Mario. La tua casa")); assert.ok(t({ ora: 21 }).startsWith("MatchAmI Buonasera, Mario. La tua casa"));
+  // (React può mettere davanti il precaricamento della foto: non fa parte della schermata)
+  assert.ok(h.replace(/^(<link[^>]*>)+/, "").startsWith('<div class="screen-dark casa-schermo">'), "è una schermata scura come quella dell'inquilino"); assert.equal([...h.matchAll(/<h1/g)].length, 1, "un solo titolo di pagina");
 });
 
 // ============================================================ per chi non è pratico
@@ -206,7 +210,7 @@ test("leggibilità: nessun carattere sotto i 15 px nella Home e nella sezione de
 test("leggibilità: i bersagli da toccare sono larghi (pulsante delle candidature e frase d'attesa almeno 64 px, tessere almeno 180 px) e c'è un contorno quando si naviga da tastiera", () => {
   const css = bloccoCss(); const alt = (c) => Number((css.match(new RegExp(`${c.replace(".", "\\.")} \\{[^}]*min-height:\\s*(\\d+)px`)) ?? [])[1]);
   assert.ok(alt(".casa-invito") >= 64 && alt(".casa-attesa") >= 64 && alt(".tessera") >= 170, `${alt(".casa-invito")}, ${alt(".casa-attesa")}, ${alt(".tessera")}`);
-  for (const c of [".tessera:focus-visible", ".casa-hero:focus-visible", ".casa-invito:focus-visible"]) assert.ok(css.includes(c), `manca il contorno per la tastiera: ${c}`); assert.match(css, /outline: 3px solid var\(--moss\)/);
+  for (const c of [".tessera:focus-visible", ".casa-hero:focus-visible", ".casa-invito:focus-visible"]) assert.ok(css.includes(c), `manca il contorno per la tastiera: ${c}`); assert.match(css, /outline: 3px solid var\(--gold\)/);
   assert.match(css, /\.casa-tessere \{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/, "le due tessere devono avere sempre la stessa larghezza"); assert.match(css, /\.tessera \{[^}]*min-width: 0;/);
   assert.match(css, /\.casa-hero \{[^}]*height: 260px;/); assert.match(css, /\.casa\.compatta \.casa-hero \{\s+height: 190px;/);
 });
@@ -215,8 +219,17 @@ test("leggibilità: il testo sulla foto sta sopra una sfumatura scura (leggibile
   const css = bloccoCss(); assert.match(css, /\.casa-sfumatura \{[^}]*linear-gradient\(to top, rgba\(16, 21, 26, 0\.9\)/); assert.match(css, /\.casa-stato \{[^}]*background: rgba\(16, 21, 26, 0\.74\)/); assert.match(css, /\.casa-modifica \{[^}]*background: rgba\(247, 244, 236, 0\.96\)/);
 });
 
+test("la schermata scorre (anche con due case o poco spazio) e il marchio resta fermo in alto mentre si scorre; la colonna è centrata e non più larga di 560 px", () => {
+  const css = bloccoCss();
+  assert.match(css, /\.casa-scroll \{\s+position: absolute;\s+inset: 0;\s+overflow-y: auto;\s+-webkit-overflow-scrolling: touch;/, "la schermata deve poter scorrere");
+  assert.match(css, /\.casa-topbar \{\s+position: sticky;\s+top: 0;\s+left: auto;\s+right: auto;\s+z-index: 5;\s+width: auto;\s+transform: none;/, "il marchio resta fermo in alto (e non eredita la posizione assoluta della barra dell'inquilino)");
+  assert.match(css, /\.casa-topbar \{[^}]*background: var\(--ink\);/, "sotto il marchio il contenuto non si vede passare"); assert.match(css, /\.casa-colonna \{\s+max-width: 560px;\s+margin: 0 auto;\s+\}/);
+  const h = pagina(); assert.ok(h.indexOf('class="casa-scroll"') < h.indexOf('class="topbar casa-topbar"'), "il marchio sta DENTRO la parte che scorre, così resta fermo con la sua posizione «sticky»");
+});
+
 test("parole semplici: nella Home niente inglesismi né sigle (match, badge, database, dashboard, lead)", () => {
-  const t = testoDi(pagina({ case_: [CASA, { ...CASA, id: "c2", pubblicato: false }] })) + " " + testoDi(pagina({ case_: [] })); for (const p of ["match", "badge", "dashboard", "lead", "feedback", "online", "click", "tap"]) assert.ok(!new RegExp(`\\b${p}\\b`, "i").test(t), `parola difficile: ${p}`);
+  // il nome dell'app (MatchAmI) è un nome proprio, non una parola difficile: si toglie prima di controllare
+  const senzaMarchio = (h) => h.replace(/<div class="brand">[\s\S]*?<\/div>/, ""); const t = testoDi(senzaMarchio(pagina({ case_: [CASA, { ...CASA, id: "c2", pubblicato: false }] }))) + " " + testoDi(senzaMarchio(pagina({ case_: [] }))); for (const p of ["match", "badge", "dashboard", "lead", "feedback", "online", "click", "tap"]) assert.ok(!new RegExp(`\\b${p}\\b`, "i").test(t), `parola difficile: ${p}`);
 });
 
 // ============================================================ i collegamenti nel codice e la sicurezza dei dati

@@ -148,3 +148,35 @@ test("stile dei documenti: caratteri da 15 px in su, pulsanti alti almeno 48 px 
   const m = css.slice(css.indexOf("/* ---- I documenti già caricati per un immobile")); const misure = [...m.matchAll(/font-size:\s*(\d+)px/g)].map((x) => Number(x[1])); assert.ok(misure.length >= 4 && Math.min(...misure) >= 15, `caratteri: ${Math.min(...misure)} px`);
   assert.match(m, /\.documento-bottone \{\s+flex: 1;\s+min-height: 48px;/); assert.match(m, /\.documento \{\s+padding: 12px 14px;\s+border-radius: 16px;\s+background: #fff;\s+box-shadow: 0 8px 20px rgba\(16, 21, 26, 0\.06\);/); assert.match(m, /\.documento-nome \{[^}]*overflow-wrap: anywhere;/); assert.match(m, /\.documento-azioni \{\s+display: flex;/);
 });
+
+// ============================================================ «verificato» richiede la prova di proprietà
+const m37 = leggi("supabase", "migrations", "0037_verificato_richiede_prova.sql"); const sql37 = m37.replace(/--[^\n]*/g, "");
+
+test("migrazione 0037: riallinea le case verificate senza prova di proprietà (dice quante) e da ora impedisce di verificarne una senza prova, per tutti; non cancella niente; è rieseguibile", () => {
+  assert.match(sql37, /update listings l\s+set verifica_stato = 'non_avviata',\s+verificato_at = null,\s+verifica_inviata_at = null,\s+verifica_esito_note = null\s+where l\.verifica_stato = 'verificato'\s+and not exists \(\s+select 1 from documenti_verifica d\s+where d\.listing_id = l\.id and d\.tipo = 'proprieta'\s+\);/);
+  assert.match(sql37, /get diagnostics v_riallineati = row_count;\s+raise notice 'Case verificate senza prova di proprietà, tornate «da verificare»: %', v_riallineati;/);
+  assert.match(sql37, /if new\.verifica_stato <> 'verificato' then\s+return new;\s+end if;\s+if tg_op = 'UPDATE' and old\.verifica_stato = 'verificato' then\s+return new;\s+end if;\s+if not exists \(\s+select 1 from documenti_verifica d\s+where d\.listing_id = new\.id and d\.tipo = 'proprieta'\s+\) then\s+raise exception 'PROVA_PROPRIETA_MANCANTE:/);
+  assert.match(sql37, /drop trigger if exists garantisci_prova_proprieta on listings;\s+create trigger garantisci_prova_proprieta\s+before insert or update of verifica_stato on listings\s+for each row execute function public\.garantisci_prova_proprieta\(\);/);
+  assert.ok(!/delete from|drop table|drop column|truncate|cascade|documenti_verifica\s+set|update documenti_verifica/i.test(sql37), "la migrazione non deve toccare i documenti"); assert.match(m37, /Rieseguirla non dà errori\./); assert.match(m37, /ATTENZIONE: il punto 1 cambia lo stato delle case verificate a mano senza prova/);
+});
+
+test("pagina dello staff: una casa in verifica senza nessuna prova di proprietà non ha il pulsante «Verifica», ma il motivo; e l'errore del database si legge in italiano", () => {
+  const p = senzaCommenti(leggi("src", "app", "staff", "[id]", "page.tsx")); assert.match(p, /const haProva = docProprieta\.length > 0;/);
+  assert.match(p, /\{decidibile && !haProva \? \(\s+<div className="note-error">Non si può verificare: il proprietario non ha caricato nessuna prova di proprietà per questo immobile\.<\/div>\s+\) : decidibile \? \(\s+<EsitoForm id=\{id\} \/>/);
+  assert.match(vf.messaggioErroreVerifica("ERROR: PROVA_PROPRIETA_MANCANTE: x (P0001)"), /non ha nessuna prova di proprietà caricata: non si può verificare\.$/); assert.ok(!/PROVA_PROPRIETA/.test(vf.messaggioErroreVerifica("PROVA_PROPRIETA_MANCANTE: x")), "il codice non deve comparire");
+});
+
+test("i file SQL di prova creano le case nell'ordine giusto (prima la casa, poi la prova, poi la verifica): nessuna casa nasce già verificata", () => {
+  for (const f of ["affitto-contratto", "riapri", "richieste"]) {
+    const sql = leggi("scripts", "db", `${f}.sql`); const inserimenti = [...sql.matchAll(/insert into listings[^;]*;/g)].map((m) => m[0]); assert.ok(inserimenti.length >= 1, f);
+    for (const i of inserimenti) assert.ok(!/'verificato'/.test(i), `${f}: una casa nasce già verificata`);
+    assert.match(sql, /insert into documenti_verifica \(owner_id, listing_id, tipo, percorso, nome_file\) values[\s\S]*?'proprieta'/, `${f}: manca la prova`); assert.match(sql, /update listings set verifica_stato = 'verificato' where id/, `${f}: manca la verifica dopo la prova`);
+    assert.ok(sql.search(/insert into documenti_verifica/) < sql.search(/update listings set verifica_stato = 'verificato'/), `${f}: la verifica viene prima della prova`);
+  }
+});
+
+test("il DB test esegue anche le prove della nuova regola (18 controlli in due tempi) e non se ne perde nessuno", () => {
+  const dopo = leggi("scripts", "db", "verifica-prova-dopo.sql"); const controlli = [...dopo.matchAll(/select t\.(ok|fallisce)\(/g)].length; assert.ok(controlli >= 18, `controlli: ${controlli}`);
+  for (const tema of ["V1 la casa verificata a mano SENZA nessuna prova", "V2 anche quella che aveva solo l'identità", "V6 una casa non può NASCERE già verificata", "V7 non si verifica una casa senza prova, nemmeno dal pannello SQL", "V12 una casa GIÀ verificata non si ricontrolla", "V13 nemmeno lo staff", "V17 una casa nuova nasce", "V18 e può andare «in verifica»"]) assert.ok(dopo.replaceAll("''", "'").includes(tema), `manca «${tema}»`);
+  assert.match(leggi("scripts", "db", "verifica-prova-prima.sql"), /case verificate senza nessuna prova \(A ed E\)/);
+});

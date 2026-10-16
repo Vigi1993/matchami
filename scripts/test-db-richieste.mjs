@@ -95,3 +95,18 @@ test("migrazione 0036 su PostgreSQL vero: si perdono solo i tre dati del proprie
     r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m36)]); assert.equal(r.status, 0, "rieseguire la 0036 non deve dare errori: " + r.stderr.slice(0, 300));
   } finally { fs.rmSync(nullo, { force: true }); esegui(["-d", "postgres", "-c", `drop database if exists ${db}`]); }
 });
+
+test("migrazione 0037 su PostgreSQL vero: le case verificate senza prova di proprietà tornano «da verificare», le altre non cambiano, e da ora nessuno (nemmeno lo staff o il pannello SQL) verifica una casa senza prova; rieseguirla non dà errori", { skip: psqlCmd ? false : "imposta MATCHAMI_PSQL per eseguire le prove SQL su un PostgreSQL vero" }, () => {
+  const [bin, ...args] = psqlCmd.split(/\s+/); const db = "matchami_test_verifica_prova"; const esegui = (extra) => spawnSync(bin, [...args, "-X", "-q", ...extra], { encoding: "utf8" });
+  const migrazioni = fs.readdirSync(path.join(radice, "supabase", "migrations")).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort(); const m37 = migrazioni.find((f) => f.startsWith("0037_")); assert.ok(m37, "manca la migrazione 0037");
+  const nullo = path.join(os.tmpdir(), `matchami-verifica-prova-${process.pid}.txt`);
+  try {
+    let r = esegui(["-d", "postgres", "-c", `drop database if exists ${db}`, "-c", `create database ${db}`]); assert.equal(r.status, 0, r.stderr);
+    r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "scripts", "db", "stub-supabase.sql")]); assert.equal(r.status, 0, r.stderr);
+    for (const m of migrazioni.filter((f) => f < "0037")) { r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m)]); assert.equal(r.status, 0, `${m}: ${r.stderr.slice(0, 300)}`); }
+    r = esegui(["-d", db, "-o", nullo, "-f", path.join(radice, "scripts", "db", "verifica-prova-prima.sql")]); assert.equal(r.status, 0, "prima della 0037: " + r.stderr.slice(0, 300));
+    r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m37)]); assert.equal(r.status, 0, "la 0037 non si applica: " + r.stderr.slice(0, 300)); assert.match(r.stderr, /tornate «da verificare»: 2/, "dice quante case ha riallineato (A ed E)");
+    r = esegui(["-d", db, "-o", nullo, "-f", path.join(radice, "scripts", "db", "verifica-prova-dopo.sql")]); assert.ok(!/CONTROLLO FALLITO/.test(r.stderr), r.stderr.split("\n").filter((l) => /FALLITO/.test(l)).join("\n")); assert.equal(r.status, 0, r.stderr.slice(0, 400)); assert.equal((r.stderr.match(/NOTICE:\s+OK:/g) ?? []).length, 18);
+    r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m37)]); assert.equal(r.status, 0, "rieseguire la 0037 non deve dare errori: " + r.stderr.slice(0, 300)); assert.match(r.stderr, /tornate «da verificare»: 0/, "la seconda volta non c'è più niente da riallineare");
+  } finally { fs.rmSync(nullo, { force: true }); esegui(["-d", "postgres", "-c", `drop database if exists ${db}`]); }
+});

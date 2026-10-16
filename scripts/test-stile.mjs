@@ -41,22 +41,31 @@ test("ogni classe del CSS nuovo del proprietario è usata da qualche file (nient
   const inutili = [...classi].filter((c) => !stati.test(c) && !new RegExp(`(?<![a-zA-Z0-9_-])${c.replace(/[-]/g, "\\-")}(?![a-zA-Z0-9_-])`).test(sorgenti)); assert.deepEqual(inutili, [], "classi mai usate: " + inutili.join(", "));
 });
 
-test("Home e Database hanno la FORMA delle altre pagine: stessi angoli (20 px), stessa ombra delle schede, nessun angolo più grande, nessun banner oro", () => {
+test("Home del proprietario: la FORMA della Home dell'inquilino (schermata scura, pannelli con gli stessi angoli del suo pannello, pulsanti a pillola con il bordo oro); Database e richieste: la forma delle schede delle altre pagine (20 px e la stessa ombra)", () => {
   const ombraStandard = valore(blocco(vecchio, ".match-card"), "box-shadow"); assert.equal(ombraStandard, "0 8px 20px rgba(16, 21, 26, 0.06)");
-  for (const sel of [".tessera", ".persona", ".richiesta"]) { assert.equal(valore(blocco(nuovo, sel), "border-radius"), "20px", `${sel}: angoli`); assert.equal(valore(blocco(nuovo, sel), "box-shadow"), ombraStandard, `${sel}: ombra diversa da quella delle altre schede`); }
-  assert.equal(valore(blocco(nuovo, ".casa-hero"), "border-radius"), "20px"); assert.equal(valore(blocco(nuovo, ".conferma-affitto"), "border-radius"), "20px");
-  const grandi = [...senzaCommenti(nuovo).matchAll(/border-radius:\s*(\d+)px/g)].map((m) => Number(m[1])).filter((n) => n > 20 && n < 900); assert.deepEqual(grandi, [], "angoli più grandi di quelli dell'app: " + grandi.join(", "));
-  const invito = blocco(nuovo, ".casa-invito"); assert.match(invito, /background: var\(--moss\);/, "il pulsante principale è verde come «+ Nuovo annuncio»"); assert.ok(!/gold/.test(invito) && !/rgba\(201, 161, 90/.test(invito), "il banner oro non c'è più"); assert.equal(valore(invito, "border-radius"), "16px", "stessi angoli del pulsante principale dell'app (opp-cta)");
+  const angoloHome = valore(blocco(vecchio, ".home-intro"), "border-radius"); assert.equal(angoloHome, "18px", "il pannello della Home dell'inquilino");
+  for (const sel of [".casa-intro", ".tessera", ".casa-attesa", ".casa-hero"]) assert.equal(valore(blocco(nuovo, sel), "border-radius"), angoloHome, `${sel}: gli angoli del pannello della Home dell'inquilino`);
+  for (const sel of [".casa-intro", ".tessera", ".casa-attesa"]) { assert.equal(valore(blocco(nuovo, sel), "background"), "var(--ink-soft)", `${sel}: pannello scuro`); assert.equal(valore(blocco(nuovo, sel), "border"), "1px solid var(--line)", `${sel}: lo stesso filetto dei pannelli scuri`); assert.equal(valore(blocco(nuovo, sel), "color"), "var(--paper)", `${sel}: testo chiaro`); }
+  for (const sel of [".persona", ".richiesta"]) { assert.equal(valore(blocco(nuovo, sel), "border-radius"), "20px", `${sel}: angoli`); assert.equal(valore(blocco(nuovo, sel), "box-shadow"), ombraStandard, `${sel}: ombra diversa da quella delle altre schede`); }
+  assert.equal(valore(blocco(nuovo, ".conferma-affitto"), "border-radius"), "20px");
+  const pillolaHome = blocco(vecchio, ".home-intro .hi-modifica") ?? vecchio.match(/\.home-intro \.hi-modifica \{([^}]*)\}/)?.[1]; assert.ok(pillolaHome, "la pillola «Modifica ricerca» dell'inquilino");
+  const invito = blocco(nuovo, ".casa-invito b"); assert.equal(valore(invito, "border"), "1px solid var(--gold)", "bordo oro come le pillole dell'inquilino"); assert.equal(valore(invito, "color"), "var(--gold)"); assert.equal(valore(invito, "background"), "rgba(201, 161, 90, 0.16)", "lo stesso fondo oro leggero"); assert.equal(valore(invito, "border-radius"), "999px");
+  assert.equal(valore(blocco(nuovo, ".tessera-numero"), "color"), "var(--gold)"); assert.equal(valore(blocco(nuovo, ".tessera-vai"), "color"), "var(--gold)");
+  assert.ok(!/background: var\(--moss\)/.test(blocco(nuovo, ".casa-invito") ?? ""), "il banner verde non c'è più");
+  const fuori = [...senzaCommenti(nuovo.slice(0, nuovo.indexOf("/* Database: testi dei possibili match */"))).matchAll(/border-radius:\s*(\d+)px/g)].map((m) => Number(m[1])).filter((n) => n > 20 && n < 900); assert.deepEqual(fuori, [], "angoli più grandi di quelli dell'app nella Home: " + fuori.join(", "));
 });
 
-test("Home: titolo e sottotitolo come le altre pagine (screen-title + screen-sub), il saluto sta nel sottotitolo; Database: la casa è la scheda di «Immobili» e i gruppi hanno l'intestazione dei gruppi dell'inquilino", () => {
-  const home = leggi("src", "app", "(app)", "OwnerHomeClient.tsx"); assert.match(home, /<h1 className="screen-title">\{case_\.length === 1 \? "La tua casa" : "Le tue case"\}<\/h1>\s+\{\/\*[^*]*\*\/\}\s+<p className="screen-sub">\{saluto\(nome, ora\)\}\.<\/p>/);
+test("Home: marchio e schermata scura come la Home dell'inquilino; Database: la casa è la scheda di «Immobili» e i gruppi hanno l'intestazione dei gruppi dell'inquilino", () => {
+  const home = leggi("src", "app", "(app)", "OwnerHomeClient.tsx"); const inq = leggi("src", "app", "(app)", "HomeClient.tsx");
+  assert.match(home, /<div className="screen-dark casa-schermo">\s+<div className="casa-scroll">\s+<div className="casa-colonna">\s+\{\/\*[^*]*\*\/\}\s+<div className="topbar casa-topbar">\s+<div className="brand">\s+Match<b>AmI<\/b>\s+<\/div>\s+<\/div>/);
+  for (const x of ['className="topbar', 'className="brand"', "Match<b>AmI</b>", "screen-dark"]) { assert.ok(home.includes(x), `la Home del proprietario non ha ${x}`); assert.ok(inq.includes(x), `la Home dell'inquilino non ha ${x}: le due Home non coincidono`); }
+  assert.match(home, /<p className="casa-intro-saluto">\{saluto\(nome, ora\)\}\.<\/p>\s+<h1 className="casa-intro-titolo">\{case_\.length === 1 \? "La tua casa" : "Le tue case"\}<\/h1>/);
   const db = leggi("src", "app", "(app)", "database", "DatabaseClient.tsx"); assert.match(db, /<header className="match-card casa-intestazione">[\s\S]*?<div className="mc-body">\s+<div className="mc-zona">\{zona\}<\/div>\s+<div className="mc-title">\{g\.casa\.titolo\}<\/div>\s+<div className="mc-meta">/);
   const s = leggi("src", "components", "SezioneApribile.tsx"); assert.match(s, /<section id=\{id\} className="gruppo-match sezione-db">\s+<button type="button" className="gruppo-testa"/); assert.match(s, /\{titolo\} — \{conteggio\}/); assert.match(s, /<IconChevronSu className=\{`gruppo-freccia \$\{stato \? "" : "chiuso"\}`\} \/>/);
   const cand = leggi("src", "app", "(app)", "candidature", "CandidatureClient.tsx"); assert.match(cand, /className="gruppo-testa"/); assert.match(cand, /\{titolo\} — \{items\.length\}/, "l'intestazione dell'inquilino ha lo stesso formato");
 });
 
 test("le pagine del proprietario usano le classi dell'app per ciò che l'app ha già (titolo, scheda della casa, pulsante principale), senza ridefinirle", () => {
-  for (const sel of [".screen-title", ".screen-sub", ".match-card", ".mc-zona", ".mc-title", ".mc-meta", ".opp-cta", ".gruppo-testa"]) assert.equal(blocco(nuovo, sel), null, `${sel} è ridefinita nel CSS nuovo: si deve riusare quella dell'app`);
-  for (const f of componenti.slice(0, 2)) { const t = leggi(...f.split("/")); assert.ok(/className="[^"]*\b(screen-title|match-card)\b/.test(t), `${f} non usa le classi dell'app`); }
+  for (const sel of [".screen-title", ".screen-sub", ".match-card", ".mc-zona", ".mc-title", ".mc-meta", ".opp-cta", ".gruppo-testa", ".topbar", ".brand", ".screen-dark", ".home-intro"]) assert.equal(blocco(nuovo, sel), null, `${sel} è ridefinita nel CSS nuovo: si deve riusare quella dell'app`);
+  for (const f of componenti.slice(0, 2)) { const t = leggi(...f.split("/")); assert.ok(/className="[^"]*\b(screen-dark|match-card)\b/.test(t), `${f} non usa le classi dell'app`); }
 });

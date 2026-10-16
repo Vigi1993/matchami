@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { PageContainer } from "@/components/ui/PageContainer";
 import { IconBusta, IconPalazzo, IconPersone } from "@/components/icons";
 import {
   DESTINAZIONI_HOME,
@@ -14,8 +13,10 @@ import {
 } from "@/lib/proprietario/home";
 
 /**
- * La Home del proprietario: la sua casa in grande (quasi tutti ne hanno una sola) e sotto due tessere grandi, «Possibili
- * inquilini» e «Candidature». Parole semplici, caratteri grandi, un solo gesto per andare dove serve:
+ * La Home del proprietario, con la stessa impostazione della Home dell'inquilino: schermata scura a tutto schermo, il marchio MatchAmI in alto
+ * (resta fermo mentre si scorre), un pannello scuro d'apertura con il saluto e, se c'è qualcosa da fare, l'invito con il pulsante a pillola con il bordo oro.
+ * Poi la sua casa in grande (quasi tutti ne hanno una sola) e sotto due tessere grandi, «Possibili inquilini» e «Candidature».
+ * Parole semplici, caratteri grandi, un solo gesto per andare dove serve:
  *  - toccare la casa porta a «Immobili»;
  *  - toccare una tessera porta al «Database».
  * Con più case, ognuna ha la sua scheda (più compatta).
@@ -25,33 +26,44 @@ export function OwnerHomeClient({ case_, nome, ora }: { case_: CasaHome[]; nome:
   const invito = inviteDaValutare(totaleDaValutare);
 
   return (
-    <PageContainer wide>
-      <h1 className="screen-title">{case_.length === 1 ? "La tua casa" : "Le tue case"}</h1>
-      {/* il saluto sta nel sottotitolo grigio, come in tutte le altre pagine */}
-      <p className="screen-sub">{saluto(nome, ora)}.</p>
+    <div className="screen-dark casa-schermo">
+      <div className="casa-scroll">
+        <div className="casa-colonna">
+          {/* il marchio, lo stesso della Home dell'inquilino */}
+          <div className="topbar casa-topbar">
+            <div className="brand">
+              Match<b>AmI</b>
+            </div>
+          </div>
 
-      {/* Se c'è qualcosa da fare lo si dice per primo, con un pulsante grande */}
-      {invito && (
-        <Link href={DESTINAZIONI_HOME.candidature} className="casa-invito">
-          <span>{invito}</span>
-          <b>Guarda ›</b>
-        </Link>
-      )}
+          {/* il pannello d'apertura: il saluto e, se c'è qualcosa da fare, lo si dice per primo con un pulsante grande */}
+          <div className="casa-intro">
+            <p className="casa-intro-saluto">{saluto(nome, ora)}.</p>
+            <h1 className="casa-intro-titolo">{case_.length === 1 ? "La tua casa" : "Le tue case"}</h1>
+            {invito && (
+              <Link href={DESTINAZIONI_HOME.candidature} className="casa-invito">
+                <span>{invito}</span>
+                <b>Guarda ›</b>
+              </Link>
+            )}
+          </div>
 
-      {case_.length === 0 ? (
-        <div className="empty-inline">
-          <IconPalazzo className="icon-empty" />
-          <h3>Non hai ancora nessuna casa</h3>
-          <p>Per cominciare, aggiungi la tua casa.</p>
-          <Link href={DESTINAZIONI_HOME.immobili} className="casa-invito" style={{ marginTop: 14 }}>
-            <span>Aggiungi la tua casa</span>
-            <b>Vai ›</b>
-          </Link>
+          {case_.length === 0 ? (
+            <div className="empty-inline">
+              <IconPalazzo className="icon-empty" />
+              <h3>Non hai ancora nessuna casa</h3>
+              <p>Per cominciare, aggiungi la tua casa.</p>
+              <Link href={DESTINAZIONI_HOME.immobili} className="casa-invito" style={{ marginTop: 14 }}>
+                <span>Aggiungi la tua casa</span>
+                <b>Vai ›</b>
+              </Link>
+            </div>
+          ) : (
+            case_.map((c) => <Casa key={c.id} casa={c} compatta={case_.length > 1} />)
+          )}
         </div>
-      ) : (
-        case_.map((c) => <Casa key={c.id} casa={c} compatta={case_.length > 1} />)
-      )}
-    </PageContainer>
+      </div>
+    </div>
   );
 }
 

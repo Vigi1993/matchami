@@ -49,9 +49,14 @@ select t.utente('11111111-0000-0000-0000-000000000005', 't5@x.it', 'inquilino', 
 select t.utente('22222222-0000-0000-0000-000000000001', 'o1@x.it', 'proprietario', 'Mario');
 select t.utente('22222222-0000-0000-0000-000000000002', 'o2@x.it', 'proprietario', 'Luisa');
 update tenant_profiles set professione = 'Designer' where profile_id = '11111111-0000-0000-0000-000000000001';
-insert into listings (id, owner_id, titolo, zona, prezzo, pubblicato, verifica_stato) values
- ('aaaaaaaa-0000-0000-0000-000000000001', '22222222-0000-0000-0000-000000000001', 'Bilocale luminoso', 'Isola, Milano', 1250, true, 'verificato'),
- ('aaaaaaaa-0000-0000-0000-000000000002', '22222222-0000-0000-0000-000000000002', 'Trilocale del sole', 'Navigli, Milano', 1500, true, 'verificato');
+insert into listings (id, owner_id, titolo, zona, prezzo, pubblicato) values
+ ('aaaaaaaa-0000-0000-0000-000000000001', '22222222-0000-0000-0000-000000000001', 'Bilocale luminoso', 'Isola, Milano', 1250, true),
+ ('aaaaaaaa-0000-0000-0000-000000000002', '22222222-0000-0000-0000-000000000002', 'Trilocale del sole', 'Navigli, Milano', 1500, true);
+-- una casa si verifica solo DOPO che c'è la prova di proprietà
+insert into documenti_verifica (owner_id, listing_id, tipo, percorso, nome_file) values
+ ('22222222-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001', 'proprieta', '22222222-0000-0000-0000-000000000001/proprieta-1.pdf', 'visura.pdf'),
+ ('22222222-0000-0000-0000-000000000002', 'aaaaaaaa-0000-0000-0000-000000000002', 'proprieta', '22222222-0000-0000-0000-000000000002/proprieta-2.pdf', 'visura.pdf');
+update listings set verifica_stato = 'verificato' where id in ('aaaaaaaa-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000002');
 
 -- tre candidature a Bilocale: Anna, Bruno, Carla (si candidano da sole, con i loro permessi)
 select t.come('11111111-0000-0000-0000-000000000001');
