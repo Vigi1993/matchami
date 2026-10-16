@@ -16,7 +16,7 @@ export default async function ImmobiliPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const [{ data: listings }, { data: candidature }, { data: visite }, { data: indirizziRighe }, { data: luoghiRighe }] = await Promise.all([
+  const [{ data: listings }, { data: candidature }, { data: visite }, { data: indirizziRighe }, { data: luoghiRighe }, { data: documenti }] = await Promise.all([
     supabase
       .from("listings")
       .select(
@@ -34,7 +34,15 @@ export default async function ImmobiliPage() {
     supabase.rpc("indirizzi_dei_miei_immobili"),
     // i luoghi dove si può mettere un immobile (provincia → città → quartiere)
     supabase.from("luoghi").select("id, livello, nome, sigla, parent_id"),
+    // i documenti di verifica che ho già caricato: servono per dire cosa manca a ogni immobile
+    supabase.from("documenti_verifica").select("tipo, listing_id").eq("owner_id", user!.id),
   ]);
+
+  const haIdentita = (documenti ?? []).some((d) => d.tipo === "identita");
+  const proprietaPerImmobile = new Map<string, number>();
+  for (const d of documenti ?? []) {
+    if (d.tipo === "proprieta" && d.listing_id) proprietaPerImmobile.set(d.listing_id as string, (proprietaPerImmobile.get(d.listing_id as string) ?? 0) + 1);
+  }
 
   const indirizzi: Record<string, IndirizzoConVista> = {};
   for (const r of indirizziRighe ?? []) indirizzi[r.listing_id as string] = conVista(r);
@@ -74,7 +82,8 @@ export default async function ImmobiliPage() {
       .map((f) => f.url),
     criteri: criteriDaRighe(l.listing_criteri as RigaCriterioDb[] | null),
     nCandidature: nCandidaturePerListing.get(l.id) ?? 0,
+    nProprieta: proprietaPerImmobile.get(l.id as string) ?? 0,
   }));
 
-  return <ImmobiliClient immobili={immobili} visite={(visite ?? []) as VisitaProprietario[]} indirizzi={indirizzi} quotazioni={quotazioni} luoghi={(luoghiRighe ?? []) as Luogo[]} />;
+  return <ImmobiliClient immobili={immobili} haIdentita={haIdentita} visite={(visite ?? []) as VisitaProprietario[]} indirizzi={indirizzi} quotazioni={quotazioni} luoghi={(luoghiRighe ?? []) as Luogo[]} />;
 }

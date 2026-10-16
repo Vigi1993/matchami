@@ -459,6 +459,21 @@ input[type="range"]::-moz-range-thumb {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+/* il riquadro a destra non può mai diventare più largo di così: con una scritta lunga schiacciava il nome della casa fino a farlo uscire dalla scheda e finire sotto il riquadro */
+.match-card .mc-pct,
+.contratto-testa .mc-pct {
+  max-width: 92px;
+  overflow-wrap: anywhere;
+}
+/* e i testi della scheda vanno a capo anche con una parola lunghissima, invece di uscire dalla loro colonna */
+.match-card .mc-zona,
+.match-card .mc-title,
+.match-card .mc-meta,
+.contratto-testa .mc-zona,
+.contratto-testa .mc-title,
+.contratto-testa .mc-meta {
+  overflow-wrap: anywhere;
+}
 /* varianti di stato del badge, come nel prototipo */
 .mc-pct.is-match {
   background: rgba(62, 107, 87, 0.14);
@@ -4620,4 +4635,71 @@ button.contratto-testa:focus-visible {
 .carica-contratto .opp-cta {
   min-height: 52px;
   font-size: 17px;
+}
+
+/* ---- La prova di proprietà nella scheda dell'immobile (e nella Home di chi non ha ancora immobili verificati) ---- */
+.verifica-immobile {
+  margin: 0 0 16px;
+  padding: 14px;
+  border-radius: 16px;
+  background: var(--paper);
+}
+.verifica-immobile-testa {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.verifica-immobile-titolo {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.verifica-immobile .mc-pct {
+  flex: none;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.verifica-immobile .field-note {
+  margin: 8px 0 0;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--body-text);
+}
+.verifica-immobile .riga-doc {
+  margin-top: 12px;
+  font-size: 15px;
+}
+.verifica-immobile .note-stop {
+  margin: 10px 0 0;
+  font-size: 15px;
+}
+.verifica-immobile .selettore-file {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 15px;
+}
+.verifica-immobile .opp-cta {
+  min-height: 52px;
+  font-size: 17px;
+}
+/* nella Home di verifica la scheda della casa è già il contenitore: niente scatola dentro la scatola */
+.verifica-card-colonna .verifica-immobile {
+  margin: 8px 0 0;
+  padding: 0;
+  background: none;
+}
+
+/* sui telefoni stretti la foto è più piccola, per lasciare spazio al nome */
+@media (max-width: 359px) {
+  .match-card img,
+  .match-card .mc-avatar {
+    width: 58px;
+    height: 58px;
+  }
 }

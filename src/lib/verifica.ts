@@ -72,6 +72,41 @@ export function puoInviare(haIdentita: boolean, immobile: ImmobileVerifica): boo
   return immobile.stato === "non_avviata" && cosaManca(haIdentita, immobile).length === 0;
 }
 
+/** I dati della verifica di un immobile, ricavati dalla sua scheda (gli stessi che la Home ricava dalla lista). */
+export function immobileVerificaDa(im: {
+  id: string;
+  titolo: string;
+  zona: string;
+  verifica_stato: StatoImmobile;
+  verifica_esito_note: string | null;
+  nProprieta?: number;
+  classe_energetica?: string | null;
+  luogo_id?: string | null;
+  bagni?: number | null;
+  piano?: number | null;
+  riscaldamento?: string | null;
+  tipo_contratto?: string | null;
+  disponibile_dal?: string | null;
+}): ImmobileVerifica {
+  return {
+    id: im.id,
+    titolo: im.titolo,
+    zona: im.zona,
+    stato: im.verifica_stato,
+    note: im.verifica_esito_note ?? null,
+    nProprieta: im.nProprieta ?? 0,
+    dati: {
+      classe_energetica: im.classe_energetica ?? null,
+      luogo_id: im.luogo_id ?? null,
+      bagni: im.bagni ?? null,
+      piano: im.piano ?? null,
+      riscaldamento: im.riscaldamento ?? null,
+      tipo_contratto: im.tipo_contratto ?? null,
+      disponibile_dal: im.disponibile_dal ?? null,
+    },
+  };
+}
+
 /** Il proprietario è verificato se ha almeno un immobile verificato. */
 export function proprietarioVerificato(immobili: ImmobileVerifica[]): boolean {
   return immobili.some((i) => i.stato === "verificato");

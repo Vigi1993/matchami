@@ -70,6 +70,8 @@ export type ImmobileDettaglio = {
   /** cosa chiede il proprietario ai candidati, con peso e obbligatorietà */
   criteri: import("@/lib/match").CriterioRichiesto[];
   nCandidature: number;
+  /** quante prove di proprietà (visura, atto) ha già caricato per questo immobile */
+  nProprieta?: number;
 };
 
 export type CandidaturaSenzaContratto = {

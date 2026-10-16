@@ -13,7 +13,8 @@ import { ATTR_VOCAB, RISCALDAMENTI, TIPI_CONTRATTO } from "@/lib/constants";
 import type { ImmobileDettaglio } from "@/lib/types";
 import type { CriterioRichiesto } from "@/lib/match";
 import { CriteriCandidati } from "@/components/CriteriCandidati";
-import { descriviStato } from "@/lib/verifica";
+import { descriviStato, immobileVerificaDa } from "@/lib/verifica";
+import { VerificaImmobile } from "@/components/VerificaImmobile";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { Chip } from "@/components/ui/Chip";
 import { CLASSI_ENERGETICHE } from "@/lib/annunci/energia";
@@ -41,12 +42,15 @@ import {
 
 export function ImmobiliClient({
   immobili,
+  haIdentita = false,
   visite = [],
   indirizzi = {},
   quotazioni = {},
   luoghi = [],
 }: {
   immobili: ImmobileDettaglio[];
+  /** ha già caricato il documento d'identità (serve per chiedere la verifica di un immobile) */
+  haIdentita?: boolean;
   /** i luoghi dove si può mettere un immobile (provincia → città → quartiere) */
   luoghi?: Luogo[];
   /** i posti liberi e le prenotazioni di tutti i miei immobili */
@@ -57,9 +61,9 @@ export function ImmobiliClient({
   quotazioni?: Record<string, RisultatoQuotazione>;
 }) {
   const [nuovoAperto, setNuovoAperto] = useState(false);
-  const [selezionato, setSelezionato] = useState<ImmobileDettaglio | null>(
-    null
-  );
+  // si tiene l'identificativo, non la casa: dopo un caricamento la pagina si aggiorna e la scheda deve mostrare i dati nuovi
+  const [selezionatoId, setSelezionatoId] = useState<string | null>(null);
+  const selezionato = immobili.find((i) => i.id === selezionatoId) ?? null;
 
   return (
     <PageContainer wide>
@@ -92,7 +96,7 @@ export function ImmobiliClient({
           {immobili.map((im) => (
             <button
               key={im.id}
-              onClick={() => setSelezionato(im)}
+              onClick={() => setSelezionatoId(im.id)}
               className="match-card"
             >
               {im.foto[0] ? (
@@ -117,15 +121,16 @@ export function ImmobiliClient({
                   im.nCandidature > 0 ? "is-match" : "is-off"
                 }`}
               >
-                {im.nCandidature > 0 ? (
+                {/* sempre «numero + etichetta piccola»: una scritta lunga schiacciava il nome dell'immobile */}
+                {im.nCandidature > 0 || im.pubblicato ? (
                   <>
                     {im.nCandidature}
                     <span>candidatur{im.nCandidature === 1 ? "a" : "e"}</span>
                   </>
-                ) : im.pubblicato ? (
-                  "Nessuna candidatura"
                 ) : (
-                  "Non pubblicato"
+                  <>
+                    —<span>non pubblicato</span>
+                  </>
                 )}
               </div>
             </button>
@@ -148,11 +153,13 @@ export function ImmobiliClient({
 
       <Sheet
         open={selezionato !== null}
-        onClose={() => setSelezionato(null)}
+        onClose={() => setSelezionatoId(null)}
         title={selezionato?.titolo ?? "Immobile"}
       >
         {selezionato && (
           <>
+            {/* la prova di proprietà: carica la visura o l'atto e chiedi la verifica, senza passare dalla Home */}
+            <VerificaImmobile key={selezionato.id} immobile={immobileVerificaDa(selezionato)} haIdentita={haIdentita} conIdentita />
             <IndirizzoImmobile key={selezionato.id} immobileId={selezionato.id} salvato={indirizzi[selezionato.id] ?? null} />
             <VisiteImmobile immobileId={selezionato.id} visite={visite} />
             <ImmobileForm
@@ -160,7 +167,7 @@ export function ImmobiliClient({
               immobile={selezionato}
               quotazioni={quotazioni}
               luoghi={luoghi}
-              onSaved={() => setSelezionato(null)}
+              onSaved={() => setSelezionatoId(null)}
             />
           </>
         )}
@@ -567,8 +574,8 @@ function ImmobileForm({
         {immobile?.verifica_stato !== "verificato" && (
           <p className="field-note">
             Gli inquilini vedono un annuncio solo dopo che l&apos;immobile è
-            stato verificato, anche se è pubblicato. Puoi seguire la verifica
-            dalla Home.
+            stato verificato, anche se è pubblicato. Per farlo verificare carica
+            la prova di proprietà qui sopra, in questa scheda.
           </p>
         )}
       </Field>

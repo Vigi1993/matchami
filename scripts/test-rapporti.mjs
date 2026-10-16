@@ -157,9 +157,11 @@ test("i TAG dell'app e del database sono la stessa lista", () => {
   assert.deepEqual([...db].sort(), [...app].sort(), "le due liste divergono");
 });
 
-test("i dati di prova usano solo tag ammessi (altrimenti il vincolo li rifiuterebbe)", () => {
+// il file dei dati dimostrativi è facoltativo: se in questa copia del progetto non c'è, il controllo si salta (non è un errore)
+const FILE_SEED = path.join(radice, "supabase", "migrations", "seed_demo_data.sql");
+test("i dati di prova usano solo tag ammessi (altrimenti il vincolo li rifiuterebbe)", { skip: fs.existsSync(FILE_SEED) ? false : "il file dei dati dimostrativi (seed_demo_data.sql) non c'è in questa copia del progetto" }, () => {
   const app = stringhe(tra(fs.readFileSync(path.join(radice, "src", "lib", "constants.ts"), "utf8"), "TAG_RECENSIONE = [", "] as const"));
-  const seed = fs.readFileSync(path.join(radice, "supabase", "migrations", "seed_demo_data.sql"), "utf8");
+  const seed = fs.readFileSync(FILE_SEED, "utf8");
   const usati = stringhe(tra(seed, "insert into recensioni", ";")).filter((x) => !/^\s*$/.test(x) && !/^(tenant_id|autore_id|voto|tag)$/.test(x));
   const tag = usati.filter((x) => x.length > 8);
   assert.ok(tag.length >= 1, "non ho trovato tag nel seed");
