@@ -1,0 +1,1440 @@
+From 4ef559a7492cb224e97f3d2f186c9f7d3c433223 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 15 Oct 2026 09:33:43 +0000
+Subject: [PATCH] feat(proprietario): nuova Home con la casa in grande, i
+ possibili inquilini e le candidature
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+DA APPLICARE DOPO punteggio-protesti.patch. Nessuna migrazione.
+RICHIEDE la variabile SUPABASE_SECRET_KEY nell'ambiente (vedi sotto): senza, la tessera dei possibili inquilini non compare e tutto il resto funziona.
+
+LA HOME DEL PROPRIETARIO (verificato). Pensata per chi non è pratico e ha una casa sola (il 90% dei casi):
+- saluto con l'ora italiana ('Buongiorno, Mario') e titolo 'La tua casa' ('Le tue case' se sono più d'una);
+- se ci sono candidature da guardare, per primo un pulsante grande in oro: 'Hai 2 candidature da guardare - Guarda';
+- LA CASA IN GRANDE: la prima foto a tutto schermo con sfumatura scura sotto (il testo si legge con qualsiasi foto), stato
+  (Pubblicata / Non pubblicata / In verifica), zona, titolo in carattere grande, '€ 1250 al mese · 2 locali · 55 m²' e un
+  pulsante chiaro 'Vedi o modifica'. Senza foto, un disegno al suo posto;
+- DUE TESSERE UGUALI sotto, con numero enorme e una frase semplice: 'Possibili inquilini - 4 - inquilini cercano una casa come
+  la tua' e 'Candidature - 3 - persone hanno chiesto di vedere la tua casa' (con '2 da valutare' in evidenza);
+- una casa non pubblicata o in verifica non mostra le tessere (non avrebbero senso): dice cosa succede e porta alla casa;
+- più case: una scheda compatta per ciascuna, con i suoi numeri.
+DOVE PORTA OGNI TOCCO: la casa (foto, titolo, 'Vedi o modifica') -> Immobili; 'Possibili inquilini' -> Database, alla sua
+sezione (#possibili); 'Candidature' e il pulsante in cima -> Database. Nessun link dentro un altro link.
+LEGGIBILITÀ: nessun carattere sotto 15 px (i testi di lettura 16-18 px, i numeri 56 px, il titolo della casa 30 px), bersagli
+larghi (tessere almeno 190 px di altezza, pulsanti almeno 64 px), contorno ben visibile navigando da tastiera, parole
+semplici (niente 'match', 'badge', 'dashboard'). Provato in Chrome: nessuno scorrimento laterale, tessere uguali.
+
+I POSSIBILI INQUILINI. 'Combacia' ha lo stesso significato della Home dell'inquilino: la casa è 'in linea con la tua ricerca'
+(budget, zona, locali, metri quadri, tipologia, caratteristiche necessarie); chi sfora il budget anche di poco, o vuole più
+locali, non conta. Non contano chi non ha impostato nessun criterio (con una ricerca vuota ogni casa avrebbe il punteggio
+pieno) e chi si è già candidato a QUELLA casa (è una candidatura). Provato su 600 ricerche casuali contro il motore vero.
+È UN NUMERO, MAI UN ELENCO: il proprietario non vede chi sono (non esiste un consenso a farsi trovare: il consenso 'terzi'
+del Profilo riguarda i partner commerciali, non i proprietari). L'identificativo di chi cerca serve solo dentro il conteggio,
+per non contare i candidati, e non ne esce. Il calcolo gira sul server con la chiave di servizio (il proprietario non può
+leggere le ricerche degli altri: lo vieta la sicurezza a livello di riga) e legge SOLO i criteri di ricerca, mai nomi, email,
+reddito o foto; un test lo richiede. Il codice che usa la chiave è un solo file del server; i componenti del browser lo
+importano solo come tipo (provato).
+SENZA LA CHIAVE (SUPABASE_SECRET_KEY, la chiave segreta sb_secret_..., la stessa che serve già per cancellare un account):
+possibili = null, la tessera non compare e non si inventa nessun numero. LIMITE DI SCALA: si leggono al massimo 5000 ricerche;
+oltre, i numeri sarebbero per difetto e il conteggio va spostato nel database.
+
+IL DATABASE. In cima una sezione 'Possibili inquilini' (a cui porta la tessera): per ogni casa il numero e la frase, e un
+testo che dice che non si vede chi sono e che se uno di loro si candida lo si trova tra le candidature. Senza numeri dice 'Il
+numero non è disponibile in questo momento'. Le candidature sotto non cambiano.
+
+INFORMATIVA. Aggiunto che ai proprietari si mostra QUANTI inquilini hanno una ricerca compatibile, in forma anonima. Versione
+2026-10-provvisoria-18; la 15-17 sono equivalenti (nessuno deve riaccettare).
+
+COSA NON C'È (decisione da prendere): vedere CHI sono i possibili inquilini e contattarli. Richiede un consenso dell'inquilino
+a farsi trovare, una funzione di invito (che riempirebbe anche la scheda 'Richieste dei proprietari' dell'inquilino) e il
+parere del legale. Oggi la tessera porta a una sezione che spiega il numero; il nome del Database promette più di così.
+
+DIFETTI MIEI TROVATI PROVANDO
+- le due tessere erano di larghezza diversa (l'etichetta lunga spingeva una colonna): ora colonne davvero uguali
+- 'tua' restava da solo su una riga: ridotto il margine interno
+- nei test: il prezzo si scrive 1250 e non 1.250 in questo ambiente (è la regola dell'ICU, non nostra): i test non dipendono
+  dal punto delle migliaia; i controlli sui link dipendevano dall'ordine degli attributi che React scrive
+- il test della sicurezza leggeva anche la query fatta con l'utente normale e non solo quella con la chiave di servizio
+- due alterazioni passavano (una scheda nascosta con hidden, un identificativo che entra nei dati): controlli stretti. Una
+  terza era sbagliata da me (colpiva un'altra regola del CSS)
+
+Test: 1061 in tutto (35 nuovi). Provato in Chrome col dito: una casa con foto (4 possibili, 3 candidature, 2 da valutare), tocchi
+su casa/possibili/candidature/pulsante, due case (la seconda senza foto), casa non pubblicata, casa in verifica, desktop, la
+sezione del Database. Difetti reintrodotti di proposito: 41 su 41 presi (38 al primo giro, 3 dopo aver stretto o corretto).
+---
+ package.json                              |   2 +-
+ scripts/test-affidabilita.mjs             |   2 +-
+ scripts/test-home-proprietario.mjs        | 244 +++++++++++++++++
+ scripts/test-raccomandato.mjs             |   2 +-
+ src/app/(app)/OwnerHomeClient.tsx         | 190 ++++++-------
+ src/app/(app)/database/DatabaseClient.tsx |  34 +++
+ src/app/(app)/database/page.tsx           |   5 +
+ src/app/(app)/page.tsx                    |  68 +++--
+ src/app/globals.css                       | 311 ++++++++++++++++++++++
+ src/content/informativa.ts                |   4 +-
+ src/lib/match/index.ts                    |   1 +
+ src/lib/match/possibili.ts                |  77 ++++++
+ src/lib/proprietario/home.ts              |  91 +++++++
+ src/lib/proprietario/possibili-server.ts  | 112 ++++++++
+ 14 files changed, 1026 insertions(+), 117 deletions(-)
+ create mode 100644 scripts/test-home-proprietario.mjs
+ create mode 100644 src/lib/match/possibili.ts
+ create mode 100644 src/lib/proprietario/home.ts
+ create mode 100644 src/lib/proprietario/possibili-server.ts
+
+diff --git a/package.json b/package.json
+index 64a37e4..db8ce32 100644
+--- a/package.json
++++ b/package.json
+@@ -8,7 +8,7 @@
+     "start": "next start",
+     "lint": "eslint",
+     "pretest": "node scripts/controlla-dipendenze.mjs",
+-    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-affidabilita.mjs scripts/test-profilo-gestione.mjs scripts/test-avvisi-profilo.mjs scripts/test-raccomandato.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-dati-immobile.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-affidabilita.mjs scripts/test-profilo-gestione.mjs scripts/test-avvisi-profilo.mjs scripts/test-raccomandato.mjs scripts/test-home-proprietario.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-dati-immobile.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-affidabilita.mjs b/scripts/test-affidabilita.mjs
+index 3880acf..db00253 100644
+--- a/scripts/test-affidabilita.mjs
++++ b/scripts/test-affidabilita.mjs
+@@ -275,7 +275,7 @@ test("informativa: i numeri vengono dalle regole del calcolo (nessun punteggio s
+ test("informativa legale: dice che i protesti (o non rispondere) fanno scendere il punteggio, con lo stesso numero della formula e nuova versione senza far riaccettare", () => {
+   const inf = caricaTs(path.join(radice, "src", "content", "informativa.ts")); const testo = JSON.stringify(inf.INFORMATIVA);
+   assert.ok(testo.includes(`la risposta è obbligatoria e «non indicato» vale come «sì»), il punteggio di affidabilità scende di ${af.PUNTI_AFFIDABILITA.protesti} punti`)); assert.ok(testo.includes("Il punteggio non è mai inferiore a zero"));
+-  assert.equal(inf.INFORMATIVA.versione, "2026-10-provvisoria-17"); assert.ok(inf.INFORMATIVA.equivalenti.includes("2026-10-provvisoria-16") && inf.INFORMATIVA.equivalenti.includes("2026-10-provvisoria-15"));
++  assert.equal(inf.INFORMATIVA.versione, "2026-10-provvisoria-18"); for (const v of [15, 16, 17]) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} deve restare equivalente`);
+ });
+ 
+ test("stile: una voce che toglie punti ha un aspetto suo (come la voce presa e quella non presa)", () => {
+diff --git a/scripts/test-home-proprietario.mjs b/scripts/test-home-proprietario.mjs
+new file mode 100644
+index 0000000..7fc01bd
+--- /dev/null
++++ b/scripts/test-home-proprietario.mjs
+@@ -0,0 +1,244 @@
++/**
++ * Test della Home del proprietario: la casa in grande, le tessere «Possibili inquilini» e «Candidature», dove porta ogni
++ * parte, il conteggio ANONIMO dei possibili inquilini, e le regole di leggibilità per chi non è pratico. Si lancia con:   npm test
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { createRequire } from "node:module";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const richiedi = createRequire(import.meta.url);
++const React = richiedi("react");
++const { renderToStaticMarkup } = richiedi("react-dom/server");
++const mp = caricaTs(path.join(radice, "src", "lib", "match", "possibili.ts"));
++const mz = caricaTs(path.join(radice, "src", "lib", "match", "mazzo.ts"));
++const lu = caricaTs(path.join(radice, "src", "lib", "luoghi.ts"));
++const hm = caricaTs(path.join(radice, "src", "lib", "proprietario", "home.ts"));
++const comp = caricaTs(path.join(radice, "src", "app", "(app)", "OwnerHomeClient.tsx"));
++const inf = caricaTs(path.join(radice, "src", "content", "informativa.ts"));
++const leggi = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8").replace(/\r\n/g, "\n");
++/** I numeri a quattro cifre si scrivono con o senza punto secondo la versione di ICU («1250» o «1.250»): non è la nostra regola, quindi si confronta senza punto. */
++const senzaPunti = (t) => t.replace(/(?<=\d)\.(?=\d{3}\b)/g, "");
++const testoDi = (h) => h.replace(/<[^>]+>/g, " ").replace(/&#x27;|&apos;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
++
++// ============================================================ il conteggio dei possibili inquilini
++const LUOGHI = [
++  { id: "pMI", livello: "provincia", nome: "Milano", sigla: "MI", parent_id: null },
++  { id: "cMI", livello: "comune", nome: "Milano", sigla: null, parent_id: "pMI" },
++  { id: "qIsola", livello: "quartiere", nome: "Isola", sigla: null, parent_id: "cMI" },
++  { id: "qNavigli", livello: "quartiere", nome: "Navigli", sigla: null, parent_id: "cMI" },
++];
++const mappa = lu.mappaLuoghi(LUOGHI);
++const casa = (o = {}) => mp.annuncioDaRiga({ id: "a1", prezzo: 1250, zona: "Isola, Milano", locali: 2, mq: 55, attributi: { balcone: true }, luogo_id: "qIsola", tipologia: "appartamento", ...o }, mappa);
++const ric = (id, riga = {}, zone = [], interessi = []) => ({ tenantId: id, riga: { budget_max: null, locali_min: null, mq_min: null, ...riga }, zone, interessi });
++const conta = (annunci, ricerche, giaCandidati = new Map()) => mp.contaPossibiliInquilini({ annunci, ricerche, giaCandidati });
++const uno = (ricerche, annuncio = casa(), giaCandidati = new Map()) => conta([annuncio], ricerche, giaCandidati).get("a1");
++
++test("conteggio: conta chi ha una ricerca che la casa rispetta (budget, locali, metri quadri); non chi la sfora, anche di poco", () => {
++  const r = [ric("t1", { budget_max: 1500 }), ric("t2", { budget_max: 1000 }), ric("t3", { budget_max: 1200 }), ric("t4", { budget_max: 1250, locali_min: 2, mq_min: 50 }), ric("t5", { budget_max: 1500, locali_min: 3 }), ric("t6", { budget_max: 1500, mq_min: 80 })];
++  assert.equal(uno(r), 2, "t1 (budget 1500) e t4 (esatto) combaciano; t2 e t3 sforano, t5 vuole 3 locali, t6 80 metri");
++});
++
++test("conteggio: chi non ha impostato NESSUN criterio non conta (con una ricerca vuota ogni casa avrebbe il punteggio pieno)", () => {
++  assert.equal(uno([ric("t1"), ric("t2", { budget_max: 0, locali_min: 0, mq_min: 0 }), ric("t3", { budget_max: 1500 })]), 1);
++});
++
++test("conteggio: chi si è già candidato a QUELLA casa non è un possibile inquilino (è una candidatura); una candidatura a un'altra casa non lo toglie", () => {
++  const r = [ric("t1", { budget_max: 1500 }), ric("t2", { budget_max: 1500 }), ric("t3", { budget_max: 1500 })];
++  assert.equal(uno(r, casa(), new Map([["a1", new Set(["t1"])]])), 2); assert.equal(uno(r, casa(), new Map([["a1", new Set(["t1", "t2", "t3"])]])), 0); assert.equal(uno(r, casa(), new Map([["altra", new Set(["t1", "t2"])]])), 3, "candidati a un'altra casa non contano");
++});
++
++test("conteggio: la zona vale per quartiere, città e provincia (chi cerca «Milano» trova l'Isola); un'altra zona non combacia", () => {
++  const isola = { zona: "Isola, Milano", luogo_id: "qIsola" }, navigli = { zona: "Navigli, Milano", luogo_id: "qNavigli" }, milano = { zona: "Milano", luogo_id: "cMI" }, prov = { zona: "Milano (MI)", luogo_id: "pMI" };
++  assert.equal(uno([ric("a", { budget_max: 2000 }, [isola]), ric("b", { budget_max: 2000 }, [navigli]), ric("c", { budget_max: 2000 }, [milano]), ric("d", { budget_max: 2000 }, [prov]), ric("e", { budget_max: 2000 }, [navigli, isola])]), 4, "a, c, d ed e (che cerca anche l'Isola); non b");
++});
++
++test("conteggio: la tipologia è un filtro netto (chi cerca una villa non conta per un appartamento) e una caratteristica NECESSARIA che manca esclude", () => {
++  assert.equal(uno([ric("v", { budget_max: 2000, tipologia: "villa" }), ric("a", { budget_max: 2000, tipologia: "appartamento" }), ric("s", { budget_max: 2000 })]), 2, "la villa no; l'appartamento e chi non specifica sì");
++  const balcone = (necessaria) => ric("t", { budget_max: 2000 }, [], [{ attributo_key: "balcone", peso: 8, necessaria }]);
++  assert.equal(uno([balcone(true)], casa({ attributi: { balcone: true } })), 1); assert.equal(uno([balcone(true)], casa({ attributi: { balcone: false } })), 0, "balcone necessario e la casa non ce l'ha"); assert.equal(uno([balcone(false)], casa({ attributi: { balcone: false } })), 1, "opzionale: la casa resta in linea");
++});
++
++test("conteggio: più case insieme, ognuna con il suo numero e con i suoi candidati; nessuna casa o nessuna ricerca = zeri, mai errori", () => {
++  const r = [ric("t1", { budget_max: 1500 }), ric("t2", { budget_max: 900 }), ric("t3", { budget_max: 1500 })];
++  const m = conta([casa({ id: "a1", prezzo: 1250 }), casa({ id: "a2", prezzo: 800 }), casa({ id: "a3", prezzo: 3000 })], r, new Map([["a2", new Set(["t1"])]]));
++  assert.deepEqual([...m.entries()], [["a1", 2], ["a2", 2], ["a3", 0]], "a2: t1 candidato (escluso); t2 e t3 combaciano"); assert.equal(conta([], r).size, 0); assert.deepEqual([...conta([casa()], []).entries()], [["a1", 0]]);
++});
++
++test("conteggio: dati rotti si ignorano senza far crollare niente (ricerche nulle, senza identificativo, senza zone né interessi)", () => {
++  const r = [null, undefined, 5, "x", {}, { tenantId: 7 }, { tenantId: "t", riga: { budget_max: 1500 } }, ric("ok", { budget_max: 1500 })];
++  assert.equal(uno(r.map((x) => (x && typeof x === "object" && "tenantId" in x && typeof x.tenantId === "string" ? { zone: [], interessi: [], ...x } : x))), 2);
++});
++
++test("conteggio: non modifica ciò che riceve, non dipende dall'ordine, e il risultato è fatto SOLO di numeri interi (nessun identificativo esce)", () => {
++  const r = [ric("t1", { budget_max: 1500 }), ric("t2", { budget_max: 1100 }), ric("t3", { locali_min: 2 }), ric("t4", { budget_max: 1300, mq_min: 40 })]; const copia = JSON.stringify(r); const a = casa();
++  const m = conta([a], r); assert.equal(JSON.stringify(r), copia); assert.equal(m.get("a1"), uno([...r].reverse())); assert.equal(m.get("a1"), uno([r[2], r[0], r[3], r[1]]));
++  for (const [chiave, valore] of m) { assert.equal(typeof chiave, "string"); assert.ok(Number.isInteger(valore) && valore >= 0); assert.ok(!JSON.stringify([...m]).includes("t1"), "un identificativo è uscito dal conteggio"); }
++});
++
++test("conteggio: coincide con il motore della Home dell'inquilino («in linea con la tua ricerca») su 600 ricerche casuali", () => {
++  let seme = 21; const rnd = () => (seme = (seme * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff; const scegli = (a) => a[Math.floor(rnd() * a.length)];
++  for (let i = 0; i < 600; i++) {
++    const riga = { budget_max: scegli([null, 900, 1100, 1250, 1300, 1500, 2000]), locali_min: scegli([null, 1, 2, 3]), mq_min: scegli([null, 40, 55, 70]), tipologia: scegli([null, "appartamento", "villa"]) };
++    const zone = scegli([[], [{ zona: "Isola, Milano", luogo_id: "qIsola" }], [{ zona: "Navigli, Milano", luogo_id: "qNavigli" }], [{ zona: "Milano", luogo_id: "cMI" }]]);
++    const interessi = scegli([[], [{ attributo_key: "balcone", peso: 6, necessaria: true }], [{ attributo_key: "balcone", peso: 6, necessaria: false }]]);
++    const annuncio = casa({ prezzo: scegli([800, 1250, 1400, 3000]), locali: scegli([1, 2, 3]), mq: scegli([35, 55, 90]), attributi: scegli([{ balcone: true }, { balcone: false }]) });
++    const profilo = mz.profiloRicercaDaRighe({ ...riga }, zone, interessi); const atteso = mz.haCriteriDiRicerca(profilo) && mz.preparaMazzo([annuncio.annuncio], profilo).inRicerca === 1;
++    assert.equal(uno([ric("t", riga, zone, interessi)], annuncio), atteso ? 1 : 0, JSON.stringify({ riga, zone, interessi, a: annuncio.annuncio }));
++  }
++});
++
++test("conteggio: regge duemila inquilini e dieci case in tempi da pagina web", () => {
++  const r = Array.from({ length: 2000 }, (_, i) => ric("t" + i, { budget_max: 800 + (i % 20) * 100, locali_min: 1 + (i % 3) }, [{ zona: "Milano", luogo_id: "cMI" }])); const a = Array.from({ length: 10 }, (_, i) => casa({ id: "a" + i, prezzo: 900 + i * 100 }));
++  const t0 = Date.now(); const m = conta(a, r); assert.equal(m.size, 10); assert.ok(Date.now() - t0 < 4000, `troppo lento: ${Date.now() - t0} ms`);
++});
++
++test("annuncioDaRiga: porta con sé i luoghi che contengono la casa (quartiere, città, provincia), e i dati mancanti diventano «non so», non errori", () => {
++  const a = casa(); assert.deepEqual(a.annuncio.antenati, ["qIsola", "cMI", "pMI"]); assert.equal(a.id, "a1"); assert.equal(a.annuncio.prezzo, 1250);
++  const v = mp.annuncioDaRiga({ id: "x", prezzo: 900, zona: "Altrove" }, mappa); assert.deepEqual([v.annuncio.locali, v.annuncio.mq, v.annuncio.attributi, v.annuncio.bagni, v.annuncio.piano], [null, null, null, null, null]);
++});
++
++// ============================================================ le frasi
++test("saluto: «Buongiorno» dalle 5 alle 12, «Buon pomeriggio» dalle 13 alle 17, «Buonasera» dalle 18 alle 4; un'ora strana non rompe niente", () => {
++  const s = hm.salutoPerOra; assert.deepEqual([5, 9, 12].map(s), ["Buongiorno", "Buongiorno", "Buongiorno"]); assert.deepEqual([13, 15, 17].map(s), ["Buon pomeriggio", "Buon pomeriggio", "Buon pomeriggio"]); assert.deepEqual([18, 22, 23, 0, 3, 4].map(s), ["Buonasera", "Buonasera", "Buonasera", "Buonasera", "Buonasera", "Buonasera"]);
++  for (const x of [NaN, Infinity, -1, 24, 25, 99.7, undefined, null, "9"]) assert.ok(["Buongiorno", "Buon pomeriggio", "Buonasera"].includes(s(x)), String(x)); assert.equal(s(24), "Buonasera"); assert.equal(s(-19), "Buongiorno");
++});
++
++test("saluto con nome: «Buongiorno, Mario»; spazi ripuliti; senza nome (vuoto, nullo, non testo) solo il saluto", () => {
++  assert.equal(hm.saluto("Mario", 9), "Buongiorno, Mario"); assert.equal(hm.saluto("  Maria   Luisa ", 15), "Buon pomeriggio, Maria Luisa"); for (const x of [null, undefined, "", "   ", 5, {}]) assert.equal(hm.saluto(x, 20), "Buonasera", String(x));
++});
++
++test("ora in Italia: la dà giusta qualunque sia il fuso del server, con l'ora legale e senza, e la mezzanotte è 0 (mai 24)", () => {
++  assert.equal(hm.oraInItalia(new Date("2026-10-15T10:00:00Z")), 12, "ora legale (UTC+2)"); assert.equal(hm.oraInItalia(new Date("2026-12-15T10:00:00Z")), 11, "ora solare (UTC+1)"); assert.equal(hm.oraInItalia(new Date("2026-12-15T23:30:00Z")), 0); assert.equal(hm.oraInItalia(new Date("2026-07-15T22:00:00Z")), 0);
++  for (let h = 0; h < 24; h++) { const v = hm.oraInItalia(new Date(Date.UTC(2026, 5, 1, h))); assert.ok(Number.isInteger(v) && v >= 0 && v <= 23, String(v)); }
++});
++
++test("stato della casa: prima la verifica, poi la pubblicazione; ogni stato ha le sue parole", () => {
++  const s = hm.statoCasa; assert.deepEqual([s({ verificata: true, pubblicato: true }).chiave, s({ verificata: true, pubblicato: false }).chiave, s({ verificata: false, pubblicato: true }).chiave, s({ verificata: false, pubblicato: false }).chiave], ["pubblicata", "non_pubblicata", "in_verifica", "in_verifica"]);
++  assert.equal(s({ verificata: true, pubblicato: true }).testo, "Pubblicata"); assert.equal(s({ verificata: true, pubblicato: false }).testo, "Non pubblicata"); assert.equal(s({ verificata: false, pubblicato: true }).testo, "In verifica"); assert.match(s({ verificata: true, pubblicato: false }).spiegazione, /non la vedono ancora/);
++});
++
++test("frasi dei numeri: singolare e plurale giusti, zero detto bene, valori strani trattati come zero", () => {
++  assert.deepEqual(hm.frasePossibili(1), { numero: "1", frase: "inquilino cerca una casa come la tua" }); assert.deepEqual(hm.frasePossibili(12), { numero: "12", frase: "inquilini cercano una casa come la tua" }); assert.deepEqual(hm.frasePossibili(0), { numero: "0", frase: "Per ora nessun inquilino cerca una casa come la tua" });
++  assert.deepEqual(hm.fraseCandidature(1), { numero: "1", frase: "persona ha chiesto di vedere la tua casa" }); assert.deepEqual(hm.fraseCandidature(3), { numero: "3", frase: "persone hanno chiesto di vedere la tua casa" }); assert.deepEqual(hm.fraseCandidature(0), { numero: "0", frase: "Nessuno ha ancora chiesto di vedere la tua casa" });
++  for (const x of [-4, NaN, undefined, null, "x"]) { assert.equal(hm.frasePossibili(x).numero, "0"); assert.equal(hm.fraseCandidature(x).numero, "0"); assert.equal(hm.inviteDaValutare(x), null); } assert.equal(hm.frasePossibili(2.9).numero, "2");
++  assert.equal(hm.inviteDaValutare(1), "Hai 1 candidatura da guardare"); assert.equal(hm.inviteDaValutare(5), "Hai 5 candidature da guardare"); assert.equal(hm.inviteDaValutare(0), null);
++});
++
++test("prezzo e dettagli: «€ 1.250 al mese», «2 locali», «55 m²»; solo ciò che si sa", () => {
++  const p = (n) => senzaPunti(hm.testoPrezzo(n)); assert.equal(p(1250), "€ 1250 al mese"); assert.equal(p(900), "€ 900 al mese"); assert.equal(p(1250.6), "€ 1251 al mese"); assert.equal(p(NaN), "€ 0 al mese"); assert.equal(p(12500), "€ 12500 al mese"); assert.match(hm.testoPrezzo(1250), /^€ 1\.?250 al mese$/);
++  assert.deepEqual(hm.dettagliCasa({ locali: 2, mq: 55 }), ["2 locali", "55 m²"]); assert.deepEqual(hm.dettagliCasa({ locali: 1, mq: null }), ["1 locale"]); assert.deepEqual(hm.dettagliCasa({ locali: null, mq: null }), []); assert.deepEqual(hm.dettagliCasa({ locali: 0, mq: -3 }), []);
++});
++
++// ============================================================ la pagina, disegnata davvero
++const CASA = { id: "c1", titolo: "Bilocale luminoso", zona: "Isola, Milano", prezzo: 1250, locali: 2, mq: 55, pubblicato: true, verificata: true, foto: "https://esempio.it/foto.jpg", nCandidature: 3, daValutare: 2, possibili: 12 };
++const pagina = (o = {}) => renderToStaticMarkup(React.createElement(comp.OwnerHomeClient, { case_: [CASA], nome: "Mario", ora: 9, ...o }));
++const ancore = (h) => [...h.matchAll(/<a ([^>]*)>/g)].map((m) => Object.fromEntries([...m[1].matchAll(/([a-z-]+)="([^"]*)"/g)].map((x) => [x[1], x[2]])));
++const link = (h) => ancore(h).map((a) => a.href);
++
++test("Home con UNA casa: saluto, «La tua casa», la casa in grande con i suoi dati, e le due tessere con i numeri", () => {
++  const h = pagina(); const t = senzaPunti(testoDi(h));
++  for (const x of ["Buongiorno, Mario", "La tua casa", "Bilocale luminoso", "Isola, Milano", "€ 1250 al mese · 2 locali · 55 m²", "Pubblicata", "Vedi o modifica ›", "Possibili inquilini", "12 inquilini cercano una casa come la tua", "Candidature", "3 persone hanno chiesto di vedere la tua casa", "2 da valutare"]) assert.ok(t.includes(x), `manca «${x}»: ${t}`);
++  assert.match(h, /<img src="https:\/\/esempio\.it\/foto\.jpg" alt=""/); assert.equal((h.match(/<article/g) ?? []).length, 1); assert.ok(!/class="casa compatta"/.test(h), "con una sola casa non è la versione compatta");
++});
++
++test("DOVE PORTA OGNI PARTE: la casa → Immobili; «Possibili inquilini» e «Candidature» → Database; il pulsante per le candidature da guardare → Database", () => {
++  const h = pagina(); const a = ancore(h); assert.deepEqual(a.map((x) => x.href), ["/database", "/immobili", "/database#possibili", "/database"], "ordine: invito, casa, possibili, candidature");
++  assert.deepEqual(a.map((x) => x.class), ["casa-invito", "casa-hero", "tessera", "tessera"]);
++  const hero = h.slice(h.indexOf('class="casa-hero"'), h.indexOf("</a>", h.indexOf('class="casa-hero"'))); assert.ok(hero.includes("Bilocale luminoso") && hero.includes("Vedi o modifica") && hero.includes("<img"), "la foto, il titolo e «Vedi o modifica» stanno TUTTI nel link verso Immobili");
++  const tessera = (href) => h.slice(h.indexOf(`href="${href}"`, h.indexOf("casa-tessere")), h.indexOf("</a>", h.indexOf(`href="${href}"`, h.indexOf("casa-tessere")))); assert.ok(tessera("/database#possibili").includes("Possibili inquilini") && !tessera("/database#possibili").includes("Candidature"));
++  assert.ok(testoDi(tessera("/database")).includes("Candidature") && !testoDi(tessera("/database")).includes("Possibili inquilini"));
++  assert.deepEqual(hm.DESTINAZIONI_HOME, { immobili: "/immobili", candidature: "/database", possibili: "/database#possibili" });
++});
++
++test("nessun link dentro un altro link (non si capirebbe dove si tocca), e la casa e le tessere hanno un nome per chi usa un lettore di schermo", () => {
++  const h = pagina(); assert.ok(!/<a [^>]*>(?:(?!<\/a>)[\s\S])*<a /.test(h), "un link dentro un altro link"); for (const scenario of [pagina(), pagina({ case_: [] }), pagina({ case_: [{ ...CASA, pubblicato: false }] }), pagina({ case_: [{ ...CASA, possibili: null }] })]) assert.ok(!/\shidden(=|\s|>)/.test(scenario), "una parte della Home è nascosta (hidden)"); for (const x of ancore(h)) if (x.class === "tessera" || x.class === "casa-hero") assert.ok((x["aria-label"] ?? "").length >= 20, JSON.stringify(x));
++  const nomi = ancore(h).map((x) => x["aria-label"]).filter(Boolean); assert.ok(nomi.includes("Possibili inquilini: 12 inquilini cercano una casa come la tua. Tocca per guardare")); assert.ok(nomi.includes("Candidature: 3 persone hanno chiesto di vedere la tua casa, 2 da valutare. Tocca per guardare")); assert.ok(nomi.includes("Bilocale luminoso, Isola, Milano. Pubblicata. Tocca per vedere o modificare la casa"));
++});
++
++test("il pulsante «Hai N candidature da guardare» compare solo se c'è qualcosa da guardare, in cima, e somma tutte le case", () => {
++  assert.match(testoDi(pagina()), /Hai 2 candidature da guardare Guarda ›/); assert.ok(!testoDi(pagina({ case_: [{ ...CASA, daValutare: 0 }] })).includes("da guardare"), "niente da guardare: niente pulsante");
++  const due = pagina({ case_: [CASA, { ...CASA, id: "c2", titolo: "Trilocale", daValutare: 3 }] }); assert.match(testoDi(due), /Hai 5 candidature da guardare/); assert.ok(due.indexOf("casa-invito") < due.indexOf("<article"), "il pulsante sta sopra le case");
++  assert.match(testoDi(pagina({ case_: [{ ...CASA, daValutare: 1 }] })), /Hai 1 candidatura da guardare/);
++});
++
++test("senza il numero dei possibili inquilini (non si riesce a calcolare) si mostra solo la tessera delle candidature, larga, senza numeri inventati", () => {
++  const h = pagina({ case_: [{ ...CASA, possibili: null }] }); assert.match(h, /class="casa-tessere una"/); assert.ok(!h.includes("Possibili inquilini") && !h.includes("#possibili")); assert.ok(h.includes("Candidature"));
++  const z = pagina({ case_: [{ ...CASA, possibili: 0, nCandidature: 0, daValutare: 0 }] }); const t = testoDi(z); assert.ok(t.includes("Per ora nessun inquilino cerca una casa come la tua") && t.includes("Nessuno ha ancora chiesto di vedere la tua casa")); assert.ok(!t.includes("da valutare"));
++});
++
++test("casa non pubblicata o in verifica: niente tessere (non avrebbero senso), ma una frase chiara e un pulsante per andare alla casa", () => {
++  for (const [o, stato, frase] of [[{ pubblicato: false }, "Non pubblicata", "Gli inquilini non la vedono ancora."], [{ verificata: false }, "In verifica", "La stiamo controllando"]]) {
++    const h = pagina({ case_: [{ ...CASA, ...o }] }); const t = testoDi(h); assert.ok(t.includes(stato) && t.includes(frase), t); assert.ok(!h.includes("tessera") && !h.includes("#possibili"), "le tessere non devono comparire"); assert.ok(ancore(h).some((x) => x.class === "casa-attesa" && x.href === "/immobili")); assert.ok(t.includes("Vai alla casa ›"));
++  }
++});
++
++test("più case: «Le tue case», ognuna nella sua scheda compatta, con le sue tessere; nessuna foto = un disegno al suo posto", () => {
++  const h = pagina({ case_: [CASA, { ...CASA, id: "c2", titolo: "Trilocale", foto: null, nCandidature: 0, daValutare: 0, possibili: 4 }] }); const t = testoDi(h);
++  assert.ok(t.includes("Le tue case") && !t.includes("La tua casa")); assert.equal((h.match(/<article class="casa compatta"/g) ?? []).length, 2); assert.equal((h.match(/class="casa-tessere/g) ?? []).length, 2); assert.equal((h.match(/<img /g) ?? []).length, 1, "una foto sola: l'altra casa ha il disegno"); assert.match(h, /casa-foto casa-foto-vuota/);
++  assert.ok(t.includes("4 inquilini cercano una casa come la tua") && t.includes("12 inquilini cercano una casa come la tua"));
++});
++
++test("nessuna casa: lo si dice con parole semplici e c'è un pulsante grande per aggiungerla (verso Immobili)", () => {
++  const h = pagina({ case_: [] }); const t = testoDi(h); assert.ok(t.includes("Non hai ancora nessuna casa") && t.includes("Aggiungi la tua casa") && t.includes("Le tue case")); assert.deepEqual(link(h), ["/immobili"]); assert.ok(!h.includes("<article"));
++});
++
++test("saluto e titolo: senza nome solo il saluto; l'ora cambia il saluto", () => {
++  assert.ok(testoDi(pagina({ nome: null })).startsWith("Buongiorno La tua casa")); assert.ok(testoDi(pagina({ ora: 15 })).startsWith("Buon pomeriggio, Mario")); assert.ok(testoDi(pagina({ ora: 21 })).startsWith("Buonasera, Mario"));
++});
++
++// ============================================================ per chi non è pratico
++function bloccoCss() { const css = leggi("src", "app", "globals.css"); const a = css.indexOf("Home del proprietario: la casa in grande e due tessere grandi."); const b = css.indexOf("/* Database: la sezione «Possibili inquilini» */"); assert.ok(a > 0 && b > a, "blocchi di stile non trovati"); return css.slice(a, b) + css.slice(b); }
++
++test("leggibilità: nessun carattere sotto i 15 px nella Home e nella sezione del Database; i testi di lettura da 16 px in su", () => {
++  const css = bloccoCss(); const misure = [...css.matchAll(/font-size:\s*(\d+(?:\.\d+)?)px/g)].map((m) => Number(m[1])); assert.ok(misure.length >= 20, "pochi caratteri trovati: " + misure.length); assert.ok(Math.min(...misure) >= 15, `un carattere è troppo piccolo: ${Math.min(...misure)} px`);
++  for (const [classe, minimo] of [[".casa-frase", 0], [".tessera-frase", 17], [".casa-invito", 19], [".casa-dati", 18], [".casa-titolo", 24], [".tessera-numero", 56], [".possibili-testo", 16], [".possibili-frase", 17]]) { if (!minimo) continue; const m = css.match(new RegExp(`${classe.replace(".", "\\.")} \\{[^}]*font-size:\\s*(\\d+)px`)); assert.ok(m && Number(m[1]) >= minimo, `${classe}: serve almeno ${minimo}px`); }
++});
++
++test("leggibilità: i bersagli da toccare sono larghi (pulsante delle candidature e frase d'attesa almeno 64 px, tessere almeno 180 px) e c'è un contorno quando si naviga da tastiera", () => {
++  const css = bloccoCss(); const alt = (c) => Number((css.match(new RegExp(`${c.replace(".", "\\.")} \\{[^}]*min-height:\\s*(\\d+)px`)) ?? [])[1]);
++  assert.ok(alt(".casa-invito") >= 64 && alt(".casa-attesa") >= 64 && alt(".tessera") >= 180, `${alt(".casa-invito")}, ${alt(".casa-attesa")}, ${alt(".tessera")}`);
++  for (const c of [".tessera:focus-visible", ".casa-hero:focus-visible", ".casa-invito:focus-visible"]) assert.ok(css.includes(c), `manca il contorno per la tastiera: ${c}`); assert.match(css, /outline: 3px solid var\(--moss\)/);
++  assert.match(css, /\.casa-tessere \{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/, "le due tessere devono avere sempre la stessa larghezza"); assert.match(css, /\.tessera \{[^}]*min-width: 0;/);
++  assert.match(css, /\.casa-hero \{[^}]*height: 300px;/); assert.match(css, /\.casa\.compatta \.casa-hero \{\s+height: 210px;/);
++});
++
++test("leggibilità: il testo sulla foto sta sopra una sfumatura scura (leggibile con qualunque foto) e le etichette dello stato hanno uno sfondo proprio", () => {
++  const css = bloccoCss(); assert.match(css, /\.casa-sfumatura \{[^}]*linear-gradient\(to top, rgba\(16, 21, 26, 0\.9\)/); assert.match(css, /\.casa-stato \{[^}]*background: rgba\(16, 21, 26, 0\.74\)/); assert.match(css, /\.casa-modifica \{[^}]*background: rgba\(247, 244, 236, 0\.96\)/);
++});
++
++test("parole semplici: nella Home niente inglesismi né sigle (match, badge, database, dashboard, lead)", () => {
++  const t = testoDi(pagina({ case_: [CASA, { ...CASA, id: "c2", pubblicato: false }] })) + " " + testoDi(pagina({ case_: [] })); for (const p of ["match", "badge", "dashboard", "lead", "feedback", "online", "click", "tap"]) assert.ok(!new RegExp(`\\b${p}\\b`, "i").test(t), `parola difficile: ${p}`);
++});
++
++// ============================================================ i collegamenti nel codice e la sicurezza dei dati
++test("pagina Home: per ogni casa conta candidature e da valutare, calcola i possibili solo per le case che gli inquilini vedono (verificate e pubblicate) e passa solo numeri al componente", () => {
++  const p = leggi("src", "app", "(app)", "page.tsx"); const o = p.slice(p.indexOf("async function OwnerHome"));
++  assert.match(o, /\.select\("id, status, listing_id, tenant_id, listings!inner\(owner_id\)"\)\s+\.eq\("listings\.owner_id", userId\)/); assert.match(o, /if \(c\.status === "in_attesa"\) daValutarePer\.set/); assert.match(o, /l\.pubblicato === true && l\.verifica_stato === "verificato"/); assert.match(o, /possibiliPerAnnuncio\(\s+visibili\.map/);
++  assert.match(o, /possibili: conteggi\?\.get\(l\.id as string\) \?\? null,/); assert.match(o, /<OwnerHomeClient case_=\{case_\} nome=\{\(profilo\?\.nome as string \| null\) \?\? null\} ora=\{oraInItalia\(\)\} \/>/); const datiCase = o.slice(o.indexOf("const case_"), o.indexOf("return <OwnerHomeClient")); assert.ok(!/tenant/i.test(datiCase), "un identificativo di inquilino finisce nei dati della Home"); assert.ok(!/tenant/i.test(leggi("src", "lib", "proprietario", "home.ts")), "i tipi della Home non devono poter contenere un inquilino");
++});
++
++test("SICUREZZA: la chiave di servizio è solo in un file del server, legge solo i criteri di ricerca (mai nomi, email, reddito, foto) e restituisce solo numeri; i componenti del browser non la importano", () => {
++  const s = leggi("src", "lib", "proprietario", "possibili-server.ts"); const soloAmministratore = s.slice(0, s.indexOf("export type PossibiliPerCasa")); const codice = soloAmministratore.replace(/\/\*[\s\S]*?\*\//g, ""); const selezioni = [...codice.matchAll(/\.select\("([^"]+)"\)/g)].map((m) => m[1]).join(" ");
++  assert.ok(selezioni.includes("budget_max") && selezioni.includes("attributo_key") && selezioni.includes("luogo_id"), "non legge i criteri di ricerca"); for (const vietato of ["nome", "cognome", "email", "avatar", "reddito", "professione", "presentazione", "protestato", "telefono"]) assert.ok(!selezioni.includes(vietato), `la chiave di servizio legge «${vietato}»`);
++  assert.match(s, /export async function possibiliPerAnnuncio\([\s\S]*?\): Promise<Map<string, number> \| null>/); assert.match(s, /export async function possibiliPerCasaDelProprietario/); assert.ok(!/NEXT_PUBLIC/.test(s));
++  for (const f of ["app/(app)/database/DatabaseClient.tsx", "app/(app)/OwnerHomeClient.tsx"]) { const t = leggi("src", ...f.split("/")); for (const riga of t.split("\n").filter((r) => /possibili-server/.test(r))) assert.match(riga, /^import type /, `${f} importa codice del server: ${riga}`); }
++  for (const f of ["app/(app)/database/DatabaseClient.tsx", "app/(app)/OwnerHomeClient.tsx"]) assert.ok(!/clienteAmministratore/.test(leggi("src", ...f.split("/"))), f);
++});
++
++test("la chiave di servizio manca: la Home non crolla e non mostra numeri inventati (possibili = null)", () => {
++  const s = leggi("src", "lib", "proprietario", "possibili-server.ts"); assert.match(s, /const admin = clienteAmministratore\(\);\s+if \(!admin\) return null;/); assert.match(s, /if \(tenant\.error \|\| zone\.error \|\| interessi\.error\) \{[\s\S]*?return null;/); assert.match(s, /if \(annunci\.length === 0\) return new Map\(\);/);
++});
++
++test("Database: la sezione «Possibili inquilini» c'è, ha l'ancora a cui porta la tessera, dice che non si vede chi sono, e funziona anche senza numeri", () => {
++  const d = leggi("src", "app", "(app)", "database", "DatabaseClient.tsx"); assert.match(d, /<section id="possibili" className="possibili" aria-labelledby="possibili-titolo">/); assert.match(d, /Non vedi chi sono: se una di loro si\s+candida, la trovi qui sotto, tra le candidature\./); assert.match(d, /Il numero non è disponibile in questo momento/); assert.match(d, /Quando la tua casa sarà pubblicata vedrai qui quanti inquilini cercano una casa come la tua\./);
++  assert.ok(d.indexOf('id="possibili"') > 0 && d.indexOf('id="possibili"') < d.indexOf("<RicercaCandidati"), "la sezione sta prima della ricerca delle candidature"); const p = leggi("src", "app", "(app)", "database", "page.tsx"); assert.match(p, /const possibili = await possibiliPerCasaDelProprietario\(supabase, user!\.id\);/); assert.match(p, /<DatabaseClient\s+possibili=\{possibili\}/);
++  assert.match(leggi("src", "app", "globals.css"), /\.possibili \{[^}]*scroll-margin-top: 16px;/);
++});
++
++test("informativa: dice che ai proprietari si mostra solo un NUMERO anonimo di inquilini compatibili, con la nuova versione; chi aveva le precedenti non deve riaccettare", () => {
++  const testo = JSON.stringify(inf.INFORMATIVA); assert.ok(testo.includes("QUANTI inquilini hanno una ricerca compatibile con il loro immobile")); assert.ok(testo.includes("è un numero anonimo, non vedono chi sono né nessun loro dato")); assert.ok(testo.includes("Se uno di loro si candida, il proprietario vede la candidatura come tutte le altre"));
++  assert.equal(inf.INFORMATIVA.versione, "2026-10-provvisoria-18"); for (let v = 15; v <= 17; v++) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), String(v)); assert.ok(!inf.INFORMATIVA.equivalenti.includes(inf.INFORMATIVA.versione));
++});
+diff --git a/scripts/test-raccomandato.mjs b/scripts/test-raccomandato.mjs
+index 8509c44..3330928 100644
+--- a/scripts/test-raccomandato.mjs
++++ b/scripts/test-raccomandato.mjs
+@@ -170,7 +170,7 @@ test("il badge non tocca il punteggio né la percentuale: affidabilita.ts non lo
+ 
+ test("informativa: dice del badge (chi lo vede, filtro, ordine, nessun effetto sul punteggio), con una nuova versione; chi aveva la precedente non deve riaccettare (testo ancora provvisorio)", () => {
+   const testo = JSON.stringify(inf.INFORMATIVA); assert.ok(testo.includes("Il badge «Inquilino raccomandato» lo ottieni in automatico con almeno due recensioni positive (da 4 stelle in su) scritte da due proprietari diversi")); assert.ok(testo.includes("possono cercare solo gli inquilini raccomandati")); assert.ok(testo.includes("Non cambia il punteggio di affidabilità")); assert.ok(testo.includes("resta sempre del proprietario"));
+-  assert.equal(inf.INFORMATIVA.versione, "2026-10-provvisoria-17"); assert.ok(inf.INFORMATIVA.equivalenti.includes("2026-10-provvisoria-15") && inf.INFORMATIVA.equivalenti.includes("2026-10-provvisoria-16")); assert.ok(!inf.INFORMATIVA.equivalenti.includes(inf.INFORMATIVA.versione));
++  assert.equal(inf.INFORMATIVA.versione, "2026-10-provvisoria-18"); for (const v of [15, 16, 17]) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} deve restare equivalente`); assert.ok(!inf.INFORMATIVA.equivalenti.includes(inf.INFORMATIVA.versione));
+ });
+ 
+ test("il simbolo del badge esiste, è sul reticolo 24x24 e la spunta non è riempita", () => {
+diff --git a/src/app/(app)/OwnerHomeClient.tsx b/src/app/(app)/OwnerHomeClient.tsx
+index f4c6983..7ddaeff 100644
+--- a/src/app/(app)/OwnerHomeClient.tsx
++++ b/src/app/(app)/OwnerHomeClient.tsx
+@@ -1,111 +1,121 @@
+ import Link from "next/link";
+-import type { ListingProprietario } from "@/lib/types";
+ import { PageContainer } from "@/components/ui/PageContainer";
+-import { IconPalazzo } from "@/components/icons";
++import { IconBusta, IconPalazzo, IconPersone } from "@/components/icons";
++import {
++  DESTINAZIONI_HOME,
++  dettagliCasa,
++  fraseCandidature,
++  frasePossibili,
++  inviteDaValutare,
++  saluto,
++  statoCasa,
++  testoPrezzo,
++  type CasaHome,
++} from "@/lib/proprietario/home";
++
++/**
++ * La Home del proprietario: la sua casa in grande (quasi tutti ne hanno una sola) e sotto due tessere grandi, «Possibili
++ * inquilini» e «Candidature». Parole semplici, caratteri grandi, un solo gesto per andare dove serve:
++ *  - toccare la casa porta a «Immobili»;
++ *  - toccare una tessera porta al «Database».
++ * Con più case, ognuna ha la sua scheda (più compatta).
++ */
++export function OwnerHomeClient({ case_, nome, ora }: { case_: CasaHome[]; nome: string | null; ora: number }) {
++  const totaleDaValutare = case_.reduce((somma, c) => somma + c.daValutare, 0);
++  const invito = inviteDaValutare(totaleDaValutare);
+ 
+-export function OwnerHomeClient({
+-  listings,
+-  totaleCandidature,
+-  daValutare,
+-}: {
+-  listings: ListingProprietario[];
+-  totaleCandidature: number;
+-  daValutare: number;
+-}) {
+   return (
+     <PageContainer wide>
+-      <h1 className="screen-title">La tua area proprietario</h1>
+-      <p className="screen-sub">
+-        Il riepilogo dei tuoi annunci e delle candidature ricevute.
+-      </p>
+-
+-      {/* ---- Statistiche ---- */}
+-      <div className="stat-grid">
+-        <Stat value={totaleCandidature} label="candidature ricevute" />
+-        <Stat value={daValutare} label="da valutare ora" highlight />
+-        <Stat value={listings.length} label="immobili pubblicati" />
+-      </div>
++      <p className="casa-saluto">{saluto(nome, ora)}</p>
++      <h1 className="screen-title">{case_.length === 1 ? "La tua casa" : "Le tue case"}</h1>
+ 
+-      {daValutare > 0 && (
+-        <Link
+-          href="/database"
+-          className="opp-cta block text-center"
+-          style={{ marginBottom: 26 }}
+-        >
+-          Vai al Database — {daValutare} da valutare
++      {/* Se c'è qualcosa da fare lo si dice per primo, con un pulsante grande */}
++      {invito && (
++        <Link href={DESTINAZIONI_HOME.candidature} className="casa-invito">
++          <span>{invito}</span>
++          <b>Guarda ›</b>
+         </Link>
+       )}
+ 
+-      {/* ---- I tuoi immobili ---- */}
+-      <div className="pref-label">
+-        <span>
+-          I tuoi immobili {listings.length > 0 && `· ${listings.length}`}
+-        </span>
+-      </div>
+-
+-      {listings.length === 0 ? (
++      {case_.length === 0 ? (
+         <div className="empty-inline">
+           <IconPalazzo className="icon-empty" />
+-          <h3>Non hai ancora pubblicato nessun immobile</h3>
+-          <p>
+-            La pubblicazione di un nuovo annuncio si fa dalla schermata
+-            Immobili.
+-          </p>
++          <h3>Non hai ancora nessuna casa</h3>
++          <p>Per cominciare, aggiungi la tua casa.</p>
++          <Link href={DESTINAZIONI_HOME.immobili} className="casa-invito" style={{ marginTop: 14 }}>
++            <span>Aggiungi la tua casa</span>
++            <b>Vai ›</b>
++          </Link>
+         </div>
+       ) : (
+-        <div className="card-grid">
+-          {listings.map((l) => (
+-            <div key={l.id} className="match-card" style={{ cursor: "default" }}>
+-              <div className="mc-avatar">
+-                {l.titolo.slice(0, 2).toUpperCase()}
+-              </div>
+-              <div className="mc-body">
+-                <div className="mc-zona">{l.zona}</div>
+-                <div className="mc-title">{l.titolo}</div>
+-                <div className="mc-meta">
+-                  €{l.prezzo.toLocaleString("it-IT")}/mese
+-                  {!l.pubblicato && " · non pubblicato"}
+-                </div>
+-              </div>
+-              <div
+-                className={`mc-pct ${
+-                  l.nCandidature > 0 ? "is-match" : "is-off"
+-                }`}
+-              >
+-                {l.nCandidature > 0 ? (
+-                  <>
+-                    {l.nCandidature}
+-                    <span>
+-                      candidatur{l.nCandidature === 1 ? "a" : "e"}
+-                    </span>
+-                  </>
+-                ) : (
+-                  "Nessuna candidatura"
+-                )}
+-              </div>
+-            </div>
+-          ))}
+-        </div>
++        case_.map((c) => <Casa key={c.id} casa={c} compatta={case_.length > 1} />)
+       )}
+     </PageContainer>
+   );
+ }
+ 
+-function Stat({
+-  value,
+-  label,
+-  highlight = false,
+-}: {
+-  value: number;
+-  label: string;
+-  highlight?: boolean;
+-}) {
++function Casa({ casa, compatta }: { casa: CasaHome; compatta: boolean }) {
++  const stato = statoCasa(casa);
++  const dettagli = [testoPrezzo(casa.prezzo), ...dettagliCasa(casa)].join(" · ");
++  const visibile = stato.chiave === "pubblicata";
++  const cand = fraseCandidature(casa.nCandidature);
++  const poss = casa.possibili === null ? null : frasePossibili(casa.possibili);
++
+   return (
+-    <div className="stat-card">
+-      <div className="v" style={highlight ? { color: "var(--gold)" } : undefined}>
+-        {value}
+-      </div>
+-      <div className="l">{label}</div>
+-    </div>
++    <article className={`casa ${compatta ? "compatta" : ""}`} aria-label={`Casa: ${casa.titolo}`}>
++      {/* Toccare la casa: Immobili */}
++      <Link href={DESTINAZIONI_HOME.immobili} className="casa-hero" aria-label={`${casa.titolo}, ${casa.zona}. ${stato.testo}. Tocca per vedere o modificare la casa`}>
++        {casa.foto ? (
++          // eslint-disable-next-line @next/next/no-img-element
++          <img src={casa.foto} alt="" className="casa-foto" />
++        ) : (
++          <span className="casa-foto casa-foto-vuota" aria-hidden="true">
++            <IconPalazzo className="casa-icona-vuota" />
++          </span>
++        )}
++        <span className="casa-sfumatura" aria-hidden="true" />
++        <span className={`casa-stato is-${stato.chiave}`}>
++          <i aria-hidden="true" /> {stato.testo}
++        </span>
++        <span className="casa-modifica" aria-hidden="true">
++          Vedi o modifica ›
++        </span>
++        <span className="casa-testo">
++          <span className="casa-zona">{casa.zona}</span>
++          <span className="casa-titolo">{casa.titolo}</span>
++          <span className="casa-dati">{dettagli}</span>
++        </span>
++      </Link>
++
++      {visibile ? (
++        <div className={`casa-tessere ${poss === null ? "una" : ""}`}>
++          {/* Toccare i possibili inquilini o le candidature: Database */}
++          {poss !== null && (
++            <Link href={DESTINAZIONI_HOME.possibili} className="tessera" aria-label={`Possibili inquilini: ${poss.numero} ${poss.frase}. Tocca per guardare`}>
++              <span className="tessera-etichetta">
++                <IconPersone className="tessera-icona" /> Possibili inquilini
++              </span>
++              <span className="tessera-numero">{poss.numero}</span>
++              <span className="tessera-frase">{poss.frase}</span>
++              <span className="tessera-vai">Guarda ›</span>
++            </Link>
++          )}
++          <Link href={DESTINAZIONI_HOME.candidature} className="tessera" aria-label={`Candidature: ${cand.numero} ${cand.frase}${casa.daValutare > 0 ? `, ${casa.daValutare} da valutare` : ""}. Tocca per guardare`}>
++            <span className="tessera-etichetta">
++              <IconBusta className="tessera-icona" /> Candidature
++            </span>
++            <span className="tessera-numero">{cand.numero}</span>
++            <span className="tessera-frase">{cand.frase}</span>
++            {casa.daValutare > 0 && <span className="tessera-badge">{casa.daValutare} da valutare</span>}
++            <span className="tessera-vai">Guarda ›</span>
++          </Link>
++        </div>
++      ) : (
++        <Link href={DESTINAZIONI_HOME.immobili} className="casa-attesa">
++          <span>{stato.spiegazione}</span>
++          <b>Vai alla casa ›</b>
++        </Link>
++      )}
++    </article>
+   );
+ }
+diff --git a/src/app/(app)/database/DatabaseClient.tsx b/src/app/(app)/database/DatabaseClient.tsx
+index 2d6026e..4da765f 100644
+--- a/src/app/(app)/database/DatabaseClient.tsx
++++ b/src/app/(app)/database/DatabaseClient.tsx
+@@ -2,6 +2,8 @@
+ 
+ import { stelleTesto, testoRecensioni } from "@/lib/recensioni";
+ import { BadgeRaccomandato } from "@/components/BadgeRaccomandato";
++import { frasePossibili } from "@/lib/proprietario/home";
++import type { PossibiliPerCasa } from "@/lib/proprietario/possibili-server";
+ import { useState, useTransition } from "react";
+ import Link from "next/link";
+ import { Sheet } from "@/components/Sheet";
+@@ -52,8 +54,11 @@ type Annuncio = {
+ 
+ export function DatabaseClient({
+   candidature,
++  possibili = [],
+ }: {
+   candidature: CandidaturaRicevuta[];
++  /** per ogni casa che gli inquilini vedono: quanti inquilini cercano una casa come quella (un numero, mai un elenco) */
++  possibili?: PossibiliPerCasa[];
+ }) {
+   const [selezionata, setSelezionata] = useState<CandidaturaRicevuta | null>(
+     null
+@@ -138,6 +143,35 @@ export function DatabaseClient({
+   return (
+     <PageContainer wide>
+       <h1 className="screen-title">Database inquilini</h1>
++
++      {/* Dove porta la tessera «Possibili inquilini» della Home */}
++      <section id="possibili" className="possibili" aria-labelledby="possibili-titolo">
++        <h2 id="possibili-titolo" className="possibili-titolo">
++          Possibili inquilini
++        </h2>
++        {possibili.length === 0 ? (
++          <p className="possibili-testo">Quando la tua casa sarà pubblicata vedrai qui quanti inquilini cercano una casa come la tua.</p>
++        ) : (
++          possibili.map((p) => {
++            const f = p.possibili === null ? null : frasePossibili(p.possibili);
++            return (
++              <div key={p.id} className="possibili-riga">
++                <b className="possibili-numero">{f ? f.numero : "–"}</b>
++                <span className="possibili-frase">
++                  {f ? f.frase : "Il numero non è disponibile in questo momento"}
++                  <small>
++                    {p.titolo} · {p.zona}
++                  </small>
++                </span>
++              </div>
++            );
++          })
++        )}
++        <p className="possibili-testo">
++          Sono persone che hanno impostato una ricerca adatta alla tua casa e non si sono ancora candidate. Non vedi chi sono: se una di loro si
++          candida, la trovi qui sotto, tra le candidature.
++        </p>
++      </section>
+       <p className="screen-sub">
+         {candidature.length === 0
+           ? "Le candidature ricevute sui tuoi annunci arrivano qui."
+diff --git a/src/app/(app)/database/page.tsx b/src/app/(app)/database/page.tsx
+index 1838cf6..de0aae8 100644
+--- a/src/app/(app)/database/page.tsx
++++ b/src/app/(app)/database/page.tsx
+@@ -1,6 +1,7 @@
+ import type { RecensioneGrezza } from "@/lib/recensioni";
+ import { createClient } from "@/lib/supabase/server";
+ import { DatabaseClient } from "./DatabaseClient";
++import { possibiliPerCasaDelProprietario } from "@/lib/proprietario/possibili-server";
+ import { criteriDaRighe } from "@/lib/match";
+ import type { CriterioRichiesto, RigaCriterioDb } from "@/lib/match";
+ import {
+@@ -27,6 +28,9 @@ export default async function DatabasePage() {
+     .eq("listings.owner_id", user!.id)
+     .order("created_at", { ascending: false });
+ 
++  // Quanti inquilini cercano una casa come le mie (un numero, mai un elenco)
++  const possibili = await possibiliPerCasaDelProprietario(supabase, user!.id);
++
+   const righe = (candidature ?? []) as unknown as RigaCandidatura[];
+   const tenantIds = [...new Set(righe.map((c) => c.tenant_id))];
+   const listingIds = [...new Set(righe.map((c) => c.listing_id))];
+@@ -68,6 +72,7 @@ export default async function DatabasePage() {
+ 
+   return (
+     <DatabaseClient
++      possibili={possibili}
+       candidature={assemblaCandidature({
+         candidature: righe,
+         vista: (vista ?? []) as unknown as RigaVistaCandidato[],
+diff --git a/src/app/(app)/page.tsx b/src/app/(app)/page.tsx
+index 3160cf3..e469c8b 100644
+--- a/src/app/(app)/page.tsx
++++ b/src/app/(app)/page.tsx
+@@ -7,8 +7,11 @@ import { computeAffidabilita } from "@/lib/affidabilita";
+ import { riepilogoRecensioni, statoRaccomandazione } from "@/lib/recensioni";
+ import { campiMatchDaRiga, haCriteriDiRicerca, preparaMazzo, profiloRicercaDaRighe } from "@/lib/match";
+ import { mappaLuoghi, type Luogo } from "@/lib/luoghi";
++import { possibiliPerAnnuncio } from "@/lib/proprietario/possibili-server";
++import { annuncioDaRiga } from "@/lib/match";
++import { oraInItalia, type CasaHome } from "@/lib/proprietario/home";
+ import type { ProfiloRicerca } from "@/lib/match";
+-import type { TenantProfile, ListingConMatch, ListingProprietario } from "@/lib/types";
++import type { TenantProfile, ListingConMatch } from "@/lib/types";
+ import { idsNascosti } from "@/lib/scelte";
+ import { VerificaRedditoPanel } from "@/components/VerificaRedditoPanel";
+ import type { DocumentoInquilino } from "@/lib/verifica-inquilino";
+@@ -212,41 +215,60 @@ async function OwnerHome({ userId }: { userId: string }) {
+     );
+   }
+ 
+-  const [{ data: listings }, { data: candidature }] = await Promise.all([
++  const [{ data: listings }, { data: candidature }, { data: profilo }, { data: luoghiRighe }] = await Promise.all([
+     supabase
+       .from("listings")
+-      .select("id, titolo, zona, prezzo, pubblicato")
++      .select(
++        "id, titolo, zona, prezzo, locali, mq, attributi, classe_energetica, luogo_id, tipologia, bagni, piano, riscaldamento, tipo_contratto, disponibile_dal, pubblicato, verifica_stato, listing_photos(url, ordine)"
++      )
+       .eq("owner_id", userId)
+       .order("created_at", { ascending: false }),
+     supabase
+       .from("candidature")
+-      .select("id, status, listing_id, listings!inner(owner_id)")
++      .select("id, status, listing_id, tenant_id, listings!inner(owner_id)")
+       .eq("listings.owner_id", userId),
++    supabase.from("profiles").select("nome").eq("id", userId).single(),
++    supabase.from("luoghi").select("id, livello, nome, sigla, parent_id"),
+   ]);
+ 
+-  const nCandidaturePerListing = new Map<string, number>();
++  // Per ogni casa: quante candidature, quante da valutare, e chi si è già candidato (serve solo a non contarlo tra i «possibili»)
++  const nCandidature = new Map<string, number>();
++  const daValutarePer = new Map<string, number>();
++  const giaCandidati = new Map<string, Set<string>>();
+   for (const c of candidature ?? []) {
+     const id = c.listing_id as string;
+-    nCandidaturePerListing.set(id, (nCandidaturePerListing.get(id) ?? 0) + 1);
++    nCandidature.set(id, (nCandidature.get(id) ?? 0) + 1);
++    if (c.status === "in_attesa") daValutarePer.set(id, (daValutarePer.get(id) ?? 0) + 1);
++    const insieme = giaCandidati.get(id) ?? new Set<string>();
++    insieme.add(c.tenant_id as string);
++    giaCandidati.set(id, insieme);
+   }
+ 
+-  const listingsConConteggio: ListingProprietario[] = (listings ?? []).map((l) => ({
+-    id: l.id,
+-    titolo: l.titolo,
+-    zona: l.zona,
+-    prezzo: l.prezzo,
+-    pubblicato: l.pubblicato,
+-    nCandidature: nCandidaturePerListing.get(l.id) ?? 0,
+-  }));
++  // I possibili inquilini: solo per le case che gli inquilini vedono (verificate e pubblicate). È un numero, mai un elenco.
++  const mappa = mappaLuoghi((luoghiRighe ?? []) as Luogo[]);
++  const visibili = (listings ?? []).filter((l) => l.pubblicato === true && l.verifica_stato === "verificato");
++  const conteggi = await possibiliPerAnnuncio(
++    visibili.map((l) => annuncioDaRiga({ ...(l as Parameters<typeof annuncioDaRiga>[0]), id: l.id as string }, mappa)),
++    giaCandidati
++  );
+ 
+-  const totaleCandidature = candidature?.length ?? 0;
+-  const daValutare = (candidature ?? []).filter((c) => c.status === "in_attesa").length;
++  const case_: CasaHome[] = (listings ?? []).map((l) => {
++    const foto = [...(l.listing_photos ?? [])].sort((a, b) => (a.ordine ?? 0) - (b.ordine ?? 0))[0]?.url ?? null;
++    return {
++      id: l.id as string,
++      titolo: l.titolo as string,
++      zona: l.zona as string,
++      prezzo: l.prezzo as number,
++      locali: (l.locali as number | null) ?? null,
++      mq: (l.mq as number | null) ?? null,
++      pubblicato: l.pubblicato === true,
++      verificata: l.verifica_stato === "verificato",
++      foto,
++      nCandidature: nCandidature.get(l.id as string) ?? 0,
++      daValutare: daValutarePer.get(l.id as string) ?? 0,
++      possibili: conteggi?.get(l.id as string) ?? null,
++    };
++  });
+ 
+-  return (
+-    <OwnerHomeClient
+-      listings={listingsConConteggio}
+-      totaleCandidature={totaleCandidature}
+-      daValutare={daValutare}
+-    />
+-  );
++  return <OwnerHomeClient case_={case_} nome={(profilo?.nome as string | null) ?? null} ora={oraInItalia()} />;
+ }
+diff --git a/src/app/globals.css b/src/app/globals.css
+index 874064b..2303583 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -3839,3 +3839,314 @@ button.contratto-testa:focus-visible {
+   background: rgba(176, 94, 74, 0.14);
+   color: var(--clay);
+ }
++
++/* ============================================================
++   Home del proprietario: la casa in grande e due tessere grandi.
++   Pensata per chi non è pratico: caratteri grandi (mai sotto 15px), bersagli larghi
++   (almeno 64px), molto contrasto, una sola cosa da fare per volta.
++   ============================================================ */
++.casa-saluto {
++  margin: 0 0 2px;
++  font-size: 18px;
++  font-weight: 600;
++  color: var(--body-soft);
++}
++.casa-invito {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 14px;
++  min-height: 68px;
++  margin: 6px 0 20px;
++  padding: 12px 14px 12px 20px;
++  border-radius: 22px;
++  background: var(--gold);
++  color: var(--ink);
++  font-size: 19px;
++  font-weight: 700;
++  line-height: 1.25;
++  text-decoration: none;
++  box-shadow: 0 10px 24px rgba(201, 161, 90, 0.35);
++  -webkit-tap-highlight-color: transparent;
++}
++.casa-invito b {
++  flex: none;
++  padding: 11px 18px;
++  border-radius: 999px;
++  background: var(--ink);
++  color: var(--paper);
++  font-size: 18px;
++}
++.casa-invito:focus-visible,
++.casa-attesa:focus-visible,
++.casa-hero:focus-visible {
++  outline: 3px solid var(--moss);
++  outline-offset: 3px;
++}
++.casa {
++  margin-bottom: 28px;
++}
++.casa-hero {
++  position: relative;
++  display: block;
++  height: 300px;
++  overflow: hidden;
++  border-radius: 28px;
++  background: var(--ink-soft);
++  color: #fff;
++  text-decoration: none;
++  box-shadow: 0 18px 40px rgba(16, 21, 26, 0.22);
++  -webkit-tap-highlight-color: transparent;
++}
++.casa.compatta .casa-hero {
++  height: 210px;
++}
++.casa-foto {
++  position: absolute;
++  inset: 0;
++  width: 100%;
++  height: 100%;
++  object-fit: cover;
++}
++.casa-foto-vuota {
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  background: linear-gradient(135deg, var(--moss) 0%, var(--moss-light) 55%, var(--gold) 150%);
++}
++.casa-icona-vuota {
++  width: 96px;
++  height: 96px;
++  fill: none;
++  stroke: rgba(255, 255, 255, 0.6);
++  stroke-width: 1.2;
++}
++.casa-sfumatura {
++  position: absolute;
++  inset: 0;
++  background: linear-gradient(to top, rgba(16, 21, 26, 0.9) 0%, rgba(16, 21, 26, 0.55) 40%, rgba(16, 21, 26, 0) 72%);
++}
++.casa-stato {
++  position: absolute;
++  top: 16px;
++  left: 16px;
++  display: inline-flex;
++  align-items: center;
++  gap: 8px;
++  padding: 8px 14px;
++  border-radius: 999px;
++  background: rgba(16, 21, 26, 0.74);
++  font-size: 15px;
++  font-weight: 700;
++}
++.casa-stato i {
++  width: 11px;
++  height: 11px;
++  border-radius: 50%;
++  background: #7fd1a0;
++}
++.casa-stato.is-in_verifica i {
++  background: var(--gold);
++}
++.casa-stato.is-non_pubblicata i {
++  background: #b9b3a5;
++}
++.casa-modifica {
++  position: absolute;
++  top: 16px;
++  right: 16px;
++  padding: 8px 14px;
++  border-radius: 999px;
++  background: rgba(247, 244, 236, 0.96);
++  color: var(--ink);
++  font-size: 15px;
++  font-weight: 700;
++}
++.casa-testo {
++  position: absolute;
++  left: 20px;
++  right: 20px;
++  bottom: 18px;
++  display: flex;
++  flex-direction: column;
++  gap: 4px;
++}
++.casa-zona {
++  font-size: 15px;
++  font-weight: 700;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++  color: var(--gold);
++}
++.casa-titolo {
++  font-family: var(--font-display);
++  font-size: 30px;
++  font-weight: 600;
++  line-height: 1.1;
++}
++.casa.compatta .casa-titolo {
++  font-size: 24px;
++}
++.casa-dati {
++  font-size: 18px;
++  line-height: 1.3;
++}
++.casa-tessere {
++  display: grid;
++  /* due colonne SEMPRE uguali, anche se un'etichetta è più lunga dell'altra */
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  gap: 14px;
++  margin-top: 14px;
++}
++.casa-tessere.una {
++  grid-template-columns: 1fr;
++}
++.tessera {
++  display: flex;
++  flex-direction: column;
++  gap: 6px;
++  min-width: 0;
++  min-height: 190px;
++  padding: 18px 16px 16px;
++  border-radius: 24px;
++  background: #fff;
++  color: var(--ink);
++  text-decoration: none;
++  box-shadow: 0 10px 26px rgba(16, 21, 26, 0.08);
++  -webkit-tap-highlight-color: transparent;
++}
++.tessera:focus-visible {
++  outline: 3px solid var(--moss);
++  outline-offset: 3px;
++}
++.tessera-etichetta {
++  display: flex;
++  align-items: flex-start;
++  gap: 8px;
++  font-size: 15px;
++  font-weight: 800;
++  line-height: 1.2;
++  letter-spacing: 0.03em;
++  text-transform: uppercase;
++  color: var(--body-soft);
++}
++.tessera-icona {
++  width: 22px;
++  height: 22px;
++  flex: none;
++  fill: none;
++  stroke: var(--moss);
++  stroke-width: 2;
++}
++.tessera-numero {
++  font-family: var(--font-display);
++  font-size: 56px;
++  font-weight: 600;
++  line-height: 1;
++  color: var(--moss);
++}
++.tessera-frase {
++  font-size: 17px;
++  line-height: 1.3;
++  color: var(--body-text);
++}
++.tessera-badge {
++  align-self: flex-start;
++  padding: 5px 12px;
++  border-radius: 999px;
++  background: rgba(201, 161, 90, 0.28);
++  color: var(--gold-ink);
++  font-size: 15px;
++  font-weight: 800;
++}
++.tessera-vai {
++  margin-top: auto;
++  font-size: 18px;
++  font-weight: 800;
++  color: var(--moss);
++}
++.casa-attesa {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 14px;
++  min-height: 72px;
++  margin-top: 14px;
++  padding: 14px 20px;
++  border-radius: 22px;
++  background: var(--paper-dim);
++  color: var(--ink);
++  font-size: 17px;
++  line-height: 1.3;
++  text-decoration: none;
++}
++.casa-attesa b {
++  flex: none;
++  color: var(--moss);
++  font-size: 18px;
++}
++@media (min-width: 768px) {
++  .casa-hero {
++    height: 380px;
++  }
++  .casa.compatta .casa-hero {
++    height: 250px;
++  }
++  .casa-titolo {
++    font-size: 38px;
++  }
++  .tessera-numero {
++    font-size: 68px;
++  }
++}
++
++/* Database: la sezione «Possibili inquilini» */
++.possibili {
++  margin: 4px 0 22px;
++  padding: 18px 18px 14px;
++  border-radius: 24px;
++  background: #fff;
++  box-shadow: 0 10px 26px rgba(16, 21, 26, 0.08);
++  scroll-margin-top: 16px;
++}
++.possibili-titolo {
++  margin: 0 0 10px;
++  font-family: var(--font-display);
++  font-size: 24px;
++  font-weight: 600;
++  color: var(--ink);
++}
++.possibili-riga {
++  display: flex;
++  align-items: center;
++  gap: 16px;
++  padding: 10px 0;
++  border-top: 1px solid rgba(16, 21, 26, 0.08);
++}
++.possibili-numero {
++  flex: none;
++  min-width: 56px;
++  font-family: var(--font-display);
++  font-size: 44px;
++  font-weight: 600;
++  line-height: 1;
++  color: var(--moss);
++  text-align: center;
++}
++.possibili-frase {
++  font-size: 17px;
++  line-height: 1.3;
++  color: var(--ink);
++}
++.possibili-frase small {
++  display: block;
++  margin-top: 2px;
++  font-size: 15px;
++  color: var(--body-soft);
++}
++.possibili-testo {
++  margin: 10px 0 0;
++  font-size: 16px;
++  line-height: 1.45;
++  color: var(--body-text);
++}
+diff --git a/src/content/informativa.ts b/src/content/informativa.ts
+index 25ac02d..71711b5 100644
+--- a/src/content/informativa.ts
++++ b/src/content/informativa.ts
+@@ -28,7 +28,7 @@ export const INFORMATIVA = {
+    * controllo che fa il database (migrazione 0017): un test fallisce se
+    * questa stringa non lo supera.
+    */
+-  versione: "2026-10-provvisoria-17",
++  versione: "2026-10-provvisoria-18",
+   /**
+    * Versioni precedenti che chi le ha accettate NON deve riaccettare.
+    *
+@@ -59,6 +59,7 @@ export const INFORMATIVA = {
+     "2026-10-provvisoria-14",
+     "2026-10-provvisoria-15",
+     "2026-10-provvisoria-16",
++    "2026-10-provvisoria-17",
+   ] as readonly string[],
+   provvisoria: true,
+   titolo: "Informativa sulla privacy",
+@@ -99,6 +100,7 @@ export const INFORMATIVA = {
+       titolo: "Punteggi calcolati automaticamente",
+       paragrafi: [
+         "La compatibilità (match) e l'affidabilità sono calcolate automaticamente da ciò che dichiari. Servono a ordinare annunci e candidati. La decisione di accettare o rifiutare una candidatura resta sempre del proprietario.",
++        "Ai proprietari mostriamo anche QUANTI inquilini hanno una ricerca compatibile con il loro immobile (budget, zona, locali, caratteristiche): è un numero anonimo, non vedono chi sono né nessun loro dato. Se uno di loro si candida, il proprietario vede la candidatura come tutte le altre.",
+         "Se dichiari dei protesti o segnalazioni in centrale rischi, o non rispondi alla domanda (la risposta è obbligatoria e «non indicato» vale come «sì»), il punteggio di affidabilità scende di 30 punti. Il reddito verificato dallo staff e un garante o una fideiussione dichiarati lo fanno salire. Il punteggio non è mai inferiore a zero.",
+         "Il badge «Inquilino raccomandato» lo ottieni in automatico con almeno due recensioni positive (da 4 stelle in su) scritte da due proprietari diversi, se negli ultimi quattro anni non hai recensioni negative. Lo vedono i proprietari a cui ti candidi, possono cercare solo gli inquilini raccomandati e, a parità di compatibilità, i candidati con il badge compaiono prima. Non cambia il punteggio di affidabilità. La decisione di accettare o rifiutare una candidatura resta sempre del proprietario.",
+         "La verifica del reddito invece non è automatica: la decide una persona del team di MatchAmI, guardando i documenti che hai caricato. Se dopo la verifica cambi il lavoro o il reddito indicati, la verifica decade e va rifatta.",
+diff --git a/src/lib/match/index.ts b/src/lib/match/index.ts
+index f8c1cf3..06b661f 100644
+--- a/src/lib/match/index.ts
++++ b/src/lib/match/index.ts
+@@ -42,3 +42,4 @@ export {
+   ordinaCandidati,
+ } from "./proprietario";
+ export type { VoceCandidato } from "./proprietario";
++export { annuncioDaRiga, contaPossibiliInquilini, type AnnuncioDaConfrontare, type RicercaInquilino } from "./possibili";
+diff --git a/src/lib/match/possibili.ts b/src/lib/match/possibili.ts
+new file mode 100644
+index 0000000..2993196
+--- /dev/null
++++ b/src/lib/match/possibili.ts
+@@ -0,0 +1,77 @@
++import { calcolaMatchInquilino } from "./inquilino";
++import { campiMatchDaRiga, haCriteriDiRicerca, profiloRicercaDaRighe, type RigaInteresse, type RigaRicerca, type RigaZona } from "./mazzo";
++import type { MappaLuoghi } from "../luoghi";
++import type { AnnuncioPerMatch, ProfiloRicerca } from "./tipi";
++
++/**
++ * «Possibili inquilini»: QUANTI inquilini hanno una ricerca che combacia con un immobile, e non si sono (ancora) candidati.
++ *
++ * È un NUMERO, mai un elenco: l'identificativo di chi cerca serve solo qui dentro, per non contare chi si è già candidato,
++ * e non esce da questa funzione. Il proprietario non vede chi sono (non c'è un consenso a farsi trovare): vede quanti sono.
++ *
++ * «Combacia» ha lo stesso significato della Home dell'inquilino, «in linea con la tua ricerca»: la casa rispetta TUTTI i
++ * criteri (budget, zona, locali, metratura, tipologia, caratteristiche necessarie). Chi non ha impostato nessun criterio non
++ * conta: con una ricerca vuota ogni casa avrebbe il punteggio pieno, e il numero non direbbe niente.
++ */
++export type RicercaInquilino = {
++  /** serve solo a non contare chi si è già candidato: non esce mai da qui */
++  tenantId: string;
++  riga: RigaRicerca;
++  zone: RigaZona[];
++  interessi: RigaInteresse[];
++};
++
++export type AnnuncioDaConfrontare = { id: string; annuncio: AnnuncioPerMatch };
++
++/** Dalla riga di un annuncio del database all'annuncio da confrontare con le ricerche (con i luoghi che lo contengono). */
++export function annuncioDaRiga(
++  l: {
++    id: string;
++    prezzo: number;
++    zona: string;
++    locali?: number | null;
++    mq?: number | null;
++    attributi?: Record<string, boolean> | null;
++    luogo_id?: string | null;
++    tipologia?: string | null;
++    bagni?: number | null;
++    piano?: number | null;
++    riscaldamento?: string | null;
++    tipo_contratto?: string | null;
++    disponibile_dal?: string | null;
++    classe_energetica?: string | null;
++  },
++  mappa: MappaLuoghi
++): AnnuncioDaConfrontare {
++  return {
++    id: l.id,
++    annuncio: { prezzo: l.prezzo, zona: l.zona, locali: l.locali ?? null, mq: l.mq ?? null, attributi: l.attributi ?? null, ...campiMatchDaRiga(l, mappa) },
++  };
++}
++
++export function contaPossibiliInquilini(input: {
++  annunci: readonly AnnuncioDaConfrontare[];
++  ricerche: readonly RicercaInquilino[];
++  /** per ogni annuncio, chi si è già candidato (non è un «possibile»: è una candidatura) */
++  giaCandidati: ReadonlyMap<string, ReadonlySet<string>>;
++}): Map<string, number> {
++  // il profilo di ogni inquilino si costruisce una volta sola, e si scartano le ricerche vuote
++  const profili: { tenantId: string; profilo: ProfiloRicerca }[] = [];
++  for (const r of input.ricerche) {
++    if (!r || typeof r.tenantId !== "string") continue;
++    const profilo = profiloRicercaDaRighe(r.riga, r.zone, r.interessi);
++    if (haCriteriDiRicerca(profilo)) profili.push({ tenantId: r.tenantId, profilo });
++  }
++
++  const conteggi = new Map<string, number>();
++  for (const { id, annuncio } of input.annunci) {
++    const candidati = input.giaCandidati.get(id);
++    let n = 0;
++    for (const { tenantId, profilo } of profili) {
++      if (candidati?.has(tenantId)) continue;
++      if (calcolaMatchInquilino(annuncio, profilo).fascia === "in_ricerca") n++;
++    }
++    conteggi.set(id, n);
++  }
++  return conteggi;
++}
+diff --git a/src/lib/proprietario/home.ts b/src/lib/proprietario/home.ts
+new file mode 100644
+index 0000000..5ffeb8f
+--- /dev/null
++++ b/src/lib/proprietario/home.ts
+@@ -0,0 +1,91 @@
++/**
++ * La Home del proprietario: i dati di ogni casa e le frasi che li accompagnano. Logica pura (nessun accesso al database),
++ * così si prova a fondo. Le frasi sono scritte per chi non è pratico: parole semplici, niente sigle né inglesismi.
++ */
++export type CasaHome = {
++  id: string;
++  titolo: string;
++  zona: string;
++  prezzo: number;
++  locali: number | null;
++  mq: number | null;
++  pubblicato: boolean;
++  /** l'immobile è stato verificato dallo staff */
++  verificata: boolean;
++  /** l'indirizzo della prima foto, se c'è */
++  foto: string | null;
++  /** tutte le candidature ricevute per questa casa */
++  nCandidature: number;
++  /** quelle a cui non si è ancora risposto */
++  daValutare: number;
++  /** quanti inquilini cercano una casa come questa e non si sono candidati; `null` = non lo sappiamo (non si mostra) */
++  possibili: number | null;
++};
++
++/** «Buongiorno», «Buon pomeriggio», «Buonasera» secondo l'ora italiana (0-23). Un'ora strana non rompe niente. */
++export function salutoPerOra(ora: number): "Buongiorno" | "Buon pomeriggio" | "Buonasera" {
++  const h = Number.isFinite(ora) ? ((Math.floor(ora) % 24) + 24) % 24 : 12;
++  if (h >= 5 && h < 13) return "Buongiorno";
++  if (h >= 13 && h < 18) return "Buon pomeriggio";
++  return "Buonasera";
++}
++
++/** «Buongiorno, Mario»; senza nome solo il saluto. */
++export function saluto(nome: string | null | undefined, ora: number): string {
++  const n = typeof nome === "string" ? nome.replace(/\s+/g, " ").trim() : "";
++  return n ? `${salutoPerOra(ora)}, ${n}` : salutoPerOra(ora);
++}
++
++/** L'ora in Italia adesso (0-23), qualunque sia il fuso del server. */
++export function oraInItalia(adesso: Date = new Date()): number {
++  const h = parseInt(adesso.toLocaleString("it-IT", { hour: "numeric", hour12: false, timeZone: "Europe/Rome" }), 10);
++  return Number.isFinite(h) ? h % 24 : 12;
++}
++
++export type StatoCasa = { chiave: "pubblicata" | "in_verifica" | "non_pubblicata"; testo: string; spiegazione: string };
++
++/** In che stato è la casa, in due parole e una frase: prima la verifica, poi la pubblicazione. */
++export function statoCasa(c: Pick<CasaHome, "pubblicato" | "verificata">): StatoCasa {
++  if (!c.verificata) return { chiave: "in_verifica", testo: "In verifica", spiegazione: "La stiamo controllando: gli inquilini la vedranno appena finito." };
++  if (!c.pubblicato) return { chiave: "non_pubblicata", testo: "Non pubblicata", spiegazione: "Gli inquilini non la vedono ancora." };
++  return { chiave: "pubblicata", testo: "Pubblicata", spiegazione: "Gli inquilini la vedono e possono candidarsi." };
++}
++
++/** Il numero da leggere, e la frase che lo segue, per i possibili inquilini. */
++export function fraseCandidature(n: number): { numero: string; frase: string } {
++  const k = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
++  if (k === 0) return { numero: "0", frase: "Nessuno ha ancora chiesto di vedere la tua casa" };
++  return { numero: String(k), frase: k === 1 ? "persona ha chiesto di vedere la tua casa" : "persone hanno chiesto di vedere la tua casa" };
++}
++
++export function frasePossibili(n: number): { numero: string; frase: string } {
++  const k = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
++  if (k === 0) return { numero: "0", frase: "Per ora nessun inquilino cerca una casa come la tua" };
++  return { numero: String(k), frase: k === 1 ? "inquilino cerca una casa come la tua" : "inquilini cercano una casa come la tua" };
++}
++
++/** «Hai 1 candidatura da guardare» / «Hai 3 candidature da guardare»; `null` se non c'è niente da dire. */
++export function inviteDaValutare(n: number): string | null {
++  const k = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
++  if (k === 0) return null;
++  return k === 1 ? "Hai 1 candidatura da guardare" : `Hai ${k} candidature da guardare`;
++}
++
++export function testoPrezzo(prezzo: number): string {
++  return `€ ${Math.round(Number.isFinite(prezzo) ? prezzo : 0).toLocaleString("it-IT")} al mese`;
++}
++
++/** «2 locali», «55 m²»: solo ciò che si sa. */
++export function dettagliCasa(c: Pick<CasaHome, "locali" | "mq">): string[] {
++  const r: string[] = [];
++  if (typeof c.locali === "number" && c.locali > 0) r.push(c.locali === 1 ? "1 locale" : `${c.locali} locali`);
++  if (typeof c.mq === "number" && c.mq > 0) r.push(`${c.mq} m²`);
++  return r;
++}
++
++/** Dove porta ogni parte della Home. */
++export const DESTINAZIONI_HOME = {
++  immobili: "/immobili",
++  candidature: "/database",
++  possibili: "/database#possibili",
++} as const;
+diff --git a/src/lib/proprietario/possibili-server.ts b/src/lib/proprietario/possibili-server.ts
+new file mode 100644
+index 0000000..7ee4c3b
+--- /dev/null
++++ b/src/lib/proprietario/possibili-server.ts
+@@ -0,0 +1,112 @@
++import { clienteAmministratore } from "@/lib/supabase/admin";
++import { annuncioDaRiga, contaPossibiliInquilini, type AnnuncioDaConfrontare, type RicercaInquilino } from "@/lib/match/possibili";
++import { mappaLuoghi, type Luogo } from "@/lib/luoghi";
++import type { createClient } from "@/lib/supabase/server";
++import type { RigaInteresse, RigaZona } from "@/lib/match";
++
++/**
++ * SOLO SUL SERVER. Legge le ricerche di TUTTI gli inquilini con la chiave di servizio (il proprietario non può leggerle:
++ * la sicurezza a livello di riga lo vieta) e restituisce SOLO NUMERI: per ogni annuncio, quanti inquilini cercano una casa
++ * come quella. Nessun identificativo, nome o dato personale esce da qui; l'identificativo serve dentro il conteggio solo per
++ * non contare chi si è già candidato.
++ *
++ * Se la chiave di servizio non c'è, o una domanda non riesce, restituisce `null`: la Home non mostra il numero (meglio
++ * niente che un numero sbagliato) e il resto funziona.
++ *
++ * Il limite sul numero di ricerche letto è un limite di scala: oltre, i numeri sarebbero per difetto. Quando ci si arriva,
++ * il conteggio va spostato nel database.
++ */
++export const MAX_RICERCHE_LETTE = 5000;
++
++export async function possibiliPerAnnuncio(
++  annunci: readonly AnnuncioDaConfrontare[],
++  giaCandidati: ReadonlyMap<string, ReadonlySet<string>>
++): Promise<Map<string, number> | null> {
++  if (annunci.length === 0) return new Map();
++  const admin = clienteAmministratore();
++  if (!admin) return null;
++
++  const [tenant, zone, interessi] = await Promise.all([
++    admin
++      .from("tenant_profiles")
++      .select("profile_id, budget_max, locali_min, mq_min, budget_min, locali_max, mq_max, tipologia")
++      .limit(MAX_RICERCHE_LETTE),
++    admin.from("tenant_zone_interesse").select("tenant_id, zona, luogo_id").limit(MAX_RICERCHE_LETTE * 20),
++    admin.from("tenant_interessi").select("tenant_id, attributo_key, peso, valore, necessaria").limit(MAX_RICERCHE_LETTE * 40),
++  ]);
++  if (tenant.error || zone.error || interessi.error) {
++    console.error("possibiliPerAnnuncio: lettura non riuscita:", tenant.error?.message ?? zone.error?.message ?? interessi.error?.message);
++    return null;
++  }
++
++  const zonePer = new Map<string, RigaZona[]>();
++  for (const z of zone.data ?? []) {
++    const id = z.tenant_id as string;
++    zonePer.set(id, [...(zonePer.get(id) ?? []), { zona: z.zona as string, luogo_id: (z.luogo_id as string | null) ?? null }]);
++  }
++  const interessiPer = new Map<string, RigaInteresse[]>();
++  for (const i of interessi.data ?? []) {
++    const id = i.tenant_id as string;
++    interessiPer.set(id, [
++      ...(interessiPer.get(id) ?? []),
++      { attributo_key: i.attributo_key as string, peso: i.peso as number, valore: i.valore, necessaria: (i.necessaria as boolean | null) ?? null },
++    ]);
++  }
++
++  const ricerche: RicercaInquilino[] = (tenant.data ?? []).map((t) => ({
++    tenantId: t.profile_id as string,
++    riga: {
++      budget_max: (t.budget_max as number | null) ?? null,
++      locali_min: (t.locali_min as number | null) ?? null,
++      mq_min: (t.mq_min as number | null) ?? null,
++      budget_min: (t.budget_min as number | null) ?? null,
++      locali_max: (t.locali_max as number | null) ?? null,
++      mq_max: (t.mq_max as number | null) ?? null,
++      tipologia: (t.tipologia as string | null) ?? null,
++    },
++    zone: zonePer.get(t.profile_id as string) ?? [],
++    interessi: interessiPer.get(t.profile_id as string) ?? [],
++  }));
++
++  return contaPossibiliInquilini({ annunci, ricerche, giaCandidati });
++}
++
++export type PossibiliPerCasa = { id: string; titolo: string; zona: string; possibili: number | null };
++
++/**
++ * Per ogni casa del proprietario che gli inquilini vedono (verificata e pubblicata): quanti inquilini cercano una casa come
++ * quella. `possibili` è `null` se non si riesce a calcolare. Usa il client del PROPRIETARIO per leggere le sue case, e quello
++ * di servizio solo dentro `possibiliPerAnnuncio`, che restituisce numeri.
++ */
++export async function possibiliPerCasaDelProprietario(
++  supabase: Awaited<ReturnType<typeof createClient>>,
++  userId: string
++): Promise<PossibiliPerCasa[]> {
++  const [{ data: case_ }, { data: candidature }, { data: luoghiRighe }] = await Promise.all([
++    supabase
++      .from("listings")
++      .select("id, titolo, zona, prezzo, locali, mq, attributi, classe_energetica, luogo_id, tipologia, bagni, piano, riscaldamento, tipo_contratto, disponibile_dal")
++      .eq("owner_id", userId)
++      .eq("pubblicato", true)
++      .eq("verifica_stato", "verificato")
++      .order("created_at", { ascending: false }),
++    supabase.from("candidature").select("listing_id, tenant_id, listings!inner(owner_id)").eq("listings.owner_id", userId),
++    supabase.from("luoghi").select("id, livello, nome, sigla, parent_id"),
++  ]);
++
++  const giaCandidati = new Map<string, Set<string>>();
++  for (const c of candidature ?? []) {
++    const id = c.listing_id as string;
++    const insieme = giaCandidati.get(id) ?? new Set<string>();
++    insieme.add(c.tenant_id as string);
++    giaCandidati.set(id, insieme);
++  }
++
++  const mappa = mappaLuoghi((luoghiRighe ?? []) as Luogo[]);
++  const righe = case_ ?? [];
++  const conteggi = await possibiliPerAnnuncio(
++    righe.map((l) => annuncioDaRiga({ ...(l as Parameters<typeof annuncioDaRiga>[0]), id: l.id as string }, mappa)),
++    giaCandidati
++  );
++  return righe.map((l) => ({ id: l.id as string, titolo: l.titolo as string, zona: l.zona as string, possibili: conteggi?.get(l.id as string) ?? null }));
++}
+-- 
+2.43.0
+

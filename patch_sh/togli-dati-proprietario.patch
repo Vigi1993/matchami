@@ -1,0 +1,148 @@
+From 8a0a7f87d661b816e9e268c727f8521271ca1537 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 16 Oct 2026 06:28:18 +0000
+Subject: [PATCH] chore(database): si tolgono tipo di proprietario, numero di
+ immobili e obiettivo (migrazione 0036)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+DA APPLICARE DOPO profilo-proprietario.patch.
+RICHIEDE LA MIGRAZIONE 0036 (supabase/migrations/0036_togli_dati_proprietario.sql), da eseguire DOPO la 0035 e PRIMA del push del codice (il codice nuovo non
+li legge né li scrive più; il codice vecchio li scriveva: con le colonne tolte, il vecchio modulo andrebbe in errore, ma il modulo non c'è più).
+
+COSA FA. Toglie da owner_profiles le colonne proprietario_tipo, num_immobili, obiettivo e il tipo tipo_proprietario. Erano scritte solo dal modulo
+'I tuoi dati' del Profilo (tolto) e non le leggeva nessuna parte dell'app; l'informativa non le elenca più (versione 21). Tenerle sarebbe conservare dati
+personali senza uno scopo. È IRREVERSIBILE: i valori già salvati si perdono (non ce n'è bisogno). Rieseguirla non dà errori (if exists).
+Resta owner_profiles con l'identificativo della persona e la data di aggiornamento: è ciò che fa risultare una persona proprietario (immobili, candidature e il resto
+si agganciano lì). Prima di scriverla ho controllato nel database che nessuna funzione, vista, indice o vincolo dipendesse dalle colonne e che il tipo servisse solo a quella colonna.
+
+PROVATA su PostgreSQL 16 VERO in due tempi: prima (un proprietario con i tre dati compilati e un inquilino), poi la 0036, poi 7 controlli: le tre colonne e il tipo non ci
+sono più; la tabella ha solo profile_id e updated_at; il proprietario che aveva i dati c'è ancora (si perdono solo i tre valori); chi si iscrive come proprietario dopo la 0036 ottiene
+il suo profilo come prima (il trigger di registrazione funziona); un inquilino non diventa proprietario; un proprietario può avere i suoi immobili. La 0036 si applica due volte senza errori.
+Tutti gli altri scenari SQL (che applicano TUTTE le migrazioni, 0036 compresa) restano verdi. ALTERAZIONI: 7 sul PostgreSQL vero, tutte prese (colonna non tolta, tipo non
+tolto, data di aggiornamento o identificativo tolti, tabella cancellata, non rieseguibile, righe cancellate); 5 prese anche dal solo test statico, senza PostgreSQL.
+Un controllo statico richiede che la migrazione tolga ESATTAMENTE tre colonne e un tipo, senza drop table, truncate, delete, cascade.
+
+DIFETTO MIO TROVATO: il mio primo test statico cercava 'È IRREVERSIBILE' maiuscolo mentre la migrazione ha 'è': falliva già sull'originale (l'ho visto leggendo il risultato, non dalle alterazioni).
+Test: 1152 in tutto (2 nuovi; 1147 senza PostgreSQL collegato e cinque saltati, 1152 con).
+---
+ scripts/db/dati-proprietario-dopo.sql         | 17 ++++++++++++++++
+ scripts/db/dati-proprietario-prima.sql        | 13 ++++++++++++
+ scripts/test-db-richieste.mjs                 | 15 ++++++++++++++
+ scripts/test-profilo-proprietario.mjs         |  7 +++++++
+ .../0036_togli_dati_proprietario.sql          | 20 +++++++++++++++++++
+ 5 files changed, 72 insertions(+)
+ create mode 100644 scripts/db/dati-proprietario-dopo.sql
+ create mode 100644 scripts/db/dati-proprietario-prima.sql
+ create mode 100644 supabase/migrations/0036_togli_dati_proprietario.sql
+
+diff --git a/scripts/db/dati-proprietario-dopo.sql b/scripts/db/dati-proprietario-dopo.sql
+new file mode 100644
+index 0000000..c44c8cb
+--- /dev/null
++++ b/scripts/db/dati-proprietario-dopo.sql
+@@ -0,0 +1,17 @@
++-- Dopo la 0036: le tre colonne e il tipo non ci sono più; il proprietario c'è ancora; i nuovi proprietari si creano come prima.
++\set ON_ERROR_STOP on
++\set QUIET on
++create function t.ok(c boolean, msg text) returns void language plpgsql as $$
++begin
++  if c is not true then raise exception 'CONTROLLO FALLITO: %', msg; end if;
++  raise notice 'OK: %', msg;
++end $$;
++select t.ok((select count(*) from information_schema.columns where table_name = 'owner_profiles' and column_name in ('proprietario_tipo', 'num_immobili', 'obiettivo')) = 0, 'D1 le tre colonne non ci sono più');
++select t.ok((select count(*) from pg_type where typname = 'tipo_proprietario') = 0, 'D2 e nemmeno il loro tipo');
++select t.ok((select array_agg(column_name::text order by column_name) from information_schema.columns where table_name = 'owner_profiles') = array['profile_id', 'updated_at'], 'D3 la tabella ha solo ciò che serve: l''identificativo e la data di aggiornamento');
++select t.ok((select count(*) from owner_profiles where profile_id = '55555555-0000-0000-0000-00000000000a') = 1, 'D4 il proprietario che aveva i dati c''è ancora (si perdono solo i tre valori)');
++insert into auth.users (id, email, raw_user_meta_data) values ('55555555-0000-0000-0000-00000000000c', 'c@x.it', '{"ruolo":"proprietario","nome":"Luisa","privacy_accettata":true}');
++select t.ok((select count(*) from owner_profiles where profile_id = '55555555-0000-0000-0000-00000000000c') = 1, 'D5 chi si iscrive come proprietario dopo la 0036 ottiene il suo profilo come prima');
++select t.ok((select count(*) from tenant_profiles where profile_id = '55555555-0000-0000-0000-00000000000b') = 1 and (select count(*) from owner_profiles where profile_id = '55555555-0000-0000-0000-00000000000b') = 0, 'D6 un inquilino non diventa proprietario');
++insert into listings (id, owner_id, titolo, zona, prezzo) values ('aaaaaaaa-0000-0000-0000-000000000099', '55555555-0000-0000-0000-00000000000a', 'Casa di prova', 'Milano', 900);
++select t.ok((select count(*) from listings where owner_id = '55555555-0000-0000-0000-00000000000a') = 1, 'D7 un proprietario può ancora avere i suoi immobili');
+diff --git a/scripts/db/dati-proprietario-prima.sql b/scripts/db/dati-proprietario-prima.sql
+new file mode 100644
+index 0000000..117d622
+--- /dev/null
++++ b/scripts/db/dati-proprietario-prima.sql
+@@ -0,0 +1,13 @@
++-- Dati PRIMA della 0036 (database con le migrazioni fino alla 0035): un proprietario con i tre dati compilati.
++\set ON_ERROR_STOP on
++\set QUIET on
++create schema t;
++insert into auth.users (id, email, raw_user_meta_data) values
++ ('55555555-0000-0000-0000-00000000000a', 'a@x.it', '{"ruolo":"proprietario","nome":"Mario","privacy_accettata":true}'),
++ ('55555555-0000-0000-0000-00000000000b', 'b@x.it', '{"ruolo":"inquilino","nome":"Anna","privacy_accettata":true}');
++update owner_profiles set proprietario_tipo = 'agenzia', num_immobili = 5, obiettivo = 'Massima selezione inquilini' where profile_id = '55555555-0000-0000-0000-00000000000a';
++do $$ begin
++  if (select count(*) from information_schema.columns where table_name = 'owner_profiles' and column_name in ('proprietario_tipo', 'num_immobili', 'obiettivo')) <> 3 then raise exception 'PRIMA: le tre colonne dovevano esserci'; end if;
++  if (select proprietario_tipo::text from owner_profiles where profile_id = '55555555-0000-0000-0000-00000000000a') <> 'agenzia' then raise exception 'PRIMA: il tipo non si è salvato'; end if;
++  raise notice 'OK: prima della 0036 le tre colonne ci sono e hanno dei dati';
++end $$;
+diff --git a/scripts/test-db-richieste.mjs b/scripts/test-db-richieste.mjs
+index e285254..da751db 100644
+--- a/scripts/test-db-richieste.mjs
++++ b/scripts/test-db-richieste.mjs
+@@ -80,3 +80,18 @@ test("migrazione 0035 su PostgreSQL vero: l'affitto nasce dal contratto con la c
+     const riusciti = (r.stderr.match(/NOTICE:\s+OK:/g) ?? []).length; assert.equal(riusciti, 61, `controlli riusciti: ${riusciti}`);
+   } finally { fs.rmSync(nullo, { force: true }); esegui(["-d", "postgres", "-c", `drop database if exists ${db}`]); }
+ });
++
++test("migrazione 0036 su PostgreSQL vero: si perdono solo i tre dati del proprietario e il loro tipo; il proprietario resta, i nuovi si creano come prima; rieseguirla non dà errori", { skip: psqlCmd ? false : "imposta MATCHAMI_PSQL per eseguire le prove SQL su un PostgreSQL vero" }, () => {
++  const [bin, ...args] = psqlCmd.split(/\s+/); const db = "matchami_test_dati_proprietario"; const esegui = (extra) => spawnSync(bin, [...args, "-X", "-q", ...extra], { encoding: "utf8" });
++  const migrazioni = fs.readdirSync(path.join(radice, "supabase", "migrations")).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort(); const m36 = migrazioni.find((f) => f.startsWith("0036_")); assert.ok(m36, "manca la migrazione 0036");
++  const nullo = path.join(os.tmpdir(), `matchami-dati-proprietario-${process.pid}.txt`);
++  try {
++    let r = esegui(["-d", "postgres", "-c", `drop database if exists ${db}`, "-c", `create database ${db}`]); assert.equal(r.status, 0, r.stderr);
++    r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "scripts", "db", "stub-supabase.sql")]); assert.equal(r.status, 0, r.stderr);
++    for (const m of migrazioni.filter((f) => f < "0036")) { r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m)]); assert.equal(r.status, 0, `${m}: ${r.stderr.slice(0, 300)}`); }
++    r = esegui(["-d", db, "-o", nullo, "-f", path.join(radice, "scripts", "db", "dati-proprietario-prima.sql")]); assert.equal(r.status, 0, "prima della 0036: " + r.stderr.slice(0, 300));
++    r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m36)]); assert.equal(r.status, 0, "la 0036 non si applica: " + r.stderr.slice(0, 300));
++    r = esegui(["-d", db, "-o", nullo, "-f", path.join(radice, "scripts", "db", "dati-proprietario-dopo.sql")]); assert.ok(!/CONTROLLO FALLITO/.test(r.stderr), r.stderr.split("\n").filter((l) => /FALLITO/.test(l)).join("\n")); assert.equal(r.status, 0, r.stderr.slice(0, 300)); assert.equal((r.stderr.match(/NOTICE:\s+OK:/g) ?? []).length, 7);
++    r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m36)]); assert.equal(r.status, 0, "rieseguire la 0036 non deve dare errori: " + r.stderr.slice(0, 300));
++  } finally { fs.rmSync(nullo, { force: true }); esegui(["-d", "postgres", "-c", `drop database if exists ${db}`]); }
++});
+diff --git a/scripts/test-profilo-proprietario.mjs b/scripts/test-profilo-proprietario.mjs
+index 262142a..5df27a7 100644
+--- a/scripts/test-profilo-proprietario.mjs
++++ b/scripts/test-profilo-proprietario.mjs
+@@ -43,3 +43,10 @@ test("informativa: non elenca più tipo di proprietario, numero di immobili e ob
+   const t = JSON.stringify(inf.INFORMATIVA); assert.ok(!/tipo di proprietario|numero di immobili|obiettivo/.test(t), "l'informativa nomina ancora quei dati"); assert.ok(t.includes("Se sei proprietario: gli annunci con titolo, descrizione, zona, prezzo, caratteristiche, classe energetica e foto;"));
+   const n = Number(inf.INFORMATIVA.versione.match(/-(\d+)$/)[1]); assert.ok(n >= 21, inf.INFORMATIVA.versione); assert.ok(inf.INFORMATIVA.equivalenti.includes("2026-10-provvisoria-20"), "la 20 deve restare equivalente");
+ });
++
++test("migrazione 0036: toglie ESATTAMENTE le tre colonne e il loro tipo (niente altro), è rieseguibile e dice che è irreversibile", () => {
++  const m = leggi("supabase", "migrations", "0036_togli_dati_proprietario.sql"); const sql = m.replace(/--[^\n]*/g, "");
++  assert.match(sql, /alter table owner_profiles\s+drop column if exists proprietario_tipo,\s+drop column if exists num_immobili,\s+drop column if exists obiettivo;/); assert.match(sql, /drop type if exists tipo_proprietario;/);
++  assert.equal([...sql.matchAll(/drop column/g)].length, 3, "devono essere solo tre colonne"); assert.ok(!/drop table|truncate|delete from|drop column (profile_id|updated_at)|cascade/i.test(sql), "la migrazione tocca altro"); assert.match(m, /è IRREVERSIBILE/); assert.match(m, /Rieseguirla non dà errori/);
++  const sqlTesti = ["scripts/db/dati-proprietario-prima.sql", "scripts/db/dati-proprietario-dopo.sql"].map((f) => leggi(...f.split("/"))).join("\n"); for (const tema of ["D1 le tre colonne non ci sono più", "D3 la tabella ha solo ciò che serve", "D4 il proprietario che aveva i dati c'è ancora", "D5 chi si iscrive come proprietario dopo la 0036"]) assert.ok(sqlTesti.replaceAll("''", "'").includes(tema), `manca il controllo «${tema}»`);
++});
+diff --git a/supabase/migrations/0036_togli_dati_proprietario.sql b/supabase/migrations/0036_togli_dati_proprietario.sql
+new file mode 100644
+index 0000000..745c032
+--- /dev/null
++++ b/supabase/migrations/0036_togli_dati_proprietario.sql
+@@ -0,0 +1,20 @@
++-- ============================================================
++-- Si tolgono dal profilo del proprietario i tre dati che non servivano a niente: tipo di proprietario, numero di immobili, obiettivo.
++--
++-- Li scriveva soltanto il modulo «I tuoi dati» del Profilo, e nessuna parte dell'app li leggeva mai (non influivano sulle candidature, non li vedeva
++-- nessuno). Il modulo non c'è più e l'informativa non li elenca più: tenerli nel database sarebbe conservare dati personali senza uno scopo.
++--
++-- ATTENZIONE: è IRREVERSIBILE. I valori già salvati si perdono. Se un giorno servissero di nuovo, si rimettono le colonne (vuote).
++-- Rieseguirla non dà errori (se le colonne non ci sono più non fa niente).
++--
++-- Resta la tabella owner_profiles con l'identificativo della persona (collegato al suo profilo) e la data di aggiornamento: è ciò che serve perché
++-- una persona risulti proprietario (gli immobili, le candidature e il resto si agganciano lì).
++-- ============================================================
++
++alter table owner_profiles
++  drop column if exists proprietario_tipo,
++  drop column if exists num_immobili,
++  drop column if exists obiettivo;
++
++-- Il tipo («privato», «agenzia», «property_manager») serviva solo a quella colonna.
++drop type if exists tipo_proprietario;
+-- 
+2.43.0
+

@@ -1,0 +1,2774 @@
+From de08b6efefb20bec3b54fc2932439b3402eb81d2 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 15 Oct 2026 15:23:12 +0000
+Subject: [PATCH] =?UTF-8?q?feat(proprietario):=20=C2=ABFai=20match=C2=BB?=
+ =?UTF-8?q?=20=E2=80=94=20il=20proprietario=20sceglie=20un=20inquilino=20d?=
+ =?UTF-8?q?isponibile=20e=20gli=20manda=20una=20richiesta?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+DA APPLICARE DOPO home-proprietario.patch.
+RICHIEDE LA MIGRAZIONE 0032 (supabase/migrations/0032_richieste_proprietari.sql): va eseguita su Supabase PRIMA del push del codice.
+RICHIEDE SUPABASE_SECRET_KEY nell'ambiente (la stessa che serve per cancellare un account); senza, le schede non compaiono.
+
+COSA FA. Un proprietario con una casa verificata e pubblicata vede, nel Database, le persone che si sono rese disponibili a
+essere contattate e hanno una ricerca in linea con la sua casa. Preme 'Fai match', conferma (con due parole facoltative) e
+all'inquilino arriva una richiesta. L'inquilino la trova in 'I tuoi match > Richieste dei proprietari'; se accetta nasce un
+match già accettato e la chat si apre; se rifiuta, finisce lì.
+
+IL CONSENSO. L'inquilino deve accendere 'Fatti trovare dai proprietari' (tenant_profiles.visibile_ai_proprietari, SPENTO di
+partenza; con la data). Lo accende e lo ritira dalla scheda delle richieste o da 'Privacy e consensi' (si salva subito a ogni
+scelta). Senza consenso nessun proprietario vede o può contattare quella persona. Il database lo controlla a ogni richiesta.
+INFORMATIVA: nuova versione 2026-10-provvisoria-19 (la 15-18 equivalenti, nessuno deve riaccettare) che spiega il consenso,
+cosa vedono i proprietari, il limite di venti richieste al giorno e che rifiutare o non rispondere non fa succedere niente.
+
+COSA VEDE IL PROPRIETARIO di chi non si è candidato: nome e iniziale del cognome ('Anna V.'), lavoro, foto, un estratto della
+presentazione (160 caratteri), affidabilità, badge, recensioni, 'reddito verificato' sì/no e la compatibilità con i suoi criteri.
+NON vede il reddito, né i contatti, né il cognome intero. Un test elenca i campi di una scheda; il codice della scheda non può
+nominare reddito, email o telefono.
+
+CHI COMPARE. Chi ha il consenso, ha una ricerca in linea con la casa (la stessa definizione della Home dell'inquilino e del
+conteggio), non si è già candidato, non ha già ricevuto una richiesta per quella casa, e non è bloccato da un criterio
+OBBLIGATORIO del proprietario. Ordine: compatibilità, poi badge, poi affidabilità, poi recensioni (come i candidati).
+Dopo un rifiuto non si può insistere per la stessa casa; l'inquilino non può cambiare idea (deve candidarsi lui).
+
+DATI PERSONALI MINIMI (lato server, chiave di servizio): la prima lettura, di TUTTI gli inquilini, prende solo i criteri di ricerca
+e il consenso; nome, lavoro, recensioni e foto si leggono DOPO, solo per chi ha il consenso E una ricerca in linea con una casa
+del proprietario; il consenso si ricontrolla sulla riga letta. Dopo un rifiuto non si dice chi è (solo '1 persona non ha accettato').
+
+IL DATABASE (migrazione 0032):
+- tenant_profiles.visibile_ai_proprietari / visibile_dal;
+- candidature.origine ('inquilino' | 'proprietario'): la notifica 'nuova candidatura' al proprietario salta le candidature nate
+  da una richiesta (sarebbe un messaggio falso), e l'inquilino non riceve un finto 'il proprietario ha accettato';
+- tabella richieste_proprietari: NESSUNO la scrive direttamente (revocati insert/update/delete); si passa da due funzioni
+  security definer: invia_richiesta_proprietario (la casa è tua, verificata e pubblicata; la persona ha dato il consenso; non
+  si è candidata; non le hai già scritto; messaggio 280 caratteri; freno di 20 richieste al giorno per proprietario) e
+  rispondi_richiesta_proprietario (la richiesta è tua e in attesa; accetta o rifiuta, una risposta vuota non vale come rifiuto;
+  la casa deve essere ancora disponibile). Accettando nasce una candidatura GIÀ ACCETTATA: la chat funziona come per ogni match;
+- due tipi di notifica: richiesta_ricevuta (all'inquilino) e richiesta_accettata (al proprietario, con il link alla chat). Un
+  rifiuto non notifica nessuno;
+- policy: l'inquilino vede solo le sue richieste, il proprietario solo le sue.
+
+L'APP. Proprietario: sezione 'Possibili inquilini' nel Database con le schede (caratteri da 15 px in su, pulsante 'Fai match'
+alto 57 px), conferma prima dell'invio ('Fai match con Dario R.? ... Sì, invia la richiesta / No, torna indietro'), l'elenco
+'Richieste mandate' (in attesa col nome; accettata con il link alla chat; rifiutate solo contate). Inquilino: la scheda 'Richieste
+dei proprietari' con il consenso e le richieste ('Sì, mi interessa' / 'No, grazie'), il numero sulla scheda e sulla voce
+'I tuoi match' della barra, e la notifica che apre direttamente quella scheda (?scheda=richieste); un match nato da una richiesta
+mostra 'Ti ha scelto il proprietario'. Gli errori del database si leggono in italiano (dodici codici) e un errore sconosciuto
+non lascia passare testo tecnico. Le azioni controllano gli identificativi (UUID) e il messaggio prima di chiamare il database.
+
+COME È STATA PROVATA. La migrazione si applica, dopo le 31 precedenti, su un PostgreSQL 16 VERO (installato nell'ambiente di
+lavoro) con uno stub minimo di Supabase (ruoli, auth, storage): 68 controlli in scripts/db/richieste.sql con identità diverse
+(inquilino, proprietario, anonimo): chi può scrivere, chi risponde, chi vede cosa, la chat, le notifiche giuste E nessuna
+sbagliata, il freno, il consenso ritirato, la casa sparita, i vincoli e le cascate. Lo stub è un'APPROSSIMAZIONE di Supabase: la
+0032 va riprovata sul vostro Supabase. test-db-richieste.mjs esegue tutto da solo se imposti MATCHAMI_PSQL
+(es. MATCHAMI_PSQL="psql -h localhost -U postgres" npm test); senza, salta quel controllo e lo dice.
+Provato in Chrome col dito: schede (4 cercano, 3 contattabili), conferma che NON invia, 'No, torna indietro' che non invia,
+invio con messaggio ripulito, errori in italiano, criteri obbligatori, richieste mandate, consenso acceso e ritirato (si
+salva solo quello), richieste con numero su scheda e barra, accetta (chat) e rifiuta, errore, stati vuoti, notifica, Privacy.
+
+ALTERAZIONI: 67 difetti reintrodotti di proposito, tutti presi — 30 sulla migrazione, provati sul PostgreSQL vero (consenso
+acceso di partenza, controlli saltati, freno, candidatura 'in attesa', finta notifica, permessi, policy, link...), e 37 sul codice.
+
+DIFETTI MIEI TROVATI PROVANDO
+- il badge 'Inquilino raccomandato' nelle schede era a 11 px (compatto): ora la versione intera a 15 px, con un test
+- il campo del messaggio usava una classe che non esiste (textarea-base): senza bordo né sfondo. Ora ob-textarea, e un test
+  richiede che la classe esista nel CSS
+- le schede avevano caratteri da 12-13 px (per un proprietario di 60+): portati a 15 px o più; il test di leggibilità ora copre
+  anche le schede del proprietario
+- un'alterazione passava (la pagina mostrava 'Sei disponibile' se la lettura del profilo falliva): ora serve un 'sì' esplicito
+- due alterazioni del database erano rotte da me (contenevano il separatore del mio script): rifatte correttamente
+- il test sull'assenza di nuove migrazioni, e quelli sulla versione dell'informativa (ora dinamici), descrivevano il passato
+
+Test: 1091 in tutto (30 nuovi + 2 sul database; 1090 senza PostgreSQL collegato e uno saltato, 1091 con).
+---
+ package.json                                  |   2 +-
+ scripts/db/richieste.sql                      | 262 ++++++++++++++++
+ scripts/db/stub-supabase.sql                  |  27 ++
+ scripts/test-affidabilita.mjs                 |   2 +-
+ scripts/test-candidature.mjs                  |   2 +-
+ scripts/test-db-richieste.mjs                 |  40 +++
+ scripts/test-home-proprietario.mjs            |  13 +-
+ scripts/test-notifiche.mjs                    |  10 +-
+ scripts/test-profilo-gestione.mjs             |   4 +-
+ scripts/test-raccomandato.mjs                 |   2 +-
+ scripts/test-richieste.mjs                    | 203 ++++++++++++
+ .../(app)/candidature/CandidatureClient.tsx   |  24 +-
+ src/app/(app)/candidature/page.tsx            |  30 +-
+ .../(app)/candidature/richieste-actions.ts    |  51 ++++
+ src/app/(app)/database/DatabaseClient.tsx     |  30 +-
+ src/app/(app)/database/actions.ts             |  25 ++
+ src/app/(app)/layout.tsx                      |   9 +-
+ src/app/(app)/profilo/ProfiloClient.tsx       |   1 +
+ src/app/globals.css                           | 289 ++++++++++++++++++
+ src/components/Navigation.tsx                 |   4 +
+ src/components/PossibiliInquilini.tsx         | 203 ++++++++++++
+ src/components/PrivacySheet.tsx               |  33 +-
+ src/components/RichiesteProprietari.tsx       | 131 ++++++++
+ src/content/informativa.ts                    |   4 +-
+ src/lib/candidature.ts                        |   6 +
+ src/lib/notifiche.ts                          |  22 +-
+ src/lib/proprietario/possibili-inquilini.ts   | 149 +++++++++
+ src/lib/proprietario/possibili-server.ts      | 221 +++++++++++---
+ src/lib/richieste.ts                          | 121 ++++++++
+ src/lib/types.ts                              |   4 +
+ .../migrations/0032_richieste_proprietari.sql | 217 +++++++++++++
+ 31 files changed, 2044 insertions(+), 97 deletions(-)
+ create mode 100644 scripts/db/richieste.sql
+ create mode 100644 scripts/db/stub-supabase.sql
+ create mode 100644 scripts/test-db-richieste.mjs
+ create mode 100644 scripts/test-richieste.mjs
+ create mode 100644 src/app/(app)/candidature/richieste-actions.ts
+ create mode 100644 src/components/PossibiliInquilini.tsx
+ create mode 100644 src/components/RichiesteProprietari.tsx
+ create mode 100644 src/lib/proprietario/possibili-inquilini.ts
+ create mode 100644 src/lib/richieste.ts
+ create mode 100644 supabase/migrations/0032_richieste_proprietari.sql
+
+diff --git a/package.json b/package.json
+index db8ce32..4139ccc 100644
+--- a/package.json
++++ b/package.json
+@@ -8,7 +8,7 @@
+     "start": "next start",
+     "lint": "eslint",
+     "pretest": "node scripts/controlla-dipendenze.mjs",
+-    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-affidabilita.mjs scripts/test-profilo-gestione.mjs scripts/test-avvisi-profilo.mjs scripts/test-raccomandato.mjs scripts/test-home-proprietario.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-dati-immobile.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-affidabilita.mjs scripts/test-profilo-gestione.mjs scripts/test-avvisi-profilo.mjs scripts/test-raccomandato.mjs scripts/test-home-proprietario.mjs scripts/test-richieste.mjs scripts/test-db-richieste.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-dati-immobile.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/db/richieste.sql b/scripts/db/richieste.sql
+new file mode 100644
+index 0000000..1f538ca
+--- /dev/null
++++ b/scripts/db/richieste.sql
+@@ -0,0 +1,262 @@
++-- ============================================================
++-- Prova della migrazione 0032 (richieste dei proprietari) su un PostgreSQL vero.
++-- Si lancia da test-db-richieste.mjs, su un database con lo stub di Supabase e TUTTE le migrazioni già applicate.
++-- Ogni controllo scrive «OK n: ...» o ferma tutto con un errore.
++-- ============================================================
++\set ON_ERROR_STOP on
++\set QUIET on
++set client_min_messages = notice;
++
++create schema t;
++create table t.esiti (n serial, testo text);
++create function t.ok(c boolean, msg text) returns void language plpgsql as $$
++begin
++  if c is not true then raise exception 'CONTROLLO FALLITO: %', msg; end if;
++  insert into t.esiti (testo) values (msg);
++  raise notice 'OK: %', msg;
++end $$;
++-- esegue un'istruzione e si aspetta un errore che contenga il codice dato
++create function t.fallisce(sql text, codice text, msg text) returns void language plpgsql as $$
++declare e text;
++begin
++  begin
++    execute sql;
++  exception when others then e := sqlerrm;
++  end;
++  if e is null then raise exception 'CONTROLLO FALLITO (nessun errore): %', msg; end if;
++  if position(codice in e) = 0 then raise exception 'CONTROLLO FALLITO (errore diverso: %): %', e, msg; end if;
++  insert into t.esiti (testo) values (msg);
++  raise notice 'OK: %', msg;
++end $$;
++-- si diventa un utente (o nessuno) come farebbe l'API
++create function t.come(utente uuid) returns void language plpgsql as $$
++begin
++  perform set_config('request.jwt.claim.sub', coalesce(utente::text, ''), false);
++  if utente is null then set role anon; else set role authenticated; end if;
++end $$;
++create function t.torna() returns void language plpgsql as $$
++begin reset role; perform set_config('request.jwt.claim.sub', '', false); end $$;
++grant usage on schema t to anon, authenticated;
++grant select, insert on t.esiti to anon, authenticated;
++grant usage on all sequences in schema t to anon, authenticated;
++grant execute on all functions in schema t to anon, authenticated;
++
++-- ---- i personaggi ----
++create function t.utente(id uuid, email text, ruolo text, nome text) returns void language sql as $$
++  insert into auth.users (id, email, raw_user_meta_data) values (id, email, jsonb_build_object('ruolo', ruolo, 'nome', nome, 'privacy_accettata', true));
++$$;
++select t.utente('11111111-0000-0000-0000-000000000001', 't1@x.it', 'inquilino', 'Anna');
++select t.utente('11111111-0000-0000-0000-000000000002', 't2@x.it', 'inquilino', 'Bruno');
++select t.utente('11111111-0000-0000-0000-000000000003', 't3@x.it', 'inquilino', 'Carla');
++select t.utente('11111111-0000-0000-0000-000000000004', 't4@x.it', 'inquilino', 'Dario');
++select t.utente('22222222-0000-0000-0000-000000000001', 'o1@x.it', 'proprietario', 'Mario');
++select t.utente('22222222-0000-0000-0000-000000000002', 'o2@x.it', 'proprietario', 'Luisa');
++
++insert into listings (id, owner_id, titolo, zona, prezzo, pubblicato, verifica_stato) values
++ ('aaaaaaaa-0000-0000-0000-000000000001', '22222222-0000-0000-0000-000000000001', 'Bilocale luminoso', 'Isola, Milano', 1250, true, 'verificato'),
++ ('aaaaaaaa-0000-0000-0000-000000000002', '22222222-0000-0000-0000-000000000002', 'Trilocale del sole', 'Navigli, Milano', 1500, true, 'verificato'),
++ ('aaaaaaaa-0000-0000-0000-000000000003', '22222222-0000-0000-0000-000000000001', 'Monolocale non pubblicato', 'Isola, Milano', 800, false, 'verificato'),
++ ('aaaaaaaa-0000-0000-0000-000000000004', '22222222-0000-0000-0000-000000000001', 'Casa in verifica', 'Isola, Milano', 900, true, 'in_verifica');
++
++select t.ok((select visibile_ai_proprietari from tenant_profiles where profile_id = '11111111-0000-0000-0000-000000000002') is false, '01 un inquilino nuovo NON è visibile ai proprietari (lo accende lui)');
++select t.ok((select visibile_dal from tenant_profiles where profile_id = '11111111-0000-0000-0000-000000000002') is null, '02 senza consenso non c''è nemmeno una data');
++select t.ok((select origine from candidature limit 1) is null, '03 (nessuna candidatura ancora)');
++
++-- t1 e t3 e t4 si rendono disponibili, t2 no
++update tenant_profiles set visibile_ai_proprietari = true, visibile_dal = now() where profile_id in ('11111111-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000003', '11111111-0000-0000-0000-000000000004');
++
++-- ---- chi può e chi non può mandare una richiesta ----
++select t.come(null);
++select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', null)$q$, 'permission denied', '04 chi non ha fatto l''accesso non può mandare una richiesta');
++select t.torna();
++
++select t.come('11111111-0000-0000-0000-000000000002');
++select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', null)$q$, 'NON_TUO_IMMOBILE', '05 un inquilino non può mandare richieste (non è il proprietario della casa)');
++select t.torna();
++
++select t.come('22222222-0000-0000-0000-000000000001');
++select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000001', null)$q$, 'NON_TUO_IMMOBILE', '06 un proprietario non può scrivere per la casa di un altro');
++select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000003', '11111111-0000-0000-0000-000000000001', null)$q$, 'IMMOBILE_NON_PUBBLICATO', '07 per una casa non pubblicata no');
++select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000004', '11111111-0000-0000-0000-000000000001', null)$q$, 'IMMOBILE_NON_PUBBLICATO', '08 per una casa in verifica no');
++select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000002', null)$q$, 'INQUILINO_NON_DISPONIBILE', '09 a chi non ha dato il consenso no');
++select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000001', '99999999-0000-0000-0000-000000000009', null)$q$, 'INQUILINO_NON_DISPONIBILE', '10 a una persona che non esiste: lo stesso errore (non si capisce se esiste)');
++select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', repeat('a', 281))$q$, 'MESSAGGIO_TROPPO_LUNGO', '11 un messaggio di 281 caratteri no');
++select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000001', '22222222-0000-0000-0000-000000000002', null)$q$, 'INQUILINO_NON_DISPONIBILE', '12 a un altro proprietario no (non è un inquilino)');
++select t.torna();
++
++-- ---- una richiesta che va a buon fine ----
++select t.come('22222222-0000-0000-0000-000000000001');
++create temp table r1 as select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', '  Ciao Anna, la casa ti piacerà!  ') as id;
++grant select on r1 to public;
++select t.torna();
++select t.ok((select count(*) from richieste_proprietari) = 1, '13 la richiesta è stata creata');
++select t.ok((select stato from richieste_proprietari) = 'inviata' and (select risposta_at from richieste_proprietari) is null, '14 parte «inviata», senza risposta');
++select t.ok((select messaggio from richieste_proprietari) = 'Ciao Anna, la casa ti piacerà!', '15 il messaggio si ripulisce dagli spazi');
++select t.ok((select nome_proprietario from richieste_proprietari) = 'Mario', '16 si ricorda il nome di battesimo del proprietario');
++select t.ok((select count(*) from notifiche where user_id = '11111111-0000-0000-0000-000000000001' and tipo = 'richiesta_ricevuta' and link = '/candidature' and dati->>'nome' = 'Mario' and dati->>'titolo' = 'Bilocale luminoso') = 1, '17 l''inquilino riceve UNA notifica, con il nome e la casa');
++select t.ok((select count(*) from notifiche where user_id = '22222222-0000-0000-0000-000000000001') = 0, '18 il proprietario non riceve niente');
++
++select t.come('22222222-0000-0000-0000-000000000001');
++select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', null)$q$, 'RICHIESTA_GIA_INVIATA', '19 non si scrive due volte alla stessa persona per la stessa casa');
++select t.torna();
++update richieste_proprietari set messaggio = null where false;  -- nessun effetto, solo per chiarezza
++
++-- un messaggio fatto di soli spazi vale «nessun messaggio»
++select t.come('22222222-0000-0000-0000-000000000001');
++select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000004', '    ');
++select t.torna();
++select t.ok((select messaggio from richieste_proprietari where tenant_id = '11111111-0000-0000-0000-000000000004') is null, '20 un messaggio di soli spazi diventa «nessun messaggio»');
++
++-- chi si è già candidato non si contatta
++select t.come('11111111-0000-0000-0000-000000000003');
++insert into candidature (listing_id, tenant_id) values ('aaaaaaaa-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000003');
++select t.torna();
++select t.ok((select origine from candidature where tenant_id = '11111111-0000-0000-0000-000000000003') = 'inquilino', '21 una candidatura normale ha origine «inquilino»');
++select t.ok((select count(*) from notifiche where user_id = '22222222-0000-0000-0000-000000000001' and tipo = 'candidatura_ricevuta') = 1, '22 una candidatura normale avvisa ANCORA il proprietario (niente è cambiato)');
++select t.come('22222222-0000-0000-0000-000000000001');
++select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000003', null)$q$, 'GIA_CANDIDATO', '23 a chi si è già candidato a quella casa no');
++select t.torna();
++
++-- ---- chi vede cosa (sicurezza a livello di riga) ----
++select t.come('11111111-0000-0000-0000-000000000001');
++select t.ok((select count(*) from richieste_proprietari) = 1, '24 Anna vede la SUA richiesta e solo quella');
++select t.fallisce($q$insert into richieste_proprietari (listing_id, owner_id, tenant_id) values ('aaaaaaaa-0000-0000-0000-000000000002', '22222222-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000001')$q$, 'permission denied', '25 un inquilino non può scrivere richieste a mano');
++select t.fallisce($q$update richieste_proprietari set stato = 'accettata', risposta_at = now()$q$, 'permission denied', '26 un inquilino non può cambiare una richiesta a mano (si passa dalla funzione)');
++select t.fallisce($q$delete from richieste_proprietari$q$, 'permission denied', '27 un inquilino non può cancellare le richieste');
++select t.torna();
++select t.come('11111111-0000-0000-0000-000000000002');
++select t.ok((select count(*) from richieste_proprietari) = 0, '28 Bruno (a cui nessuno ha scritto) non vede richieste');
++select t.torna();
++select t.come('22222222-0000-0000-0000-000000000001');
++select t.ok((select count(*) from richieste_proprietari) = 2, '29 Mario vede le sue due richieste');
++select t.fallisce($q$insert into richieste_proprietari (listing_id, owner_id, tenant_id) values ('aaaaaaaa-0000-0000-0000-000000000001', '22222222-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000002')$q$, 'permission denied', '30 un proprietario non può scrivere richieste a mano (salterebbe il consenso)');
++select t.fallisce($q$update richieste_proprietari set stato = 'accettata', risposta_at = now()$q$, 'permission denied', '31 un proprietario non può accettare al posto dell''inquilino');
++select t.torna();
++select t.come('22222222-0000-0000-0000-000000000002');
++select t.ok((select count(*) from richieste_proprietari) = 0, '32 Luisa (un altro proprietario) non vede le richieste di Mario');
++select t.torna();
++select t.come(null);
++select t.fallisce($q$select count(*) from richieste_proprietari$q$, 'permission denied', '33 chi non ha fatto l''accesso non legge niente');
++select t.torna();
++
++-- ---- rispondere ----
++select t.come('11111111-0000-0000-0000-000000000003');
++select t.fallisce(format('select rispondi_richiesta_proprietario(%L, true)', (select id from r1)), 'RICHIESTA_NON_TUA', '34 un''altra persona non può rispondere alla richiesta di Anna');
++select t.torna();
++select t.come('22222222-0000-0000-0000-000000000001');
++select t.fallisce(format('select rispondi_richiesta_proprietario(%L, true)', (select id from r1)), 'RICHIESTA_NON_TUA', '35 il proprietario non può rispondere al posto dell''inquilino');
++select t.torna();
++select t.come('11111111-0000-0000-0000-000000000001');
++select t.fallisce(format('select rispondi_richiesta_proprietario(%L, null)', (select id from r1)), 'RISPOSTA_NON_VALIDA', '36 una risposta vuota non vale come un rifiuto');
++select t.ok((select stato from richieste_proprietari where id = (select id from r1)) = 'inviata', '37 la richiesta è ancora in attesa');
++select t.torna();
++
++-- Anna ACCETTA
++select t.come('11111111-0000-0000-0000-000000000001');
++create temp table c1 as select rispondi_richiesta_proprietario((select id from r1), true) as id;
++grant select on c1 to public;
++select t.torna();
++select t.ok((select id from c1) is not null, '38 accettando si riceve l''identificativo della candidatura');
++select t.ok((select count(*) from candidature where id = (select id from c1) and status = 'accettata' and origine = 'proprietario' and tenant_id = '11111111-0000-0000-0000-000000000001' and listing_id = 'aaaaaaaa-0000-0000-0000-000000000001') = 1, '39 nasce una candidatura GIÀ ACCETTATA, di origine «proprietario»');
++select t.ok((select stato from richieste_proprietari where id = (select id from r1)) = 'accettata' and (select candidatura_id from richieste_proprietari where id = (select id from r1)) = (select id from c1) and (select risposta_at from richieste_proprietari where id = (select id from r1)) is not null, '40 la richiesta diventa «accettata», con la candidatura e la data');
++select t.ok((select count(*) from notifiche where user_id = '22222222-0000-0000-0000-000000000001' and tipo = 'richiesta_accettata' and link = '/chat/' || (select id from c1)::text and dati->>'titolo' = 'Bilocale luminoso') = 1, '41 il proprietario riceve UNA notifica «richiesta accettata», con il link alla chat');
++select t.ok((select count(*) from notifiche where user_id = '22222222-0000-0000-0000-000000000001' and tipo = 'candidatura_ricevuta') = 1, '42 e NON una finta «nuova candidatura» (ne resta una sola, quella di Carla)');
++select t.ok((select count(*) from notifiche where user_id = '11111111-0000-0000-0000-000000000001' and tipo = 'candidatura_accettata') = 0, '43 l''inquilino non riceve un finto «il proprietario ha accettato la tua candidatura»');
++select t.come('11111111-0000-0000-0000-000000000001');
++select t.fallisce(format('select rispondi_richiesta_proprietario(%L, false)', (select id from r1)), 'RICHIESTA_GIA_RISPOSTA', '44 non si risponde due volte');
++select t.torna();
++
++-- la chat funziona come per ogni match
++select t.come('11111111-0000-0000-0000-000000000001');
++insert into messaggi (candidatura_id, mittente_id, testo) values ((select id from c1), '11111111-0000-0000-0000-000000000001', 'Grazie, mi piace!');
++select t.torna();
++select t.come('22222222-0000-0000-0000-000000000001');
++insert into messaggi (candidatura_id, mittente_id, testo) values ((select id from c1), '22222222-0000-0000-0000-000000000001', 'Quando vuoi vederla?');
++select t.ok((select count(*) from messaggi where candidatura_id = (select id from c1)) = 2, '45 la chat si apre: l''inquilino e il proprietario si scrivono');
++select t.ok((select count(*) from candidati_del_proprietario where candidatura_id = (select id from c1)) = 1, '46 il proprietario vede l''inquilino tra i candidati, come per ogni match');
++select t.torna();
++select t.come('11111111-0000-0000-0000-000000000004');
++select t.fallisce(format('insert into messaggi (candidatura_id, mittente_id, testo) values (%L, %L, ''intruso'')', (select id from c1), '11111111-0000-0000-0000-000000000004'), 'row-level security', '47 un estraneo non entra nella chat');
++select t.torna();
++
++-- ---- Dario RIFIUTA ----
++create temp table nprima as select count(*) as n from notifiche where user_id = '22222222-0000-0000-0000-000000000001';
++grant select on nprima to public;
++select t.come('11111111-0000-0000-0000-000000000004');
++create temp table rd as select id from richieste_proprietari where tenant_id = '11111111-0000-0000-0000-000000000004';
++grant select on rd to public;
++select t.ok((select rispondi_richiesta_proprietario((select id from rd), false)) is null, '48 rifiutando non nasce nessuna candidatura');
++select t.torna();
++select t.ok((select stato from richieste_proprietari where tenant_id = '11111111-0000-0000-0000-000000000004') = 'rifiutata' and (select risposta_at from richieste_proprietari where tenant_id = '11111111-0000-0000-0000-000000000004') is not null, '49 la richiesta diventa «rifiutata»');
++select t.ok((select count(*) from candidature where tenant_id = '11111111-0000-0000-0000-000000000004') = 0, '50 e Dario non risulta candidato');
++select t.ok((select count(*) from notifiche where user_id = '22222222-0000-0000-0000-000000000001') = (select n from nprima), '51 il proprietario non riceve nessuna notifica per un rifiuto (nessuna pressione)');
++select t.come('22222222-0000-0000-0000-000000000001');
++select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000004', null)$q$, 'RICHIESTA_GIA_INVIATA', '52 dopo un rifiuto non si può insistere per la stessa casa');
++select t.torna();
++select t.come('11111111-0000-0000-0000-000000000004');
++select t.fallisce(format('select rispondi_richiesta_proprietario(%L, true)', (select id from rd)), 'RICHIESTA_GIA_RISPOSTA', '53 e Dario non può cambiare idea dopo aver rifiutato (deve candidarsi lui)');
++select t.torna();
++
++-- ---- il consenso si può ritirare ----
++update tenant_profiles set visibile_ai_proprietari = false where profile_id = '11111111-0000-0000-0000-000000000003';
++select t.come('22222222-0000-0000-0000-000000000002');
++select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000003', null)$q$, 'INQUILINO_NON_DISPONIBILE', '54 chi ritira il consenso non si può più contattare');
++select t.torna();
++
++-- ---- la casa non c'è più al momento della risposta ----
++update tenant_profiles set visibile_ai_proprietari = true where profile_id = '11111111-0000-0000-0000-000000000003';
++select t.come('22222222-0000-0000-0000-000000000002');
++create temp table rl as select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000003', null) as id;
++grant select on rl to public;
++select t.torna();
++update listings set pubblicato = false where id = 'aaaaaaaa-0000-0000-0000-000000000002';
++select t.come('11111111-0000-0000-0000-000000000003');
++select t.fallisce(format('select rispondi_richiesta_proprietario(%L, true)', (select id from rl)), 'IMMOBILE_NON_DISPONIBILE', '55 se la casa non è più pubblicata non si può accettare');
++select t.torna();
++select t.ok((select stato from richieste_proprietari where id = (select id from rl)) = 'inviata' and (select count(*) from candidature where listing_id = 'aaaaaaaa-0000-0000-0000-000000000002') = 0, '56 e non cambia niente: la richiesta resta in attesa, nessuna candidatura');
++select t.come('11111111-0000-0000-0000-000000000003');
++select t.ok((select rispondi_richiesta_proprietario((select id from rl), false)) is null, '57 ma si può sempre rifiutare');
++select t.torna();
++
++-- ---- il freno: venti richieste in un giorno ----
++do $$
++declare i int; u uuid;
++begin
++  for i in 1..21 loop
++    u := ('33333333-0000-0000-0000-' || lpad(i::text, 12, '0'))::uuid;
++    insert into auth.users (id, email, raw_user_meta_data) values (u, 'x' || i || '@x.it', '{"ruolo":"inquilino","nome":"Prova","privacy_accettata":true}');
++    update tenant_profiles set visibile_ai_proprietari = true where profile_id = u;
++  end loop;
++end $$;
++update listings set pubblicato = true where id = 'aaaaaaaa-0000-0000-0000-000000000002';
++select t.come('22222222-0000-0000-0000-000000000002');
++do $$
++declare i int;
++begin
++  -- Luisa ha già mandato 1 richiesta (a Carla): ne restano 19
++  for i in 1..19 loop
++    perform invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000002', ('33333333-0000-0000-0000-' || lpad(i::text, 12, '0'))::uuid, null);
++  end loop;
++end $$;
++select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000002', '33333333-0000-0000-0000-000000000020', null)$q$, 'TROPPE_RICHIESTE', '58 dopo venti richieste in un giorno ci si ferma');
++select t.torna();
++select t.come('22222222-0000-0000-0000-000000000001');
++select t.ok(invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000001', '33333333-0000-0000-0000-000000000021', null) is not null, '59 il freno è per proprietario: un altro può scrivere');
++select t.torna();
++update richieste_proprietari set created_at = now() - interval '2 days' where owner_id = '22222222-0000-0000-0000-000000000002';
++select t.come('22222222-0000-0000-0000-000000000002');
++select t.ok(invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000002', '33333333-0000-0000-0000-000000000020', null) is not null, '60 il giorno dopo si può di nuovo');
++select t.torna();
++
++-- ---- vincoli e pulizia ----
++select t.fallisce($q$update candidature set origine = 'altro' where false or true$q$, 'candidature_origine_valida', '61 l''origine di una candidatura può essere solo «inquilino» o «proprietario»');
++select t.fallisce($q$insert into notifiche (user_id, tipo, link) values ('11111111-0000-0000-0000-000000000001', 'tipo_inventato', '/x')$q$, 'notifiche_tipo_check', '62 i tipi di notifica sono solo quelli noti');
++select t.ok((select count(*) from notifiche where tipo in ('richiesta_ricevuta', 'richiesta_accettata')) > 0, '63 i due tipi nuovi di notifica sono ammessi');
++select t.fallisce($q$insert into richieste_proprietari (listing_id, owner_id, tenant_id, stato) values ('aaaaaaaa-0000-0000-0000-000000000001', '22222222-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000002', 'accettata')$q$, 'richieste_proprietari_check', '64 una richiesta «accettata» deve avere la data della risposta');
++select t.fallisce($q$insert into richieste_proprietari (listing_id, owner_id, tenant_id, stato, risposta_at) values ('aaaaaaaa-0000-0000-0000-000000000001', '22222222-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000002', 'inventato', now())$q$, 'richieste_proprietari_stato_check', '65 gli stati sono solo inviata, accettata, rifiutata');
++delete from auth.users where id = '11111111-0000-0000-0000-000000000001';
++select t.ok((select count(*) from richieste_proprietari where tenant_id = '11111111-0000-0000-0000-000000000001') = 0, '66 cancellando un account spariscono le sue richieste');
++delete from listings where id = 'aaaaaaaa-0000-0000-0000-000000000001';
++select t.ok((select count(*) from richieste_proprietari where listing_id = 'aaaaaaaa-0000-0000-0000-000000000001') = 0, '67 cancellando una casa spariscono le sue richieste');
++select t.ok((select count(*) from t.esiti) = 67, '68 nessun controllo è stato saltato (ne servono 67 prima di questo)');
++select 'TUTTI I CONTROLLI: ' || count(*) from t.esiti;
+diff --git a/scripts/db/stub-supabase.sql b/scripts/db/stub-supabase.sql
+new file mode 100644
+index 0000000..68a51d2
+--- /dev/null
++++ b/scripts/db/stub-supabase.sql
+@@ -0,0 +1,27 @@
++-- Gli elementi di Supabase di cui le migrazioni hanno bisogno, in versione minima.
++do $$ begin
++  if not exists (select 1 from pg_roles where rolname = 'anon') then create role anon nologin; end if;
++  if not exists (select 1 from pg_roles where rolname = 'authenticated') then create role authenticated nologin; end if;
++  if not exists (select 1 from pg_roles where rolname = 'service_role') then create role service_role nologin bypassrls; end if;
++end $$;
++create schema if not exists extensions; create schema if not exists auth; create schema if not exists storage;
++grant usage on schema auth, storage, extensions to anon, authenticated, service_role;
++create table auth.users (
++  id uuid primary key default gen_random_uuid(), instance_id uuid, aud text default 'authenticated', role text default 'authenticated',
++  email text unique, encrypted_password text, email_confirmed_at timestamptz, raw_app_meta_data jsonb default '{}'::jsonb,
++  raw_user_meta_data jsonb default '{}'::jsonb, created_at timestamptz default now(), updated_at timestamptz default now(),
++  confirmation_token text default '', recovery_token text default '', email_change_token_new text default '', email_change text default ''
++);
++create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
++create function auth.role() returns text language sql stable as $$ select coalesce(nullif(current_setting('request.jwt.claim.role', true), ''), 'anon') $$;
++create table storage.buckets (id text primary key, name text, public boolean default false, file_size_limit bigint, allowed_mime_types text[]);
++create table storage.objects (id uuid primary key default gen_random_uuid(), bucket_id text, name text, owner uuid, metadata jsonb, created_at timestamptz default now());
++alter table storage.objects enable row level security;
++create function storage.foldername(name text) returns text[] language sql immutable as $$ select string_to_array(name, '/') $$;
++create function storage.filename(name text) returns text language sql immutable as $$ select (string_to_array(name, '/'))[array_length(string_to_array(name, '/'), 1)] $$;
++grant select, insert, update, delete on all tables in schema storage to authenticated, anon, service_role;
++grant select on auth.users to service_role;
++alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
++alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
++alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
++create publication supabase_realtime;
+diff --git a/scripts/test-affidabilita.mjs b/scripts/test-affidabilita.mjs
+index db00253..63026bc 100644
+--- a/scripts/test-affidabilita.mjs
++++ b/scripts/test-affidabilita.mjs
+@@ -275,7 +275,7 @@ test("informativa: i numeri vengono dalle regole del calcolo (nessun punteggio s
+ test("informativa legale: dice che i protesti (o non rispondere) fanno scendere il punteggio, con lo stesso numero della formula e nuova versione senza far riaccettare", () => {
+   const inf = caricaTs(path.join(radice, "src", "content", "informativa.ts")); const testo = JSON.stringify(inf.INFORMATIVA);
+   assert.ok(testo.includes(`la risposta è obbligatoria e «non indicato» vale come «sì»), il punteggio di affidabilità scende di ${af.PUNTI_AFFIDABILITA.protesti} punti`)); assert.ok(testo.includes("Il punteggio non è mai inferiore a zero"));
+-  assert.equal(inf.INFORMATIVA.versione, "2026-10-provvisoria-18"); for (const v of [15, 16, 17]) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} deve restare equivalente`);
++  const vN = Number(inf.INFORMATIVA.versione.match(/^2026-10-provvisoria-(\d+)$/)?.[1]); assert.ok(vN >= 19, "versione: " + inf.INFORMATIVA.versione); for (let v = 15; v < vN; v++) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} deve restare equivalente`);
+ });
+ 
+ test("stile: una voce che toglie punti ha un aspetto suo (come la voce presa e quella non presa)", () => {
+diff --git a/scripts/test-candidature.mjs b/scripts/test-candidature.mjs
+index d87ff0f..0c45b46 100644
+--- a/scripts/test-candidature.mjs
++++ b/scripts/test-candidature.mjs
+@@ -276,7 +276,7 @@ test("pagina: due schede accessibili (gruppo di schede, frecce), le parti ripieg
+   assert.match(p, /role="tablist"/); assert.match(p, /role="tab"[\s\S]*?aria-selected=\{scheda === s\.id\}[\s\S]*?aria-controls=/); assert.equal([...p.matchAll(/role="tabpanel"/g)].length, 2); assert.match(p, /e\.key !== "ArrowRight" && e\.key !== "ArrowLeft"/); assert.match(p, /tabIndex=\{scheda === s\.id \? 0 : -1\}/);
+   assert.match(p, /aria-labelledby=\{`\$\{idBase\}-candidature`\} hidden=\{scheda !== "candidature"\}/); assert.match(p, /aria-labelledby=\{`\$\{idBase\}-richieste`\} hidden=\{scheda !== "richieste"\}/, "una scheda non attiva deve essere nascosta"); assert.match(p, /<div id=\{id\} className="card-grid" hidden=\{!aperto\}>/, "una parte chiusa deve essere nascosta");
+   assert.match(p, /sezioniCandidature\(candidature\)/); assert.match(p, /aria-expanded=\{aperto\}/); assert.match(p, /\{titolo\} — \{items\.length\}/); assert.match(p, /useState\(apertaAllInizio\)/);
+-  assert.match(p, /Nessuna richiesta dai proprietari/); assert.match(p, /Per ora i proprietari vedono solo chi si candida alle loro case, quindi non\s+ce ne sono/); assert.ok(!/IconChat/.test(p), "la pagina usa ancora il simbolo della chat");
++  assert.match(p, /<RichiesteProprietari richieste=\{richieste\} visibile=\{visibile\} \/>/); assert.ok(!/Per ora i proprietari vedono solo chi si candida/.test(p), "la frase di prima (non ci sono richieste) non è più vera"); assert.ok(!/IconChat/.test(p), "la pagina usa ancora il simbolo della chat");
+   assert.match(p, /Torna alla Home e scorri gli annunci/); assert.ok(!/Torna su &quot;Cerca&quot;/.test(p), "rimanda a una voce «Cerca» che non esiste");
+   const css = leggiFile("src", "app", "globals.css"); assert.match(css, /\.gruppo-match \.card-grid\[hidden\][\s\S]*?display: none !important;/, "una parte chiusa resterebbe visibile: la griglia vince sull'attributo hidden");
+ });
+diff --git a/scripts/test-db-richieste.mjs b/scripts/test-db-richieste.mjs
+new file mode 100644
+index 0000000..65cba04
+--- /dev/null
++++ b/scripts/test-db-richieste.mjs
+@@ -0,0 +1,40 @@
++/**
++ * Prova la migrazione 0032 (richieste dei proprietari) su un PostgreSQL VERO: applica lo stub di Supabase e tutte le migrazioni
++ * su un database nuovo, poi esegue scripts/db/richieste.sql (68 controlli con identità diverse: inquilino, proprietario, anonimo).
++ *
++ * Gira solo se è impostata la variabile MATCHAMI_PSQL, con il comando psql da usare (un utente che può creare database), per esempio:
++ *     MATCHAMI_PSQL="psql -h localhost -U postgres"  npm test
++ * Senza, questi controlli si saltano (e lo dicono). Gli altri test controllano comunque che il file delle prove sia tutto lì.
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import fs from "node:fs";
++import os from "node:os";
++import path from "node:path";
++import { spawnSync } from "node:child_process";
++import { radice } from "./carica-ts.mjs";
++
++const psqlCmd = process.env.MATCHAMI_PSQL;
++const sql = fs.readFileSync(path.join(radice, "scripts", "db", "richieste.sql"), "utf8");
++
++test("le prove SQL sono tutte presenti (nessun controllo tolto), e lo stub di Supabase c'è", () => {
++  const controlli = [...sql.matchAll(/select t\.(ok|fallisce)\(/g)].length; assert.ok(controlli >= 66, `controlli nel file: ${controlli}`);
++  assert.match(sql, /select t\.ok\(\(select count\(\*\) from t\.esiti\) = 67,/, "l'autocontrollo sul numero di prove"); assert.ok(fs.existsSync(path.join(radice, "scripts", "db", "stub-supabase.sql")));
++  const testo = sql.replaceAll("''", "'"); // nel file gli apostrofi sono raddoppiati
++  for (const tema of ["04 chi non ha fatto l'accesso", "09 a chi non ha dato il consenso no", "23 a chi si è già candidato", "25 un inquilino non può scrivere richieste a mano", "30 un proprietario non può scrivere richieste a mano", "39 nasce una candidatura GIÀ ACCETTATA", "42 e NON una finta", "45 la chat si apre", "52 dopo un rifiuto", "54 chi ritira il consenso", "58 dopo venti richieste"]) assert.ok(testo.includes(tema), `manca il controllo «${tema}»`);
++});
++
++test("migrazione 0032 su PostgreSQL vero: tutti i 68 controlli passano", { skip: psqlCmd ? false : "imposta MATCHAMI_PSQL per eseguire le prove SQL su un PostgreSQL vero" }, () => {
++  const [bin, ...args] = psqlCmd.split(/\s+/); const db = "matchami_test_richieste"; const esegui = (extra, opzioni = {}) => spawnSync(bin, [...args, "-X", "-q", ...extra], { encoding: "utf8", ...opzioni });
++  const migrazioni = fs.readdirSync(path.join(radice, "supabase", "migrations")).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
++  assert.ok(migrazioni.includes("0032_richieste_proprietari.sql"));
++  try {
++    let r = esegui(["-d", "postgres", "-c", `drop database if exists ${db}`, "-c", `create database ${db}`]); assert.equal(r.status, 0, "non riesco a creare il database di prova: " + r.stderr);
++    r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "scripts", "db", "stub-supabase.sql")]); assert.equal(r.status, 0, "lo stub di Supabase non si applica: " + r.stderr);
++    for (const m of migrazioni) { r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m)]); assert.equal(r.status, 0, `la migrazione ${m} non si applica: ${r.stderr.slice(0, 400)}`); }
++    const uscita = path.join(os.tmpdir(), `matchami-richieste-${process.pid}.txt`);
++    r = esegui(["-d", db, "-o", uscita, "-f", path.join(radice, "scripts", "db", "richieste.sql")]); fs.rmSync(uscita, { force: true });
++    assert.ok(!/CONTROLLO FALLITO/.test(r.stderr), "un controllo è fallito:\n" + r.stderr.split("\n").filter((l) => /FALLITO|ERROR/.test(l)).slice(0, 4).join("\n")); assert.equal(r.status, 0, r.stderr.slice(0, 500));
++    const riusciti = (r.stderr.match(/NOTICE:\s+OK:/g) ?? []).length; assert.equal(riusciti, 68, `controlli riusciti: ${riusciti}`);
++  } finally { esegui(["-d", "postgres", "-c", `drop database if exists ${db}`]); }
++});
+diff --git a/scripts/test-home-proprietario.mjs b/scripts/test-home-proprietario.mjs
+index 7fc01bd..b9e2e0c 100644
+--- a/scripts/test-home-proprietario.mjs
++++ b/scripts/test-home-proprietario.mjs
+@@ -190,7 +190,12 @@ test("saluto e titolo: senza nome solo il saluto; l'ora cambia il saluto", () =>
+ });
+ 
+ // ============================================================ per chi non è pratico
+-function bloccoCss() { const css = leggi("src", "app", "globals.css"); const a = css.indexOf("Home del proprietario: la casa in grande e due tessere grandi."); const b = css.indexOf("/* Database: la sezione «Possibili inquilini» */"); assert.ok(a > 0 && b > a, "blocchi di stile non trovati"); return css.slice(a, b) + css.slice(b); }
++function bloccoCss() {
++  const css = leggi("src", "app", "globals.css"); const a = css.indexOf("Home del proprietario: la casa in grande e due tessere grandi."); const fineHome = css.indexOf("/* ---- «Richieste dei proprietari» (inquilino) ---- */"); const schede = css.indexOf("/* ---- Database: le schede dei possibili inquilini e la richiesta ---- */");
++  assert.ok(a > 0 && fineHome > a && schede > fineHome, "blocchi di stile non trovati");
++  // la Home e la sezione del Database, poi le schede dei possibili inquilini e la richiesta: tutto ciò che legge il proprietario. Le richieste dell'inquilino stanno in mezzo e restano fuori.
++  return css.slice(a, fineHome) + css.slice(schede);
++}
+ 
+ test("leggibilità: nessun carattere sotto i 15 px nella Home e nella sezione del Database; i testi di lettura da 16 px in su", () => {
+   const css = bloccoCss(); const misure = [...css.matchAll(/font-size:\s*(\d+(?:\.\d+)?)px/g)].map((m) => Number(m[1])); assert.ok(misure.length >= 20, "pochi caratteri trovati: " + misure.length); assert.ok(Math.min(...misure) >= 15, `un carattere è troppo piccolo: ${Math.min(...misure)} px`);
+@@ -233,12 +238,12 @@ test("la chiave di servizio manca: la Home non crolla e non mostra numeri invent
+ });
+ 
+ test("Database: la sezione «Possibili inquilini» c'è, ha l'ancora a cui porta la tessera, dice che non si vede chi sono, e funziona anche senza numeri", () => {
+-  const d = leggi("src", "app", "(app)", "database", "DatabaseClient.tsx"); assert.match(d, /<section id="possibili" className="possibili" aria-labelledby="possibili-titolo">/); assert.match(d, /Non vedi chi sono: se una di loro si\s+candida, la trovi qui sotto, tra le candidature\./); assert.match(d, /Il numero non è disponibile in questo momento/); assert.match(d, /Quando la tua casa sarà pubblicata vedrai qui quanti inquilini cercano una casa come la tua\./);
+-  assert.ok(d.indexOf('id="possibili"') > 0 && d.indexOf('id="possibili"') < d.indexOf("<RicercaCandidati"), "la sezione sta prima della ricerca delle candidature"); const p = leggi("src", "app", "(app)", "database", "page.tsx"); assert.match(p, /const possibili = await possibiliPerCasaDelProprietario\(supabase, user!\.id\);/); assert.match(p, /<DatabaseClient\s+possibili=\{possibili\}/);
++  const d = leggi("src", "app", "(app)", "database", "DatabaseClient.tsx"); const c = leggi("src", "components", "PossibiliInquilini.tsx"); assert.match(d, /<PossibiliInquilini possibili=\{possibili\} \/>/); assert.match(c, /<section id="possibili" className="possibili" aria-labelledby="possibili-titolo">/); assert.match(c, /Vedi solo chi ha scelto di farsi trovare, e non i suoi contatti/); assert.match(c, /Il numero non è disponibile in questo momento/); assert.match(c, /Quando la tua casa sarà pubblicata vedrai qui quanti inquilini cercano una casa come la tua\./);
++  assert.ok(d.indexOf("<PossibiliInquilini") > 0 && d.indexOf("<PossibiliInquilini") < d.indexOf("<RicercaCandidati"), "la sezione sta prima della ricerca delle candidature"); const p = leggi("src", "app", "(app)", "database", "page.tsx"); assert.match(p, /const possibili = await possibiliPerCasaDelProprietario\(supabase, user!\.id\);/); assert.match(p, /<DatabaseClient\s+possibili=\{possibili\}/);
+   assert.match(leggi("src", "app", "globals.css"), /\.possibili \{[^}]*scroll-margin-top: 16px;/);
+ });
+ 
+ test("informativa: dice che ai proprietari si mostra solo un NUMERO anonimo di inquilini compatibili, con la nuova versione; chi aveva le precedenti non deve riaccettare", () => {
+   const testo = JSON.stringify(inf.INFORMATIVA); assert.ok(testo.includes("QUANTI inquilini hanno una ricerca compatibile con il loro immobile")); assert.ok(testo.includes("è un numero anonimo, non vedono chi sono né nessun loro dato")); assert.ok(testo.includes("Se uno di loro si candida, il proprietario vede la candidatura come tutte le altre"));
+-  assert.equal(inf.INFORMATIVA.versione, "2026-10-provvisoria-18"); for (let v = 15; v <= 17; v++) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), String(v)); assert.ok(!inf.INFORMATIVA.equivalenti.includes(inf.INFORMATIVA.versione));
++  const vN = Number(inf.INFORMATIVA.versione.match(/^2026-10-provvisoria-(\d+)$/)?.[1]); assert.ok(vN >= 19, "versione: " + inf.INFORMATIVA.versione); for (let v = 15; v < vN; v++) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} deve restare equivalente`); assert.ok(!inf.INFORMATIVA.equivalenti.includes(inf.INFORMATIVA.versione));
+ });
+diff --git a/scripts/test-notifiche.mjs b/scripts/test-notifiche.mjs
+index b9ddd33..eb543b3 100644
+--- a/scripts/test-notifiche.mjs
++++ b/scripts/test-notifiche.mjs
+@@ -16,12 +16,13 @@ const sql = fs.readFileSync(path.join(radice, "supabase", "migrations", "0019_no
+ // (il ritiro di una candidatura): la verità è l'ultima definizione.
+ const sql0020 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0020_ritira_candidatura.sql"), "utf8");
+ const sql0022 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0022_visite.sql"), "utf8");
++const sql0032 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0032_richieste_proprietari.sql"), "utf8");
+ 
+ /** I tipi che il vincolo sulla tabella ammette. */
+ function tipiDelDatabase() {
+   // l'ultima definizione del vincolo, in ordine di migrazione
+-  const tutte = [...(sql + "\n" + sql0020 + "\n" + sql0022).matchAll(/check \(tipo in \(([\s\S]*?)\)\)/g)];
+-  assert.ok(tutte.length >= 3, "dovrei trovare il vincolo della 0019, quello della 0020 e quello della 0022");
++  const tutte = [...(sql + "\n" + sql0020 + "\n" + sql0022 + "\n" + sql0032).matchAll(/check \(tipo in \(([\s\S]*?)\)\)/g)];
++  assert.ok(tutte.length >= 4, "dovrei trovare il vincolo della 0019, quello della 0020, quello della 0022 e quello della 0032");
+   return [...tutte[tutte.length - 1][1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
+ }
+ 
+@@ -33,7 +34,10 @@ const trigger =
+   sql0020.slice(sql0020.indexOf("-- 5. La notifica al proprietario")) +
+   "\n" +
+   // la 0022 aggiunge il trigger delle visite: si guarda la sua funzione
+-  sql0022.slice(sql0022.indexOf("create or replace function public.notifica_visita()"), sql0022.indexOf("drop trigger if exists notifica_visita"));
++  sql0022.slice(sql0022.indexOf("create or replace function public.notifica_visita()"), sql0022.indexOf("drop trigger if exists notifica_visita")) +
++  "\n" +
++  // la 0032: le due funzioni che mandano e accettano una richiesta creano le notifiche (non sono trigger, ma producono i tipi)
++  sql0032.slice(sql0032.indexOf("create or replace function public.invia_richiesta_proprietario"));
+ 
+ // ------------------------------------------------------------
+ // I tipi
+diff --git a/scripts/test-profilo-gestione.mjs b/scripts/test-profilo-gestione.mjs
+index 303054f..1bae1cb 100644
+--- a/scripts/test-profilo-gestione.mjs
++++ b/scripts/test-profilo-gestione.mjs
+@@ -91,7 +91,9 @@ test("notifiche: il link resta sempre dentro il sito, anche per i tipi spostati;
+ });
+ 
+ test("le notifiche del database non cambiano: il sistema le corregge in lettura (nessuna migrazione, nessun dato toccato)", () => {
+-  const cartella = path.join(radice, "supabase", "migrations"); const ultima = fs.readdirSync(cartella).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort().at(-1); assert.equal(ultima, "0031_dati_obbligatori_annuncio_2.sql", "è comparsa una migrazione nuova: aggiorna questo test");
++  const cartella = path.join(radice, "supabase", "migrations"); const ultima = fs.readdirSync(cartella).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort().at(-1); assert.equal(ultima, "0032_richieste_proprietari.sql", "è comparsa una migrazione nuova: aggiorna questo test");
++  // la correzione dei link degli affitti resta in lettura: la 0032 non crea né cambia le notifiche degli affitti
++  const m = fs.readFileSync(path.join(cartella, ultima), "utf8"); assert.ok(!/crea_notifica\([^;]*'(affitto_|rapporto_)/.test(m), "la 0032 non deve toccare le notifiche degli affitti");
+ });
+ 
+ // ============================================================ le frasi che non sono più vere
+diff --git a/scripts/test-raccomandato.mjs b/scripts/test-raccomandato.mjs
+index 3330928..e354916 100644
+--- a/scripts/test-raccomandato.mjs
++++ b/scripts/test-raccomandato.mjs
+@@ -170,7 +170,7 @@ test("il badge non tocca il punteggio né la percentuale: affidabilita.ts non lo
+ 
+ test("informativa: dice del badge (chi lo vede, filtro, ordine, nessun effetto sul punteggio), con una nuova versione; chi aveva la precedente non deve riaccettare (testo ancora provvisorio)", () => {
+   const testo = JSON.stringify(inf.INFORMATIVA); assert.ok(testo.includes("Il badge «Inquilino raccomandato» lo ottieni in automatico con almeno due recensioni positive (da 4 stelle in su) scritte da due proprietari diversi")); assert.ok(testo.includes("possono cercare solo gli inquilini raccomandati")); assert.ok(testo.includes("Non cambia il punteggio di affidabilità")); assert.ok(testo.includes("resta sempre del proprietario"));
+-  assert.equal(inf.INFORMATIVA.versione, "2026-10-provvisoria-18"); for (const v of [15, 16, 17]) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} deve restare equivalente`); assert.ok(!inf.INFORMATIVA.equivalenti.includes(inf.INFORMATIVA.versione));
++  const vN = Number(inf.INFORMATIVA.versione.match(/^2026-10-provvisoria-(\d+)$/)?.[1]); assert.ok(vN >= 19, "versione: " + inf.INFORMATIVA.versione); for (let v = 15; v < vN; v++) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} deve restare equivalente`); assert.ok(!inf.INFORMATIVA.equivalenti.includes(inf.INFORMATIVA.versione));
+ });
+ 
+ test("il simbolo del badge esiste, è sul reticolo 24x24 e la spunta non è riempita", () => {
+diff --git a/scripts/test-richieste.mjs b/scripts/test-richieste.mjs
+new file mode 100644
+index 0000000..9dd733b
+--- /dev/null
++++ b/scripts/test-richieste.mjs
+@@ -0,0 +1,203 @@
++/**
++ * Test delle richieste dei proprietari («Fai match»): consenso dell'inquilino, scelta e ordine dei possibili inquilini, cosa
++ * vede il proprietario (e cosa NO), le parole degli errori, e la coerenza tra la migrazione 0032 e il codice.
++ * Le regole vere stanno nel database: le prova test-db-richieste.mjs su un PostgreSQL vero. Si lancia con:   npm test
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const rq = caricaTs(path.join(radice, "src", "lib", "richieste.ts"));
++const pi = caricaTs(path.join(radice, "src", "lib", "proprietario", "possibili-inquilini.ts"));
++const lu = caricaTs(path.join(radice, "src", "lib", "luoghi.ts"));
++const mp = caricaTs(path.join(radice, "src", "lib", "match", "possibili.ts"));
++const nt = caricaTs(path.join(radice, "src", "lib", "notifiche.ts"));
++const cand = caricaTs(path.join(radice, "src", "lib", "candidature.ts"));
++const inf = caricaTs(path.join(radice, "src", "content", "informativa.ts"));
++const leggi = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8").replace(/\r\n/g, "\n");
++const migrazione = leggi("supabase", "migrations", "0032_richieste_proprietari.sql");
++const senzaCommenti = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/--[^\n]*/g, "");
++
++// ============================================================ la migrazione e il codice dicono le stesse cose
++test("limiti: 280 caratteri e venti richieste al giorno sono gli STESSI nel database e nel codice", () => {
++  assert.equal(rq.MESSAGGIO_RICHIESTA_MAX, 280); assert.equal(rq.RICHIESTE_AL_GIORNO, 20);
++  assert.match(migrazione, /char_length\(messaggio\) between 1 and 280/); assert.match(migrazione, /char_length\(v_msg\) > 280/); assert.match(migrazione, /created_at > now\(\) - interval '1 day'\) >= 20/);
++});
++
++test("errori: ogni codice che il database può restituire ha le sue parole, e nessuna parola è per un codice che non esiste", () => {
++  const codici = [...new Set([...migrazione.matchAll(/raise exception '([A-Z_]+):/g)].map((m) => m[1]))].sort(); assert.ok(codici.length >= 11, "codici: " + codici.length);
++  assert.deepEqual(Object.keys(rq.ERRORI_RICHIESTA).sort(), codici, "i codici del database e quelli del codice devono coincidere");
++  for (const [k, v] of Object.entries(rq.ERRORI_RICHIESTA)) { assert.ok(v.length > 10 && /[.]$/.test(v), `${k}: una frase intera`); assert.ok(!/[A-Z_]{6,}/.test(v), `${k}: il codice non deve comparire nelle parole`); }
++});
++
++test("errori: dal messaggio del database alle parole; ciò che non si riconosce resta generico e non lascia passare testo del database", () => {
++  assert.equal(rq.messaggioErroreRichiesta("GIA_CANDIDATO: questa persona si è già candidata a questa casa"), rq.ERRORI_RICHIESTA.GIA_CANDIDATO); assert.equal(rq.messaggioErroreRichiesta("TROPPE_RICHIESTE: x"), "Per oggi hai scritto ad abbastanza persone: riprova domani.");
++  for (const x of [null, undefined, 5, {}, [], "", "boh", "gia_candidato: x", "  GIA_CANDIDATO: x", "errore GIA_CANDIDATO: x", "CODICE_INVENTATO: x", 'new row violates check constraint "x"', "permission denied for function invia_richiesta_proprietario"]) assert.equal(rq.messaggioErroreRichiesta(x), rq.ERRORE_RICHIESTA_GENERICO, JSON.stringify(x));
++});
++
++test("messaggio del proprietario: ripulito dagli spazi, vuoto = nessuno, oltre 280 caratteri no, tipi strani no", () => {
++  const m = rq.messaggioPulito; assert.deepEqual(m("  Ciao  "), { ok: true, valore: "Ciao" }); assert.deepEqual(m("   "), { ok: true, valore: null }); assert.deepEqual(m(""), { ok: true, valore: null }); assert.deepEqual(m(null), { ok: true, valore: null }); assert.deepEqual(m(undefined), { ok: true, valore: null });
++  assert.deepEqual(m("a".repeat(280)), { ok: true, valore: "a".repeat(280) }); assert.deepEqual(m("a".repeat(281)), { ok: false }); assert.deepEqual(m(" " + "a".repeat(280) + " "), { ok: true, valore: "a".repeat(280) }, "gli spazi non contano nel limite"); for (const x of [5, {}, [], true]) assert.deepEqual(m(x), { ok: false });
++});
++
++test("identificativi: solo veri UUID passano (niente testo libero verso il database)", () => {
++  assert.equal(rq.eUuid("11111111-0000-0000-0000-000000000001"), true); assert.equal(rq.eUuid("AAAAAAAA-0000-4000-8000-00000000000A"), true);
++  for (const x of ["", "x", "1", "11111111-0000-0000-0000-00000000000", "11111111-0000-0000-0000-0000000000011", "'; drop table x; --", null, undefined, 5, {}]) assert.equal(rq.eUuid(x), false, String(x));
++});
++
++// ============================================================ la richiesta letta dall'inquilino
++const RIGA = (o = {}) => ({ id: "r1", stato: "inviata", messaggio: "  Ciao!  ", nome_proprietario: " Mario ", candidatura_id: null, created_at: "2026-10-15T10:00:00Z", listings: { titolo: "Bilocale", zona: "Isola", prezzo: 1250, locali: 2, mq: 55, listing_photos: [{ url: "b.jpg", ordine: 2 }, { url: "a.jpg", ordine: 1 }] }, ...o });
++
++test("richiestaDaRiga: legge la richiesta con la casa e la sua prima foto, ripulisce i testi; la casa può arrivare come oggetto o come lista", () => {
++  const r = rq.richiestaDaRiga(RIGA()); assert.deepEqual(r, { id: "r1", stato: "inviata", messaggio: "Ciao!", nomeProprietario: "Mario", creataIl: "2026-10-15T10:00:00Z", candidaturaId: null, casa: { titolo: "Bilocale", zona: "Isola", prezzo: 1250, locali: 2, mq: 55, foto: "a.jpg" } });
++  assert.deepEqual(rq.richiestaDaRiga(RIGA({ listings: [RIGA().listings] })).casa, r.casa);
++  assert.equal(rq.richiestaDaRiga(RIGA({ messaggio: "   " })).messaggio, null); assert.equal(rq.richiestaDaRiga(RIGA({ nome_proprietario: null })).nomeProprietario, null); assert.equal(rq.richiestaDaRiga(RIGA({ stato: "accettata", candidatura_id: "c1" })).candidaturaId, "c1");
++});
++
++test("richiestaDaRiga: la casa che non c'è più dà «nessuna casa»; una riga rotta dà null e non rompe niente", () => {
++  for (const l of [null, undefined, {}, { titolo: 5 }, "x"]) assert.equal(rq.richiestaDaRiga(RIGA({ listings: l })).casa, null, JSON.stringify(l));
++  assert.equal(rq.richiestaDaRiga(RIGA({ listings: { titolo: "X", listing_photos: [] } })).casa.foto, null); assert.equal(rq.richiestaDaRiga(RIGA({ listings: { titolo: "X", listing_photos: [{ url: 5 }, null] } })).casa.foto, null);
++  for (const x of [null, undefined, 5, "x", [], {}, { id: 5, stato: "inviata" }, { id: "x" }, { id: "x", stato: "inventato" }, RIGA({ stato: "annullata" })]) assert.equal(rq.richiestaDaRiga(x), null, JSON.stringify(x));
++});
++
++test("richieste in attesa: solo quelle a cui non si è risposto, le più recenti per prime; frase con il nome", () => {
++  const r = (id, stato, quando) => rq.richiestaDaRiga(RIGA({ id, stato, created_at: quando, candidatura_id: stato === "accettata" ? "c" : null }));
++  assert.deepEqual(rq.richiesteInAttesa([r("a", "inviata", "2026-10-01T00:00:00Z"), r("b", "accettata", "2026-10-03T00:00:00Z"), r("c", "inviata", "2026-10-05T00:00:00Z"), r("d", "rifiutata", "2026-10-06T00:00:00Z")]).map((x) => x.id), ["c", "a"]); assert.deepEqual(rq.richiesteInAttesa([]), []);
++  assert.equal(rq.fraseRichiesta({ nomeProprietario: "Mario" }), "Mario ha scelto il tuo profilo"); assert.equal(rq.fraseRichiesta({ nomeProprietario: null }), "Un proprietario ha scelto il tuo profilo");
++});
++
++// ============================================================ i possibili inquilini, per il proprietario
++const LUOGHI = [{ id: "pMI", livello: "provincia", nome: "Milano", sigla: "MI", parent_id: null }, { id: "cMI", livello: "comune", nome: "Milano", sigla: null, parent_id: "pMI" }, { id: "qIsola", livello: "quartiere", nome: "Isola", sigla: null, parent_id: "cMI" }, { id: "qNavigli", livello: "quartiere", nome: "Navigli", sigla: null, parent_id: "cMI" }];
++const mappa = lu.mappaLuoghi(LUOGHI);
++const ANNUNCIO = mp.annuncioDaRiga({ id: "a1", prezzo: 1250, zona: "Isola, Milano", locali: 2, mq: 55, attributi: { balcone: true }, luogo_id: "qIsola", tipologia: "appartamento" }, mappa).annuncio;
++const ORA = Date.parse("2026-10-15T12:00:00Z");
++const persona = (id, o = {}) => ({ tenantId: id, nome: "Anna", cognome: "Verdi", professione: "Designer", avatarUrl: null, presentazione: "Ciao, cerco casa.", verificato: false, protestato: false, garante: null, fideiussione: null, reddito_mensile: 2600, reddito_nucleo: null, animaliCompilato: true, nucleoCompilato: true, riga: { budget_max: 1500, locali_min: null, mq_min: null }, zone: [], interessi: [], recensioni: [], ...o });
++const schede = (disponibili, o = {}) => pi.schedeInquilini({ annuncio: ANNUNCIO, canone: 1250, criteri: [], disponibili, esclusi: new Set(), ora: ORA, ...o });
++const ids = (s) => s.map((x) => x.tenantId);
++
++test("nome breve: nome e iniziale del cognome in maiuscolo; con una parte sola quella; senza niente «Un inquilino»; spazi ripuliti", () => {
++  const n = pi.nomeBreve; assert.equal(n("Anna", "Verdi"), "Anna V."); assert.equal(n("  Anna  ", " verdi "), "Anna V."); assert.equal(n("Anna", null), "Anna"); assert.equal(n(null, "Verdi"), "V."); assert.equal(n("Maria Luisa", "De Rossi"), "Maria Luisa D."); assert.equal(n("Émile", "ébert"), "Émile É.");
++  for (const x of [null, undefined, "", "  ", 5, {}]) assert.equal(n(x, x), "Un inquilino", String(x));
++});
++
++test("estratto della presentazione: intera se è breve; sennò tagliata a una parola intera con i puntini; mai oltre 160 caratteri più i puntini", () => {
++  assert.equal(pi.estratto("Ciao, cerco casa."), "Ciao, cerco casa."); assert.equal(pi.estratto("  tanti   spazi   qui  "), "tanti spazi qui"); for (const x of [null, undefined, "", "   ", 5, {}]) assert.equal(pi.estratto(x), null);
++  const lungo = "parola ".repeat(60); const e = pi.estratto(lungo); assert.ok(e.endsWith("…") && e.length <= 161 && !/parol…$/.test(e), e); assert.ok(!/[ ,.;:]…$/.test(e)); assert.equal(pi.estratto("x".repeat(500)).length, 161, "senza spazi si taglia dove capita"); assert.equal(pi.LUNGHEZZA_ESTRATTO, 160);
++});
++
++test("in linea: la casa rispetta la ricerca (budget, zona, tipologia); una ricerca vuota non conta", () => {
++  const li = (riga, zone = []) => pi.ricercaInLinea(ANNUNCIO, { riga: { budget_max: null, locali_min: null, mq_min: null, ...riga }, zone, interessi: [] });
++  assert.equal(li({ budget_max: 1500 }), true); assert.equal(li({ budget_max: 1000 }), false); assert.equal(li({}), false, "ricerca vuota"); assert.equal(li({ budget_max: 1500 }, [{ zona: "Navigli", luogo_id: "qNavigli" }]), false); assert.equal(li({ budget_max: 1500 }, [{ zona: "Milano", luogo_id: "cMI" }]), true); assert.equal(li({ budget_max: 1500, tipologia: "villa" }), false);
++});
++
++test("schede: solo chi ha una ricerca in linea con la casa; chi non è disponibile o sfora il budget non compare", () => {
++  const s = schede([persona("a"), persona("b", { riga: { budget_max: 900, locali_min: null, mq_min: null } }), persona("c", { riga: { budget_max: null, locali_min: null, mq_min: null } }), persona("d", { riga: { budget_max: 2000, locali_min: null, mq_min: null } })]); assert.deepEqual(ids(s).sort(), ["a", "d"]);
++});
++
++test("schede: chi si è già candidato o ha già ricevuto una richiesta non si propone di nuovo", () => {
++  const tutti = [persona("a"), persona("b"), persona("c")]; assert.deepEqual(ids(schede(tutti, { esclusi: new Set(["a", "c"]) })), ["b"]); assert.deepEqual(ids(schede(tutti, { esclusi: new Set(["a", "b", "c"]) })), []);
++});
++
++test("schede: chi non rispetta un criterio OBBLIGATORIO del proprietario non si propone; uno solo preferenziale sì, ma più in basso", () => {
++  const verificato = [{ chiave: "profiloVerificato", peso: 8, modo: "obbligatorio" }]; const tutti = [persona("v", { verificato: true }), persona("n", { verificato: false })];
++  assert.deepEqual(ids(schede(tutti, { criteri: verificato })), ["v"], "chi non ha il reddito verificato è escluso se il proprietario lo vuole"); const preferito = [{ chiave: "profiloVerificato", peso: 8, modo: "preferenziale" }];
++  const s = schede(tutti, { criteri: preferito }); assert.deepEqual(ids(s), ["v", "n"]); assert.ok(s[0].compatibilita > s[1].compatibilita, "chi ha il reddito verificato è più adatto");
++});
++
++test("schede: l'ordine è compatibilità, poi il badge «raccomandato», poi l'affidabilità", () => {
++  const rec = (a, b) => [{ voto: 5, autore_id: a, created_at: "2026-09-01T00:00:00Z" }, { voto: 5, autore_id: b, created_at: "2026-09-01T00:00:00Z" }];
++  const tutti = [persona("basso", { protestato: true }), persona("badge", { recensioni: rec("o1", "o2"), garante: null }), persona("alto", { verificato: true, garante: true })];
++  const s = schede(tutti); assert.deepEqual(ids(s), ["badge", "alto", "basso"], "senza criteri la compatibilità è la stessa: prima il badge, poi l'affidabilità"); assert.equal(s[0].raccomandato, true); assert.equal(s[1].raccomandato, false);
++  assert.deepEqual(ids(schede([persona("b2", { verificato: true }), persona("b1", { verificato: true, garante: true })])), ["b1", "b2"], "a parità di tutto, l'affidabilità più alta");
++});
++
++test("COSA VEDE IL PROPRIETARIO: solo nome e iniziale, lavoro, foto, estratto, affidabilità, badge, recensioni, reddito verificato sì/no, compatibilità; NIENTE reddito, contatti, cognome intero, identificativi interni oltre a quello per scrivere", () => {
++  const p = persona("a", { nome: "Anna", cognome: "Verdi", reddito_mensile: 4321, reddito_nucleo: 8765, protestato: true, garante: true, avatarUrl: "https://x/f.jpg", presentazione: "x ".repeat(200), verificato: true });
++  const [s] = schede([p]); assert.deepEqual(Object.keys(s).sort(), ["affidabilita", "avatarUrl", "compatibilita", "etichettaAffidabilita", "nome", "presentazione", "professione", "raccomandato", "recensioni", "redditoVerificato", "tenantId"]);
++  const json = JSON.stringify(s); for (const vietato of ["4321", "8765", "Verdi", "reddito_mensile", "reddito_nucleo", "email", "telefono", "protestato", "cognome"]) assert.ok(!json.includes(vietato), `una scheda contiene «${vietato}»`); assert.equal(s.nome, "Anna V."); assert.equal(s.redditoVerificato, true); assert.ok(s.presentazione.length <= 161);
++});
++
++test("schede: le recensioni e il badge si calcolano come altrove (stelle e proprietari diversi); dati rotti si ignorano; gli input non si modificano", () => {
++  const recs = [{ voto: 5, autore_id: "o1", created_at: "2026-09-01T00:00:00Z" }, { voto: 4, autore_id: "o2", created_at: "2026-09-01T00:00:00Z" }, { voto: 1, autore_id: "o3", created_at: "2000-01-01T00:00:00Z" }];
++  const d = [persona("a", { recensioni: recs }), null, undefined, 5, { tenantId: 7 }, persona("b", { recensioni: [{ voto: 5, autore_id: "o1" }, { voto: 5, autore_id: "o1" }] })]; const copia = JSON.stringify(d);
++  const s = schede(d); assert.deepEqual(ids(s).sort(), ["a", "b"]); assert.equal(JSON.stringify(d), copia); const a = s.find((x) => x.tenantId === "a"), b = s.find((x) => x.tenantId === "b");
++  assert.equal(a.raccomandato, true, "due proprietari diversi, la negativa è scaduta"); assert.deepEqual(a.recensioni, { numero: 3, media: 3.3 }); assert.equal(b.raccomandato, false, "lo stesso proprietario due volte");
++});
++
++// ============================================================ il codice rispetta il consenso e la minimizzazione
++test("SICUREZZA: la chiave di servizio legge PRIMA solo i criteri di ricerca e il consenso; nome, lavoro e recensioni si leggono solo dopo, per chi ha dato il consenso e ha una ricerca in linea, e il consenso si ricontrolla sulla riga", () => {
++  const s = senzaCommenti(leggi("src", "lib", "proprietario", "possibili-server.ts"));
++  const prima = s.slice(s.indexOf("async function leggiRicerche"), s.indexOf("export async function possibiliPerAnnuncio")); const selezioni = [...prima.matchAll(/\.select\("([^"]+)"\)/g)].map((m) => m[1]).join(" ");
++  assert.ok(selezioni.includes("visibile_ai_proprietari") && selezioni.includes("budget_max") && selezioni.includes("attributo_key")); for (const v of ["nome", "cognome", "professione", "reddito", "presentazione", "avatar", "protestato", "email", "recensioni"]) assert.ok(!selezioni.includes(v), `la prima lettura (di TUTTI) legge «${v}»`);
++  assert.match(s, /const disponibili = ricerche\.filter\(\(r\) => r\.visibile\);/); assert.match(s, /for \(const a of annunci\) for \(const d of disponibili\) if \(!esclusi\.get\(a\.id\)\?\.has\(d\.tenantId\) && ricercaInLinea\(a\.annuncio, d\)\) daLeggere\.add\(d\.tenantId\);/);
++  assert.match(s, /if \(!det \|\| det\.visibile_ai_proprietari !== true\) continue;/, "il consenso si ricontrolla sulla riga letta"); assert.match(s, /\.from\("profiles"\)\.select\("id, nome, cognome"\)\.in\("id", blocco\)/);
++});
++
++test("nessuna parte dell'app scrive le richieste a mano: si passa solo dalle due funzioni del database", () => {
++  const trovati = []; const visita = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) visita(p); else if (/\.(ts|tsx)$/.test(e.name)) { const t = fs.readFileSync(p, "utf8"); if (/from\("richieste_proprietari"\)\s*\.(insert|update|delete|upsert)/.test(t)) trovati.push(path.relative(radice, p)); } } };
++  visita(path.join(radice, "src")); assert.deepEqual(trovati, [], "scritture dirette: " + trovati.join(", "));
++  const a = leggi("src", "app", "(app)", "database", "actions.ts"); assert.match(a, /supabase\.rpc\("invia_richiesta_proprietario", \{ p_listing: listingId, p_tenant: tenantId, p_messaggio: m\.valore \}\)/);
++  const r = leggi("src", "app", "(app)", "candidature", "richieste-actions.ts"); assert.match(r, /supabase\.rpc\("rispondi_richiesta_proprietario", \{ p_richiesta: richiestaId, p_accetta: accetta \}\)/);
++});
++
++test("azioni: gli identificativi si controllano PRIMA di chiamare il database, il messaggio pure, e dopo il successo si aggiornano le pagine giuste", () => {
++  const a = leggi("src", "app", "(app)", "database", "actions.ts"); const f = a.slice(a.indexOf("export async function faiMatch"));
++  assert.match(f, /if \(!eUuid\(listingId\) \|\| !eUuid\(tenantId\)\) return/); assert.match(f, /const m = messaggioPulito\(messaggio \?\? null\);\s+if \(!m\.ok\)/); assert.ok(f.indexOf("eUuid(") < f.indexOf("createClient()") && f.indexOf("messaggioPulito(") < f.indexOf("supabase.rpc("), "i controlli vengono prima"); assert.match(f, /revalidatePath\("\/database"\);\s+revalidatePath\("\/"\);/);
++  const r = leggi("src", "app", "(app)", "candidature", "richieste-actions.ts"); assert.match(r, /if \(!eUuid\(richiestaId\) \|\| typeof accetta !== "boolean"\)/); assert.match(r, /revalidatePath\("\/candidature"\);\s+revalidatePath\("\/messaggi"\);/); assert.match(r, /if \(typeof visibile !== "boolean"\) return/);
++  assert.match(r, /\.update\(\{ visibile_ai_proprietari: visibile, visibile_dal: visibile \? new Date\(\)\.toISOString\(\) : null \}\)\s+\.eq\("profile_id", user\.id\)/, "si cambia solo il proprio consenso");
++});
++
++test("il consenso è spento di partenza nel database, nel tipo e nell'informativa; ritirarlo si salva subito", () => {
++  assert.match(migrazione, /add column if not exists visibile_ai_proprietari boolean not null default false/); assert.match(leggi("src", "lib", "types.ts"), /visibile_ai_proprietari\?: boolean;/); assert.match(leggi("src", "app", "(app)", "candidature", "page.tsx"), /visibile=\{profilo\?\.visibile_ai_proprietari === true\}/, "se la lettura del profilo non riesce, NON si deve risultare disponibili: solo un «sì» esplicito conta");
++  const p = leggi("src", "components", "PrivacySheet.tsx"); assert.match(p, /visibileProprietariIniziale\?: boolean;/); assert.match(p, /useState\(visibileProprietariIniziale === true\)/); assert.match(p, /\{visibileProprietariIniziale !== undefined && \(\s+<Field label="Fatti trovare dai proprietari">/); assert.match(p, /const r = await impostaVisibilita\(nuova\);/);
++  assert.match(leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx"), /visibileProprietariIniziale=\{tenant\.visibile_ai_proprietari === true\}/); assert.ok(!/visibileProprietariIniziale/.test(leggi("src", "app", "(app)", "profilo", "OwnerProfiloClient.tsx")), "il proprietario non ha questo consenso");
++  const t = JSON.stringify(inf.INFORMATIVA); assert.ok(t.includes("è spento finché non lo accendi tu, e lo puoi ritirare quando vuoi")); assert.ok(t.includes("Non vedono il reddito né i contatti")); assert.ok(t.includes(`al massimo ${{ 20: "venti" }[rq.RICHIESTE_AL_GIORNO]} al giorno`));
++});
++
++// ============================================================ le schermate
++test("Database (proprietario): «Fai match» NON invia subito: apre una conferma con le parole giuste, e solo «Sì, invia la richiesta» chiama il server", () => {
++  const c = senzaCommenti(leggi("src", "components", "PossibiliInquilini.tsx"));
++  assert.match(c, /onClick=\{\(\) => setScelta\(\{ casa: p, scheda: s \}\)\}>\s+Fai match/); assert.equal([...c.matchAll(/faiMatch\(/g)].length, 1, "faiMatch si chiama in un solo punto"); assert.ok(c.indexOf("faiMatch(") > c.indexOf("function invia()") && c.indexOf("faiMatch(") < c.indexOf("function invia()") + 400, "solo dentro «invia»");
++  for (const x of ["Fai match con ${scelta.scheda.nome}?", "Le arriverà una richiesta per", "Se non risponde o dice di no, non succede\n              niente", "Sì, invia la richiesta", "No, torna indietro", "Vuoi aggiungere due parole? (facoltativo)"]) assert.ok(c.includes(x) || c.replace(/\s+/g, " ").includes(x.replace(/\s+/g, " ")), `manca «${x}»`);
++  assert.match(c, /className="ob-textarea"/, "il campo del messaggio deve usare la classe che esiste (con bordo e sfondo)"); assert.ok(!/textarea-base/.test(c)); assert.match(leggi("src", "app", "globals.css"), /\.ob-textarea \{/, "la classe del campo di testo deve esistere nel CSS");
++  assert.match(c, /maxLength=\{MESSAGGIO_RICHIESTA_MAX\}/); assert.match(c, /\{messaggio\.length\}\/\{MESSAGGIO_RICHIESTA_MAX\}/);
++});
++
++test("Database (proprietario): la scheda non mostra reddito né contatti; mostra il badge, l'affidabilità e le recensioni; un rifiuto non dice chi è", () => {
++  const c = senzaCommenti(leggi("src", "components", "PossibiliInquilini.tsx")); for (const vietato of ["reddito_mensile", "reddito_nucleo", "email", "telefono", "cognome", "protestato"]) assert.ok(!c.includes(vietato), `la scheda usa «${vietato}»`);
++  for (const x of ["<BadgeRaccomandato />", "Reddito verificato", "Affidabilità {s.affidabilita} · {s.etichettaAffidabilita}", "testoRecensioni(s.recensioni)"]) assert.ok(c.includes(x), `manca «${x}»`);
++  assert.match(c, /\{rifiutate === 1 \? "1 persona non ha accettato" : `\$\{rifiutate\} persone non hanno accettato`\}/); const s = senzaCommenti(leggi("src", "lib", "proprietario", "possibili-server.ts")); assert.match(s, /nome: r\.stato === "inviata" \? nomiRichieste\.get\(r\.id as string\) \?\? null : null,/);
++});
++
++test("«I tuoi match» (inquilino): il consenso è spiegato, si risponde con «Sì, mi interessa» / «No, grazie», accettando si apre la chat; il numero sulla scheda e sulla barra conta solo le richieste in attesa", () => {
++  const c = senzaCommenti(leggi("src", "components", "RichiesteProprietari.tsx")); for (const x of ["Fatti trovare dai proprietari", "Mi rendo disponibile", "Non voglio più essere trovato", "Sì, mi interessa", "No, grazie", "È un match!", "Apri la chat", "Nessuna richiesta per ora", "non il reddito né i contatti"]) assert.ok(c.replace(/\s+/g, " ").includes(x), `manca «${x}»`);
++  assert.match(c, /href=\{`\/chat\/\$\{esito\.candidaturaId\}`\}/); assert.match(c, /disabled=\{pending \|\| !r\.casa\}/, "non si accetta una casa che non c'è più");
++  const l = leggi("src", "app", "(app)", "layout.tsx"); assert.match(l, /ruolo === "inquilino"\s+\? await supabase\.from\("richieste_proprietari"\)\.select\("id", \{ count: "exact", head: true \}\)\.eq\("stato", "inviata"\)\s+: \{ count: 0 \}/); assert.match(leggi("src", "components", "Navigation.tsx"), /"\/candidature": \{ etichetta: etichettaConteggio\(richiesteInAttesa\), descrizione: "richieste dei proprietari a cui rispondere" \}/);
++  assert.match(leggi("src", "app", "(app)", "candidature", "CandidatureClient.tsx"), /\{s\.id === "richieste" && nRichieste > 0 && <span className="conteggio da-leggere">\{nRichieste\}<\/span>\}/);
++});
++
++test("«I tuoi match»: la scheda da aprire si legge dall'indirizzo (?scheda=richieste) e qualunque altro valore apre le candidature; la notifica porta lì", () => {
++  assert.equal(cand.schedaMatchDaParametro("richieste"), "richieste"); assert.equal(cand.schedaMatchDaParametro(["richieste", "x"]), "richieste"); for (const x of ["candidature", "", "RICHIESTE", "x", null, undefined, 5, {}, []]) assert.equal(cand.schedaMatchDaParametro(x), "candidature", String(x));
++  assert.equal(nt.linkNotifica({ tipo: "richiesta_ricevuta", link: "/candidature" }), "/candidature?scheda=richieste"); assert.equal(nt.linkNotifica({ tipo: "candidatura_rifiutata", link: "/candidature" }), "/candidature", "le altre notifiche delle candidature non cambiano"); assert.equal(nt.linkNotifica({ tipo: "richiesta_accettata", link: "/chat/c1" }), "/chat/c1");
++  assert.equal(nt.linkNotifica({ tipo: "richiesta_ricevuta", link: "//evil.example" }), "/", "il link resta dentro il sito");
++});
++
++test("notifiche: i due tipi nuovi hanno parole per chi legge, con il nome e la casa; un nome o un titolo che manca non rompe niente", () => {
++  assert.ok(nt.TIPI_NOTIFICA.includes("richiesta_ricevuta") && nt.TIPI_NOTIFICA.includes("richiesta_accettata"));
++  const a = nt.descriviNotifica("richiesta_ricevuta", { nome: "Mario", titolo: "Bilocale" }); assert.equal(a.titolo, "Un proprietario vuole conoscerti"); assert.equal(a.testo, "Mario ha scelto il tuo profilo per «Bilocale». Se ti interessa, rispondi da «I tuoi match».");
++  assert.match(nt.descriviNotifica("richiesta_ricevuta", null).testo, /^Un proprietario ha scelto il tuo profilo per la sua casa\./); assert.match(nt.descriviNotifica("richiesta_ricevuta", { nome: 5 }).testo, /^Un proprietario/);
++  const b = nt.descriviNotifica("richiesta_accettata", { titolo: "Bilocale" }); assert.equal(b.titolo, "Hai un nuovo match"); assert.match(b.testo, /ora potete scrivervi in chat\.$/); assert.match(nt.descriviNotifica("richiesta_accettata", null).testo, /la tua casa/);
++});
++
++test("una candidatura nata da una richiesta si riconosce («Ti ha scelto il proprietario») e resta un match come gli altri", () => {
++  const c = leggi("src", "app", "(app)", "candidature", "CandidatureClient.tsx"); assert.match(c, /\{c\.origine === "proprietario" && <div className="mc-origine">Ti ha scelto il proprietario<\/div>\}/); assert.match(leggi("src", "app", "(app)", "candidature", "page.tsx"), /\.select\("id, status, match_pct, motivo_rifiuto, origine, created_at, listings\(titolo, zona, prezzo, locali, mq\)"\)/);
++  assert.match(leggi("src", "lib", "types.ts"), /origine\?: "inquilino" \| "proprietario";/);
++});
++
++test("stile del proprietario: i pulsanti «Fai match» e di conferma sono grandi (almeno 56 px), e i testi delle schede sono da 15 px in su", () => {
++  const css = leggi("src", "app", "globals.css"); const h = (c) => Number((css.match(new RegExp(`${c.replace(/\./g, "\\.")} \\{[^}]*min-height:\\s*(\\d+)px`)) ?? [])[1]); assert.ok(h(".scheda-match") >= 56 && h(".possibili-conferma .opp-cta") >= 56, `${h(".scheda-match")}, ${h(".possibili-conferma .opp-cta")}`);
++  assert.match(css, /\.scheda-etichette \.badge-raccomandato \{[^}]*font-size: 15px;/, "il badge nelle schede è piccolo: per il proprietario deve essere da 15 px"); assert.ok(!/<BadgeRaccomandato compatto/.test(leggi("src", "components", "PossibiliInquilini.tsx")), "nelle schede non si usa la versione compatta (11 px)");
++  const blocco = css.slice(css.indexOf("/* ---- Database: le schede dei possibili inquilini e la richiesta ---- */")); const misure = [...blocco.matchAll(/font-size:\s*(\d+(?:\.\d+)?)px/g)].map((m) => Number(m[1])); assert.ok(misure.length >= 10 && Math.min(...misure) >= 15, `caratteri: ${Math.min(...misure)} px`);
++});
+diff --git a/src/app/(app)/candidature/CandidatureClient.tsx b/src/app/(app)/candidature/CandidatureClient.tsx
+index fb86c46..a9d28b9 100644
+--- a/src/app/(app)/candidature/CandidatureClient.tsx
++++ b/src/app/(app)/candidature/CandidatureClient.tsx
+@@ -16,18 +16,29 @@ import {
+   type SchedaMatch,
+ } from "@/lib/candidature";
+ import { RitiraCandidatura } from "@/components/RitiraCandidatura";
++import { RichiesteProprietari } from "@/components/RichiesteProprietari";
++import { richiesteInAttesa, type RichiestaPerInquilino } from "@/lib/richieste";
+ import { PageContainer } from "@/components/ui/PageContainer";
+ import { messaggioMotivoRifiuto } from "@/lib/motivi-rifiuto";
+ import { IconChevronSu, IconMatch } from "@/components/icons";
+ 
+ export function CandidatureClient({
+   candidature,
++  richieste = [],
++  visibile = false,
++  schedaIniziale = "candidature",
+ }: {
+   candidature: CandidaturaConAnnuncio[];
++  /** le richieste dei proprietari */
++  richieste?: RichiestaPerInquilino[];
++  /** l'inquilino si è reso disponibile a essere trovato dai proprietari */
++  visibile?: boolean;
++  schedaIniziale?: SchedaMatch;
+ }) {
+   const router = useRouter();
+   const idBase = useId();
+-  const [scheda, setScheda] = useState<SchedaMatch>("candidature");
++  const [scheda, setScheda] = useState<SchedaMatch>(schedaIniziale);
++  const nRichieste = richiesteInAttesa(richieste).length;
+   const [selezionata, setSelezionata] = useState<CandidaturaConAnnuncio | null>(null);
+ 
+   const sezioni = sezioniCandidature(candidature);
+@@ -61,6 +72,7 @@ export function CandidatureClient({
+           >
+             {s.etichetta}
+             {s.id === "candidature" && candidature.length > 0 && <span className="conteggio">{candidature.length}</span>}
++            {s.id === "richieste" && nRichieste > 0 && <span className="conteggio da-leggere">{nRichieste}</span>}
+           </button>
+         ))}
+       </div>
+@@ -82,14 +94,7 @@ export function CandidatureClient({
+ 
+       {/* ---- Le richieste che arrivano dai proprietari ---- */}
+       <div role="tabpanel" id={`${idBase}-pannello-richieste`} aria-labelledby={`${idBase}-richieste`} hidden={scheda !== "richieste"}>
+-        <div className="empty-inline">
+-          <IconMatch className="icon-empty" />
+-          <h3>Nessuna richiesta dai proprietari</h3>
+-          <p>
+-            Qui compariranno le richieste che ti mandano i proprietari. Per ora i proprietari vedono solo chi si candida alle loro case, quindi non
+-            ce ne sono: le tue candidature le trovi nell&apos;altra scheda.
+-          </p>
+-        </div>
++        <RichiesteProprietari richieste={richieste} visibile={visibile} />
+       </div>
+ 
+       <Sheet open={selezionata !== null} onClose={() => setSelezionata(null)} title={selezionata?.listings?.titolo ?? "Candidatura"}>
+@@ -181,6 +186,7 @@ function Gruppo({
+                 {c.listings?.prezzo ? `€${c.listings.prezzo.toLocaleString("it-IT")}/mese` : "—"}
+                 {c.match_pct !== null && ` · ${c.match_pct}% compatibile`}
+               </div>
++              {c.origine === "proprietario" && <div className="mc-origine">Ti ha scelto il proprietario</div>}
+             </div>
+             <div className={`mc-pct ${STATO_BADGE[c.status]}`}>{STATO_LABEL[c.status]}</div>
+           </button>
+diff --git a/src/app/(app)/candidature/page.tsx b/src/app/(app)/candidature/page.tsx
+index 04a9868..6fdadf4 100644
+--- a/src/app/(app)/candidature/page.tsx
++++ b/src/app/(app)/candidature/page.tsx
+@@ -1,24 +1,38 @@
+ import { createClient } from "@/lib/supabase/server";
+ import { CandidatureClient } from "./CandidatureClient";
+ import type { CandidaturaConAnnuncio } from "@/lib/types";
++import { richiestaDaRiga, type RichiestaPerInquilino } from "@/lib/richieste";
++import { schedaMatchDaParametro } from "@/lib/candidature";
+ 
+-export default async function CandidaturePage() {
++export default async function CandidaturePage({ searchParams }: { searchParams: Promise<{ scheda?: string | string[] }> }) {
+   const supabase = await createClient();
+   const {
+     data: { user },
+   } = await supabase.auth.getUser();
+ 
+-  const { data: candidature } = await supabase
+-    .from("candidature")
+-    .select(
+-      "id, status, match_pct, motivo_rifiuto, created_at, listings(titolo, zona, prezzo, locali, mq)"
+-    )
+-    .eq("tenant_id", user!.id)
+-    .order("created_at", { ascending: false });
++  const [{ data: candidature }, { data: richieste }, { data: profilo }] = await Promise.all([
++    supabase
++      .from("candidature")
++      .select("id, status, match_pct, motivo_rifiuto, origine, created_at, listings(titolo, zona, prezzo, locali, mq)")
++      .eq("tenant_id", user!.id)
++      .order("created_at", { ascending: false }),
++    // le richieste dei proprietari, con la casa e le sue foto
++    supabase
++      .from("richieste_proprietari")
++      .select("id, stato, messaggio, nome_proprietario, candidatura_id, created_at, listings(titolo, zona, prezzo, locali, mq, listing_photos(url, ordine))")
++      .eq("tenant_id", user!.id)
++      .order("created_at", { ascending: false }),
++    supabase.from("tenant_profiles").select("visibile_ai_proprietari").eq("profile_id", user!.id).single(),
++  ]);
++
++  const lista = (richieste ?? []).map(richiestaDaRiga).filter((r): r is RichiestaPerInquilino => r !== null);
+ 
+   return (
+     <CandidatureClient
+       candidature={(candidature ?? []) as unknown as CandidaturaConAnnuncio[]}
++      richieste={lista}
++      visibile={profilo?.visibile_ai_proprietari === true}
++      schedaIniziale={schedaMatchDaParametro((await searchParams).scheda)}
+     />
+   );
+ }
+diff --git a/src/app/(app)/candidature/richieste-actions.ts b/src/app/(app)/candidature/richieste-actions.ts
+new file mode 100644
+index 0000000..d90b119
+--- /dev/null
++++ b/src/app/(app)/candidature/richieste-actions.ts
+@@ -0,0 +1,51 @@
++"use server";
++
++import { revalidatePath } from "next/cache";
++import { createClient } from "@/lib/supabase/server";
++import { eUuid, messaggioErroreRichiesta } from "@/lib/richieste";
++
++export type EsitoRichiesta = { ok: true; candidaturaId: string | null } | { ok: false; error: string };
++
++/**
++ * L'inquilino risponde a una richiesta di un proprietario. Tutte le regole (la richiesta è sua, non ha già risposto, la casa è
++ * ancora disponibile) le controlla il database: qui si chiama e si traduce l'errore in parole.
++ * Accettando nasce una candidatura già accettata, e si restituisce il suo identificativo (serve per aprire la chat).
++ */
++export async function rispondiRichiesta(richiestaId: string, accetta: boolean): Promise<EsitoRichiesta> {
++  if (!eUuid(richiestaId) || typeof accetta !== "boolean") return { ok: false, error: messaggioErroreRichiesta("RICHIESTA_NON_TUA: x") };
++  const supabase = await createClient();
++  const {
++    data: { user },
++  } = await supabase.auth.getUser();
++  if (!user) return { ok: false, error: messaggioErroreRichiesta("NON_AUTENTICATO: x") };
++
++  const { data, error } = await supabase.rpc("rispondi_richiesta_proprietario", { p_richiesta: richiestaId, p_accetta: accetta });
++  if (error) return { ok: false, error: messaggioErroreRichiesta(error.message) };
++
++  revalidatePath("/candidature");
++  revalidatePath("/messaggi");
++  return { ok: true, candidaturaId: typeof data === "string" ? data : null };
++}
++
++/**
++ * L'inquilino sceglie se farsi trovare dai proprietari. Spento di partenza: lo accende lui, e lo può spegnere quando vuole
++ * (le richieste già arrivate restano, e potrà rifiutarle).
++ */
++export async function impostaVisibilita(visibile: boolean): Promise<{ ok: true } | { ok: false; error: string }> {
++  if (typeof visibile !== "boolean") return { ok: false, error: "Scelta non valida." };
++  const supabase = await createClient();
++  const {
++    data: { user },
++  } = await supabase.auth.getUser();
++  if (!user) return { ok: false, error: "Accedi di nuovo per continuare." };
++
++  const { error } = await supabase
++    .from("tenant_profiles")
++    .update({ visibile_ai_proprietari: visibile, visibile_dal: visibile ? new Date().toISOString() : null })
++    .eq("profile_id", user.id);
++  if (error) return { ok: false, error: "Non siamo riusciti a salvare. Riprova tra poco." };
++
++  revalidatePath("/candidature");
++  revalidatePath("/profilo");
++  return { ok: true };
++}
+diff --git a/src/app/(app)/database/DatabaseClient.tsx b/src/app/(app)/database/DatabaseClient.tsx
+index 4da765f..04286c7 100644
+--- a/src/app/(app)/database/DatabaseClient.tsx
++++ b/src/app/(app)/database/DatabaseClient.tsx
+@@ -2,7 +2,7 @@
+ 
+ import { stelleTesto, testoRecensioni } from "@/lib/recensioni";
+ import { BadgeRaccomandato } from "@/components/BadgeRaccomandato";
+-import { frasePossibili } from "@/lib/proprietario/home";
++import { PossibiliInquilini } from "@/components/PossibiliInquilini";
+ import type { PossibiliPerCasa } from "@/lib/proprietario/possibili-server";
+ import { useState, useTransition } from "react";
+ import Link from "next/link";
+@@ -145,33 +145,7 @@ export function DatabaseClient({
+       <h1 className="screen-title">Database inquilini</h1>
+ 
+       {/* Dove porta la tessera «Possibili inquilini» della Home */}
+-      <section id="possibili" className="possibili" aria-labelledby="possibili-titolo">
+-        <h2 id="possibili-titolo" className="possibili-titolo">
+-          Possibili inquilini
+-        </h2>
+-        {possibili.length === 0 ? (
+-          <p className="possibili-testo">Quando la tua casa sarà pubblicata vedrai qui quanti inquilini cercano una casa come la tua.</p>
+-        ) : (
+-          possibili.map((p) => {
+-            const f = p.possibili === null ? null : frasePossibili(p.possibili);
+-            return (
+-              <div key={p.id} className="possibili-riga">
+-                <b className="possibili-numero">{f ? f.numero : "–"}</b>
+-                <span className="possibili-frase">
+-                  {f ? f.frase : "Il numero non è disponibile in questo momento"}
+-                  <small>
+-                    {p.titolo} · {p.zona}
+-                  </small>
+-                </span>
+-              </div>
+-            );
+-          })
+-        )}
+-        <p className="possibili-testo">
+-          Sono persone che hanno impostato una ricerca adatta alla tua casa e non si sono ancora candidate. Non vedi chi sono: se una di loro si
+-          candida, la trovi qui sotto, tra le candidature.
+-        </p>
+-      </section>
++      <PossibiliInquilini possibili={possibili} />
+       <p className="screen-sub">
+         {candidature.length === 0
+           ? "Le candidature ricevute sui tuoi annunci arrivano qui."
+diff --git a/src/app/(app)/database/actions.ts b/src/app/(app)/database/actions.ts
+index ac67c69..8c8e1be 100644
+--- a/src/app/(app)/database/actions.ts
++++ b/src/app/(app)/database/actions.ts
+@@ -8,6 +8,7 @@ import type { RigaCriterioDb } from "@/lib/match";
+ import { motivoRifiutoValido } from "@/lib/motivi-rifiuto";
+ import { profiloDaVista } from "@/lib/candidati";
+ import { messaggioErroreVerifica } from "@/lib/verifica";
++import { eUuid, messaggioErroreRichiesta, messaggioPulito } from "@/lib/richieste";
+ 
+ export async function valutaCandidatura(
+   candidaturaId: string,
+@@ -95,3 +96,27 @@ export async function valutaCandidatura(
+   revalidatePath("/database");
+   return { ok: true };
+ }
++
++/**
++ * «Fai match»: il proprietario manda una richiesta a un inquilino che si è reso disponibile. L'inquilino la trova in «I tuoi
++ * match» e decide. Le regole (la casa è tua e pubblicata, la persona ha dato il consenso, non si è già candidata, non le hai
++ * già scritto, il freno giornaliero) le controlla il database; qui si traduce l'errore in parole.
++ */
++export async function faiMatch(listingId: string, tenantId: string, messaggio?: string | null): Promise<{ ok: true } | { ok: false; error: string }> {
++  if (!eUuid(listingId) || !eUuid(tenantId)) return { ok: false, error: messaggioErroreRichiesta("INQUILINO_NON_DISPONIBILE: x") };
++  const m = messaggioPulito(messaggio ?? null);
++  if (!m.ok) return { ok: false, error: messaggioErroreRichiesta("MESSAGGIO_TROPPO_LUNGO: x") };
++
++  const supabase = await createClient();
++  const {
++    data: { user },
++  } = await supabase.auth.getUser();
++  if (!user) return { ok: false, error: messaggioErroreRichiesta("NON_AUTENTICATO: x") };
++
++  const { error } = await supabase.rpc("invia_richiesta_proprietario", { p_listing: listingId, p_tenant: tenantId, p_messaggio: m.valore });
++  if (error) return { ok: false, error: messaggioErroreRichiesta(error.message) };
++
++  revalidatePath("/database");
++  revalidatePath("/");
++  return { ok: true };
++}
+diff --git a/src/app/(app)/layout.tsx b/src/app/(app)/layout.tsx
+index 824e563..c802c35 100644
+--- a/src/app/(app)/layout.tsx
++++ b/src/app/(app)/layout.tsx
+@@ -44,6 +44,13 @@ export default async function AppLayout({
+     .eq("letto", false)
+     .neq("mittente_id", user!.id);
+ 
++  // Le richieste dei proprietari a cui l'inquilino non ha ancora risposto (per il numero su «I tuoi match»). Solo per gli inquilini;
++  // come sopra, se non riesce si mostra zero.
++  const { count: richiesteInAttesa } =
++    ruolo === "inquilino"
++      ? await supabase.from("richieste_proprietari").select("id", { count: "exact", head: true }).eq("stato", "inviata")
++      : { count: 0 };
++
+   /*
+     Come nel prototipo: un unico "telaio" da 480px centrato, alto quanto
+     la viewport e senza scroll di pagina. Dentro, l'area delle schermate
+@@ -52,7 +59,7 @@ export default async function AppLayout({
+   return (
+     <div className="app-shell">
+       <div className="screens">{children}</div>
+-      <Navigation ruolo={ruolo} nome={profile?.nome} nonLette={count ?? 0} messaggiNonLetti={messaggiNonLetti ?? 0} />
++      <Navigation ruolo={ruolo} nome={profile?.nome} nonLette={count ?? 0} messaggiNonLetti={messaggiNonLetti ?? 0} richiesteInAttesa={richiesteInAttesa ?? 0} />
+     </div>
+   );
+ }
+diff --git a/src/app/(app)/profilo/ProfiloClient.tsx b/src/app/(app)/profilo/ProfiloClient.tsx
+index c27448d..4c0b582 100644
+--- a/src/app/(app)/profilo/ProfiloClient.tsx
++++ b/src/app/(app)/profilo/ProfiloClient.tsx
+@@ -227,6 +227,7 @@ export function ProfiloClient({
+         onClose={() => setSheetAperta(null)}
+         consensoMarketingIniziale={consensoMarketingIniziale}
+         consensoTerziIniziale={consensoTerziIniziale}
++        visibileProprietariIniziale={tenant.visibile_ai_proprietari === true}
+       />
+       <FaqSheet open={sheetAperta === "faq"} onClose={() => setSheetAperta(null)} />
+         </PageContainer>
+diff --git a/src/app/globals.css b/src/app/globals.css
+index 2303583..0a11657 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -4150,3 +4150,292 @@ button.contratto-testa:focus-visible {
+   line-height: 1.45;
+   color: var(--body-text);
+ }
++
++/* ---- «Richieste dei proprietari» (inquilino) ---- */
++.match-schede .conteggio.da-leggere {
++  background: var(--clay);
++  color: #fff;
++}
++.mc-origine {
++  margin-top: 2px;
++  font-size: 12px;
++  font-weight: 700;
++  color: var(--moss);
++}
++.richieste-consenso {
++  margin: 2px 0 16px;
++  padding: 16px 16px 14px;
++  border-radius: 20px;
++  background: rgba(16, 21, 26, 0.04);
++  border: 1px dashed rgba(16, 21, 26, 0.2);
++}
++.richieste-consenso.attivo {
++  background: rgba(62, 107, 87, 0.1);
++  border: 1px solid rgba(62, 107, 87, 0.4);
++}
++.richieste-consenso h3 {
++  margin: 0 0 6px;
++  font-family: var(--font-display);
++  font-size: 20px;
++  color: var(--ink);
++}
++.richieste-consenso p {
++  margin: 0 0 12px;
++  font-size: 14px;
++  line-height: 1.45;
++  color: var(--body-text);
++}
++.richieste-consenso small {
++  display: block;
++  margin-top: 8px;
++  font-size: 12.5px;
++  color: var(--body-soft);
++}
++.richieste-secondario {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  min-height: 44px;
++  padding: 10px 18px;
++  border: 1px solid rgba(16, 21, 26, 0.25);
++  border-radius: 999px;
++  background: transparent;
++  color: var(--ink);
++  font-family: var(--font-sans);
++  font-size: 14px;
++  font-weight: 700;
++  cursor: pointer;
++}
++.richieste-lista {
++  list-style: none;
++  margin: 0;
++  padding: 0;
++}
++.richiesta {
++  display: flex;
++  gap: 14px;
++  margin-bottom: 14px;
++  padding: 12px;
++  border-radius: 20px;
++  background: #fff;
++  box-shadow: 0 8px 20px rgba(16, 21, 26, 0.06);
++}
++.richiesta-foto {
++  flex: none;
++  width: 84px;
++  height: 84px;
++  border-radius: 14px;
++  object-fit: cover;
++}
++.richiesta-foto-vuota {
++  background: linear-gradient(135deg, var(--moss), var(--moss-light));
++}
++.richiesta-corpo {
++  min-width: 0;
++  flex: 1;
++}
++.richiesta-chi {
++  font-size: 12px;
++  font-weight: 800;
++  letter-spacing: 0.05em;
++  text-transform: uppercase;
++  color: var(--moss);
++}
++.richiesta-casa {
++  display: flex;
++  flex-direction: column;
++  gap: 2px;
++  margin: 2px 0 6px;
++  font-size: 14px;
++  color: var(--body-text);
++}
++.richiesta-casa b {
++  font-family: var(--font-display);
++  font-size: 18px;
++  color: var(--ink);
++}
++.richiesta-messaggio {
++  margin: 4px 0 8px;
++  padding: 8px 12px;
++  border-left: 3px solid var(--gold);
++  background: rgba(201, 161, 90, 0.12);
++  font-size: 14px;
++  line-height: 1.4;
++  color: var(--body-text);
++}
++.richiesta-azioni {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 8px;
++  margin-top: 8px;
++}
++.richiesta-azioni .opp-cta {
++  flex: 1;
++  min-width: 140px;
++  margin: 0;
++}
++.richiesta-esito {
++  margin-top: 8px;
++  padding: 10px 12px;
++  border-radius: 14px;
++  background: rgba(62, 107, 87, 0.12);
++  font-size: 14px;
++  color: var(--ink);
++}
++
++/* ---- Database: le schede dei possibili inquilini e la richiesta ---- */
++.possibili-casa + .possibili-casa {
++  margin-top: 14px;
++  padding-top: 14px;
++  border-top: 2px solid rgba(16, 21, 26, 0.08);
++}
++.possibili-avviso {
++  margin: 0 0 10px;
++  padding: 10px 14px;
++  border-radius: 14px;
++  background: rgba(62, 107, 87, 0.14);
++  font-size: 16px;
++  font-weight: 700;
++  color: var(--ink);
++}
++.schede-inquilini {
++  list-style: none;
++  margin: 8px 0 0;
++  padding: 0;
++}
++.scheda-inquilino {
++  margin-bottom: 12px;
++  padding: 14px;
++  border-radius: 20px;
++  background: var(--paper);
++  border: 1px solid rgba(16, 21, 26, 0.08);
++}
++.scheda-testa {
++  display: flex;
++  align-items: center;
++  gap: 12px;
++}
++.scheda-foto {
++  flex: none;
++  width: 56px;
++  height: 56px;
++  border-radius: 50%;
++  object-fit: cover;
++}
++.scheda-iniziale {
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  background: linear-gradient(135deg, var(--moss), var(--moss-light));
++  color: #fff;
++  font-family: var(--font-display);
++  font-size: 24px;
++  font-weight: 600;
++}
++.scheda-chi {
++  display: flex;
++  flex: 1;
++  flex-direction: column;
++  min-width: 0;
++  font-size: 17px;
++  color: var(--body-text);
++}
++.scheda-chi b {
++  font-family: var(--font-display);
++  font-size: 20px;
++  color: var(--ink);
++}
++.scheda-compat {
++  flex: none;
++  display: flex;
++  flex-direction: column;
++  align-items: center;
++  font-family: var(--font-display);
++  font-size: 24px;
++  font-weight: 600;
++  color: var(--moss);
++}
++.scheda-compat small {
++  font-family: var(--font-sans);
++  font-size: 15px;
++  font-weight: 700;
++  color: var(--body-soft);
++}
++.scheda-etichette {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 6px;
++  margin: 10px 0 6px;
++}
++.scheda-chip {
++  padding: 4px 10px;
++  border-radius: 999px;
++  background: rgba(16, 21, 26, 0.06);
++  font-size: 15px;
++  font-weight: 600;
++  color: var(--body-text);
++}
++.scheda-presentazione {
++  margin: 6px 0 10px;
++  font-size: 16px;
++  line-height: 1.4;
++  color: var(--body-text);
++}
++.scheda-match {
++  width: 100%;
++  min-height: 56px;
++  margin: 4px 0 0;
++  font-size: 18px;
++}
++.possibili-conferma {
++  display: flex;
++  flex-direction: column;
++  gap: 10px;
++  margin-top: 14px;
++}
++.possibili-conferma .opp-cta {
++  min-height: 56px;
++  margin: 0;
++  font-size: 18px;
++}
++.richieste-inviate {
++  margin-top: 12px;
++  padding: 12px 14px;
++  border-radius: 16px;
++  background: rgba(201, 161, 90, 0.12);
++}
++.richieste-inviate h3 {
++  margin: 0 0 6px;
++  font-size: 15px;
++  font-weight: 800;
++  letter-spacing: 0.04em;
++  text-transform: uppercase;
++  color: var(--gold-ink);
++}
++.richieste-inviate ul {
++  margin: 0;
++  padding: 0;
++  list-style: none;
++  font-size: 16px;
++  line-height: 1.5;
++  color: var(--ink);
++}
++.richieste-inviate li.accettata {
++  color: var(--moss);
++}
++.richieste-link {
++  margin-left: 8px;
++  font-weight: 800;
++  color: var(--moss);
++  text-decoration: underline;
++}
++
++/* nelle schede dei possibili inquilini il badge è leggibile come il resto (per chi non è pratico) */
++.scheda-etichette .badge-raccomandato {
++  padding: 5px 12px 5px 9px;
++  font-size: 15px;
++}
++.scheda-etichette .badge-raccomandato-icona {
++  width: 18px;
++  height: 18px;
++}
+diff --git a/src/components/Navigation.tsx b/src/components/Navigation.tsx
+index b5818f4..de24670 100644
+--- a/src/components/Navigation.tsx
++++ b/src/components/Navigation.tsx
+@@ -40,12 +40,15 @@ export function Navigation({
+   ruolo,
+   nonLette = 0,
+   messaggiNonLetti = 0,
++  richiesteInAttesa = 0,
+ }: {
+   ruolo: string;
+   /** Le novità non ancora lette: se ce ne sono, un numero sulla voce Profilo. */
+   nonLette?: number;
+   /** I messaggi della chat non ancora letti: se ce ne sono, un numero sulla voce Messaggi. */
+   messaggiNonLetti?: number;
++  /** Le richieste dei proprietari a cui l'inquilino non ha ancora risposto: un numero sulla voce «I tuoi match». */
++  richiesteInAttesa?: number;
+   /** Non più mostrato in barra: il nome resta nella schermata Profilo. */
+   nome?: string | null;
+ }) {
+@@ -55,6 +58,7 @@ export function Navigation({
+   const segnalini: Record<string, { etichetta: string; descrizione: string }> = {
+     "/profilo": { etichetta: etichettaConteggio(nonLette), descrizione: "novità da leggere" },
+     "/messaggi": { etichetta: etichettaConteggio(messaggiNonLetti), descrizione: "messaggi da leggere" },
++    "/candidature": { etichetta: etichettaConteggio(richiesteInAttesa), descrizione: "richieste dei proprietari a cui rispondere" },
+   };
+ 
+   return (
+diff --git a/src/components/PossibiliInquilini.tsx b/src/components/PossibiliInquilini.tsx
+new file mode 100644
+index 0000000..0433c39
+--- /dev/null
++++ b/src/components/PossibiliInquilini.tsx
+@@ -0,0 +1,203 @@
++"use client";
++
++import { useState, useTransition } from "react";
++import Link from "next/link";
++import { useRouter } from "next/navigation";
++import { Sheet } from "@/components/Sheet";
++import { BadgeRaccomandato } from "@/components/BadgeRaccomandato";
++import { faiMatch } from "@/app/(app)/database/actions";
++import { frasePossibili } from "@/lib/proprietario/home";
++import { stelleTesto, testoRecensioni } from "@/lib/recensioni";
++import { MESSAGGIO_RICHIESTA_MAX } from "@/lib/richieste";
++import type { PossibiliPerCasa } from "@/lib/proprietario/possibili-server";
++import type { SchedaInquilino } from "@/lib/proprietario/possibili-inquilini";
++
++/**
++ * La sezione «Possibili inquilini» del Database: per ogni casa quanti inquilini cercano una casa come quella, e le persone che
++ * si sono rese disponibili a essere contattate, con il pulsante «Fai match». Più sotto le richieste già mandate.
++ */
++export function PossibiliInquilini({ possibili }: { possibili: PossibiliPerCasa[] }) {
++  const router = useRouter();
++  const [pending, startTransition] = useTransition();
++  const [scelta, setScelta] = useState<{ casa: PossibiliPerCasa; scheda: SchedaInquilino } | null>(null);
++  const [messaggio, setMessaggio] = useState("");
++  const [errore, setErrore] = useState<string | null>(null);
++  const [avviso, setAvviso] = useState<string | null>(null);
++
++  function chiudi() {
++    setScelta(null);
++    setMessaggio("");
++    setErrore(null);
++  }
++
++  function invia() {
++    if (!scelta) return;
++    setErrore(null);
++    startTransition(async () => {
++      const r = await faiMatch(scelta.casa.id, scelta.scheda.tenantId, messaggio);
++      if (!r.ok) return setErrore(r.error);
++      setAvviso(`Richiesta inviata a ${scelta.scheda.nome}`);
++      chiudi();
++      router.refresh();
++    });
++  }
++
++  return (
++    <section id="possibili" className="possibili" aria-labelledby="possibili-titolo">
++      <h2 id="possibili-titolo" className="possibili-titolo">
++        Possibili inquilini
++      </h2>
++      {avviso && (
++        <p className="possibili-avviso" role="status">
++          {avviso}
++        </p>
++      )}
++
++      {possibili.length === 0 ? (
++        <p className="possibili-testo">Quando la tua casa sarà pubblicata vedrai qui quanti inquilini cercano una casa come la tua.</p>
++      ) : (
++        possibili.map((p) => {
++          const f = p.possibili === null ? null : frasePossibili(p.possibili);
++          const inAttesa = p.richieste.filter((r) => r.stato === "inviata");
++          const accettate = p.richieste.filter((r) => r.stato === "accettata");
++          const rifiutate = p.richieste.filter((r) => r.stato === "rifiutata").length;
++          return (
++            <div key={p.id} className="possibili-casa">
++              <div className="possibili-riga">
++                <b className="possibili-numero">{f ? f.numero : "–"}</b>
++                <span className="possibili-frase">
++                  {f ? f.frase : "Il numero non è disponibile in questo momento"}
++                  <small>
++                    {p.titolo} · {p.zona}
++                  </small>
++                </span>
++              </div>
++
++              {p.disponibili !== null && p.possibili !== null && p.possibili > 0 && (
++                <p className="possibili-testo">
++                  {p.disponibili.length === 0
++                    ? "Nessuno di loro si è ancora reso disponibile a essere contattato: se una di queste persone si candida, la trovi tra le candidature."
++                    : p.disponibili.length === 1
++                      ? "Una di queste persone si è resa disponibile a essere contattata:"
++                      : `${p.disponibili.length} di queste persone si sono rese disponibili a essere contattate:`}
++                </p>
++              )}
++
++              {(p.disponibili ?? []).length > 0 && (
++                <ul className="schede-inquilini" aria-label={`Persone disponibili per ${p.titolo}`}>
++                  {(p.disponibili ?? []).map((s) => (
++                    <li key={s.tenantId} className="scheda-inquilino">
++                      <div className="scheda-testa">
++                        {s.avatarUrl ? (
++                          // eslint-disable-next-line @next/next/no-img-element
++                          <img src={s.avatarUrl} alt="" className="scheda-foto" />
++                        ) : (
++                          <span className="scheda-foto scheda-iniziale" aria-hidden="true">
++                            {s.nome.slice(0, 1)}
++                          </span>
++                        )}
++                        <div className="scheda-chi">
++                          <b>{s.nome}</b>
++                          {s.professione && <span>{s.professione}</span>}
++                        </div>
++                        {s.compatibilita !== null && (
++                          <span className="scheda-compat">
++                            {s.compatibilita}%<small>adatto</small>
++                          </span>
++                        )}
++                      </div>
++                      <div className="scheda-etichette">
++                        {s.raccomandato && <BadgeRaccomandato />}
++                        {s.redditoVerificato && <span className="scheda-chip">Reddito verificato</span>}
++                        <span className="scheda-chip">
++                          Affidabilità {s.affidabilita} · {s.etichettaAffidabilita}
++                        </span>
++                        {s.recensioni.numero > 0 && (
++                          <span className="scheda-chip">
++                            <span aria-hidden="true">{stelleTesto(s.recensioni.media)}</span> {testoRecensioni(s.recensioni)}
++                          </span>
++                        )}
++                      </div>
++                      {s.presentazione && <p className="scheda-presentazione">{s.presentazione}</p>}
++                      <button type="button" className="opp-cta scheda-match" disabled={pending} onClick={() => setScelta({ casa: p, scheda: s })}>
++                        Fai match
++                      </button>
++                    </li>
++                  ))}
++                </ul>
++              )}
++
++              {(inAttesa.length > 0 || accettate.length > 0 || rifiutate > 0) && (
++                <div className="richieste-inviate">
++                  <h3>Richieste mandate</h3>
++                  <ul>
++                    {inAttesa.map((r) => (
++                      <li key={r.id}>
++                        <b>{r.nome ?? "Una persona"}</b> · in attesa di risposta
++                      </li>
++                    ))}
++                    {accettate.map((r) => (
++                      <li key={r.id} className="accettata">
++                        <b>Ha accettato!</b> Ora potete scrivervi.
++                        {r.candidaturaId && (
++                          <Link href={`/chat/${r.candidaturaId}`} className="richieste-link">
++                            Apri la chat ›
++                          </Link>
++                        )}
++                      </li>
++                    ))}
++                    {rifiutate > 0 && <li>{rifiutate === 1 ? "1 persona non ha accettato" : `${rifiutate} persone non hanno accettato`}</li>}
++                  </ul>
++                </div>
++              )}
++            </div>
++          );
++        })
++      )}
++
++      <p className="possibili-testo">
++        Sono persone che hanno impostato una ricerca adatta alla tua casa. Vedi solo chi ha scelto di farsi trovare, e non i suoi contatti: se
++        accetta la tua richiesta, o se si candida, la trovi tra le candidature e potete scrivervi.
++      </p>
++
++      <Sheet open={scelta !== null} onClose={chiudi} title={scelta ? `Fai match con ${scelta.scheda.nome}?` : "Fai match"}>
++        {scelta && (
++          <>
++            <p className="possibili-testo" style={{ marginTop: 0 }}>
++              Le arriverà una richiesta per <b>{scelta.casa.titolo}</b>. Se accetta, potete scrivervi in chat. Se non risponde o dice di no, non succede
++              niente.
++            </p>
++            <label className="field-label" htmlFor="messaggio-richiesta">
++              Vuoi aggiungere due parole? (facoltativo)
++            </label>
++            <textarea
++              id="messaggio-richiesta"
++              className="ob-textarea"
++              rows={3}
++              maxLength={MESSAGGIO_RICHIESTA_MAX}
++              value={messaggio}
++              onChange={(e) => setMessaggio(e.target.value)}
++              placeholder="Per esempio: la casa è libera da dicembre, può venire a vederla quando vuole."
++            />
++            <small className="field-note">
++              {messaggio.length}/{MESSAGGIO_RICHIESTA_MAX}
++            </small>
++            {errore && (
++              <p className="note-error" role="alert">
++                {errore}
++              </p>
++            )}
++            <div className="possibili-conferma">
++              <button type="button" className="opp-cta" disabled={pending} onClick={invia}>
++                {pending ? "Invio…" : "Sì, invia la richiesta"}
++              </button>
++              <button type="button" className="richieste-secondario" disabled={pending} onClick={chiudi}>
++                No, torna indietro
++              </button>
++            </div>
++          </>
++        )}
++      </Sheet>
++    </section>
++  );
++}
+diff --git a/src/components/PrivacySheet.tsx b/src/components/PrivacySheet.tsx
+index 4aa507e..c18d3be 100644
+--- a/src/components/PrivacySheet.tsx
++++ b/src/components/PrivacySheet.tsx
+@@ -1,7 +1,8 @@
+ "use client";
+ 
+ import Link from "next/link";
+-import { useActionState, useEffect, useState } from "react";
++import { useActionState, useEffect, useState, useTransition } from "react";
++import { impostaVisibilita } from "@/app/(app)/candidature/richieste-actions";
+ import { createClient } from "@/lib/supabase/client";
+ import { INFORMATIVA } from "@/content/informativa";
+ import { versioniAccettabili } from "@/lib/informativa";
+@@ -19,11 +20,14 @@ export function PrivacySheet({
+   onClose,
+   consensoMarketingIniziale,
+   consensoTerziIniziale,
++  visibileProprietariIniziale,
+ }: {
+   open: boolean;
+   onClose: () => void;
+   consensoMarketingIniziale: boolean;
+   consensoTerziIniziale: boolean;
++  /** solo per l'inquilino: è visibile ai proprietari? (per il proprietario non si passa) */
++  visibileProprietariIniziale?: boolean;
+ }) {
+   const [state, formAction, pending] = useActionState<SaveState, FormData>(
+     updatePrivacy,
+@@ -31,6 +35,19 @@ export function PrivacySheet({
+   );
+   const [marketing, setMarketing] = useState(consensoMarketingIniziale);
+   const [terzi, setTerzi] = useState(consensoTerziIniziale);
++  // Il consenso a farsi trovare dai proprietari si salva subito, a ogni scelta (non col pulsante «Salva preferenze»):
++  // ritirarlo deve essere immediato.
++  const [visibile, setVisibile] = useState(visibileProprietariIniziale === true);
++  const [erroreVisibilita, setErroreVisibilita] = useState<string | null>(null);
++  const [inCorsoVisibilita, avviaVisibilita] = useTransition();
++  function scegliVisibilita(nuova: boolean) {
++    setErroreVisibilita(null);
++    avviaVisibilita(async () => {
++      const r = await impostaVisibilita(nuova);
++      if (!r.ok) return setErroreVisibilita(r.error);
++      setVisibile(nuova);
++    });
++  }
+ 
+   // Quando hai accettato l'informativa in vigore. La sicurezza del database
+   // fa leggere a ognuno solo le proprie accettazioni.
+@@ -99,6 +116,20 @@ export function PrivacySheet({
+           </div>
+         </Field>
+ 
++        {visibileProprietariIniziale !== undefined && (
++          <Field label="Fatti trovare dai proprietari">
++            <p className="field-note" style={{ margin: "-4px 0 10px 0" }}>
++              I proprietari con una casa adatta alla tua ricerca possono vedere il tuo profilo (nome e iniziale del cognome, lavoro, foto, affidabilità
++              e recensioni, non il reddito né i contatti) e scriverti. Tu decidi se rispondere. Si salva subito, e lo puoi ritirare quando vuoi.
++            </p>
++            <div className="chip-row">
++              <Chip label="Sì" active={visibile} onClick={() => !inCorsoVisibilita && scegliVisibilita(true)} />
++              <Chip label="No" active={!visibile} onClick={() => !inCorsoVisibilita && scegliVisibilita(false)} />
++            </div>
++            {erroreVisibilita && <p className="note-error">{erroreVisibilita}</p>}
++          </Field>
++        )}
++
+         <Field label="Condivisione con partner terzi">
+           <p className="field-note" style={{ margin: "-4px 0 10px 0" }}>
+             Offerte di servizi collegati alla casa (utenze, assicurazioni,
+diff --git a/src/components/RichiesteProprietari.tsx b/src/components/RichiesteProprietari.tsx
+new file mode 100644
+index 0000000..a08c637
+--- /dev/null
++++ b/src/components/RichiesteProprietari.tsx
+@@ -0,0 +1,131 @@
++"use client";
++
++import { useState, useTransition } from "react";
++import Link from "next/link";
++import { useRouter } from "next/navigation";
++import { rispondiRichiesta, impostaVisibilita } from "@/app/(app)/candidature/richieste-actions";
++import { fraseRichiesta, richiesteInAttesa, type RichiestaPerInquilino } from "@/lib/richieste";
++import { IconMatch } from "@/components/icons";
++
++type Esito = { stato: "accettata"; candidaturaId: string | null } | { stato: "rifiutata" };
++
++/**
++ * La scheda «Richieste dei proprietari» di «I tuoi match»: prima il consenso a farsi trovare (spento di partenza), poi le
++ * richieste a cui rispondere. Accettare crea un match con la chat; rifiutare chiude la richiesta.
++ */
++export function RichiesteProprietari({ richieste, visibile }: { richieste: RichiestaPerInquilino[]; visibile: boolean }) {
++  const router = useRouter();
++  const [pending, startTransition] = useTransition();
++  const [vis, setVis] = useState(visibile);
++  const [esiti, setEsiti] = useState<Record<string, Esito>>({});
++  const [errore, setErrore] = useState<string | null>(null);
++
++  const inAttesa = richiesteInAttesa(richieste);
++
++  function cambiaVisibilita(nuova: boolean) {
++    setErrore(null);
++    startTransition(async () => {
++      const r = await impostaVisibilita(nuova);
++      if (!r.ok) return setErrore(r.error);
++      setVis(nuova);
++      router.refresh();
++    });
++  }
++
++  function rispondi(id: string, accetta: boolean) {
++    setErrore(null);
++    startTransition(async () => {
++      const r = await rispondiRichiesta(id, accetta);
++      if (!r.ok) return setErrore(r.error);
++      setEsiti((e) => ({ ...e, [id]: accetta ? { stato: "accettata", candidaturaId: r.candidaturaId } : { stato: "rifiutata" } }));
++      router.refresh();
++    });
++  }
++
++  return (
++    <div className="richieste">
++      {/* ---- il consenso ---- */}
++      <div className={`richieste-consenso ${vis ? "attivo" : ""}`}>
++        <h3>{vis ? "Sei disponibile ai proprietari" : "Fatti trovare dai proprietari"}</h3>
++        <p>
++          {vis
++            ? "I proprietari con una casa adatta alla tua ricerca possono vedere il tuo profilo (nome e iniziale del cognome, lavoro, foto, affidabilità e recensioni, non il reddito né i contatti) e scriverti. Tu decidi se rispondere."
++            : "Se ti rendi disponibile, i proprietari con una casa adatta alla tua ricerca possono vedere il tuo profilo (nome e iniziale del cognome, lavoro, foto, affidabilità e recensioni, non il reddito né i contatti) e scriverti. Tu decidi se rispondere. Puoi cambiare idea quando vuoi."}
++        </p>
++        <button type="button" className={vis ? "richieste-secondario" : "opp-cta"} disabled={pending} onClick={() => cambiaVisibilita(!vis)}>
++          {vis ? "Non voglio più essere trovato" : "Mi rendo disponibile"}
++        </button>
++        {!vis && <small>La ricerca che hai impostato serve a trovare le case adatte a te: è la stessa con cui i proprietari ti trovano.</small>}
++      </div>
++
++      {errore && (
++        <p className="note-error" role="alert">
++          {errore}
++        </p>
++      )}
++
++      {/* ---- le richieste ---- */}
++      {inAttesa.length === 0 && Object.keys(esiti).length === 0 ? (
++        <div className="empty-inline">
++          <IconMatch className="icon-empty" />
++          <h3>Nessuna richiesta per ora</h3>
++          <p>{vis ? "Quando un proprietario sceglie il tuo profilo, la trovi qui e puoi rispondere." : "Rendendoti disponibile, i proprietari potranno scriverti: le richieste arrivano qui."}</p>
++        </div>
++      ) : (
++        <ul className="richieste-lista" aria-label="Richieste dei proprietari">
++          {[...inAttesa, ...richieste.filter((r) => esiti[r.id] && !inAttesa.includes(r))].map((r) => {
++            const esito = esiti[r.id];
++            return (
++              <li key={r.id} className="richiesta">
++                {r.casa?.foto ? (
++                  // eslint-disable-next-line @next/next/no-img-element
++                  <img src={r.casa.foto} alt="" className="richiesta-foto" />
++                ) : (
++                  <span className="richiesta-foto richiesta-foto-vuota" aria-hidden="true" />
++                )}
++                <div className="richiesta-corpo">
++                  <div className="richiesta-chi">{fraseRichiesta(r)}</div>
++                  {r.casa ? (
++                    <div className="richiesta-casa">
++                      <b>{r.casa.titolo}</b>
++                      <span>
++                        {r.casa.zona} · €{r.casa.prezzo.toLocaleString("it-IT")}/mese
++                      </span>
++                    </div>
++                  ) : (
++                    <div className="richiesta-casa">
++                      <span>Questa casa non è più disponibile.</span>
++                    </div>
++                  )}
++                  {r.messaggio && <blockquote className="richiesta-messaggio">{r.messaggio}</blockquote>}
++
++                  {esito?.stato === "accettata" ? (
++                    <div className="richiesta-esito">
++                      <b>È un match!</b> Ora puoi scrivere a {r.nomeProprietario ?? "il proprietario"}.
++                      {esito.candidaturaId && (
++                        <Link href={`/chat/${esito.candidaturaId}`} className="opp-cta block text-center" style={{ marginTop: 10 }}>
++                          Apri la chat
++                        </Link>
++                      )}
++                    </div>
++                  ) : esito?.stato === "rifiutata" ? (
++                    <div className="richiesta-esito">Hai risposto di no. La richiesta è chiusa.</div>
++                  ) : (
++                    <div className="richiesta-azioni">
++                      <button type="button" className="opp-cta" disabled={pending || !r.casa} onClick={() => rispondi(r.id, true)}>
++                        Sì, mi interessa
++                      </button>
++                      <button type="button" className="richieste-secondario" disabled={pending} onClick={() => rispondi(r.id, false)}>
++                        No, grazie
++                      </button>
++                    </div>
++                  )}
++                </div>
++              </li>
++            );
++          })}
++        </ul>
++      )}
++    </div>
++  );
++}
+diff --git a/src/content/informativa.ts b/src/content/informativa.ts
+index 71711b5..5005ddd 100644
+--- a/src/content/informativa.ts
++++ b/src/content/informativa.ts
+@@ -28,7 +28,7 @@ export const INFORMATIVA = {
+    * controllo che fa il database (migrazione 0017): un test fallisce se
+    * questa stringa non lo supera.
+    */
+-  versione: "2026-10-provvisoria-18",
++  versione: "2026-10-provvisoria-19",
+   /**
+    * Versioni precedenti che chi le ha accettate NON deve riaccettare.
+    *
+@@ -60,6 +60,7 @@ export const INFORMATIVA = {
+     "2026-10-provvisoria-15",
+     "2026-10-provvisoria-16",
+     "2026-10-provvisoria-17",
++    "2026-10-provvisoria-18",
+   ] as readonly string[],
+   provvisoria: true,
+   titolo: "Informativa sulla privacy",
+@@ -100,6 +101,7 @@ export const INFORMATIVA = {
+       titolo: "Punteggi calcolati automaticamente",
+       paragrafi: [
+         "La compatibilità (match) e l'affidabilità sono calcolate automaticamente da ciò che dichiari. Servono a ordinare annunci e candidati. La decisione di accettare o rifiutare una candidatura resta sempre del proprietario.",
++        "Se scegli «Fatti trovare dai proprietari» (è spento finché non lo accendi tu, e lo puoi ritirare quando vuoi da Privacy e consensi), i proprietari con una casa verificata e adatta alla tua ricerca possono vedere il tuo nome e l'iniziale del cognome, il lavoro, la foto, un estratto della presentazione, l'affidabilità e le recensioni. Non vedono il reddito né i contatti. Un proprietario può mandarti una richiesta, al massimo venti al giorno: tu decidi se rispondere. Se accetti nasce un match e potete scriverti; se rifiuti, o non rispondi, non succede niente.",
+         "Ai proprietari mostriamo anche QUANTI inquilini hanno una ricerca compatibile con il loro immobile (budget, zona, locali, caratteristiche): è un numero anonimo, non vedono chi sono né nessun loro dato. Se uno di loro si candida, il proprietario vede la candidatura come tutte le altre.",
+         "Se dichiari dei protesti o segnalazioni in centrale rischi, o non rispondi alla domanda (la risposta è obbligatoria e «non indicato» vale come «sì»), il punteggio di affidabilità scende di 30 punti. Il reddito verificato dallo staff e un garante o una fideiussione dichiarati lo fanno salire. Il punteggio non è mai inferiore a zero.",
+         "Il badge «Inquilino raccomandato» lo ottieni in automatico con almeno due recensioni positive (da 4 stelle in su) scritte da due proprietari diversi, se negli ultimi quattro anni non hai recensioni negative. Lo vedono i proprietari a cui ti candidi, possono cercare solo gli inquilini raccomandati e, a parità di compatibilità, i candidati con il badge compaiono prima. Non cambia il punteggio di affidabilità. La decisione di accettare o rifiutare una candidatura resta sempre del proprietario.",
+diff --git a/src/lib/candidature.ts b/src/lib/candidature.ts
+index ef87ce6..94016d8 100644
+--- a/src/lib/candidature.ts
++++ b/src/lib/candidature.ts
+@@ -47,6 +47,12 @@ export const SCHEDE_MATCH = [
+ ] as const;
+ export type SchedaMatch = (typeof SCHEDE_MATCH)[number]["id"];
+ 
++/** Dal parametro dell'indirizzo (`?scheda=richieste`) alla scheda da aprire; qualunque altro valore apre le candidature. */
++export function schedaMatchDaParametro(valore: unknown): SchedaMatch {
++  const v = Array.isArray(valore) ? valore[0] : valore;
++  return v === "richieste" ? "richieste" : "candidature";
++}
++
+ /** Le parti in cui si dividono le candidature, nell'ordine in cui compaiono. */
+ export const SEZIONI_CANDIDATURE = [
+   { id: "match", titolo: "Match", stato: "accettata", aperta: true },
+diff --git a/src/lib/notifiche.ts b/src/lib/notifiche.ts
+index 822fcfa..82730ec 100644
+--- a/src/lib/notifiche.ts
++++ b/src/lib/notifiche.ts
+@@ -27,6 +27,8 @@ export const TIPI_NOTIFICA = [
+   "feedback_ricevuto",
+   "visita_prenotata",
+   "visita_annullata",
++  "richiesta_ricevuta",
++  "richiesta_accettata",
+ ] as const;
+ 
+ export type TipoNotifica = (typeof TIPI_NOTIFICA)[number];
+@@ -132,6 +134,18 @@ export function descriviNotifica(
+         testo: `La visita a ${annuncio(dati, "un immobile")}${quando ? ` di ${quando}` : ""} è stata annullata.`,
+       };
+     }
++    case "richiesta_ricevuta": {
++      const nome = dati && typeof dati.nome === "string" ? dati.nome.trim() : "";
++      return {
++        titolo: "Un proprietario vuole conoscerti",
++        testo: `${nome || "Un proprietario"} ha scelto il tuo profilo per ${annuncio(dati, "la sua casa")}. Se ti interessa, rispondi da «I tuoi match».`,
++      };
++    }
++    case "richiesta_accettata":
++      return {
++        titolo: "Hai un nuovo match",
++        testo: `L'inquilino ha accettato la tua richiesta per ${annuncio(dati, "la tua casa")}: ora potete scrivervi in chat.`,
++      };
+     case "feedback_ricevuto":
+       return {
+         titolo: "Nuovo feedback",
+@@ -147,13 +161,19 @@ export function descriviNotifica(
+  * in «Gestione affitto»: si corregge qui, quando si legge il link, così vale anche per le notifiche già create (quelle del
+  * proprietario hanno già un altro indirizzo e non cambiano).
+  */
++/** Dove si trova la richiesta di un proprietario: la scheda «Richieste dei proprietari» di «I tuoi match». */
++export const LINK_RICHIESTE_PROPRIETARI = "/candidature?scheda=richieste";
++
+ export const TIPI_NOTIFICA_AFFITTI_INQUILINO: readonly string[] = ["affitto_verificato", "affitto_respinto", "rapporto_confermato", "rapporto_rifiutato"];
+ export const LINK_AFFITTI_INQUILINO = "/gestione?apri=affitti";
+ 
+ /** Dove porta una notifica. Mai fuori dal sito, qualunque cosa ci sia nei dati. */
+ export function linkNotifica(n: Pick<Notifica, "link"> & Partial<Pick<Notifica, "tipo">>): string {
+   const percorso = percorsoInterno(n.link, "/");
+-  return percorso === "/profilo" && typeof n.tipo === "string" && TIPI_NOTIFICA_AFFITTI_INQUILINO.includes(n.tipo) ? LINK_AFFITTI_INQUILINO : percorso;
++  if (percorso === "/profilo" && typeof n.tipo === "string" && TIPI_NOTIFICA_AFFITTI_INQUILINO.includes(n.tipo)) return LINK_AFFITTI_INQUILINO;
++  // il database salva «/candidature» (un link non può avere la query): si apre direttamente la scheda delle richieste
++  if (percorso === "/candidature" && n.tipo === "richiesta_ricevuta") return LINK_RICHIESTE_PROPRIETARI;
++  return percorso;
+ }
+ 
+ /**
+diff --git a/src/lib/proprietario/possibili-inquilini.ts b/src/lib/proprietario/possibili-inquilini.ts
+new file mode 100644
+index 0000000..9b74e06
+--- /dev/null
++++ b/src/lib/proprietario/possibili-inquilini.ts
+@@ -0,0 +1,149 @@
++import { computeAffidabilita } from "../affidabilita";
++import { statoRaccomandazione, riepilogoRecensioni, type RecensioneGrezza, type RiepilogoRecensioni } from "../recensioni";
++import { calcolaMatchInquilino } from "../match/inquilino";
++import { haCriteriDiRicerca, profiloRicercaDaRighe, type RigaInteresse, type RigaRicerca, type RigaZona } from "../match/mazzo";
++import { valutaCandidato } from "../match/candidato";
++import { ordinaCandidati } from "../match/proprietario";
++import type { AnnuncioPerMatch, CriterioRichiesto } from "../match";
++
++/**
++ * I possibili inquilini di una casa, per il proprietario: chi si è reso disponibile a essere contattato (il consenso si controlla
++ * prima di arrivare qui), ha una ricerca in linea con la casa e rispetta i criteri OBBLIGATORI che il proprietario ha chiesto,
++ * ordinati dal più adatto.
++ *
++ * Logica pura. Cosa vede il proprietario di una persona che non si è candidata: il nome di battesimo con l'iniziale del
++ * cognome, il lavoro, la foto, un estratto della presentazione, l'affidabilità e le recensioni. Non il reddito, non i dati di
++ * contatto. Il resto lo vede solo dopo il match, come per ogni candidato.
++ */
++export type InquilinoDisponibile = {
++  tenantId: string;
++  nome: string | null;
++  cognome: string | null;
++  professione: string | null;
++  avatarUrl: string | null;
++  presentazione: string | null;
++  verificato: boolean;
++  protestato: boolean | null;
++  garante: boolean | null;
++  fideiussione: boolean | null;
++  reddito_mensile: number | null;
++  reddito_nucleo: number | null;
++  animaliCompilato: boolean;
++  nucleoCompilato: boolean;
++  /** la sua ricerca */
++  riga: RigaRicerca;
++  zone: RigaZona[];
++  interessi: RigaInteresse[];
++  recensioni: RecensioneGrezza[];
++};
++
++export type SchedaInquilino = {
++  tenantId: string;
++  /** «Anna V.» */
++  nome: string;
++  professione: string | null;
++  avatarUrl: string | null;
++  /** un estratto della presentazione, mai più di 160 caratteri */
++  presentazione: string | null;
++  affidabilita: number;
++  etichettaAffidabilita: string;
++  raccomandato: boolean;
++  recensioni: RiepilogoRecensioni;
++  redditoVerificato: boolean;
++  /** quanto combacia con i criteri del proprietario, da 0 a 99; `null` se non ne ha chiesto nessuno */
++  compatibilita: number | null;
++};
++
++const pulito = (v: unknown): string => (typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "");
++
++/** «Anna V.»: il nome e l'iniziale del cognome. Con una parte sola, quella; senza niente, «Un inquilino». */
++export function nomeBreve(nome: unknown, cognome: unknown): string {
++  const n = pulito(nome);
++  const c = Array.from(pulito(cognome))[0];
++  if (n && c) return `${n} ${c.toUpperCase()}.`;
++  return n || (c ? `${c.toUpperCase()}.` : "Un inquilino");
++}
++
++export const LUNGHEZZA_ESTRATTO = 160;
++
++/** Le prime parole della presentazione, tagliate a una parola intera, con i puntini se è più lunga. */
++export function estratto(testo: unknown, max: number = LUNGHEZZA_ESTRATTO): string | null {
++  const t = pulito(testo);
++  if (!t) return null;
++  if (t.length <= max) return t;
++  const taglio = t.slice(0, max);
++  const spazio = taglio.lastIndexOf(" ");
++  return (spazio > max * 0.5 ? taglio.slice(0, spazio) : taglio).replace(/[\s,.;:!?-]+$/, "") + "…";
++}
++
++/** La casa è in linea con la ricerca di questa persona (la stessa regola della Home dell'inquilino e del conteggio). */
++export function ricercaInLinea(annuncio: AnnuncioPerMatch, p: Pick<InquilinoDisponibile, "riga" | "zone" | "interessi">): boolean {
++  const profilo = profiloRicercaDaRighe(p.riga, p.zone, p.interessi);
++  return haCriteriDiRicerca(profilo) && calcolaMatchInquilino(annuncio, profilo).fascia === "in_ricerca";
++}
++
++export function schedeInquilini(input: {
++  annuncio: AnnuncioPerMatch;
++  canone: number;
++  /** i criteri che il proprietario ha chiesto per questa casa */
++  criteri: readonly CriterioRichiesto[];
++  disponibili: readonly InquilinoDisponibile[];
++  /** chi si è già candidato a questa casa e chi ha già ricevuto una richiesta: non si propongono */
++  esclusi: ReadonlySet<string>;
++  ora?: number;
++}): SchedaInquilino[] {
++  const voci: { scheda: SchedaInquilino; match: { bloccato: boolean; punteggio: number | null }; affidabilita: number; raccomandato: boolean; recensioni: RiepilogoRecensioni }[] = [];
++
++  for (const d of input.disponibili) {
++    if (!d || typeof d.tenantId !== "string" || input.esclusi.has(d.tenantId)) continue;
++    if (!ricercaInLinea(input.annuncio, d)) continue;
++
++    const riepilogo = riepilogoRecensioni((d.recensioni ?? []).map((r) => r.voto));
++    const raccomandato = statoRaccomandazione(d.recensioni, input.ora).raccomandato;
++    const valutazione = valutaCandidato({
++      criteri: [...input.criteri],
++      canone: input.canone,
++      profilo: {
++        professione: d.professione,
++        reddito_mensile: d.reddito_mensile,
++        reddito_nucleo: d.reddito_nucleo,
++        garante: d.garante,
++        fideiussione: d.fideiussione,
++        protestato: d.protestato,
++        animali_compilato: d.animaliCompilato === true,
++        nucleo_compilato: d.nucleoCompilato === true,
++        presentazione: d.presentazione,
++        verificato: d.verificato === true,
++      },
++      recensioni: riepilogo,
++      raccomandato,
++    });
++    // chi non rispetta un criterio OBBLIGATORIO del proprietario non si propone
++    if (valutazione.match.bloccato) continue;
++
++    const aff = computeAffidabilita({ verificato: d.verificato === true, protestato: d.protestato, garante: d.garante, fideiussione: d.fideiussione });
++    voci.push({
++      scheda: {
++        tenantId: d.tenantId,
++        nome: nomeBreve(d.nome, d.cognome),
++        professione: pulito(d.professione) || null,
++        avatarUrl: typeof d.avatarUrl === "string" && d.avatarUrl ? d.avatarUrl : null,
++        presentazione: estratto(d.presentazione),
++        affidabilita: aff.punteggio,
++        etichettaAffidabilita: aff.label,
++        raccomandato,
++        recensioni: riepilogo,
++        redditoVerificato: d.verificato === true,
++        compatibilita: valutazione.match.punteggio,
++      },
++      match: { bloccato: false, punteggio: valutazione.match.punteggio },
++      affidabilita: aff.punteggio,
++      raccomandato,
++      recensioni: riepilogo,
++    });
++  }
++
++  // lo stesso ordine dei candidati: compatibilità, poi il badge, poi l'affidabilità, poi le recensioni
++  const ordinati = ordinaCandidati(voci.map((v, i) => ({ id: String(i), match: v.match as never, affidabilita: v.affidabilita, raccomandato: v.raccomandato, recensioni: v.recensioni })));
++  return ordinati.map((o) => voci[Number(o.id)].scheda);
++}
+diff --git a/src/lib/proprietario/possibili-server.ts b/src/lib/proprietario/possibili-server.ts
+index 7ee4c3b..547362a 100644
+--- a/src/lib/proprietario/possibili-server.ts
++++ b/src/lib/proprietario/possibili-server.ts
+@@ -1,41 +1,47 @@
+ import { clienteAmministratore } from "@/lib/supabase/admin";
+ import { annuncioDaRiga, contaPossibiliInquilini, type AnnuncioDaConfrontare, type RicercaInquilino } from "@/lib/match/possibili";
+ import { mappaLuoghi, type Luogo } from "@/lib/luoghi";
+-import type { createClient } from "@/lib/supabase/server";
++import { criteriDaRighe, type RigaCriterioDb } from "@/lib/match";
+ import type { RigaInteresse, RigaZona } from "@/lib/match";
++import { ricercaInLinea, schedeInquilini, nomeBreve, type InquilinoDisponibile, type SchedaInquilino } from "@/lib/proprietario/possibili-inquilini";
++import type { RecensioneGrezza } from "@/lib/recensioni";
++import type { StatoRichiesta } from "@/lib/richieste";
++import type { createClient } from "@/lib/supabase/server";
+ 
+ /**
+- * SOLO SUL SERVER. Legge le ricerche di TUTTI gli inquilini con la chiave di servizio (il proprietario non può leggerle:
+- * la sicurezza a livello di riga lo vieta) e restituisce SOLO NUMERI: per ogni annuncio, quanti inquilini cercano una casa
+- * come quella. Nessun identificativo, nome o dato personale esce da qui; l'identificativo serve dentro il conteggio solo per
+- * non contare chi si è già candidato.
++ * SOLO SUL SERVER. Legge le ricerche degli inquilini con la chiave di servizio (il proprietario non può leggerle: la sicurezza
++ * a livello di riga lo vieta). Cosa esce da qui:
++ *   - per ogni casa, un NUMERO: quanti inquilini cercano una casa come quella (tutti, anche chi non si è reso disponibile);
++ *   - per ogni casa, le SCHEDE di chi si è reso disponibile a essere contattato (consenso), ha una ricerca in linea con la casa
++ *     e rispetta i criteri obbligatori: nome e iniziale, lavoro, foto, estratto della presentazione, affidabilità, recensioni.
++ *     Niente reddito, niente contatti.
++ * I dati personali (nome, lavoro, recensioni…) si leggono SOLO per chi ha dato il consenso E ha una ricerca in linea: per tutti
++ * gli altri si leggono solo i criteri di ricerca.
+  *
+- * Se la chiave di servizio non c'è, o una domanda non riesce, restituisce `null`: la Home non mostra il numero (meglio
+- * niente che un numero sbagliato) e il resto funziona.
++ * Se la chiave di servizio non c'è, o una domanda non riesce, restituisce `null`/nessuna scheda: la Home e il Database non
++ * mostrano il numero né le schede (meglio niente che un dato sbagliato) e il resto funziona.
+  *
+- * Il limite sul numero di ricerche letto è un limite di scala: oltre, i numeri sarebbero per difetto. Quando ci si arriva,
+- * il conteggio va spostato nel database.
++ * Il limite sul numero di ricerche lette è un limite di scala: oltre, i numeri sarebbero per difetto. Quando ci si arriva, il
++ * conteggio va spostato nel database.
+  */
+ export const MAX_RICERCHE_LETTE = 5000;
++const A_BLOCCHI = 100;
+ 
+-export async function possibiliPerAnnuncio(
+-  annunci: readonly AnnuncioDaConfrontare[],
+-  giaCandidati: ReadonlyMap<string, ReadonlySet<string>>
+-): Promise<Map<string, number> | null> {
+-  if (annunci.length === 0) return new Map();
+-  const admin = clienteAmministratore();
+-  if (!admin) return null;
++type RicercaLetta = RicercaInquilino & { visibile: boolean };
++type Admin = NonNullable<ReturnType<typeof clienteAmministratore>>;
+ 
++/** Le ricerche di tutti gli inquilini, con il consenso a farsi trovare. Solo criteri di ricerca: nient'altro. */
++async function leggiRicerche(admin: Admin): Promise<RicercaLetta[] | null> {
+   const [tenant, zone, interessi] = await Promise.all([
+     admin
+       .from("tenant_profiles")
+-      .select("profile_id, budget_max, locali_min, mq_min, budget_min, locali_max, mq_max, tipologia")
++      .select("profile_id, visibile_ai_proprietari, budget_max, locali_min, mq_min, budget_min, locali_max, mq_max, tipologia")
+       .limit(MAX_RICERCHE_LETTE),
+     admin.from("tenant_zone_interesse").select("tenant_id, zona, luogo_id").limit(MAX_RICERCHE_LETTE * 20),
+     admin.from("tenant_interessi").select("tenant_id, attributo_key, peso, valore, necessaria").limit(MAX_RICERCHE_LETTE * 40),
+   ]);
+   if (tenant.error || zone.error || interessi.error) {
+-    console.error("possibiliPerAnnuncio: lettura non riuscita:", tenant.error?.message ?? zone.error?.message ?? interessi.error?.message);
++    console.error("leggiRicerche: lettura non riuscita:", tenant.error?.message ?? zone.error?.message ?? interessi.error?.message);
+     return null;
+   }
+ 
+@@ -53,8 +59,9 @@ export async function possibiliPerAnnuncio(
+     ]);
+   }
+ 
+-  const ricerche: RicercaInquilino[] = (tenant.data ?? []).map((t) => ({
++  return (tenant.data ?? []).map((t) => ({
+     tenantId: t.profile_id as string,
++    visibile: t.visibile_ai_proprietari === true,
+     riga: {
+       budget_max: (t.budget_max as number | null) ?? null,
+       locali_min: (t.locali_min as number | null) ?? null,
+@@ -67,22 +74,57 @@ export async function possibiliPerAnnuncio(
+     zone: zonePer.get(t.profile_id as string) ?? [],
+     interessi: interessiPer.get(t.profile_id as string) ?? [],
+   }));
++}
+ 
++export async function possibiliPerAnnuncio(
++  annunci: readonly AnnuncioDaConfrontare[],
++  giaCandidati: ReadonlyMap<string, ReadonlySet<string>>
++): Promise<Map<string, number> | null> {
++  if (annunci.length === 0) return new Map();
++  const admin = clienteAmministratore();
++  if (!admin) return null;
++  const ricerche = await leggiRicerche(admin);
++  if (!ricerche) return null;
+   return contaPossibiliInquilini({ annunci, ricerche, giaCandidati });
+ }
+ 
+-export type PossibiliPerCasa = { id: string; titolo: string; zona: string; possibili: number | null };
++export type RichiestaInviata = {
++  id: string;
++  stato: StatoRichiesta;
++  /** il nome si dà solo finché la richiesta è in attesa; dopo un rifiuto non si dice chi è */
++  nome: string | null;
++  candidaturaId: string | null;
++  creataIl: string;
++};
++
++export type PossibiliPerCasa = {
++  id: string;
++  titolo: string;
++  zona: string;
++  /** quanti inquilini cercano una casa come questa (tutti, anche chi non si è reso disponibile); `null` = non si sa */
++  possibili: number | null;
++  /** chi si è reso disponibile e si può contattare; `null` = non si sa */
++  disponibili: SchedaInquilino[] | null;
++  /** le richieste già mandate per questa casa */
++  richieste: RichiestaInviata[];
++};
++
++function inBlocchi<T>(lista: readonly T[], n: number): T[][] {
++  const r: T[][] = [];
++  for (let i = 0; i < lista.length; i += n) r.push(lista.slice(i, i + n));
++  return r;
++}
+ 
+ /**
+- * Per ogni casa del proprietario che gli inquilini vedono (verificata e pubblicata): quanti inquilini cercano una casa come
+- * quella. `possibili` è `null` se non si riesce a calcolare. Usa il client del PROPRIETARIO per leggere le sue case, e quello
+- * di servizio solo dentro `possibiliPerAnnuncio`, che restituisce numeri.
++ * Per ogni casa del proprietario che gli inquilini vedono (verificata e pubblicata): il numero di chi cerca una casa come
++ * quella, le schede di chi si può contattare e le richieste già mandate. Il client del PROPRIETARIO legge le sue case, i suoi
++ * criteri e le sue richieste; quello di servizio serve solo per le ricerche e per le schede di chi ha dato il consenso.
+  */
+ export async function possibiliPerCasaDelProprietario(
+   supabase: Awaited<ReturnType<typeof createClient>>,
+   userId: string
+ ): Promise<PossibiliPerCasa[]> {
+-  const [{ data: case_ }, { data: candidature }, { data: luoghiRighe }] = await Promise.all([
++  const [{ data: case_ }, { data: candidature }, { data: luoghiRighe }, { data: richieste }] = await Promise.all([
+     supabase
+       .from("listings")
+       .select("id, titolo, zona, prezzo, locali, mq, attributi, classe_energetica, luogo_id, tipologia, bagni, piano, riscaldamento, tipo_contratto, disponibile_dal")
+@@ -92,21 +134,128 @@ export async function possibiliPerCasaDelProprietario(
+       .order("created_at", { ascending: false }),
+     supabase.from("candidature").select("listing_id, tenant_id, listings!inner(owner_id)").eq("listings.owner_id", userId),
+     supabase.from("luoghi").select("id, livello, nome, sigla, parent_id"),
++    supabase.from("richieste_proprietari").select("id, listing_id, tenant_id, stato, candidatura_id, created_at").eq("owner_id", userId).order("created_at", { ascending: false }),
+   ]);
+ 
++  const righe = case_ ?? [];
++  const ids = righe.map((l) => l.id as string);
++  const { data: righeCriteri } = ids.length > 0 ? await supabase.from("listing_criteri").select("listing_id, chiave, peso, modo, soglia_pct").in("listing_id", ids) : { data: [] };
++
+   const giaCandidati = new Map<string, Set<string>>();
+-  for (const c of candidature ?? []) {
+-    const id = c.listing_id as string;
+-    const insieme = giaCandidati.get(id) ?? new Set<string>();
+-    insieme.add(c.tenant_id as string);
+-    giaCandidati.set(id, insieme);
+-  }
++  const aggiungi = (m: Map<string, Set<string>>, listing: string, tenant: string) => {
++    const s = m.get(listing) ?? new Set<string>();
++    s.add(tenant);
++    m.set(listing, s);
++  };
++  for (const c of candidature ?? []) aggiungi(giaCandidati, c.listing_id as string, c.tenant_id as string);
++  const esclusi = new Map<string, Set<string>>();
++  for (const [l, s] of giaCandidati) for (const t of s) aggiungi(esclusi, l, t);
++  for (const r of richieste ?? []) aggiungi(esclusi, r.listing_id as string, r.tenant_id as string);
+ 
+   const mappa = mappaLuoghi((luoghiRighe ?? []) as Luogo[]);
+-  const righe = case_ ?? [];
+-  const conteggi = await possibiliPerAnnuncio(
+-    righe.map((l) => annuncioDaRiga({ ...(l as Parameters<typeof annuncioDaRiga>[0]), id: l.id as string }, mappa)),
+-    giaCandidati
+-  );
+-  return righe.map((l) => ({ id: l.id as string, titolo: l.titolo as string, zona: l.zona as string, possibili: conteggi?.get(l.id as string) ?? null }));
++  const annunci = righe.map((l) => annuncioDaRiga({ ...(l as Parameters<typeof annuncioDaRiga>[0]), id: l.id as string }, mappa));
++
++  const admin = clienteAmministratore();
++  const ricerche = admin ? await leggiRicerche(admin) : null;
++  const conteggi = ricerche ? contaPossibiliInquilini({ annunci, ricerche, giaCandidati }) : null;
++
++  // le schede: solo chi ha dato il consenso, ha una ricerca in linea ed è libero (non candidato, non già contattato)
++  let schedePer: Map<string, SchedaInquilino[]> | null = null;
++  const nomiRichieste = new Map<string, string | null>();
++  if (admin && ricerche) {
++    const disponibili = ricerche.filter((r) => r.visibile);
++    const daLeggere = new Set<string>();
++    for (const a of annunci) for (const d of disponibili) if (!esclusi.get(a.id)?.has(d.tenantId) && ricercaInLinea(a.annuncio, d)) daLeggere.add(d.tenantId);
++    for (const r of richieste ?? []) if (r.stato === "inviata") daLeggere.add(r.tenant_id as string);
++
++    const profili = new Map<string, { nome: string | null; cognome: string | null }>();
++    const dettagli = new Map<string, Record<string, unknown>>();
++    const recensioniPer = new Map<string, RecensioneGrezza[]>();
++    let riuscito = true;
++    for (const blocco of inBlocchi([...daLeggere], A_BLOCCHI)) {
++      const [p, t, r] = await Promise.all([
++        admin.from("profiles").select("id, nome, cognome").in("id", blocco),
++        admin
++          .from("tenant_profiles")
++          .select("profile_id, visibile_ai_proprietari, professione, reddito_mensile, reddito_nucleo, garante, fideiussione, protestato, animali, nucleo, presentazione, verificato, avatar_url")
++          .in("profile_id", blocco),
++        admin.from("recensioni").select("tenant_id, voto, autore_id, created_at").in("tenant_id", blocco),
++      ]);
++      if (p.error || t.error || r.error) {
++        console.error("possibiliPerCasaDelProprietario: lettura non riuscita:", p.error?.message ?? t.error?.message ?? r.error?.message);
++        riuscito = false;
++        break;
++      }
++      for (const x of p.data ?? []) profili.set(x.id as string, { nome: (x.nome as string | null) ?? null, cognome: (x.cognome as string | null) ?? null });
++      for (const x of t.data ?? []) dettagli.set(x.profile_id as string, x);
++      for (const x of r.data ?? []) {
++        const id = x.tenant_id as string;
++        recensioniPer.set(id, [...(recensioniPer.get(id) ?? []), { voto: x.voto, autore_id: x.autore_id, created_at: x.created_at }]);
++      }
++    }
++
++    if (riuscito) {
++      const completi: InquilinoDisponibile[] = [];
++      for (const d of disponibili) {
++        const det = dettagli.get(d.tenantId);
++        // il consenso si ricontrolla sulla riga letta: senza, non si mostra
++        if (!det || det.visibile_ai_proprietari !== true) continue;
++        const pr = profili.get(d.tenantId);
++        completi.push({
++          tenantId: d.tenantId,
++          nome: pr?.nome ?? null,
++          cognome: pr?.cognome ?? null,
++          professione: (det.professione as string | null) ?? null,
++          avatarUrl: (det.avatar_url as string | null) ?? null,
++          presentazione: (det.presentazione as string | null) ?? null,
++          verificato: det.verificato === true,
++          protestato: (det.protestato as boolean | null) ?? null,
++          garante: (det.garante as boolean | null) ?? null,
++          fideiussione: (det.fideiussione as boolean | null) ?? null,
++          reddito_mensile: (det.reddito_mensile as number | null) ?? null,
++          reddito_nucleo: (det.reddito_nucleo as number | null) ?? null,
++          animaliCompilato: det.animali !== null && det.animali !== undefined,
++          nucleoCompilato: det.nucleo !== null && det.nucleo !== undefined,
++          riga: d.riga,
++          zone: d.zone,
++          interessi: d.interessi,
++          recensioni: recensioniPer.get(d.tenantId) ?? [],
++        });
++      }
++      const criteriPer = new Map<string, RigaCriterioDb[]>();
++      for (const c of righeCriteri ?? []) {
++        const id = c.listing_id as string;
++        criteriPer.set(id, [...(criteriPer.get(id) ?? []), c as unknown as RigaCriterioDb]);
++      }
++      schedePer = new Map();
++      righe.forEach((l, i) => {
++        const id = l.id as string;
++        schedePer!.set(id, schedeInquilini({ annuncio: annunci[i].annuncio, canone: l.prezzo as number, criteri: criteriDaRighe(criteriPer.get(id) ?? null), disponibili: completi, esclusi: esclusi.get(id) ?? new Set() }));
++      });
++      for (const r of richieste ?? []) {
++        const pr = profili.get(r.tenant_id as string);
++        nomiRichieste.set(r.id as string, pr ? nomeBreve(pr.nome, pr.cognome) : null);
++      }
++    }
++  }
++
++  return righe.map((l) => {
++    const id = l.id as string;
++    return {
++      id,
++      titolo: l.titolo as string,
++      zona: l.zona as string,
++      possibili: conteggi?.get(id) ?? null,
++      disponibili: schedePer?.get(id) ?? null,
++      richieste: (richieste ?? [])
++        .filter((r) => r.listing_id === id)
++        .map((r) => ({
++          id: r.id as string,
++          stato: r.stato as StatoRichiesta,
++          nome: r.stato === "inviata" ? nomiRichieste.get(r.id as string) ?? null : null,
++          candidaturaId: (r.candidatura_id as string | null) ?? null,
++          creataIl: r.created_at as string,
++        })),
++    };
++  });
+ }
+diff --git a/src/lib/richieste.ts b/src/lib/richieste.ts
+new file mode 100644
+index 0000000..4a66e1a
+--- /dev/null
++++ b/src/lib/richieste.ts
+@@ -0,0 +1,121 @@
++/**
++ * Le richieste dei proprietari: un proprietario sceglie un inquilino che si è reso disponibile e gli manda una richiesta
++ * («Fai match»). L'inquilino la trova in «I tuoi match»; se accetta nasce un match (con la chat), se rifiuta finisce lì.
++ * Logica pura, senza database: si prova con `npm test`. Le regole vere (chi può scrivere a chi, il freno, il consenso) stanno
++ * nel database (migrazione 0032) e qui si riflettono in parole.
++ */
++
++/** Quanto può essere lungo il messaggio facoltativo del proprietario (lo stesso limite del database). */
++export const MESSAGGIO_RICHIESTA_MAX = 280;
++/** Quante richieste al giorno può mandare un proprietario (lo stesso limite del database). */
++export const RICHIESTE_AL_GIORNO = 20;
++
++export type StatoRichiesta = "inviata" | "accettata" | "rifiutata";
++const STATI: readonly string[] = ["inviata", "accettata", "rifiutata"];
++
++export type CasaDellaRichiesta = {
++  titolo: string;
++  zona: string;
++  prezzo: number;
++  locali: number | null;
++  mq: number | null;
++  foto: string | null;
++};
++
++/** Una richiesta com'è letta dall'inquilino. */
++export type RichiestaPerInquilino = {
++  id: string;
++  stato: StatoRichiesta;
++  messaggio: string | null;
++  /** il nome di battesimo del proprietario */
++  nomeProprietario: string | null;
++  creataIl: string;
++  /** la candidatura (la chat) nata dall'accettazione */
++  candidaturaId: string | null;
++  /** `null` se la casa non c'è più o non è più visibile */
++  casa: CasaDellaRichiesta | null;
++};
++
++const testo = (v: unknown): string | null => (typeof v === "string" && v.trim() !== "" ? v.trim() : null);
++
++/**
++ * Dalla riga del database (con la casa e le sue foto annidate) alla richiesta. Una riga rotta (senza identificativo o con uno
++ * stato sconosciuto) dà `null` e non rompe la pagina.
++ */
++export function richiestaDaRiga(r: unknown): RichiestaPerInquilino | null {
++  if (typeof r !== "object" || r === null) return null;
++  const x = r as Record<string, unknown>;
++  if (typeof x.id !== "string" || typeof x.stato !== "string" || !STATI.includes(x.stato)) return null;
++
++  const l = (Array.isArray(x.listings) ? x.listings[0] : x.listings) as Record<string, unknown> | null | undefined;
++  let casa: CasaDellaRichiesta | null = null;
++  if (l && typeof l === "object" && typeof l.titolo === "string") {
++    const foto = (Array.isArray(l.listing_photos) ? (l.listing_photos as Record<string, unknown>[]) : [])
++      .filter((f) => f && typeof f.url === "string")
++      .sort((a, b) => (Number(a.ordine) || 0) - (Number(b.ordine) || 0))[0];
++    casa = {
++      titolo: l.titolo,
++      zona: typeof l.zona === "string" ? l.zona : "",
++      prezzo: typeof l.prezzo === "number" ? l.prezzo : 0,
++      locali: typeof l.locali === "number" ? l.locali : null,
++      mq: typeof l.mq === "number" ? l.mq : null,
++      foto: foto ? (foto.url as string) : null,
++    };
++  }
++  return {
++    id: x.id,
++    stato: x.stato as StatoRichiesta,
++    messaggio: testo(x.messaggio),
++    nomeProprietario: testo(x.nome_proprietario),
++    creataIl: typeof x.created_at === "string" ? x.created_at : "",
++    candidaturaId: typeof x.candidatura_id === "string" ? x.candidatura_id : null,
++    casa,
++  };
++}
++
++/** Le richieste a cui l'inquilino deve ancora rispondere, le più recenti per prime. */
++export function richiesteInAttesa(lista: readonly RichiestaPerInquilino[]): RichiestaPerInquilino[] {
++  return lista.filter((r) => r.stato === "inviata").sort((a, b) => (a.creataIl < b.creataIl ? 1 : a.creataIl > b.creataIl ? -1 : 0));
++}
++
++/** «Mario ha scelto il tuo profilo»; senza nome «Un proprietario». */
++export function fraseRichiesta(r: Pick<RichiestaPerInquilino, "nomeProprietario">): string {
++  return `${r.nomeProprietario ?? "Un proprietario"} ha scelto il tuo profilo`;
++}
++
++/** Le parole per ogni errore che il database può restituire: il codice sta all'inizio del messaggio. */
++export const ERRORI_RICHIESTA: Readonly<Record<string, string>> = {
++  NON_AUTENTICATO: "Accedi di nuovo per continuare.",
++  NON_TUO_IMMOBILE: "Puoi scrivere solo per le tue case.",
++  IMMOBILE_NON_PUBBLICATO: "La casa deve essere verificata e pubblicata.",
++  INQUILINO_NON_DISPONIBILE: "Questa persona non è più disponibile.",
++  GIA_CANDIDATO: "Questa persona si è già candidata alla tua casa: la trovi tra le candidature.",
++  RICHIESTA_GIA_INVIATA: "Hai già scritto a questa persona per questa casa.",
++  MESSAGGIO_TROPPO_LUNGO: `Il messaggio è troppo lungo: al massimo ${MESSAGGIO_RICHIESTA_MAX} caratteri.`,
++  TROPPE_RICHIESTE: "Per oggi hai scritto ad abbastanza persone: riprova domani.",
++  RICHIESTA_NON_TUA: "Non troviamo questa richiesta.",
++  RICHIESTA_GIA_RISPOSTA: "Hai già risposto a questa richiesta.",
++  IMMOBILE_NON_DISPONIBILE: "La casa non è più disponibile.",
++  RISPOSTA_NON_VALIDA: "Rispondi sì o no.",
++};
++
++export const ERRORE_RICHIESTA_GENERICO = "Qualcosa non ha funzionato. Riprova tra poco.";
++
++/** Dal messaggio del database («GIA_CANDIDATO: ...») alle parole per la persona; qualunque altra cosa resta generica. */
++export function messaggioErroreRichiesta(messaggio: unknown): string {
++  if (typeof messaggio !== "string") return ERRORE_RICHIESTA_GENERICO;
++  const m = messaggio.match(/^([A-Z][A-Z_]+):/);
++  return (m && ERRORI_RICHIESTA[m[1]]) || ERRORE_RICHIESTA_GENERICO;
++}
++
++/** Il messaggio facoltativo del proprietario: ripulito dagli spazi, vuoto = nessuno; `null` se è troppo lungo. */
++export function messaggioPulito(m: unknown): { ok: true; valore: string | null } | { ok: false } {
++  if (m === null || m === undefined) return { ok: true, valore: null };
++  if (typeof m !== "string") return { ok: false };
++  const v = m.trim();
++  if (v.length > MESSAGGIO_RICHIESTA_MAX) return { ok: false };
++  return { ok: true, valore: v === "" ? null : v };
++}
++
++const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
++export const eUuid = (v: unknown): v is string => typeof v === "string" && UUID.test(v);
+diff --git a/src/lib/types.ts b/src/lib/types.ts
+index fb39ba1..964878a 100644
+--- a/src/lib/types.ts
++++ b/src/lib/types.ts
+@@ -3,6 +3,8 @@ export type NucleoFamiliare = "single" | "coppia";
+ 
+ export type TenantProfile = {
+   profile_id: string;
++  /** l'inquilino ha scelto di farsi trovare dai proprietari (spento di partenza) */
++  visibile_ai_proprietari?: boolean;
+   professione: string | null;
+   reddito_mensile: number | null;
+   /** reddito mensile di TUTTO il nucleo, chiesto esplicitamente */
+@@ -140,6 +142,8 @@ export type CandidaturaConAnnuncio = {
+   match_pct: number | null;
+   /** chiave della lista chiusa in lib/motivi-rifiuto.ts; null se non rifiutata o rifiutata prima che esistesse */
+   motivo_rifiuto: string | null;
++  /** chi ha cominciato: l'inquilino che si candida, o il proprietario con una richiesta accettata */
++  origine?: "inquilino" | "proprietario";
+   created_at: string;
+   listings: {
+     titolo: string;
+diff --git a/supabase/migrations/0032_richieste_proprietari.sql b/supabase/migrations/0032_richieste_proprietari.sql
+new file mode 100644
+index 0000000..654f6f1
+--- /dev/null
++++ b/supabase/migrations/0032_richieste_proprietari.sql
+@@ -0,0 +1,217 @@
++-- ============================================================
++-- Il proprietario può mandare una richiesta («Fai match») a un inquilino che si è reso disponibile.
++--
++-- Cosa c'è di nuovo:
++--   1. il CONSENSO dell'inquilino a farsi trovare dai proprietari (spento di partenza: lo accende lui);
++--   2. l'ORIGINE di una candidatura: nata dall'inquilino (come sempre) o da una richiesta del proprietario;
++--   3. la tabella delle RICHIESTE, che nessuno scrive direttamente: si passa da due funzioni che controllano tutto;
++--   4. due nuovi tipi di notifica.
++--
++-- Come funziona, in breve: il proprietario manda la richiesta (funzione invia_richiesta_proprietario); l'inquilino
++-- riceve una notifica e la trova in «I tuoi match»; se accetta (rispondi_richiesta_proprietario) nasce una candidatura
++-- GIÀ ACCETTATA, quindi la chat e tutto il resto funzionano come per ogni match; se rifiuta, finisce lì.
++-- ============================================================
++
++-- ---- 1. il consenso a farsi trovare ----
++alter table tenant_profiles
++  add column if not exists visibile_ai_proprietari boolean not null default false,
++  add column if not exists visibile_dal timestamptz;
++
++comment on column tenant_profiles.visibile_ai_proprietari is
++  'Consenso dell''inquilino a farsi trovare dai proprietari con un immobile verificato e pubblicato. Spento di partenza.';
++
++-- ---- 2. l'origine di una candidatura ----
++alter table candidature
++  add column if not exists origine text not null default 'inquilino';
++alter table candidature drop constraint if exists candidature_origine_valida;
++alter table candidature add constraint candidature_origine_valida check (origine in ('inquilino', 'proprietario'));
++
++-- Una candidatura nata da una richiesta non è una «nuova candidatura» da valutare: il proprietario non riceve la notifica.
++create or replace function public.notifica_candidatura_ricevuta()
++returns trigger
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  l listings;
++begin
++  if new.origine = 'proprietario' then
++    return new;
++  end if;
++  select * into l from listings where id = new.listing_id;
++  perform public.crea_notifica(l.owner_id, 'candidatura_ricevuta',
++    jsonb_build_object('titolo', left(l.titolo, 80)), '/database');
++  return new;
++end;
++$$;
++
++-- ---- 3. le richieste ----
++create table if not exists public.richieste_proprietari (
++  id uuid primary key default gen_random_uuid(),
++  listing_id uuid not null references listings(id) on delete cascade,
++  owner_id uuid not null references owner_profiles(profile_id) on delete cascade,
++  tenant_id uuid not null references tenant_profiles(profile_id) on delete cascade,
++  stato text not null default 'inviata' check (stato in ('inviata', 'accettata', 'rifiutata')),
++  -- una frase facoltativa del proprietario
++  messaggio text check (messaggio is null or char_length(messaggio) between 1 and 280),
++  -- il nome di battesimo del proprietario, com'era quando ha mandato la richiesta
++  nome_proprietario text check (nome_proprietario is null or char_length(nome_proprietario) <= 60),
++  -- la candidatura nata dall'accettazione
++  candidatura_id uuid references candidature(id) on delete set null,
++  created_at timestamptz not null default now(),
++  risposta_at timestamptz,
++  unique (listing_id, tenant_id),
++  check ((stato = 'inviata') = (risposta_at is null))
++);
++
++create index if not exists richieste_proprietari_inquilino_idx on richieste_proprietari (tenant_id, stato);
++create index if not exists richieste_proprietari_proprietario_idx on richieste_proprietari (owner_id, created_at desc);
++
++alter table richieste_proprietari enable row level security;
++
++drop policy if exists "richieste: le vede l'inquilino" on richieste_proprietari;
++create policy "richieste: le vede l'inquilino" on richieste_proprietari for select to authenticated
++  using (tenant_id = auth.uid());
++drop policy if exists "richieste: le vede il proprietario" on richieste_proprietari;
++create policy "richieste: le vede il proprietario" on richieste_proprietari for select to authenticated
++  using (owner_id = auth.uid());
++
++-- Nessuno scrive direttamente: né il proprietario né l'inquilino. Si passa dalle due funzioni qui sotto.
++revoke all on richieste_proprietari from anon, authenticated;
++grant select on richieste_proprietari to authenticated;
++
++-- ---- 4. i tipi di notifica ----
++alter table notifiche drop constraint if exists notifiche_tipo_check;
++alter table notifiche add constraint notifiche_tipo_check check (tipo in (
++  'candidatura_ricevuta', 'candidatura_accettata', 'candidatura_rifiutata', 'candidatura_ritirata',
++  'immobile_verificato', 'immobile_respinto', 'reddito_verificato', 'reddito_respinto',
++  'affitto_verificato', 'affitto_respinto', 'rapporto_confermato', 'rapporto_rifiutato',
++  'feedback_ricevuto', 'visita_prenotata', 'visita_annullata',
++  'richiesta_ricevuta', 'richiesta_accettata'
++));
++
++-- ---- 5. mandare una richiesta ----
++create or replace function public.invia_richiesta_proprietario(
++  p_listing uuid,
++  p_tenant uuid,
++  p_messaggio text default null
++)
++returns uuid
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_owner uuid := auth.uid();
++  l listings;
++  v_msg text := nullif(btrim(coalesce(p_messaggio, '')), '');
++  v_nome text;
++  v_id uuid;
++begin
++  if v_owner is null then
++    raise exception 'NON_AUTENTICATO: accedi per continuare' using errcode = 'P0001';
++  end if;
++
++  select * into l from listings where id = p_listing;
++  if not found or l.owner_id <> v_owner then
++    raise exception 'NON_TUO_IMMOBILE: puoi scrivere solo per le tue case' using errcode = 'P0001';
++  end if;
++  if l.pubblicato is not true or l.verifica_stato <> 'verificato' then
++    raise exception 'IMMOBILE_NON_PUBBLICATO: la casa deve essere verificata e pubblicata' using errcode = 'P0001';
++  end if;
++
++  -- solo chi ha scelto di farsi trovare
++  if not exists (select 1 from tenant_profiles where profile_id = p_tenant and visibile_ai_proprietari is true) then
++    raise exception 'INQUILINO_NON_DISPONIBILE: questa persona non è disponibile' using errcode = 'P0001';
++  end if;
++
++  if exists (select 1 from candidature where listing_id = p_listing and tenant_id = p_tenant) then
++    raise exception 'GIA_CANDIDATO: questa persona si è già candidata a questa casa' using errcode = 'P0001';
++  end if;
++  if exists (select 1 from richieste_proprietari where listing_id = p_listing and tenant_id = p_tenant) then
++    raise exception 'RICHIESTA_GIA_INVIATA: hai già scritto a questa persona per questa casa' using errcode = 'P0001';
++  end if;
++
++  if v_msg is not null and char_length(v_msg) > 280 then
++    raise exception 'MESSAGGIO_TROPPO_LUNGO: al massimo 280 caratteri' using errcode = 'P0001';
++  end if;
++
++  -- un freno contro chi scrive a tutti: venti richieste in un giorno
++  if (select count(*) from richieste_proprietari where owner_id = v_owner and created_at > now() - interval '1 day') >= 20 then
++    raise exception 'TROPPE_RICHIESTE: per oggi hai scritto ad abbastanza persone, riprova domani' using errcode = 'P0001';
++  end if;
++
++  select left(nullif(btrim(nome), ''), 60) into v_nome from profiles where id = v_owner;
++
++  insert into richieste_proprietari (listing_id, owner_id, tenant_id, messaggio, nome_proprietario)
++  values (p_listing, v_owner, p_tenant, v_msg, v_nome)
++  returning id into v_id;
++
++  perform public.crea_notifica(p_tenant, 'richiesta_ricevuta',
++    jsonb_build_object('titolo', left(l.titolo, 80), 'nome', coalesce(v_nome, '')), '/candidature');
++
++  return v_id;
++end;
++$$;
++
++-- ---- 6. rispondere a una richiesta ----
++-- Restituisce l'identificativo della candidatura (chat) se si accetta, `null` se si rifiuta.
++create or replace function public.rispondi_richiesta_proprietario(p_richiesta uuid, p_accetta boolean)
++returns uuid
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_utente uuid := auth.uid();
++  r richieste_proprietari;
++  l listings;
++  v_candidatura uuid;
++begin
++  if v_utente is null then
++    raise exception 'NON_AUTENTICATO: accedi per continuare' using errcode = 'P0001';
++  end if;
++  -- «sì» o «no»: una risposta vuota non vale come un rifiuto
++  if p_accetta is null then
++    raise exception 'RISPOSTA_NON_VALIDA: rispondi sì o no' using errcode = 'P0001';
++  end if;
++
++  select * into r from richieste_proprietari where id = p_richiesta for update;
++  if not found or r.tenant_id <> v_utente then
++    raise exception 'RICHIESTA_NON_TUA: richiesta non trovata' using errcode = 'P0001';
++  end if;
++  if r.stato <> 'inviata' then
++    raise exception 'RICHIESTA_GIA_RISPOSTA: hai già risposto a questa richiesta' using errcode = 'P0001';
++  end if;
++
++  if not p_accetta then
++    update richieste_proprietari set stato = 'rifiutata', risposta_at = now() where id = r.id;
++    return null;
++  end if;
++
++  select * into l from listings where id = r.listing_id;
++  if not found or l.pubblicato is not true or l.verifica_stato <> 'verificato' then
++    raise exception 'IMMOBILE_NON_DISPONIBILE: la casa non è più disponibile' using errcode = 'P0001';
++  end if;
++
++  -- La candidatura nasce GIÀ ACCETTATA: è un match, la chat si apre subito.
++  insert into candidature (listing_id, tenant_id, status, origine)
++  values (r.listing_id, r.tenant_id, 'accettata', 'proprietario')
++  returning id into v_candidatura;
++
++  update richieste_proprietari
++     set stato = 'accettata', risposta_at = now(), candidatura_id = v_candidatura
++   where id = r.id;
++
++  perform public.crea_notifica(r.owner_id, 'richiesta_accettata',
++    jsonb_build_object('titolo', left(l.titolo, 80)), '/chat/' || v_candidatura::text);
++
++  return v_candidatura;
++end;
++$$;
++
++revoke all on function public.invia_richiesta_proprietario(uuid, uuid, text) from public, anon;
++revoke all on function public.rispondi_richiesta_proprietario(uuid, boolean) from public, anon;
++grant execute on function public.invia_richiesta_proprietario(uuid, uuid, text) to authenticated;
++grant execute on function public.rispondi_richiesta_proprietario(uuid, boolean) to authenticated;
+-- 
+2.43.0
+

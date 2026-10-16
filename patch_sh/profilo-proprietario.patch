@@ -1,0 +1,543 @@
+From e57e249363bbe4d9fea473eda81026d168f4a2a9 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 16 Oct 2026 06:18:58 +0000
+Subject: [PATCH] =?UTF-8?q?feat(profilo):=20profilo=20del=20proprietario?=
+ =?UTF-8?q?=20con=20il=20nome=20in=20alto=20e=20la=20campanella=20nell'ang?=
+ =?UTF-8?q?olo;=20via=20=C2=ABI=20tuoi=20dati=C2=BB?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+DA APPLICARE DOPO affitto-da-contratto.patch. Nessuna migrazione.
+
+INTESTAZIONE. Come per l'inquilino: le iniziali nell'avatar, il NOME E COGNOME come titolo, l'email sotto, e la campanella delle novità nell'angolo
+(con il numero solo se ci sono novità da leggere, 44 px, porta a /notifiche). Via 'Il tuo profilo' e 'Proprietario a Milano'. È la stessa intestazione
+dell'inquilino (stesse classi, stessi helper, stessa campanella): un test lo richiede. Via la riga 'Novità' (e il componente RigaNovita, che non serve più).
+
+VIA «I TUOI DATI». Chiedeva tipo di proprietario, numero di immobili e obiettivo: NESSUNA parte dell'app li leggeva mai (non influivano su candidature,
+non li vedeva nessuno), li scriveva soltanto il loro modulo. Nome e email stanno già in 'Account e accesso'; ciò che conta per il proprietario (la
+verifica) sta negli immobili. Restano le tre righe utili: Account e accesso, Privacy e consensi, FAQ, più Esci. Tolti anche: l'azione che li salvava
+(owner-actions.ts), la lettura del profilo del proprietario dalla pagina, il tipo OwnerProfile.
+INFORMATIVA 2026-10-provvisoria-21: non elenca più quei tre dati (non si raccolgono più). La 20 è equivalente (si chiedono MENO dati: nessuno deve
+riaccettare). I DATI GIÀ SALVATI nelle tre colonne di owner_profiles restano nel database, inutilizzati: cancellarli (e togliere le colonne) è una
+scelta di minimizzazione dei dati che non ho fatto da solo perché è irreversibile; si fa con una migrazione di tre righe.
+
+PROVATO. In Chrome col dito: nome, iniziali ed email; campanella con il numero 2 (porta a /notifiche, 44x44, a destra dell'avatar, nell'angolo) e senza numero
+quando non ci sono novità; stessa posizione dell'inquilino; solo tre righe; le tre schede si aprono; la scheda Privacy del proprietario non ha la scelta
+'Fatti trovare dai proprietari' (è dell'inquilino). ALTERAZIONI: 10 difetti reintrodotti di proposito, tutti presi.
+Test: 1150 in tutto (5 nuovi). I due test che citavano la riga 'Novità' del proprietario sono stati aggiornati.
+---
+ package.json                                 |   2 +-
+ scripts/test-profilo-gestione.mjs            |   4 +-
+ scripts/test-profilo-proprietario.mjs        |  45 +++++
+ scripts/test-rapporti.mjs                    |   2 +-
+ src/app/(app)/profilo/OwnerProfiloClient.tsx | 198 ++-----------------
+ src/app/(app)/profilo/owner-actions.ts       |  36 ----
+ src/app/(app)/profilo/page.tsx               |   9 +-
+ src/components/RigaNovita.tsx                |  24 ---
+ src/content/informativa.ts                   |   6 +-
+ src/lib/types.ts                             |   7 -
+ 10 files changed, 71 insertions(+), 262 deletions(-)
+ create mode 100644 scripts/test-profilo-proprietario.mjs
+ delete mode 100644 src/app/(app)/profilo/owner-actions.ts
+ delete mode 100644 src/components/RigaNovita.tsx
+
+diff --git a/package.json b/package.json
+index bfd77ed..0376375 100644
+--- a/package.json
++++ b/package.json
+@@ -8,7 +8,7 @@
+     "start": "next start",
+     "lint": "eslint",
+     "pretest": "node scripts/controlla-dipendenze.mjs",
+-    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-affidabilita.mjs scripts/test-profilo-gestione.mjs scripts/test-avvisi-profilo.mjs scripts/test-raccomandato.mjs scripts/test-home-proprietario.mjs scripts/test-richieste.mjs scripts/test-database-proprietario.mjs scripts/test-affitto-contratto.mjs scripts/test-db-richieste.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-dati-immobile.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-affidabilita.mjs scripts/test-profilo-gestione.mjs scripts/test-avvisi-profilo.mjs scripts/test-raccomandato.mjs scripts/test-home-proprietario.mjs scripts/test-richieste.mjs scripts/test-database-proprietario.mjs scripts/test-affitto-contratto.mjs scripts/test-profilo-proprietario.mjs scripts/test-db-richieste.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-dati-immobile.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-profilo-gestione.mjs b/scripts/test-profilo-gestione.mjs
+index 7dd2956..e2ebb23 100644
+--- a/scripts/test-profilo-gestione.mjs
++++ b/scripts/test-profilo-gestione.mjs
+@@ -48,8 +48,8 @@ test("Profilo: in alto il nome (titolo della pagina), le iniziali nell'avatar, l
+   assert.ok(alto.indexOf("avatar-name") < alto.indexOf("CampanellaNovita"), "la campanella sta dopo il nome, nell'angolo"); assert.ok(!/In cerca a Milano/.test(p), "una frase falsa da quando c'è anche Bergamo"); assert.ok(!/\(nome \?\? "\?"\)\.slice/.test(p), "le iniziali sono ancora quelle vecchie");
+ });
+ 
+-test("Profilo: la riga «Novità» non c'è più per l'inquilino (resta quella del proprietario), né le righe e le schede di affitti e inviti", () => {
+-  const p = profiloClient(); assert.ok(!/RigaNovita/.test(p), "la riga Novità è ancora nel Profilo dell'inquilino"); assert.match(leggi("src", "app", "(app)", "profilo", "OwnerProfiloClient.tsx"), /<RigaNovita /, "la riga del proprietario non va toccata");
++test("Profilo: la riga «Novità» non c'è più né per l'inquilino né per il proprietario (c'è la campanella nell'angolo), né le righe e le schede di affitti e inviti", () => {
++  const p = profiloClient(); assert.ok(!/RigaNovita/.test(p), "la riga Novità è ancora nel Profilo dell'inquilino"); assert.ok(!/RigaNovita/.test(leggi("src", "app", "(app)", "profilo", "OwnerProfiloClient.tsx")), "la riga Novità è ancora nel Profilo del proprietario"); assert.ok(!fs.existsSync(path.join(radice, "src", "components", "RigaNovita.tsx")), "il componente della riga Novità non serve più");
+   for (const vietato of ["I tuoi affitti", "Invita il tuo proprietario", "InvitaProprietarioSheet", "affittiPanel", "inviti:", "inviti,", 'sheetAperta === "invito"', 'sheetAperta === "affitti"', "IconPersone", "IconDocumento"]) assert.ok(!p.includes(vietato), `nel Profilo resta «${vietato}»`);
+   for (const resta of ["Preferiti", 'title="La tua ricerca"', 'title="Account e accesso"', 'title="Privacy e consensi"', 'title="FAQ e bonus affitto"', "<DatiSheet", "<RicercaSheet"]) assert.ok(p.includes(resta) || leggi("src", "components", "RigaPreferiti.tsx").includes("Preferiti"), `è sparito «${resta}»`);
+ });
+diff --git a/scripts/test-profilo-proprietario.mjs b/scripts/test-profilo-proprietario.mjs
+new file mode 100644
+index 0000000..262142a
+--- /dev/null
++++ b/scripts/test-profilo-proprietario.mjs
+@@ -0,0 +1,45 @@
++/**
++ * Test del Profilo del proprietario: il nome in alto con la campanella delle novità nell'angolo (come per l'inquilino) e niente «I tuoi
++ * dati»: tipo di proprietario, numero di immobili e obiettivo non li usava nessuna parte dell'app. Si lancia con:   npm test
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const inf = caricaTs(path.join(radice, "src", "content", "informativa.ts"));
++const leggi = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8").replace(/\r\n/g, "\n");
++const senzaCommenti = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
++const prop = senzaCommenti(leggi("src", "app", "(app)", "profilo", "OwnerProfiloClient.tsx"));
++const tenant = senzaCommenti(leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx"));
++
++test("intestazione: nome (e cognome) in alto come titolo, email sotto, iniziali nell'avatar, campanella delle novità nell'angolo; non più «Il tuo profilo» e «Proprietario a Milano»", () => {
++  assert.match(prop, /<div className="avatar-row">\s+<div className="avatar">\{iniziali\(nome, cognome\)\}<\/div>\s+<div className="avatar-testo">\s+<h1 className="avatar-name">\{nomeCompleto\(nome, cognome\) \|\| "Il tuo profilo"\}<\/h1>\s+\{email && <div className="avatar-sub">\{email\}<\/div>\}\s+<\/div>\s+<CampanellaNovita nonLette=\{nonLette\} \/>\s+<\/div>/);
++  assert.ok(!/Proprietario a Milano/.test(prop) && !/avatar-name">Il tuo profilo</.test(prop)); assert.match(prop, /import \{ iniziali, nomeCompleto \} from "@\/lib\/persona";/);
++  // è la STESSA intestazione dell'inquilino: stesse classi, stessi helper, stessa campanella
++  for (const x of ['className="avatar-row"', 'className="avatar-testo"', 'className="avatar-name"', 'className="avatar-sub"', "<CampanellaNovita nonLette={nonLette} />"]) { assert.ok(prop.includes(x), `manca ${x}`); assert.ok(tenant.includes(x), `l'inquilino non ha ${x}: le due intestazioni non coincidono`); }
++});
++
++test("nessuna riga «Novità» (c'è la campanella) e nessun «I tuoi dati»: restano Account e accesso, Privacy e consensi, FAQ, Esci", () => {
++  assert.ok(!/RigaNovita|title="Novità"/.test(prop)); for (const vietato of ["I tuoi dati", "DatiProprietarioForm", "TIPO_VOCAB", "OBIETTIVO_VOCAB", "datiAperto", "Tipo di proprietario", "immobili gestiti", "Affittare velocemente", "updateDatiProprietario", "useActionState"]) assert.ok(!prop.includes(vietato), `resta «${vietato}»`);
++  const titoli = [...prop.matchAll(/(?<![a-zA-Z])title="([^"]+)"/g)].map((m) => m[1]); assert.deepEqual(titoli, ["Account e accesso", "Privacy e consensi", "FAQ"]); assert.match(prop, /<form action=\{logout\} className="mt-6">\s+<button className="redo-link"[^>]*>\s+Esci\s+<\/button>/);
++  for (const x of ["<AccountSheet", "<PrivacySheet", "<FaqSheet"]) assert.ok(prop.includes(x), `manca ${x}`); assert.ok(!/visibileProprietariIniziale/.test(prop), "il proprietario non ha la scelta di farsi trovare");
++});
++
++test("i dati che non servivano non si chiedono né si salvano più: via l'azione, via la lettura dalla pagina, via il tipo; e nessun file dell'app li nomina", () => {
++  assert.ok(!fs.existsSync(path.join(radice, "src", "app", "(app)", "profilo", "owner-actions.ts")), "l'azione che li salvava c'è ancora");
++  const p = senzaCommenti(leggi("src", "app", "(app)", "profilo", "page.tsx")); assert.ok(!/owner_profiles|OwnerProfile|owner=/.test(p), "la pagina legge ancora il profilo del proprietario"); assert.match(p, /<OwnerProfiloClient\s+nonLette=\{nonLette\}\s+nome=\{profile\?\.nome \?\? null\}\s+cognome=\{profile\?\.cognome \?\? null\}\s+email=\{user!\.email \?\? null\}\s+consensoMarketingIniziale/);
++  const trovati = []; const visita = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) visita(f); else if (/\.(ts|tsx)$/.test(e.name) && /proprietario_tipo|num_immobili|\bobiettivo\b|OwnerProfile\b/.test(senzaCommenti(fs.readFileSync(f, "utf8")).replace(/OwnerProfiloClient/g, ""))) trovati.push(path.relative(radice, f)); } };
++  visita(path.join(radice, "src")); assert.deepEqual(trovati, [], "nominano ancora quei dati: " + trovati.join(", "));
++});
++
++test("la notifica dell'inquilino e quella del proprietario passano dalla stessa campanella, che porta alle notifiche e mostra il numero solo se ce ne sono", () => {
++  const c = senzaCommenti(leggi("src", "components", "CampanellaNovita.tsx")); assert.match(c, /<Link href="\/notifiche" className=\{`campanella \$\{numero \? "con-novita" : ""\}`\}/); assert.match(c, /\{numero && \(/);
++  assert.match(leggi("src", "app", "(app)", "profilo", "page.tsx"), /\.from\("notifiche"\)\s+\.select\("id", \{ count: "exact", head: true \}\)\s+\.is\("letta_at", null\);/, "il numero delle novità non lette si legge per entrambi i ruoli");
++});
++
++test("informativa: non elenca più tipo di proprietario, numero di immobili e obiettivo (non si raccolgono più); nuova versione, la precedente resta equivalente (si chiedono meno dati: nessuno deve riaccettare)", () => {
++  const t = JSON.stringify(inf.INFORMATIVA); assert.ok(!/tipo di proprietario|numero di immobili|obiettivo/.test(t), "l'informativa nomina ancora quei dati"); assert.ok(t.includes("Se sei proprietario: gli annunci con titolo, descrizione, zona, prezzo, caratteristiche, classe energetica e foto;"));
++  const n = Number(inf.INFORMATIVA.versione.match(/-(\d+)$/)[1]); assert.ok(n >= 21, inf.INFORMATIVA.versione); assert.ok(inf.INFORMATIVA.equivalenti.includes("2026-10-provvisoria-20"), "la 20 deve restare equivalente");
++});
+diff --git a/scripts/test-rapporti.mjs b/scripts/test-rapporti.mjs
+index c098160..4d4ce9e 100644
+--- a/scripts/test-rapporti.mjs
++++ b/scripts/test-rapporti.mjs
+@@ -214,7 +214,7 @@ test("i testi dei rapporti non presumono il genere di nessuno", () => {
+     "src/app/invito/[token]/InvitoClient.tsx",
+     "src/components/VerificaRedditoPanel.tsx", "src/components/SelettoreFile.tsx",
+     "src/lib/verifica-inquilino.ts", "src/content/informativa.ts",
+-    "src/lib/notifiche.ts", "src/components/RigaNovita.tsx", "src/app/(app)/notifiche/NotificheLista.tsx",
++    "src/lib/notifiche.ts", "src/app/(app)/notifiche/NotificheLista.tsx",
+     "src/app/staff/inquilini/[id]/page.tsx", "src/app/staff/inquilini/[id]/EsitoInquilinoForm.tsx",
+   ].map((f) => path.join(radice, f));
+   // tutte le pagine e i moduli delle cartelle nuove, compresi i sottolivelli
+diff --git a/src/app/(app)/profilo/OwnerProfiloClient.tsx b/src/app/(app)/profilo/OwnerProfiloClient.tsx
+index 0c258c7..214ff8f 100644
+--- a/src/app/(app)/profilo/OwnerProfiloClient.tsx
++++ b/src/app/(app)/profilo/OwnerProfiloClient.tsx
+@@ -1,42 +1,26 @@
+ "use client";
+ 
+-import { RigaNovita } from "@/components/RigaNovita";
+-import { useActionState, useEffect, useState } from "react";
+-import { Sheet } from "@/components/Sheet";
+-import type { OwnerProfile } from "@/lib/types";
+-import { updateDatiProprietario, type SaveState } from "./owner-actions";
++import { useState } from "react";
+ import { logout } from "@/app/login/actions";
+ import { PageContainer } from "@/components/ui/PageContainer";
+-import { Chip } from "@/components/ui/Chip";
+-import { Field } from "@/components/ui/Field";
++import { Row } from "@/components/ui/Row";
++import { CampanellaNovita } from "@/components/CampanellaNovita";
+ import { PrivacySheet } from "@/components/PrivacySheet";
+ import { FaqSheet } from "@/components/FaqSheet";
+ import { AccountSheet } from "@/components/AccountSheet";
+-import {
+-  IconDomanda,
+-  IconLucchetto,
+-  IconPersona,
+-  IconScudo,
+-} from "@/components/icons";
+-
+-const TIPO_VOCAB = [
+-  { value: "privato", label: "Privato" },
+-  { value: "agenzia", label: "Agenzia" },
+-  { value: "property_manager", label: "Property manager" },
+-];
+-
+-const OBIETTIVO_VOCAB = [
+-  "Affittare velocemente",
+-  "Massima selezione inquilini",
+-  "Un equilibrio tra i due",
+-];
+-
++import { iniziali, nomeCompleto } from "@/lib/persona";
++import { IconDomanda, IconLucchetto, IconScudo } from "@/components/icons";
++
++/**
++ * Il profilo del proprietario: in alto il nome (con l'email sotto) e la campanella delle novità nell'angolo, come per l'inquilino;
++ * sotto solo ciò che serve davvero: l'account, la privacy, le domande frequenti. Non ci sono «dati» del proprietario da compilare:
++ * nome e email stanno nell'account, e ciò che conta per lui (la verifica) sta negli immobili.
++ */
+ export function OwnerProfiloClient({
+   nonLette,
+   nome,
+   cognome,
+   email,
+-  owner,
+   consensoMarketingIniziale,
+   consensoTerziIniziale,
+ }: {
+@@ -45,36 +29,26 @@ export function OwnerProfiloClient({
+   nome: string | null;
+   cognome: string | null;
+   email: string | null;
+-  owner: OwnerProfile;
+   consensoMarketingIniziale: boolean;
+   consensoTerziIniziale: boolean;
+ }) {
+-  const [datiAperto, setDatiAperto] = useState(false);
+   const [accountAperto, setAccountAperto] = useState(false);
+   const [privacyAperto, setPrivacyAperto] = useState(false);
+   const [faqAperto, setFaqAperto] = useState(false);
+ 
+   return (
+     <PageContainer>
+-      {/* Avatar */}
++      {/* In alto: l'avatar, il nome e la campanella delle novità nell'angolo */}
+       <div className="avatar-row">
+-        <div className="avatar">{(nome ?? "?").slice(0, 2).toUpperCase()}</div>
+-        <div>
+-          <div className="avatar-name">Il tuo profilo</div>
+-          <div className="avatar-sub">Proprietario a Milano</div>
++        <div className="avatar">{iniziali(nome, cognome)}</div>
++        <div className="avatar-testo">
++          <h1 className="avatar-name">{nomeCompleto(nome, cognome) || "Il tuo profilo"}</h1>
++          {email && <div className="avatar-sub">{email}</div>}
+         </div>
++        <CampanellaNovita nonLette={nonLette} />
+       </div>
+ 
+       <div className="card-grid">
+-        <RigaNovita nonLette={nonLette} />
+-        <Row
+-          color="var(--ink)"
+-          icon={<IconPersona className="fill-none stroke-white stroke-2" />}
+-          title="I tuoi dati"
+-          subtitle="Tipo di proprietario, immobili gestiti e priorità."
+-          cta="Vedi il dettaglio"
+-          onClick={() => setDatiAperto(true)}
+-        />
+         <Row
+           color="var(--ink-soft)"
+           icon={<IconLucchetto className="fill-none stroke-white stroke-2" />}
+@@ -107,22 +81,7 @@ export function OwnerProfiloClient({
+         </button>
+       </form>
+ 
+-      <Sheet
+-        open={datiAperto}
+-        onClose={() => setDatiAperto(false)}
+-        title="I tuoi dati"
+-      >
+-        <DatiProprietarioForm owner={owner} onSaved={() => setDatiAperto(false)} />
+-      </Sheet>
+-
+-      <AccountSheet
+-        open={accountAperto}
+-        onClose={() => setAccountAperto(false)}
+-        nome={nome}
+-        cognome={cognome}
+-        email={email}
+-        ruolo="proprietario"
+-      />
++      <AccountSheet open={accountAperto} onClose={() => setAccountAperto(false)} nome={nome} cognome={cognome} email={email} ruolo="proprietario" />
+ 
+       <PrivacySheet
+         open={privacyAperto}
+@@ -134,124 +93,3 @@ export function OwnerProfiloClient({
+     </PageContainer>
+   );
+ }
+-
+-function DatiProprietarioForm({
+-  owner,
+-  onSaved,
+-}: {
+-  owner: OwnerProfile;
+-  onSaved: () => void;
+-}) {
+-  const [state, formAction, pending] = useActionState<SaveState, FormData>(
+-    updateDatiProprietario,
+-    null
+-  );
+-
+-  const [tipo, setTipo] = useState(owner.proprietario_tipo ?? "");
+-  const [numImmobili, setNumImmobili] = useState(owner.num_immobili ?? 1);
+-  const [obiettivo, setObiettivo] = useState(owner.obiettivo ?? "");
+-
+-  useEffect(() => {
+-    if (state?.ok) {
+-      const t = setTimeout(onSaved, 600);
+-      return () => clearTimeout(t);
+-    }
+-  }, [state, onSaved]);
+-
+-  return (
+-    <form action={formAction}>
+-      <input type="hidden" name="proprietario_tipo" value={tipo} />
+-      <input type="hidden" name="num_immobili" value={numImmobili} />
+-      <input type="hidden" name="obiettivo" value={obiettivo} />
+-
+-      <Field label="Tipo di proprietario">
+-        <div className="chip-row">
+-          {TIPO_VOCAB.map((t) => (
+-            <Chip
+-              key={t.value}
+-              label={t.label}
+-              active={tipo === t.value}
+-              onClick={() => setTipo(t.value)}
+-            />
+-          ))}
+-        </div>
+-      </Field>
+-
+-      <Field label="Immobili gestiti su MatchAmI">
+-        <div className="stepper">
+-          <button
+-            type="button"
+-            onClick={() => setNumImmobili((n) => Math.max(1, n - 1))}
+-          >
+-            −
+-          </button>
+-          <div className="val">{numImmobili}</div>
+-          <button
+-            type="button"
+-            onClick={() => setNumImmobili((n) => Math.min(50, n + 1))}
+-          >
+-            +
+-          </button>
+-        </div>
+-      </Field>
+-
+-      <Field label="Priorità">
+-        <div className="chip-row" style={{ flexDirection: "column", alignItems: "flex-start" }}>
+-          {OBIETTIVO_VOCAB.map((o) => (
+-            <Chip
+-              key={o}
+-              label={o}
+-              active={obiettivo === o}
+-              onClick={() => setObiettivo(o)}
+-            />
+-          ))}
+-        </div>
+-      </Field>
+-
+-      {state?.error && <p className="note-error">{state.error}</p>}
+-      {state?.ok && <p className="note-saved">Salvato.</p>}
+-
+-      <button
+-        type="submit"
+-        disabled={pending}
+-        className="opp-cta"
+-      >
+-        {pending ? "Salvataggio..." : "Salva"}
+-      </button>
+-    </form>
+-  );
+-}
+-
+-function Row({
+-  color,
+-  title,
+-  subtitle,
+-  cta,
+-  onClick,
+-  icon,
+-}: {
+-  color: string;
+-  title: string;
+-  subtitle: string;
+-  cta: string;
+-  onClick: () => void;
+-  icon?: React.ReactNode;
+-}) {
+-  return (
+-    <button onClick={onClick} className="pv-row">
+-      <div
+-        className="pv-check"
+-        style={{ background: color, borderColor: color }}
+-      >
+-        {icon}
+-      </div>
+-      <div className="pv-text">
+-        <div className="pv-label-row">
+-          <b>{title}</b>
+-        </div>
+-        <p>{subtitle}</p>
+-        <span className="pv-readmore">{cta}</span>
+-      </div>
+-    </button>
+-  );
+-}
+diff --git a/src/app/(app)/profilo/owner-actions.ts b/src/app/(app)/profilo/owner-actions.ts
+deleted file mode 100644
+index db14539..0000000
+--- a/src/app/(app)/profilo/owner-actions.ts
++++ /dev/null
+@@ -1,36 +0,0 @@
+-"use server";
+-
+-import { revalidatePath } from "next/cache";
+-import { createClient } from "@/lib/supabase/server";
+-
+-export type SaveState = { error?: string; ok?: boolean } | null;
+-
+-export async function updateDatiProprietario(
+-  _prevState: SaveState,
+-  formData: FormData
+-): Promise<SaveState> {
+-  const supabase = await createClient();
+-  const {
+-    data: { user },
+-  } = await supabase.auth.getUser();
+-  if (!user) return { error: "Non autenticato." };
+-
+-  const proprietario_tipo = String(formData.get("proprietario_tipo") || "") || null;
+-  const num_immobili = Number(formData.get("num_immobili") || 1);
+-  const obiettivo = String(formData.get("obiettivo") || "") || null;
+-
+-  const { error } = await supabase
+-    .from("owner_profiles")
+-    .update({
+-      proprietario_tipo,
+-      num_immobili,
+-      obiettivo,
+-      updated_at: new Date().toISOString(),
+-    })
+-    .eq("profile_id", user.id);
+-
+-  if (error) return { error: error.message };
+-
+-  revalidatePath("/profilo");
+-  return { ok: true };
+-}
+diff --git a/src/app/(app)/profilo/page.tsx b/src/app/(app)/profilo/page.tsx
+index 247d744..3a11118 100644
+--- a/src/app/(app)/profilo/page.tsx
++++ b/src/app/(app)/profilo/page.tsx
+@@ -7,7 +7,7 @@ import { sezioneProfilo } from "@/lib/home";
+ import { profiloRicercaDaRighe } from "@/lib/match";
+ import type { Luogo } from "@/lib/luoghi";
+ import { OwnerProfiloClient } from "./OwnerProfiloClient";
+-import type { TenantProfile, OwnerProfile } from "@/lib/types";
++import type { TenantProfile } from "@/lib/types";
+ import { redirect } from "next/navigation";
+ 
+ export default async function ProfiloPage({ searchParams }: { searchParams: Promise<{ apri?: string | string[] }> }) {
+@@ -30,19 +30,12 @@ export default async function ProfiloPage({ searchParams }: { searchParams: Prom
+     .single();
+ 
+   if (profile?.ruolo === "proprietario") {
+-    const { data: owner } = await supabase
+-      .from("owner_profiles")
+-      .select("*")
+-      .eq("profile_id", user!.id)
+-      .single();
+-
+     return (
+       <OwnerProfiloClient
+         nonLette={nonLette}
+         nome={profile?.nome ?? null}
+         cognome={profile?.cognome ?? null}
+         email={user!.email ?? null}
+-        owner={owner as OwnerProfile}
+         consensoMarketingIniziale={profile?.consenso_marketing ?? false}
+         consensoTerziIniziale={profile?.consenso_terzi ?? false}
+       />
+diff --git a/src/components/RigaNovita.tsx b/src/components/RigaNovita.tsx
+deleted file mode 100644
+index b7216ac..0000000
+--- a/src/components/RigaNovita.tsx
++++ /dev/null
+@@ -1,24 +0,0 @@
+-"use client";
+-
+-import { useRouter } from "next/navigation";
+-import { Row } from "@/components/ui/Row";
+-import { IconCampana } from "@/components/icons";
+-import { sottotitoloNovita } from "@/lib/notifiche";
+-
+-/**
+- * La riga «Novità» in cima al Profilo, per inquilini e proprietari: apre
+- * la pagina con l'elenco delle notifiche.
+- */
+-export function RigaNovita({ nonLette }: { nonLette: number }) {
+-  const router = useRouter();
+-  return (
+-    <Row
+-      color={nonLette > 0 ? "var(--clay)" : "var(--ink-soft)"}
+-      icon={<IconCampana className="fill-none stroke-white stroke-2" />}
+-      title="Novità"
+-      subtitle={sottotitoloNovita(nonLette)}
+-      cta="Vedi le novità"
+-      onClick={() => router.push("/notifiche")}
+-    />
+-  );
+-}
+diff --git a/src/content/informativa.ts b/src/content/informativa.ts
+index 1980b46..cc567bd 100644
+--- a/src/content/informativa.ts
++++ b/src/content/informativa.ts
+@@ -28,7 +28,7 @@ export const INFORMATIVA = {
+    * controllo che fa il database (migrazione 0017): un test fallisce se
+    * questa stringa non lo supera.
+    */
+-  versione: "2026-10-provvisoria-20",
++  versione: "2026-10-provvisoria-21",
+   /**
+    * Versioni precedenti che chi le ha accettate NON deve riaccettare.
+    *
+@@ -44,7 +44,7 @@ export const INFORMATIVA = {
+    */
+   // Dalla versione 20 il profilo di chi cerca casa è visibile ai proprietari di partenza: è un cambiamento che riguarda anche chi era
+   // già iscritto, quindi le versioni precedenti NON sono equivalenti e chi le aveva accettate deve riaccettare al prossimo accesso.
+-  equivalenti: [] as readonly string[],
++  equivalenti: ["2026-10-provvisoria-20"] as readonly string[],
+   provvisoria: true,
+   titolo: "Informativa sulla privacy",
+   aggiornata: "ottobre 2026",
+@@ -68,7 +68,7 @@ export const INFORMATIVA = {
+       elenco: [
+         "Account: email, password (conservata come impronta, non in chiaro), nome, cognome e ruolo, inquilino o proprietario.",
+         "Se sei inquilino: lavoro, reddito tuo e del tuo nucleo, garante, fideiussione, protesti (li dichiari tu e non vengono verificati), animali, composizione del nucleo, numero di figli, presentazione, foto del profilo, le tue preferenze di ricerca (budget, zone, locali, metri, tipo di casa e di contratto, caratteristiche e se per te sono necessarie) e gli annunci che salvi tra i preferiti o che scarti.",
+-        "Se sei proprietario: tipo di proprietario, numero di immobili, obiettivo; gli annunci con titolo, descrizione, zona, prezzo, caratteristiche, classe energetica e foto; l'indirizzo preciso, se lo indichi, e la posizione sulla mappa che se ne ricava; i criteri che chiedi ai candidati.",
++        "Se sei proprietario: gli annunci con titolo, descrizione, zona, prezzo, caratteristiche, classe energetica e foto; l'indirizzo preciso, se lo indichi, e la posizione sulla mappa che se ne ricava; i criteri che chiedi ai candidati.",
+         "Per le verifiche: il documento d'identità e la prova di proprietà dell'immobile (proprietari); se sei inquilino e chiedi di verificare il reddito, un documento d'identità e una prova del reddito (una busta paga, la CU o la dichiarazione dei redditi); e i contratti di affitto caricati per dichiarare un affitto. Non chiediamo lo stato di famiglia.",
+         "Mentre usi l'app: candidature, messaggi, visite (giorno e ora, e chi le ha prenotate), contratti, recensioni, richieste di conferma di un affitto e inviti. Inoltre le notifiche sulle novità del tuo account, e le email che le riassumono (la tua impostazione, la data dell'ultimo invio e un registro di data, esito e numero di notifiche, senza contenuto né indirizzi, per 90 giorni) (per esempio l'esito di una verifica o la risposta a una candidatura): contengono il tipo di evento e, al massimo, il titolo di un annuncio e, per le visite, il giorno e l'ora; mai nomi di persone.",
+         "Dati di un'altra persona: se inviti il tuo proprietario, scrivi il suo nome e, se vuoi, la sua email.",
+diff --git a/src/lib/types.ts b/src/lib/types.ts
+index b235316..5319346 100644
+--- a/src/lib/types.ts
++++ b/src/lib/types.ts
+@@ -41,13 +41,6 @@ export type ListingProprietario = {
+   nCandidature: number;
+ };
+ 
+-export type OwnerProfile = {
+-  profile_id: string;
+-  proprietario_tipo: "privato" | "agenzia" | "property_manager" | null;
+-  num_immobili: number;
+-  obiettivo: string | null;
+-};
+-
+ export type ImmobileDettaglio = {
+   id: string;
+   titolo: string;
+-- 
+2.43.0
+

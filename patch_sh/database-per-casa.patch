@@ -1,0 +1,2817 @@
+From f0e3a629631954be4211644cb94756fe2dec1b67 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 15 Oct 2026 21:01:35 +0000
+Subject: [PATCH] feat(database): inquilini divisi per casa, scheda nuova,
+ ricerca in fondo, annulla match e annulla scarto
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+DA APPLICARE DOPO visibile-di-default.patch.
+RICHIEDE LA MIGRAZIONE 0034 (supabase/migrations/0034_riapri_candidatura.sql). Se non sono ancora sul database vanno eseguite IN ORDINE la
+0032, la 0033 e la 0034, PRIMA del push del codice.
+
+COME È FATTA LA PAGINA. Il Database inquilini è diviso per CASA (foto, titolo, zona, prezzo). Dentro ogni casa tre sezioni che si aprono e si
+chiudono, ognuna con il numero di persone:
+  - CANDIDATURE SPONTANEE: chi si è candidato da solo e aspetta (la più adatta per prima: chi rispetta i criteri obbligatori, poi la
+    percentuale, il badge, l'affidabilità);
+  - POSSIBILI MATCH: chi cerca una casa come questa e non si è candidato (si manda una richiesta), con le richieste già mandate;
+  - GIÀ VALUTATI: Match, Scartati e chi ha ritirato la candidatura. Parte chiusa se c'è altro da fare.
+Una casa pubblicata senza candidati compare lo stesso (chi ha una casa sola la vede subito). La RICERCA e i filtri stanno IN FONDO, sotto
+tutte le case, e i risultati compaiono sotto la barra con le stesse schede e gli stessi pulsanti (si cerca solo tra i candidati).
+
+LA SCHEDA. In alto due cifre grandi: AFFIDABILITÀ e MATCH (verde da 70, oro da 50, rosso sotto; «No / Manca un requisito» se un criterio
+obbligatorio non è rispettato; «–» se il proprietario non ha chiesto criteri). Sotto: foto, nome breve («Anna V.»), lavoro, badge 'Inquilino
+raccomandato', reddito verificato, stelle, estratto della presentazione. In fondo i pulsanti. 'Vedi la scheda completa' apre i dettagli
+(con gli stessi pulsanti). La stessa scheda serve per candidati e possibili match.
+PULSANTI SECONDO LO STATO: in attesa = Fai match, Scarta; match = Apri chat, Annulla match; scartato = Annulla scarto; ritirata = niente.
+(Apri chat compare solo per i match: la chat si apre solo dopo un match, come prima.)
+CONFERME: Fai match (si apre la chat, la persona riceve una notifica), Scarta (con il motivo, che la persona legge) e Annulla match
+chiedono prima conferma; Annulla scarto è un tocco solo. Dopo un match c'è un avviso con il link alla chat. I messaggi con il nome
+abbreviato non hanno mai due punti di fila (un test lo vieta). Gli errori del database si leggono in italiano e la conferma resta aperta.
+
+ANNULLARE UNA DECISIONE (migrazione 0034). Prima una decisione era definitiva (trigger blocca_cambio_decisione). Ora il proprietario può
+annullare un match o uno scarto, SOLO dalla funzione riapri_candidatura:
+  - è del proprietario della casa; la candidatura deve essere un match o uno scarto (non in attesa, non ritirata);
+  - un MATCH non si annulla se c'è un contratto o una visita in programma (proposta o confermata, da oggi in poi); una visita rifiutata o già
+    passata non blocca;
+  - la candidatura torna «in attesa», il motivo del rifiuto si cancella, la valutazione registrata alla decisione si cancella (la prossima
+    ne fotografa una nuova), la chat si chiude (i messaggi restano e si rivedono rifacendo il match);
+  - l'inquilino riceve una notifica nuova, candidatura_riaperta («La tua candidatura è di nuovo in attesa»);
+  - una candidatura nata da una richiesta del proprietario si annulla allo stesso modo e ricorda l'origine; la richiesta resta «accettata».
+NESSUNA SCORCIATOIA: non c'è nessuna policy di modifica sulle candidature; il trigger lascia passare SOLO accettata/rifiutata -> in attesa e
+solo se la funzione ha alzato un segnale che vale per la transazione e si spegne a fine funzione.
+
+COME È STATA PROVATA. Su PostgreSQL 16 VERO: 44 controlli in scripts/db/riapri.sql con identità diverse (altro proprietario, inquilino,
+anonimo): chi può annullare, i casi vietati (contratto, visita confermata, visita proposta), visite passate o rifiutate che non
+bloccano, chat chiusa e riaperta, scarto annullato che restituisce i dati dell'inquilino, nuova valutazione al posto della vecchia,
+nessuna scorciatoia (aggiornamento a mano, con e senza il segnale, anche da chi scrive ovunque), segnale spento a fine funzione.
+In Chrome col dito: struttura (una casa e due case), sezioni e persone di ognuna, pulsanti per stato, conferma e invio del match,
+«No, torna indietro» che non invia, scarto con motivo (pulsante spento finché non si sceglie), annulla match con conferma, annulla
+scarto con un tocco, errori in italiano (contratto, visita), ricerca in fondo con risultati e filtri, scheda completa, nessun carattere
+sotto i 15 px e nessuno scorrimento laterale.
+ALTERAZIONI: 35 sul codice e 18 sulla migrazione (17 prese; la 16 è equivalente: un secondo controllo rifiuta lo stesso la stessa cosa).
+
+DIFETTI MIEI TROVATI PROVANDO
+- l'avviso dopo il match diceva 'Match fatto con Anna V.. Ora potete scrivervi' (due punti: il nome abbreviato finisce già con un punto);
+  e il mio primo rimedio per lo scarto aveva lo stesso difetto ('Hai scartato Anna V.. Se cambi idea'): l'ha trovato un test nuovo.
+  Ora i messaggi usano i due punti e nessuno può avere un punto subito dopo il nome
+- i pulsanti della ricerca avevano il carattere sotto i 15 px (e per un proprietario di 60+ è sotto la regola che ci siamo dati)
+- il segnale che permette la riapertura non si spegneva a fine funzione: una alterazione passava; ora c'è una prova (A43) che nella
+  stessa transazione un'altra decisione non si riapre a mano
+- un conteggio dei miei test sulle prove SQL era sbagliato (la nuova prova usa 'perform'): le ultime quattro alterazioni risultavano prese
+  da un test già rotto, e le ho rifatte dopo averlo corretto
+- i test che citavano la vecchia scheda e il vecchio componente dei possibili inquilini sono stati riscritti sulla struttura nuova
+
+Test: 1124 in tutto (28 nuovi sul Database e 2 sul database vero; 1121 senza PostgreSQL collegato e tre saltati, 1124 con).
+---
+ package.json                                  |   2 +-
+ scripts/db/riapri.sql                         | 208 ++++++
+ scripts/test-affidabilita.mjs                 |   2 +-
+ scripts/test-database-proprietario.mjs        | 197 +++++
+ scripts/test-db-richieste.mjs                 |  13 +
+ scripts/test-home-proprietario.mjs            |  12 +-
+ scripts/test-notifiche.mjs                    |  10 +-
+ scripts/test-raccomandato.mjs                 |   3 +-
+ scripts/test-ricerca-candidati.mjs            |   3 +-
+ scripts/test-richieste.mjs                    |  23 +-
+ src/app/(app)/database/DatabaseClient.tsx     | 686 ++++++++----------
+ src/app/(app)/database/actions.ts             |  22 +
+ src/app/(app)/database/page.tsx               |  20 +-
+ src/app/globals.css                           | 329 +++++++--
+ src/components/PossibiliInquilini.tsx         | 203 ------
+ src/components/PossibiliMatch.tsx             | 164 +++++
+ src/components/SchedaPersona.tsx              |  80 ++
+ src/components/SezioneApribile.tsx            |  42 ++
+ src/lib/database-proprietario.ts              | 158 ++++
+ src/lib/decisioni.ts                          |  42 ++
+ src/lib/notifiche.ts                          |   6 +
+ .../migrations/0034_riapri_candidatura.sql    | 102 +++
+ 22 files changed, 1666 insertions(+), 661 deletions(-)
+ create mode 100644 scripts/db/riapri.sql
+ create mode 100644 scripts/test-database-proprietario.mjs
+ delete mode 100644 src/components/PossibiliInquilini.tsx
+ create mode 100644 src/components/PossibiliMatch.tsx
+ create mode 100644 src/components/SchedaPersona.tsx
+ create mode 100644 src/components/SezioneApribile.tsx
+ create mode 100644 src/lib/database-proprietario.ts
+ create mode 100644 src/lib/decisioni.ts
+ create mode 100644 supabase/migrations/0034_riapri_candidatura.sql
+
+diff --git a/package.json b/package.json
+index 4139ccc..49d30f4 100644
+--- a/package.json
++++ b/package.json
+@@ -8,7 +8,7 @@
+     "start": "next start",
+     "lint": "eslint",
+     "pretest": "node scripts/controlla-dipendenze.mjs",
+-    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-affidabilita.mjs scripts/test-profilo-gestione.mjs scripts/test-avvisi-profilo.mjs scripts/test-raccomandato.mjs scripts/test-home-proprietario.mjs scripts/test-richieste.mjs scripts/test-db-richieste.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-dati-immobile.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-affidabilita.mjs scripts/test-profilo-gestione.mjs scripts/test-avvisi-profilo.mjs scripts/test-raccomandato.mjs scripts/test-home-proprietario.mjs scripts/test-richieste.mjs scripts/test-database-proprietario.mjs scripts/test-db-richieste.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-dati-immobile.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/db/riapri.sql b/scripts/db/riapri.sql
+new file mode 100644
+index 0000000..a154575
+--- /dev/null
++++ b/scripts/db/riapri.sql
+@@ -0,0 +1,208 @@
++-- ============================================================
++-- Prova della migrazione 0034 (annullare un match o uno scarto) su un PostgreSQL vero.
++-- Database con lo stub di Supabase e TUTTE le migrazioni già applicate. Ogni controllo scrive «OK: ...» o ferma tutto.
++-- ============================================================
++\set ON_ERROR_STOP on
++\set QUIET on
++set client_min_messages = notice;
++
++create schema t;
++create table t.esiti (n serial, testo text);
++create function t.ok(c boolean, msg text) returns void language plpgsql as $$
++begin
++  if c is not true then raise exception 'CONTROLLO FALLITO: %', msg; end if;
++  insert into t.esiti (testo) values (msg);
++  raise notice 'OK: %', msg;
++end $$;
++create function t.fallisce(sql text, codice text, msg text) returns void language plpgsql as $$
++declare e text;
++begin
++  begin execute sql; exception when others then e := sqlerrm; end;
++  if e is null then raise exception 'CONTROLLO FALLITO (nessun errore): %', msg; end if;
++  if position(codice in e) = 0 then raise exception 'CONTROLLO FALLITO (errore diverso: %): %', e, msg; end if;
++  insert into t.esiti (testo) values (msg);
++  raise notice 'OK: %', msg;
++end $$;
++-- quante righe modifica un'istruzione (con la sicurezza a livello di riga)
++create function t.righe(sql text) returns int language plpgsql as $$
++declare n int;
++begin execute sql; get diagnostics n = row_count; return n; end $$;
++create function t.come(utente uuid) returns void language plpgsql as $$
++begin
++  perform set_config('request.jwt.claim.sub', coalesce(utente::text, ''), false);
++  if utente is null then set role anon; else set role authenticated; end if;
++end $$;
++create function t.torna() returns void language plpgsql as $$
++begin reset role; perform set_config('request.jwt.claim.sub', '', false); end $$;
++grant usage on schema t to anon, authenticated;
++grant select, insert on t.esiti to anon, authenticated;
++grant usage on all sequences in schema t to anon, authenticated;
++grant execute on all functions in schema t to anon, authenticated;
++
++create function t.utente(id uuid, email text, ruolo text, nome text) returns void language sql as $$
++  insert into auth.users (id, email, raw_user_meta_data) values (id, email, jsonb_build_object('ruolo', ruolo, 'nome', nome, 'cognome', 'Prova', 'privacy_accettata', true));
++$$;
++select t.utente('11111111-0000-0000-0000-000000000001', 't1@x.it', 'inquilino', 'Anna');
++select t.utente('11111111-0000-0000-0000-000000000002', 't2@x.it', 'inquilino', 'Bruno');
++select t.utente('11111111-0000-0000-0000-000000000003', 't3@x.it', 'inquilino', 'Carla');
++select t.utente('11111111-0000-0000-0000-000000000005', 't5@x.it', 'inquilino', 'Elena');
++select t.utente('22222222-0000-0000-0000-000000000001', 'o1@x.it', 'proprietario', 'Mario');
++select t.utente('22222222-0000-0000-0000-000000000002', 'o2@x.it', 'proprietario', 'Luisa');
++update tenant_profiles set professione = 'Designer' where profile_id = '11111111-0000-0000-0000-000000000001';
++insert into listings (id, owner_id, titolo, zona, prezzo, pubblicato, verifica_stato) values
++ ('aaaaaaaa-0000-0000-0000-000000000001', '22222222-0000-0000-0000-000000000001', 'Bilocale luminoso', 'Isola, Milano', 1250, true, 'verificato'),
++ ('aaaaaaaa-0000-0000-0000-000000000002', '22222222-0000-0000-0000-000000000002', 'Trilocale del sole', 'Navigli, Milano', 1500, true, 'verificato');
++
++-- tre candidature a Bilocale: Anna, Bruno, Carla (si candidano da sole, con i loro permessi)
++select t.come('11111111-0000-0000-0000-000000000001');
++insert into candidature (id, listing_id, tenant_id) values ('cccccccc-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001');
++select t.torna();
++select t.come('11111111-0000-0000-0000-000000000002');
++insert into candidature (id, listing_id, tenant_id) values ('cccccccc-0000-0000-0000-000000000002', 'aaaaaaaa-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000002');
++select t.torna();
++select t.come('11111111-0000-0000-0000-000000000003');
++insert into candidature (id, listing_id, tenant_id) values ('cccccccc-0000-0000-0000-000000000003', 'aaaaaaaa-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000003');
++select t.torna();
++
++-- ---- Mario accetta Anna (match) ----
++select t.come('22222222-0000-0000-0000-000000000001');
++select decidi_candidatura('cccccccc-0000-0000-0000-000000000001', 'accettata', null, '{"match":{"punteggio":80}}'::jsonb);
++select t.torna();
++select t.ok((select status::text from candidature where id = 'cccccccc-0000-0000-0000-000000000001') = 'accettata', 'A01 Mario fa match con Anna');
++select t.ok((select count(*) from valutazioni_candidati where candidatura_id = 'cccccccc-0000-0000-0000-000000000001') = 1, 'A02 la valutazione si registra alla decisione');
++select t.come('11111111-0000-0000-0000-000000000001');
++insert into messaggi (candidatura_id, mittente_id, testo) values ('cccccccc-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', 'Buongiorno!');
++select t.torna();
++select t.ok((select count(*) from messaggi where candidatura_id = 'cccccccc-0000-0000-0000-000000000001') = 1, 'A03 la chat del match funziona');
++
++-- ---- chi può annullare e chi no ----
++select t.come('22222222-0000-0000-0000-000000000002');
++select t.fallisce($q$select riapri_candidatura('cccccccc-0000-0000-0000-000000000001')$q$, 'CANDIDATURA_NON_TUA', 'A04 un altro proprietario non può annullare');
++select t.torna();
++select t.come('11111111-0000-0000-0000-000000000001');
++select t.fallisce($q$select riapri_candidatura('cccccccc-0000-0000-0000-000000000001')$q$, 'CANDIDATURA_NON_TUA', 'A05 nemmeno l''inquilino può annullare il match');
++select t.torna();
++select t.come(null);
++select t.fallisce($q$select riapri_candidatura('cccccccc-0000-0000-0000-000000000001')$q$, 'permission denied', 'A06 chi non ha fatto l''accesso non può annullare niente');
++select t.torna();
++select t.come('22222222-0000-0000-0000-000000000001');
++select t.fallisce($q$select riapri_candidatura('99999999-0000-0000-0000-000000000009')$q$, 'CANDIDATURA_NON_TUA', 'A07 una candidatura che non esiste: lo stesso errore (non si capisce se esiste)');
++select t.fallisce($q$select riapri_candidatura('cccccccc-0000-0000-0000-000000000002')$q$, 'NON_DECISA', 'A08 una candidatura ancora in attesa non ha niente da annullare');
++select t.torna();
++update candidature set status = 'ritirata' where id = 'cccccccc-0000-0000-0000-000000000003';
++select t.come('22222222-0000-0000-0000-000000000001');
++select t.fallisce($q$select riapri_candidatura('cccccccc-0000-0000-0000-000000000003')$q$, 'NON_DECISA', 'A09 una candidatura ritirata dall''inquilino non si riapre');
++select t.torna();
++select t.ok((select status::text from candidature where id = 'cccccccc-0000-0000-0000-000000000001') = 'accettata', 'A10 e il match di Anna è ancora lì');
++
++-- ---- il blocco: un contratto o una visita in programma ----
++insert into contratti (candidatura_id) values ('cccccccc-0000-0000-0000-000000000001');
++create temp table prima as select count(*) as n from notifiche where tipo = 'candidatura_riaperta'; grant select on prima to public;
++select t.come('22222222-0000-0000-0000-000000000001');
++select t.fallisce($q$select riapri_candidatura('cccccccc-0000-0000-0000-000000000001')$q$, 'HA_UN_CONTRATTO', 'A11 con un contratto il match non si annulla');
++select t.torna();
++select t.ok((select status::text from candidature where id = 'cccccccc-0000-0000-0000-000000000001') = 'accettata' and (select count(*) from notifiche where tipo = 'candidatura_riaperta') = (select n from prima), 'A12 e non cambia niente: né lo stato né le notifiche');
++delete from contratti where candidatura_id = 'cccccccc-0000-0000-0000-000000000001';
++insert into visite (listing_id, candidatura_id, data_ora, stato) values ('aaaaaaaa-0000-0000-0000-000000000001', 'cccccccc-0000-0000-0000-000000000001', now() + interval '3 days', 'confermata');
++select t.come('22222222-0000-0000-0000-000000000001');
++select t.fallisce($q$select riapri_candidatura('cccccccc-0000-0000-0000-000000000001')$q$, 'HA_UNA_VISITA', 'A13 con una visita CONFERMATA in programma non si annulla');
++select t.torna();
++update visite set stato = 'proposta' where candidatura_id = 'cccccccc-0000-0000-0000-000000000001';
++select t.come('22222222-0000-0000-0000-000000000001');
++select t.fallisce($q$select riapri_candidatura('cccccccc-0000-0000-0000-000000000001')$q$, 'HA_UNA_VISITA', 'A14 e nemmeno con una visita solo PROPOSTA');
++select t.torna();
++update visite set stato = 'rifiutata' where candidatura_id = 'cccccccc-0000-0000-0000-000000000001';
++update visite set stato = 'confermata', data_ora = now() - interval '2 days' where false;
++-- una visita rifiutata, e una già passata, non bloccano
++insert into visite (listing_id, candidatura_id, data_ora, stato) values ('aaaaaaaa-0000-0000-0000-000000000001', 'cccccccc-0000-0000-0000-000000000001', now() - interval '2 days', 'confermata');
++
++-- ---- annullare il match ----
++select t.come('22222222-0000-0000-0000-000000000001');
++select riapri_candidatura('cccccccc-0000-0000-0000-000000000001');
++select t.torna();
++select t.ok((select status::text from candidature where id = 'cccccccc-0000-0000-0000-000000000001') = 'in_attesa' and (select motivo_rifiuto from candidature where id = 'cccccccc-0000-0000-0000-000000000001') is null, 'A15 una visita rifiutata o già passata non blocca: il match si annulla e la candidatura torna «in attesa»');
++select t.ok((select count(*) from valutazioni_candidati where candidatura_id = 'cccccccc-0000-0000-0000-000000000001') = 0, 'A16 la valutazione registrata si cancella');
++select t.ok((select count(*) from notifiche where user_id = '11111111-0000-0000-0000-000000000001' and tipo = 'candidatura_riaperta' and link = '/candidature' and dati->>'titolo' = 'Bilocale luminoso') = 1, 'A17 Anna riceve UNA notifica «candidatura riaperta», con il titolo');
++select t.ok((select count(*) from notifiche where user_id = '22222222-0000-0000-0000-000000000001' and tipo in ('candidatura_ricevuta', 'candidatura_riaperta')) = 3, 'A18 il proprietario riceve solo le tre notifiche delle candidature vere (nessuna in più)');
++select t.ok((select count(*) from messaggi where candidatura_id = 'cccccccc-0000-0000-0000-000000000001') = 1, 'A19 i messaggi restano');
++select t.come('11111111-0000-0000-0000-000000000001');
++select t.fallisce($q$insert into messaggi (candidatura_id, mittente_id, testo) values ('cccccccc-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', 'ci siete?')$q$, 'row-level security', 'A20 ma la chat è chiusa finché non si rifà il match');
++select t.ok((select status::text from candidature where id = 'cccccccc-0000-0000-0000-000000000001') = 'in_attesa', 'A21 Anna vede la sua candidatura «in attesa»');
++select t.torna();
++select t.come('22222222-0000-0000-0000-000000000001');
++select t.fallisce($q$select riapri_candidatura('cccccccc-0000-0000-0000-000000000001')$q$, 'NON_DECISA', 'A22 annullare due volte non si può (ora è in attesa)');
++select t.torna();
++
++-- ---- si può rifare: scarto, annulla lo scarto, match ----
++select t.come('22222222-0000-0000-0000-000000000001');
++select decidi_candidatura('cccccccc-0000-0000-0000-000000000001', 'rifiutata', 'altro_candidato', '{"match":{"punteggio":10}}'::jsonb);
++select t.torna();
++select t.ok((select status::text from candidature where id = 'cccccccc-0000-0000-0000-000000000001') = 'rifiutata' and (select motivo_rifiuto from candidature where id = 'cccccccc-0000-0000-0000-000000000001') = 'altro_candidato', 'A23 dopo l''annullamento si può decidere di nuovo (qui: scarto, con il motivo)');
++select t.come('22222222-0000-0000-0000-000000000001');
++select t.ok((select professione from candidati_del_proprietario where candidatura_id = 'cccccccc-0000-0000-0000-000000000001') is null, 'A24 dopo lo scarto il proprietario non vede più i dati dell''inquilino (solo il nome)');
++select riapri_candidatura('cccccccc-0000-0000-0000-000000000001');
++select t.ok((select professione from candidati_del_proprietario where candidatura_id = 'cccccccc-0000-0000-0000-000000000001') = 'Designer', 'A25 annullando lo scarto i dati tornano visibili');
++select t.torna();
++select t.ok((select status::text from candidature where id = 'cccccccc-0000-0000-0000-000000000001') = 'in_attesa' and (select motivo_rifiuto from candidature where id = 'cccccccc-0000-0000-0000-000000000001') is null and (select count(*) from valutazioni_candidati where candidatura_id = 'cccccccc-0000-0000-0000-000000000001') = 0, 'A26 lo scarto annullato: di nuovo «in attesa», senza motivo e senza valutazione');
++select t.ok((select count(*) from notifiche where user_id = '11111111-0000-0000-0000-000000000001' and tipo = 'candidatura_riaperta') = 2, 'A27 ad ogni annullamento l''inquilino è avvisato');
++select t.come('22222222-0000-0000-0000-000000000001');
++select decidi_candidatura('cccccccc-0000-0000-0000-000000000001', 'accettata', null, '{"match":{"punteggio":99}}'::jsonb);
++select t.torna();
++select t.ok((select valutazione->'match'->>'punteggio' from valutazioni_candidati where candidatura_id = 'cccccccc-0000-0000-0000-000000000001') = '99', 'A28 e la nuova valutazione è quella NUOVA (non quella vecchia rimasta)');
++select t.come('11111111-0000-0000-0000-000000000001');
++insert into messaggi (candidatura_id, mittente_id, testo) values ('cccccccc-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', 'eccomi di nuovo');
++select t.ok((select count(*) from messaggi where candidatura_id = 'cccccccc-0000-0000-0000-000000000001') = 2, 'A29 rifatto il match la chat si riapre, con i messaggi di prima');
++select t.torna();
++
++-- ---- nessuna scorciatoia ----
++select t.come('22222222-0000-0000-0000-000000000001');
++select t.ok(t.righe($q$update candidature set status = 'in_attesa' where id = 'cccccccc-0000-0000-0000-000000000001'$q$) = 0, 'A30 il proprietario non può riportare una candidatura «in attesa» a mano (nessuna riga si muove)');
++select set_config('matchami.riapertura', 'on', false);
++select t.ok(t.righe($q$update candidature set status = 'in_attesa' where id = 'cccccccc-0000-0000-0000-000000000001'$q$) = 0, 'A31 nemmeno alzando il segnale a mano (il permesso manca comunque)');
++select set_config('matchami.riapertura', 'off', false);
++select t.torna();
++select t.come('11111111-0000-0000-0000-000000000001');
++select t.ok(t.righe($q$update candidature set status = 'in_attesa' where id = 'cccccccc-0000-0000-0000-000000000001'$q$) = 0 and t.righe($q$update candidature set status = 'ritirata' where id = 'cccccccc-0000-0000-0000-000000000001'$q$) = 0, 'A32 e nemmeno l''inquilino cambia a mano la sua candidatura decisa');
++select t.torna();
++select t.fallisce($q$update candidature set status = 'in_attesa' where id = 'cccccccc-0000-0000-0000-000000000001'$q$, 'DECISIONE_DEFINITIVA', 'A33 il trigger blocca la riapertura senza il segnale (anche a chi può scrivere ovunque)');
++select t.fallisce($q$update candidature set status = 'rifiutata' where id = 'cccccccc-0000-0000-0000-000000000001'$q$, 'DECISIONE_DEFINITIVA', 'A34 e blocca match -> scarto senza passare dall''annullamento');
++select set_config('matchami.riapertura', 'on', false);
++select t.fallisce($q$update candidature set status = 'rifiutata' where id = 'cccccccc-0000-0000-0000-000000000001'$q$, 'DECISIONE_DEFINITIVA', 'A35 col segnale alzato l''UNICO passaggio ammesso è verso «in attesa»: match -> scarto no');
++select t.fallisce($q$update candidature set status = 'ritirata' where id = 'cccccccc-0000-0000-0000-000000000001'$q$, 'DECISIONE_DEFINITIVA', 'A36 né match -> ritirata');
++select set_config('matchami.riapertura', 'off', false);
++
++-- ---- un match nato da una richiesta del proprietario ----
++update tenant_profiles set visibile_ai_proprietari = true where profile_id = '11111111-0000-0000-0000-000000000005';
++select t.come('22222222-0000-0000-0000-000000000001');
++create temp table rq as select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000005', null) as id; grant select on rq to public;
++select t.torna();
++select t.come('11111111-0000-0000-0000-000000000005');
++create temp table cq as select rispondi_richiesta_proprietario((select id from rq), true) as id; grant select on cq to public;
++select t.torna();
++select t.ok((select origine from candidature where id = (select id from cq)) = 'proprietario' and (select status::text from candidature where id = (select id from cq)) = 'accettata', 'A37 Elena ha accettato la richiesta: match con origine «proprietario»');
++select t.come('22222222-0000-0000-0000-000000000001');
++select riapri_candidatura((select id from cq));
++select t.torna();
++select t.ok((select status::text from candidature where id = (select id from cq)) = 'in_attesa' and (select origine from candidature where id = (select id from cq)) = 'proprietario', 'A38 si può annullare anche questo match: torna in attesa e ricorda l''origine');
++select t.ok((select stato from richieste_proprietari where id = (select id from rq)) = 'accettata', 'A39 la richiesta resta «accettata» (non si può rimandare la stessa richiesta)');
++
++-- ---- vincoli ----
++select t.fallisce($q$insert into notifiche (user_id, tipo, link) values ('11111111-0000-0000-0000-000000000001', 'tipo_inventato', '/x')$q$, 'notifiche_tipo_check', 'A40 i tipi di notifica restano solo quelli noti');
++select t.ok((select count(*) from notifiche where tipo = 'candidatura_riaperta') = 3, 'A41 il tipo nuovo è ammesso');
++select t.come('22222222-0000-0000-0000-000000000001');
++select t.fallisce($q$select riapri_candidatura(null)$q$, 'CANDIDATURA_NON_TUA', 'A42 senza identificativo nemmeno');
++select t.torna();
++-- ---- il segnale si spegne: nella STESSA transazione un'altra riapertura a mano non passa ----
++select t.come('22222222-0000-0000-0000-000000000001');
++select decidi_candidatura('cccccccc-0000-0000-0000-000000000002', 'accettata', null, '{"match":{"punteggio":50}}'::jsonb);
++select t.torna();
++do $$
++begin
++  perform set_config('request.jwt.claim.sub', '22222222-0000-0000-0000-000000000001', false);
++  perform riapri_candidatura('cccccccc-0000-0000-0000-000000000001');
++  perform t.fallisce($q$update candidature set status = 'in_attesa' where id = 'cccccccc-0000-0000-0000-000000000002'$q$, 'DECISIONE_DEFINITIVA',
++    'A43 finita una riapertura il segnale è spento: nella stessa transazione un''altra decisione non si riapre a mano');
++  perform set_config('request.jwt.claim.sub', '', false);
++end $$;
++select t.ok((select count(*) from t.esiti) = 43, 'A44 nessun controllo è stato saltato (ne servono 43 prima di questo)');
++select 'TUTTI I CONTROLLI: ' || count(*) from t.esiti;
+diff --git a/scripts/test-affidabilita.mjs b/scripts/test-affidabilita.mjs
+index 72a1d60..881d6c5 100644
+--- a/scripts/test-affidabilita.mjs
++++ b/scripts/test-affidabilita.mjs
+@@ -193,7 +193,7 @@ test("modulo dei dati: avvisa UNA volta per salvataggio, le note sul punteggio v
+ });
+ 
+ test("proprietario: vede le recensioni a parte dal punteggio (lista e dettaglio) e le usa solo come ultimo spareggio", () => {
+-  const d = leggi("src", "app", "(app)", "database", "DatabaseClient.tsx"); assert.match(d, /label="Recensioni"/); assert.match(d, /selezionata\.valutazione\?\.recensioni/); assert.match(d, /recensioni: c\.valutazione!\.recensioni \?\? null/);
++  const d = leggi("src", "app", "(app)", "database", "DatabaseClient.tsx"); assert.match(d, /label="Recensioni"/); assert.match(d, /selezionata\.valutazione\?\.recensioni/); assert.match(leggi("src", "lib", "database-proprietario.ts"), /recensioni: c\.valutazione!\.recensioni \?\? null/); assert.match(leggi("src", "lib", "database-proprietario.ts"), /recensioni: v\?\.recensioni \?\? null/, "la scheda mostra le recensioni a parte");
+   const c = leggi("src", "lib", "candidati.ts"); assert.match(c, /recensioni: riepilogoRecensioni\(recensioniGrezze\.map\(\(r\) => r\.voto\)\)/); const x = leggi("src", "app", "(app)", "database", "actions.ts"); assert.match(x, /recensioni: riepilogoRecensioni\(recensioniGrezze\.map\(\(r\) => r\.voto\)\)/);
+ });
+ 
+diff --git a/scripts/test-database-proprietario.mjs b/scripts/test-database-proprietario.mjs
+new file mode 100644
+index 0000000..10c2244
+--- /dev/null
++++ b/scripts/test-database-proprietario.mjs
+@@ -0,0 +1,197 @@
++/**
++ * Test del Database inquilini del proprietario: diviso per casa (candidature spontanee, possibili match, già valutati), la scheda con
++ * affidabilità e match in alto, «Fai match» / «Scarta» / «Apri chat» e gli ANNULLAMENTI (annulla match, annulla scarto), la ricerca in
++ * fondo. Le regole dell'annullamento stanno nel database (migrazione 0034): le prova test-db-richieste.mjs su un PostgreSQL vero.
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const db = caricaTs(path.join(radice, "src", "lib", "database-proprietario.ts"));
++const dec = caricaTs(path.join(radice, "src", "lib", "decisioni.ts"));
++const nt = caricaTs(path.join(radice, "src", "lib", "notifiche.ts"));
++const leggi = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8").replace(/\r\n/g, "\n");
++const senzaCommenti = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
++const migrazione = leggi("supabase", "migrations", "0034_riapri_candidatura.sql");
++
++// ============================================================ le parole e le regole
++test("errori dell'annullamento: ogni codice che la funzione del database può restituire ha le sue parole, e nessuna parola è per un codice che non esiste", () => {
++  const corpo = migrazione.slice(migrazione.indexOf("create or replace function public.riapri_candidatura"));
++  const codici = [...new Set([...corpo.matchAll(/raise exception '([A-Z_]+):/g)].map((m) => m[1]))].sort(); assert.deepEqual(Object.keys(dec.ERRORI_RIAPERTURA).sort(), codici);
++  for (const [k, v] of Object.entries(dec.ERRORI_RIAPERTURA)) { assert.ok(v.length > 10 && /[.]$/.test(v), `${k}: una frase intera`); assert.ok(!/[A-Z_]{6,}/.test(v), `${k}: il codice non deve comparire`); }
++});
++
++test("errori dell'annullamento: dal messaggio del database alle parole; ciò che non si riconosce resta generico", () => {
++  assert.equal(dec.messaggioErroreRiapertura("HA_UN_CONTRATTO: c'è già un contratto, il match non si può annullare"), dec.ERRORI_RIAPERTURA.HA_UN_CONTRATTO); assert.match(dec.messaggioErroreRiapertura("HA_UNA_VISITA: x"), /visita in programma/);
++  for (const x of [null, undefined, 5, {}, "", "boh", "ha_un_contratto: x", "  HA_UN_CONTRATTO: x", "CODICE_INVENTATO: x", "DECISIONE_DEFINITIVA: la candidatura è già stata valutata", 'new row violates check constraint "x"', "permission denied for function riapri_candidatura"]) assert.equal(dec.messaggioErroreRiapertura(x), dec.ERRORE_RIAPERTURA_GENERICO, JSON.stringify(x));
++});
++
++test("cosa si può fare con una candidatura: in attesa = Fai match e Scarta; match = Apri chat e Annulla match; scartata = Annulla scarto; ritirata o sconosciuta = niente", () => {
++  const a = dec.azioniPerStato; const solo = (s) => Object.entries(a(s)).filter(([, v]) => v).map(([k]) => k).sort();
++  assert.deepEqual(solo("in_attesa"), ["faiMatch", "scarta"]); assert.deepEqual(solo("accettata"), ["annullaMatch", "apriChat"]); assert.deepEqual(solo("rifiutata"), ["annullaScarto"]); for (const x of ["ritirata", "", "boh", undefined, null, 5]) assert.deepEqual(solo(x), [], String(x));
++  for (const s of ["in_attesa", "accettata", "rifiutata"]) { assert.ok(!(a(s).faiMatch && a(s).annullaMatch)); assert.ok(!(a(s).apriChat && a(s).scarta), "chi è un match non si scarta senza prima annullare il match"); }
++});
++
++test("la notifica «candidatura riaperta» ha parole per l'inquilino, con la casa; senza titolo non si rompe", () => {
++  assert.ok(nt.TIPI_NOTIFICA.includes("candidatura_riaperta")); const n = nt.descriviNotifica("candidatura_riaperta", { titolo: "Bilocale" }); assert.equal(n.titolo, "La tua candidatura è di nuovo in attesa"); assert.equal(n.testo, "Il proprietario di «Bilocale» ha annullato la sua decisione: sta rivalutando la tua candidatura."); assert.match(nt.descriviNotifica("candidatura_riaperta", null).testo, /^Il proprietario di una casa ha annullato/);
++});
++
++// ============================================================ il raggruppamento per casa
++let n = 0;
++const cand = (listing, status, o = {}) => ({ id: "c" + ++n, status, match_pct: null, created_at: `2026-10-${String(10 + (n % 15)).padStart(2, "0")}T10:00:00Z`, tenant_id: "t" + n, listing_id: listing, listings: { titolo: "Casa " + listing, zona: "Isola, Milano", prezzo: 1000 }, tenant_profiles: { professione: "Designer", reddito_mensile: 2000, reddito_nucleo: null, verificato: false, presentazione: "Ciao", avatar_url: null }, nome: "Anna", cognome: "Verdi", valutazione: { match: { punteggio: 50, etichetta: "Buona", bloccato: false, mancanti: [], criteri: [], incompleto: false }, affidabilita: 40, recensioni: null, raccomandato: false, congelata: false }, ...o });
++const casa = (id, o = {}) => ({ id, titolo: "Casa " + id, zona: "Isola, Milano", prezzo: 1000, foto: null, pubblicata: true, verificata: true, ...o });
++const poss = (id, disponibili = [], richieste = [], possibili = disponibili.length) => ({ id, titolo: "Casa " + id, zona: "Isola", possibili, disponibili, richieste });
++const sch = (id) => ({ tenantId: id, nome: "Dario R.", professione: "Cuoco", avatarUrl: null, presentazione: null, affidabilita: 80, etichettaAffidabilita: "Eccellente", raccomandato: false, recensioni: { numero: 0, media: null }, redditoVerificato: true, compatibilita: 70 });
++const stato = (c) => c.status;
++const raggruppa = (o) => db.raggruppaPerAnnuncio({ case_: [], candidature: [], possibili: [], stato, ...o });
++const ids = (l) => l.map((c) => c.id);
++
++test("raggruppa: ogni persona sta in UN gruppo secondo il suo stato; le candidature spontanee sono solo quelle in attesa", () => {
++  const cs = [cand("A", "in_attesa"), cand("A", "accettata"), cand("A", "rifiutata"), cand("A", "ritirata"), cand("A", "in_attesa")];
++  const [g] = raggruppa({ case_: [casa("A")], candidature: cs }); assert.equal(g.spontanei.length, 2); assert.deepEqual([g.match.length, g.scartati.length, g.ritirati.length], [1, 1, 1]); assert.equal(g.casa.id, "A");
++  assert.deepEqual([...ids(g.spontanei), ...ids(g.match), ...ids(g.scartati), ...ids(g.ritirati)].sort(), ids(cs).sort(), "tutte, una volta sola");
++});
++
++test("raggruppa: lo stato appena cambiato dal proprietario sposta la persona subito (Fai match → Match; Annulla match → di nuovo tra le spontanee)", () => {
++  const c1 = cand("A", "in_attesa"), c2 = cand("A", "accettata"); const aggiornate = { [c1.id]: "accettata", [c2.id]: "in_attesa" };
++  const [g] = raggruppa({ case_: [casa("A")], candidature: [c1, c2], stato: (c) => aggiornate[c.id] ?? c.status }); assert.deepEqual(ids(g.spontanei), [c2.id]); assert.deepEqual(ids(g.match), [c1.id]);
++});
++
++test("raggruppa: una casa pubblicata senza candidati compare lo stesso (chi ha una casa sola la vede subito); una casa che gli inquilini non vedono e senza nessuno non compare", () => {
++  const g = raggruppa({ case_: [casa("A"), casa("B", { pubblicata: false }), casa("C", { verificata: false })] }); assert.deepEqual(g.map((x) => x.casa.id), ["A"]); assert.deepEqual([g[0].spontanei, g[0].match, g[0].scartati, g[0].ritirati], [[], [], [], []]); assert.equal(g[0].possibili, null);
++  const h = raggruppa({ case_: [casa("B", { pubblicata: false })], candidature: [cand("B", "in_attesa")] }); assert.deepEqual(h.map((x) => x.casa.id), ["B"], "con candidature compare anche se non è pubblicata");
++});
++
++test("raggruppa: una casa che non si conosce (cancellata, o non letta) si ricostruisce dalla candidatura; senza case né candidature c'è un elenco vuoto", () => {
++  const [g] = raggruppa({ candidature: [cand("X", "in_attesa")] }); assert.equal(g.casa.titolo, "Casa X"); assert.equal(g.casa.foto, null); assert.deepEqual(raggruppa({}), []);
++  const [h] = raggruppa({ candidature: [{ ...cand("Y", "in_attesa"), listings: null }] }); assert.equal(h.casa.titolo, "Annuncio");
++});
++
++test("raggruppa: i possibili match della casa stanno con la casa; le case sono in ordine (più candidature da valutare, poi più possibili match, poi titolo)", () => {
++  const g = raggruppa({ case_: [casa("A"), casa("B"), casa("C")], candidature: [cand("B", "in_attesa"), cand("B", "in_attesa"), cand("A", "in_attesa")], possibili: [poss("A", [sch("p1")]), poss("C", [sch("p2"), sch("p3")])] });
++  assert.deepEqual(g.map((x) => x.casa.id), ["B", "A", "C"]); assert.equal(g[1].possibili.id, "A"); assert.equal(g[0].possibili, null);
++  const h = raggruppa({ case_: [casa("Z"), casa("A"), casa("M")], possibili: [poss("M", [sch("p")])] }); assert.deepEqual(h.map((x) => x.casa.id), ["M", "A", "Z"], "a parità, più possibili match prima, poi il titolo");
++});
++
++test("raggruppa: tra le spontanee prima chi rispetta i criteri e ha il match più alto; senza valutazioni l'ordine è dal più recente", () => {
++  const v = (pct, bloccato = false, aff = 50) => ({ match: { punteggio: pct, etichetta: "x", bloccato, mancanti: [], criteri: [], incompleto: false }, affidabilita: aff, recensioni: null, raccomandato: false, congelata: false });
++  const a = cand("A", "in_attesa", { valutazione: v(40) }), b = cand("A", "in_attesa", { valutazione: v(90) }), c = cand("A", "in_attesa", { valutazione: v(95, true) });
++  assert.deepEqual(ids(raggruppa({ case_: [casa("A")], candidature: [a, b, c] })[0].spontanei), [b.id, a.id, c.id], "chi è bloccato da un criterio obbligatorio va in fondo, anche con il 95%");
++  const x = cand("A", "in_attesa", { created_at: "2026-10-01T00:00:00Z", valutazione: undefined }), y = cand("A", "in_attesa", { created_at: "2026-10-09T00:00:00Z", valutazione: undefined }); assert.deepEqual(ids(raggruppa({ case_: [casa("A")], candidature: [x, y] })[0].spontanei), [y.id, x.id]);
++});
++
++test("conteggi del gruppo: da valutare, possibili match (persone da contattare + richieste in attesa), valutati (match + scartati + ritirati)", () => {
++  const g = raggruppa({ case_: [casa("A")], candidature: [cand("A", "in_attesa"), cand("A", "accettata"), cand("A", "accettata"), cand("A", "rifiutata"), cand("A", "ritirata")], possibili: [poss("A", [sch("p1"), sch("p2")], [{ id: "r1", stato: "inviata", nome: "Dario R.", candidaturaId: null, creataIl: "" }, { id: "r2", stato: "rifiutata", nome: null, candidaturaId: null, creataIl: "" }])] })[0];
++  assert.deepEqual(db.conteggiGruppo(g), { daValutare: 1, possibili: 3, match: 2, scartati: 1, valutati: 4 }); assert.deepEqual(db.conteggiGruppo(raggruppa({ case_: [casa("A")] })[0]), { daValutare: 0, possibili: 0, match: 0, scartati: 0, valutati: 0 });
++});
++
++test("raggruppa: su 300 insiemi casuali ogni candidatura compare una volta sola, nessuna è persa, gli input non si toccano", () => {
++  let seme = 11; const rnd = () => (seme = (seme * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff; const scegli = (l) => l[Math.floor(rnd() * l.length)];
++  for (let i = 0; i < 300; i++) {
++    const cs = Array.from({ length: Math.floor(rnd() * 9) }, () => cand(scegli(["A", "B", "C", "D"]), scegli(["in_attesa", "accettata", "rifiutata", "ritirata"]))); const cases = [casa("A"), casa("B", { pubblicata: false }), casa("C")]; const copia = JSON.stringify([cs, cases]);
++    const g = raggruppa({ case_: cases, candidature: cs }); const tutte = g.flatMap((x) => [...x.spontanei, ...x.match, ...x.scartati, ...x.ritirati]); assert.deepEqual(ids(tutte).sort(), ids(cs).sort()); assert.equal(JSON.stringify([cs, cases]), copia);
++    for (const x of g) for (const c of [...x.spontanei, ...x.match, ...x.scartati, ...x.ritirati]) assert.equal(c.listing_id, x.casa.id, "una persona nella casa sbagliata");
++  }
++});
++
++// ============================================================ la scheda
++test("scheda di un candidato: nome breve, lavoro, affidabilità e match (percentuale, bloccato o nessun criterio), badge, recensioni, reddito verificato, estratto", () => {
++  const c = cand("A", "in_attesa", { valutazione: { match: { punteggio: 82, etichetta: "Ottima", bloccato: false, mancanti: [], criteri: [], incompleto: true }, affidabilita: 85, recensioni: { numero: 3, media: 4.3 }, raccomandato: true, congelata: false }, tenant_profiles: { professione: " Insegnante ", reddito_mensile: 2000, reddito_nucleo: null, verificato: true, presentazione: "x ".repeat(200), avatar_url: "a.jpg" } });
++  const d = db.datiSchedaCandidato(c); assert.ok(d.presentazione.endsWith("…") && d.presentazione.length <= 161, "estratto tagliato con i puntini"); assert.deepEqual({ ...d, presentazione: "estratto" }, { nome: "Anna V.", professione: "Insegnante", avatarUrl: "a.jpg", affidabilita: 85, match: { tipo: "pct", valore: 82 }, raccomandato: true, recensioni: { numero: 3, media: 4.3 }, redditoVerificato: true, presentazione: "estratto", incompleto: true });
++  const b = db.datiSchedaCandidato(cand("A", "in_attesa", { valutazione: { match: { punteggio: 95, etichetta: "x", bloccato: true, mancanti: ["Reddito verificato"], criteri: [], incompleto: false }, affidabilita: 20, recensioni: null, raccomandato: false, congelata: false } })); assert.deepEqual(b.match, { tipo: "bloccato", mancanti: ["Reddito verificato"] }, "bloccato conta più della percentuale");
++  assert.deepEqual(db.datiSchedaCandidato(cand("A", "in_attesa", { valutazione: { match: { punteggio: null, etichetta: null, bloccato: false, mancanti: [], criteri: [], incompleto: false }, affidabilita: 0, recensioni: null, raccomandato: false, congelata: false } })).match, { tipo: "nessuno" });
++});
++
++test("scheda di un candidato scartato (la vista dà solo il nome) o senza valutazione: niente si rompe, i dati che mancano restano vuoti", () => {
++  const d = db.datiSchedaCandidato(cand("A", "rifiutata", { tenant_profiles: { professione: null, reddito_mensile: null, reddito_nucleo: null, verificato: false, presentazione: null, avatar_url: null }, valutazione: undefined })); assert.deepEqual([d.professione, d.avatarUrl, d.affidabilita, d.presentazione, d.redditoVerificato, d.raccomandato, d.recensioni], [null, null, null, null, false, false, null]); assert.deepEqual(d.match, { tipo: "nessuno" });
++  const e = db.datiSchedaCandidato(cand("A", "in_attesa", { tenant_profiles: null, nome: null, cognome: null, valutazione: undefined })); assert.equal(e.nome, "Un inquilino"); assert.equal(e.redditoVerificato, false);
++});
++
++test("scheda di un possibile match: stessi campi; senza criteri del proprietario il match è «nessuno»; il resto passa invariato", () => {
++  const d = db.datiSchedaPossibile({ ...sch("p"), compatibilita: 64, raccomandato: true }); assert.deepEqual([d.nome, d.professione, d.affidabilita, d.match, d.raccomandato, d.redditoVerificato, d.incompleto], ["Dario R.", "Cuoco", 80, { tipo: "pct", valore: 64 }, true, true, false]); assert.deepEqual(db.datiSchedaPossibile({ ...sch("p"), compatibilita: null }).match, { tipo: "nessuno" });
++  assert.deepEqual(Object.keys(d).sort(), Object.keys(db.datiSchedaCandidato(cand("A", "in_attesa"))).sort(), "le due schede hanno gli stessi campi");
++});
++
++test("colore della percentuale: da 70 verde, da 50 oro, sotto rosso (estremi esatti)", () => {
++  assert.deepEqual([100, 70, 69, 50, 49, 0].map(db.classeMatch), ["is-match", "is-match", "is-wait", "is-wait", "is-off", "is-off"]);
++});
++
++// ============================================================ la pagina
++const cl = senzaCommenti(leggi("src", "app", "(app)", "database", "DatabaseClient.tsx"));
++
++test("PAGINA: ogni casa ha tre sezioni nell'ordine candidature spontanee, possibili match, già valutati (match e scartati); la ricerca viene DOPO le case", () => {
++  const i = (x) => { const k = cl.indexOf(x); assert.ok(k > 0, `manca «${x}»`); return k; };
++  assert.ok(i('titolo="Candidature spontanee"') < i('titolo="Possibili match"') && i('titolo="Possibili match"') < i('titolo="Già valutati"')); assert.ok(i('<h3 className="sotto-titolo">Match</h3>') < i('<h3 className="sotto-titolo">Scartati</h3>'));
++  assert.ok(i("{gruppi.map") < i('aria-label="Cerca tra i candidati"') && i('aria-label="Cerca tra i candidati"') < i("<RicercaCandidati"), "la ricerca sta in fondo"); assert.ok(i('<h2 className="ricerca-fondo-titolo">Cerca tra i candidati</h2>') > i("{gruppi.map"));
++  assert.match(cl, /titolo="Già valutati" conteggio=\{n\.valutati\} aperta=\{n\.daValutare === 0 && n\.possibili === 0\}/, "«Già valutati» parte chiusa se c'è altro da fare"); assert.match(cl, /\{cercando && visibili\.length > 0 && \(/, "i risultati si mostrano solo cercando");
++});
++
++test("PAGINA: i pulsanti di ogni scheda vengono dalla tabella delle azioni (Fai match, Apri chat, Scarta, Annulla match, Annulla scarto) e ciascuno fa la cosa giusta", () => {
++  const a = cl.slice(cl.indexOf("function azioni("), cl.indexOf("function scheda("));
++  assert.match(a, /const a = azioniPerStato\(stato\(c\)\);/); for (const [flag, testo] of [["faiMatch", "Fai match"], ["scarta", "Scarta"], ["annullaMatch", "Annulla match"], ["annullaScarto", "Annulla scarto"]]) assert.match(a, new RegExp(`\\{a\\.${flag} && \\([\\s\\S]*?${testo}\\s+</button>`), `${flag} → «${testo}»`);
++  assert.match(a, /\{a\.apriChat && \(\s+<Link href=\{`\/chat\/\$\{c\.id\}`\} className="opp-cta persona-primario block text-center">\s+Apri chat/);
++  assert.match(a, /apriDialogo\("match", c\)/); assert.match(a, /apriDialogo\("scarta", c\)/); assert.match(a, /apriDialogo\("annulla_match", c\)/); assert.match(a, /onClick=\{\(\) => annullaScarto\(c\)\}/, "annullare uno scarto è un tocco solo (non c'è niente da proteggere)");
++});
++
++test("PAGINA: fai match, scarta e annulla match passano da una conferma; il server si chiama solo da «conferma» e «annullaScarto»", () => {
++  assert.equal([...cl.matchAll(/valutaCandidatura\(/g)].length, 1, "valutaCandidatura in un solo punto"); assert.equal([...cl.matchAll(/riapriCandidatura\(/g)].length, 2, "riapriCandidatura in due punti: conferma (annulla match) e annullaScarto");
++  const conf = cl.slice(cl.indexOf("function conferma()"), cl.indexOf("function annullaScarto(")); assert.ok(conf.includes("valutaCandidatura(") && conf.includes("riapriCandidatura("), "dentro «conferma»"); const sc = cl.slice(cl.indexOf("function annullaScarto("), cl.indexOf("// ---- i gruppi"));
++  assert.ok(sc.includes("riapriCandidatura("), "annullaScarto chiama il server"); assert.match(cl, /dialogo\.tipo === "match" \? "Sì, fai match" : dialogo\.tipo === "scarta" \? "Conferma lo scarto" : "Sì, annulla il match"/); assert.match(cl, /No, torna indietro/);
++  assert.match(cl, /disabled=\{pending \|\| \(dialogo\.tipo === "scarta" && motivo === null\)\}/, "scartare richiede il motivo");
++});
++
++test("PAGINA: le parole delle conferme e degli avvisi dicono che si può annullare, e cosa succede annullando un match", () => {
++  const t = cl.replace(/&apos;/g, "'").replace(/\s+/g, " "); for (const x of ["Si apre la chat e la persona riceve una notifica. Se cambi idea, potrai annullare il match.", "La persona leggerà il motivo che scegli. Se cambi idea, potrai annullare lo scarto.", "La chat si chiude e la persona riceve un avviso: la candidatura torna tra quelle da valutare. I messaggi non si perdono.", "Se c'è già un contratto o una visita in programma, il match non si può annullare.", "Match fatto con ${nome}: ora potete scrivervi.", "Match annullato: ${nome} è di nuovo tra le candidature da valutare.", "Hai scartato ${nome}: se cambi idea, puoi annullare lo scarto.", "Scarto annullato: ${datiSchedaCandidato(c).nome} è di nuovo tra le candidature da valutare.", "Apri la chat ›"]) assert.ok(t.includes(x), `manca «${x}»`);
++  for (const vecchia of ["La decisione non si può annullare", "Accettare e rifiutare non si annullano", "La decisione\n                    non si può annullare"]) assert.ok(!t.includes(vecchia), `c'è ancora «${vecchia}»`);
++  assert.match(cl, /dopo\(c, "accettata", `Match fatto con \$\{nome\}: ora potete scrivervi\.`, `\/chat\/\$\{c\.id\}`\)/, "dopo il match c'è il link alla chat");
++});
++
++test("PAGINA: dopo ogni azione lo stato si aggiorna subito (match → accettata, scarto → rifiutata, annullamento → in attesa) e l'errore del database si legge in italiano e la conferma resta aperta", () => {
++  assert.match(cl, /dopo\(c, "in_attesa", `Match annullato/); assert.match(cl, /dopo\(c, "accettata", /); assert.match(cl, /dopo\(c, "rifiutata", /); assert.match(cl, /if \(!r\.ok\) return setErrore\(r\.error\);/); assert.match(cl, /if \(!r\.ok\) return setAvviso\(\{ testo: r\.error \}\);/, "se l'annullamento dello scarto fallisce lo si dice");
++  assert.ok(cl.indexOf("chiudiDialogo();\n    });") > cl.indexOf("setErrore(r.error)"), "la conferma si chiude solo se è andata bene");
++});
++
++test("scheda della persona: in alto affidabilità e match, poi foto e informazioni, poi i pulsanti; la scheda completa si apre da un pulsante", () => {
++  const s = senzaCommenti(leggi("src", "components", "SchedaPersona.tsx")); const i = (x) => { const k = s.indexOf(x); assert.ok(k > 0, x); return k; };
++  assert.ok(i('className="persona-cifre"') < i('className="persona-testa"') && i('className="persona-testa"') < i('className="persona-etichette"') && i('className="persona-etichette"') < i('className="persona-presentazione"') && i('className="persona-presentazione"') < i('className="persona-azioni"') && i('className="persona-azioni"') < i("Vedi la scheda completa ›"));
++  for (const x of ["Affidabilità", "Match", "Manca un requisito", "Match (nessun criterio)", "Non soddisfa:"]) assert.ok(s.includes(x), `manca «${x}»`); assert.match(s, /\{onApri && \(\s+<button type="button" className="persona-dettagli" onClick=\{onApri\}>/);
++  for (const vietato of ["reddito_mensile", "reddito_nucleo", "email", "telefono", "protestato"]) assert.ok(!s.includes(vietato), `la scheda usa «${vietato}»`);
++});
++
++test("sezione apribile: bottone con titolo e numero, aria-expanded, il contenuto resta nella pagina da chiuso (nascosto, non smontato)", () => {
++  const s = senzaCommenti(leggi("src", "components", "SezioneApribile.tsx")); assert.match(s, /aria-expanded=\{stato\}/); assert.match(s, /aria-controls=\{corpo\}/); assert.match(s, /<div id=\{corpo\} className="sezione-corpo" hidden=\{!stato\}>/); assert.ok(!/stato &&\s*\(/.test(s), "il contenuto non deve smontarsi"); assert.match(s, /\{conteggio === 0 && vuoto \? <p className="sezione-vuota">\{vuoto\}<\/p> : null\}/);
++});
++
++// ============================================================ l'azione e la migrazione
++test("azione «annulla»: controlla l'identificativo PRIMA del database, chiama la funzione giusta, aggiorna le pagine e traduce gli errori", () => {
++  const a = leggi("src", "app", "(app)", "database", "actions.ts"); const f = a.slice(a.indexOf("export async function riapriCandidatura"));
++  assert.match(f, /if \(!eUuid\(candidaturaId\)\) return/); assert.ok(f.indexOf("eUuid(") < f.indexOf("createClient()")); assert.match(f, /supabase\.rpc\("riapri_candidatura", \{ p_candidatura: candidaturaId \}\)/); assert.match(f, /revalidatePath\("\/database"\);\s+revalidatePath\("\/"\);\s+revalidatePath\("\/messaggi"\);/); assert.match(f, /messaggioErroreRiapertura\(error\.message\)/);
++  assert.ok(!/from\("candidature"\)\s*\.(update|upsert|delete)/.test(a), "nessuna scrittura diretta sulle candidature");
++});
++
++test("migrazione 0034: il trigger lascia passare SOLO accettata/rifiutata → in attesa col segnale della funzione; la funzione è del proprietario, controlla contratti e visite, cancella la valutazione e avvisa l'inquilino; nessuna policy di modifica", () => {
++  const m = senzaCommenti(migrazione);
++  assert.match(m, /if old\.status in \('accettata', 'rifiutata'\) and new\.status = 'in_attesa'\s+and current_setting\('matchami\.riapertura', true\) = 'on' then\s+return new;/); assert.match(m, /raise exception 'DECISIONE_DEFINITIVA/);
++  assert.match(m, /create or replace function public\.riapri_candidatura\(p_candidatura uuid\)\s+returns void\s+language plpgsql\s+security definer\s+set search_path = public/); assert.match(m, /if l\.owner_id is distinct from auth\.uid\(\) then/); assert.match(m, /c\.status::text not in \('accettata', 'rifiutata'\)/);
++  assert.match(m, /exists \(select 1 from contratti where candidatura_id = c\.id\)/); assert.match(m, /exists \(select 1 from visite where candidatura_id = c\.id and stato in \('proposta', 'confermata'\) and data_ora >= now\(\)\)/); assert.match(m, /perform set_config\('matchami\.riapertura', 'on', true\);[\s\S]*?perform set_config\('matchami\.riapertura', 'off', true\);/);
++  assert.match(m, /delete from valutazioni_candidati where candidatura_id = c\.id;/); assert.match(m, /crea_notifica\(c\.tenant_id, 'candidatura_riaperta'/); assert.match(m, /revoke all on function public\.riapri_candidatura\(uuid\) from public, anon;\s+grant execute on function public\.riapri_candidatura\(uuid\) to authenticated;/);
++  assert.ok(!/create policy/i.test(m), "la 0034 non deve aggiungere policy (nessuno modifica le candidature a mano)"); assert.ok(!/grant (update|all)[^;]*candidature/i.test(m));
++});
++
++test("il DB test esegue anche le prove dell'annullamento (44 controlli) e non se ne perde nessuno", () => {
++  const sql = leggi("scripts", "db", "riapri.sql"); const controlli = [...sql.matchAll(/(select|perform) t\.(ok|fallisce)\(/g)].length; assert.ok(controlli >= 44, `controlli: ${controlli}`); assert.match(sql, /select t\.ok\(\(select count\(\*\) from t\.esiti\) = 43,/);
++  for (const tema of ["A04 un altro proprietario non può annullare", "A11 con un contratto il match non si annulla", "A13 con una visita CONFERMATA", "A20 ma la chat è chiusa", "A24 dopo lo scarto il proprietario non vede più i dati", "A28 e la nuova valutazione è quella NUOVA", "A30 il proprietario non può riportare una candidatura", "A35 col segnale alzato", "A43 finita una riapertura il segnale è spento"]) assert.ok(sql.replaceAll("''", "'").includes(tema), `manca il controllo «${tema}»`);
++});
++
++test("la ricerca in fondo ha caratteri leggibili (pulsanti da 15 px, campo da 17 px) e bersagli larghi", () => {
++  const css = leggi("src", "app", "globals.css"); const m = css.slice(css.indexOf("/* la ricerca in fondo"));
++  assert.match(m, /\.ricerca-fondo \.chip \{\s+min-height: 44px;\s+padding: 8px 16px;\s+font-size: 15px;/); assert.match(m, /\.ricerca-fondo \.ricerca-input,\s+\.ricerca-fondo \.ricerca-select \{\s+min-height: 52px;\s+font-size: 17px;/);
++  const misure = [...m.matchAll(/font-size:\s*(\d+)px/g)].map((x) => Number(x[1])); assert.ok(Math.min(...misure) >= 15, `caratteri: ${Math.min(...misure)} px`);
++});
++
++test("i messaggi con il nome abbreviato («Anna V.») non hanno mai due punti di fila: dopo il nome non c'è un punto", () => {
++  const testo = cl.replace(/&apos;/g, "'"); for (const m of testo.matchAll(/`([^`]*\$\{nome\}[^`]*)`/g)) assert.ok(!/\$\{nome\}\./.test(m[1]), `un punto subito dopo il nome: «${m[1]}»`);
++  for (const m of testo.matchAll(/\$\{datiSchedaCandidato\(c\)\.nome\}[.]/g)) assert.fail("un punto subito dopo il nome in " + m[0]);
++});
+diff --git a/scripts/test-db-richieste.mjs b/scripts/test-db-richieste.mjs
+index e9b0268..d38dead 100644
+--- a/scripts/test-db-richieste.mjs
++++ b/scripts/test-db-richieste.mjs
+@@ -54,3 +54,16 @@ test("migrazione 0033 su PostgreSQL vero: chi era già iscritto diventa visibile
+     r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m0033)]); assert.equal(r.status, 0, "rieseguire la 0033 non deve dare errori: " + r.stderr.slice(0, 300));
+   } finally { fs.rmSync(nullo, { force: true }); esegui(["-d", "postgres", "-c", `drop database if exists ${db}`]); }
+ });
++
++test("migrazione 0034 su PostgreSQL vero: annullare un match o uno scarto, i casi vietati e nessuna scorciatoia (44 controlli)", { skip: psqlCmd ? false : "imposta MATCHAMI_PSQL per eseguire le prove SQL su un PostgreSQL vero" }, () => {
++  const [bin, ...args] = psqlCmd.split(/\s+/); const db = "matchami_test_riapri"; const esegui = (extra) => spawnSync(bin, [...args, "-X", "-q", ...extra], { encoding: "utf8" });
++  const migrazioni = fs.readdirSync(path.join(radice, "supabase", "migrations")).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort(); assert.ok(migrazioni.includes("0034_riapri_candidatura.sql"), "manca la migrazione 0034");
++  const nullo = path.join(os.tmpdir(), `matchami-riapri-${process.pid}.txt`);
++  try {
++    let r = esegui(["-d", "postgres", "-c", `drop database if exists ${db}`, "-c", `create database ${db}`]); assert.equal(r.status, 0, r.stderr);
++    r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "scripts", "db", "stub-supabase.sql")]); assert.equal(r.status, 0, r.stderr);
++    for (const m of migrazioni) { r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m)]); assert.equal(r.status, 0, `la migrazione ${m} non si applica: ${r.stderr.slice(0, 300)}`); }
++    r = esegui(["-d", db, "-o", nullo, "-f", path.join(radice, "scripts", "db", "riapri.sql")]); assert.ok(!/CONTROLLO FALLITO/.test(r.stderr), r.stderr.split("\n").filter((l) => /FALLITO|ERROR/.test(l)).slice(0, 4).join("\n")); assert.equal(r.status, 0, r.stderr.slice(0, 500));
++    const riusciti = (r.stderr.match(/NOTICE:\s+OK:/g) ?? []).length; assert.equal(riusciti, 44, `controlli riusciti: ${riusciti}`);
++  } finally { fs.rmSync(nullo, { force: true }); esegui(["-d", "postgres", "-c", `drop database if exists ${db}`]); }
++});
+diff --git a/scripts/test-home-proprietario.mjs b/scripts/test-home-proprietario.mjs
+index c3cabd4..553f66a 100644
+--- a/scripts/test-home-proprietario.mjs
++++ b/scripts/test-home-proprietario.mjs
+@@ -191,7 +191,7 @@ test("saluto e titolo: senza nome solo il saluto; l'ora cambia il saluto", () =>
+ 
+ // ============================================================ per chi non è pratico
+ function bloccoCss() {
+-  const css = leggi("src", "app", "globals.css"); const a = css.indexOf("Home del proprietario: la casa in grande e due tessere grandi."); const fineHome = css.indexOf("/* ---- «Richieste dei proprietari» (inquilino) ---- */"); const schede = css.indexOf("/* ---- Database: le schede dei possibili inquilini e la richiesta ---- */");
++  const css = leggi("src", "app", "globals.css"); const a = css.indexOf("Home del proprietario: la casa in grande e due tessere grandi."); const fineHome = css.indexOf("/* ---- «Richieste dei proprietari» (inquilino) ---- */"); const schede = css.indexOf("/* ---- Database: le case, le schede delle persone e le richieste ---- */");
+   assert.ok(a > 0 && fineHome > a && schede > fineHome, "blocchi di stile non trovati");
+   // la Home e la sezione del Database, poi le schede dei possibili inquilini e la richiesta: tutto ciò che legge il proprietario. Le richieste dell'inquilino stanno in mezzo e restano fuori.
+   return css.slice(a, fineHome) + css.slice(schede);
+@@ -237,10 +237,12 @@ test("la chiave di servizio manca: la Home non crolla e non mostra numeri invent
+   const s = leggi("src", "lib", "proprietario", "possibili-server.ts"); assert.match(s, /const admin = clienteAmministratore\(\);\s+if \(!admin\) return null;/); assert.match(s, /if \(tenant\.error \|\| zone\.error \|\| interessi\.error\) \{[\s\S]*?return null;/); assert.match(s, /if \(annunci\.length === 0\) return new Map\(\);/);
+ });
+ 
+-test("Database: la sezione «Possibili inquilini» c'è, ha l'ancora a cui porta la tessera, dice che non si vede chi sono, e funziona anche senza numeri", () => {
+-  const d = leggi("src", "app", "(app)", "database", "DatabaseClient.tsx"); const c = leggi("src", "components", "PossibiliInquilini.tsx"); assert.match(d, /<PossibiliInquilini possibili=\{possibili\} \/>/); assert.match(c, /<section id="possibili" className="possibili" aria-labelledby="possibili-titolo">/); assert.match(c, /Chi ha scelto di non farsi trovare non compare, e i contatti di nessuno sono/); assert.match(c, /Il numero non è disponibile in questo momento/); assert.match(c, /Quando la tua casa sarà pubblicata vedrai qui quanti inquilini cercano una casa come la tua\./);
+-  assert.ok(d.indexOf("<PossibiliInquilini") > 0 && d.indexOf("<PossibiliInquilini") < d.indexOf("<RicercaCandidati"), "la sezione sta prima della ricerca delle candidature"); const p = leggi("src", "app", "(app)", "database", "page.tsx"); assert.match(p, /const possibili = await possibiliPerCasaDelProprietario\(supabase, user!\.id\);/); assert.match(p, /<DatabaseClient\s+possibili=\{possibili\}/);
+-  assert.match(leggi("src", "app", "globals.css"), /\.possibili \{[^}]*scroll-margin-top: 16px;/);
++test("Database: ogni casa ha la sezione «Possibili match», con l'ancora a cui porta la tessera della Home (sulla prima casa), dice che non si vede chi sono, e funziona anche senza numeri", () => {
++  const d = leggi("src", "app", "(app)", "database", "DatabaseClient.tsx"); const c = leggi("src", "components", "PossibiliMatch.tsx");
++  assert.match(d, /<SezioneApribile id=\{g\.casa\.id === primoConPossibili \? "possibili" : undefined\} titolo="Possibili match" conteggio=\{n\.possibili\}>\s+<PossibiliMatch casa=\{g\.possibili\} \/>/); assert.match(d, /const primoConPossibili = gruppi\.find\(\(g\) => g\.possibili !== null\)\?\.casa\.id \?\? null;/);
++  assert.match(c, /Chi ha scelto di non farsi trovare non compare, e i contatti di nessuno sono/); assert.match(c, /Il numero non è disponibile in questo momento/); assert.match(d, /Appena una tua casa sarà pubblicata, qui vedrai chi si candida e chi potrebbe fare al caso tuo\./);
++  assert.ok(d.indexOf("{gruppi.map") > 0 && d.indexOf("{gruppi.map") < d.indexOf("<RicercaCandidati"), "le case stanno PRIMA della ricerca (la ricerca è in fondo)"); const p = leggi("src", "app", "(app)", "database", "page.tsx"); assert.match(p, /const possibili = await possibiliPerCasaDelProprietario\(supabase, user!\.id\);/); assert.match(p, /<DatabaseClient\s+case_=\{case_\}\s+possibili=\{possibili\}/);
++  assert.match(leggi("src", "app", "globals.css"), /\.sezione-apribile \{[^}]*scroll-margin-top: 16px;/, "la sezione a cui porta l'ancora non deve finire sotto il bordo");
+ });
+ 
+ test("informativa: dice che ai proprietari si mostra solo un NUMERO anonimo di inquilini compatibili, con la nuova versione; chi aveva le precedenti non deve riaccettare", () => {
+diff --git a/scripts/test-notifiche.mjs b/scripts/test-notifiche.mjs
+index eb543b3..f3804f9 100644
+--- a/scripts/test-notifiche.mjs
++++ b/scripts/test-notifiche.mjs
+@@ -17,12 +17,13 @@ const sql = fs.readFileSync(path.join(radice, "supabase", "migrations", "0019_no
+ const sql0020 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0020_ritira_candidatura.sql"), "utf8");
+ const sql0022 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0022_visite.sql"), "utf8");
+ const sql0032 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0032_richieste_proprietari.sql"), "utf8");
++const sql0034 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0034_riapri_candidatura.sql"), "utf8");
+ 
+ /** I tipi che il vincolo sulla tabella ammette. */
+ function tipiDelDatabase() {
+   // l'ultima definizione del vincolo, in ordine di migrazione
+-  const tutte = [...(sql + "\n" + sql0020 + "\n" + sql0022 + "\n" + sql0032).matchAll(/check \(tipo in \(([\s\S]*?)\)\)/g)];
+-  assert.ok(tutte.length >= 4, "dovrei trovare il vincolo della 0019, quello della 0020, quello della 0022 e quello della 0032");
++  const tutte = [...(sql + "\n" + sql0020 + "\n" + sql0022 + "\n" + sql0032 + "\n" + sql0034).matchAll(/check \(tipo in \(([\s\S]*?)\)\)/g)];
++  assert.ok(tutte.length >= 5, "dovrei trovare il vincolo della 0019, quello della 0020, quello della 0022, quello della 0032 e quello della 0034");
+   return [...tutte[tutte.length - 1][1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
+ }
+ 
+@@ -37,7 +38,10 @@ const trigger =
+   sql0022.slice(sql0022.indexOf("create or replace function public.notifica_visita()"), sql0022.indexOf("drop trigger if exists notifica_visita")) +
+   "\n" +
+   // la 0032: le due funzioni che mandano e accettano una richiesta creano le notifiche (non sono trigger, ma producono i tipi)
+-  sql0032.slice(sql0032.indexOf("create or replace function public.invia_richiesta_proprietario"));
++  sql0032.slice(sql0032.indexOf("create or replace function public.invia_richiesta_proprietario")) +
++  "\n" +
++  // la 0034: la funzione che annulla una decisione crea la notifica «candidatura riaperta»
++  sql0034.slice(sql0034.indexOf("create or replace function public.riapri_candidatura"));
+ 
+ // ------------------------------------------------------------
+ // I tipi
+diff --git a/scripts/test-raccomandato.mjs b/scripts/test-raccomandato.mjs
+index 85320d9..0408779 100644
+--- a/scripts/test-raccomandato.mjs
++++ b/scripts/test-raccomandato.mjs
+@@ -159,7 +159,8 @@ test("pagine: leggono chi ha scritto le recensioni e quando (servono per il badg
+ });
+ 
+ test("proprietario: il badge compare sulla scheda e nel dettaglio solo se c'è, entra nell'ordine, e il filtro è nella ricerca", () => {
+-  const d = leggi("src", "app", "(app)", "database", "DatabaseClient.tsx"); assert.match(d, /\{v\?\.raccomandato === true && \(\s+<div style=\{\{ margin: "3px 0" \}\}>\s+<BadgeRaccomandato compatto \/>/); assert.match(d, /selezionata\.valutazione\?\.raccomandato === true && \(\s+<div className="feat-row">/); assert.match(d, /raccomandato: c\.valutazione!\.raccomandato === true,/);
++  const d = leggi("src", "app", "(app)", "database", "DatabaseClient.tsx"); // la scheda in lista è SchedaPersona (badge intero, 15 px); il dettaglio ha la riga con il badge compatto; l'ordine lo usa dopo la percentuale
++  assert.match(leggi("src", "components", "SchedaPersona.tsx"), /\{dati\.raccomandato && <BadgeRaccomandato \/>\}/); assert.match(leggi("src", "lib", "database-proprietario.ts"), /raccomandato: v\?\.raccomandato === true,/); assert.match(d, /selezionata\.valutazione\?\.raccomandato === true && \(\s+<div className="feat-row">/); assert.match(leggi("src", "lib", "database-proprietario.ts"), /raccomandato: c\.valutazione!\.raccomandato === true,/);
+   assert.match(leggi("src", "components", "RicercaCandidati.tsx"), /<Interruttore acceso=\{filtri\.soloRaccomandati\} onClick=\{\(\) => imposta\(\{ soloRaccomandati: !filtri\.soloRaccomandati \}\)\}>\s+Inquilini raccomandati/);
+ });
+ 
+diff --git a/scripts/test-ricerca-candidati.mjs b/scripts/test-ricerca-candidati.mjs
+index 7ead583..c97c1f2 100644
+--- a/scripts/test-ricerca-candidati.mjs
++++ b/scripts/test-ricerca-candidati.mjs
+@@ -261,7 +261,8 @@ test("testi: etichette dei filtri e della soglia", () => {
+ // ------------------------------------------------------------
+ 
+ test("le soglie sono quelle con cui la schermata colora le percentuali (70 e 50)", () => {
+-  const schermata = leggi("src", "app", "(app)", "database", "DatabaseClient.tsx");
++  // il colore della percentuale sulla scheda sta in classeMatch (lib/database-proprietario.ts)
++  const schermata = leggi("src", "lib", "database-proprietario.ts");
+   assert.match(schermata, /pct >= 70/);
+   assert.match(schermata, /pct >= 50/);
+   assert.deepEqual([...r.SOGLIE_COMPATIBILITA].filter((x) => x > 0), [50, 70]);
+diff --git a/scripts/test-richieste.mjs b/scripts/test-richieste.mjs
+index c52c035..a64ed60 100644
+--- a/scripts/test-richieste.mjs
++++ b/scripts/test-richieste.mjs
+@@ -175,19 +175,20 @@ test("NESSUNA schermata chiede più di «rendersi disponibili»: la parola non c
+ 
+ // ============================================================ le schermate
+ test("Database (proprietario): «Fai match» NON invia subito: apre una conferma con le parole giuste, e solo «Sì, invia la richiesta» chiama il server", () => {
+-  const c = senzaCommenti(leggi("src", "components", "PossibiliInquilini.tsx"));
+-  assert.match(c, /onClick=\{\(\) => setScelta\(\{ casa: p, scheda: s \}\)\}>\s+Fai match/); assert.equal([...c.matchAll(/faiMatch\(/g)].length, 1, "faiMatch si chiama in un solo punto"); assert.ok(c.indexOf("faiMatch(") > c.indexOf("function invia()") && c.indexOf("faiMatch(") < c.indexOf("function invia()") + 400, "solo dentro «invia»");
+-  for (const x of ["Fai match con ${scelta.scheda.nome}?", "Le arriverà una richiesta per", "Se non risponde o dice di no, non succede\n              niente", "Sì, invia la richiesta", "No, torna indietro", "Vuoi aggiungere due parole? (facoltativo)"]) assert.ok(c.includes(x) || c.replace(/\s+/g, " ").includes(x.replace(/\s+/g, " ")), `manca «${x}»`);
+-  for (const x of ["Queste persone hanno scelto di non farsi trovare dai proprietari: se una di loro si candida, la trovi tra le candidature.", "Puoi contattare questa persona:", "Puoi contattare ${p.disponibili.length} di queste persone:", "Sono persone iscritte che cercano una casa adatta alla tua."]) assert.ok(c.replace(/\s+/g, " ").includes(x), `manca la frase «${x}»`);
++  const c = senzaCommenti(leggi("src", "components", "PossibiliMatch.tsx"));
++  assert.match(c, /onClick=\{\(\) => setScelta\(s\)\}>\s+Fai match/); assert.equal([...c.matchAll(/faiMatch\(/g)].length, 1, "faiMatch si chiama in un solo punto"); assert.ok(c.indexOf("faiMatch(") > c.indexOf("function invia()") && c.indexOf("faiMatch(") < c.indexOf("function invia()") + 400, "solo dentro «invia»");
++  for (const x of ["Fai match con ${scelta.nome}?", "Le arriverà una richiesta per", "Se non risponde o dice di no, non succede\n              niente", "Sì, invia la richiesta", "No, torna indietro", "Vuoi aggiungere due parole? (facoltativo)"]) assert.ok(c.includes(x) || c.replace(/\s+/g, " ").includes(x.replace(/\s+/g, " ")), `manca «${x}»`);
++  for (const x of ["Hanno scelto di non farsi trovare dai proprietari: se una di loro si candida, la trovi tra le candidature.", "Puoi contattare questa persona:", "Puoi contattare ${disponibili.length} di queste persone:", "Sono persone iscritte che cercano una casa adatta alla tua."]) assert.ok(c.replace(/\s+/g, " ").includes(x), `manca la frase «${x}»`);
+   for (const vecchia of ["si è ancora reso disponibile", "si sono rese disponibili", "si è resa disponibile", "Vedi solo chi ha scelto di farsi trovare"]) assert.ok(!c.includes(vecchia), `c'è ancora la frase vecchia «${vecchia}»`);
+   assert.match(c, /className="ob-textarea"/, "il campo del messaggio deve usare la classe che esiste (con bordo e sfondo)"); assert.ok(!/textarea-base/.test(c)); assert.match(leggi("src", "app", "globals.css"), /\.ob-textarea \{/, "la classe del campo di testo deve esistere nel CSS");
+   assert.match(c, /maxLength=\{MESSAGGIO_RICHIESTA_MAX\}/); assert.match(c, /\{messaggio\.length\}\/\{MESSAGGIO_RICHIESTA_MAX\}/);
+ });
+ 
+-test("Database (proprietario): la scheda non mostra reddito né contatti; mostra il badge, l'affidabilità e le recensioni; un rifiuto non dice chi è", () => {
+-  const c = senzaCommenti(leggi("src", "components", "PossibiliInquilini.tsx")); for (const vietato of ["reddito_mensile", "reddito_nucleo", "email", "telefono", "cognome", "protestato"]) assert.ok(!c.includes(vietato), `la scheda usa «${vietato}»`);
+-  for (const x of ["<BadgeRaccomandato />", "Reddito verificato", "Affidabilità {s.affidabilita} · {s.etichettaAffidabilita}", "testoRecensioni(s.recensioni)"]) assert.ok(c.includes(x), `manca «${x}»`);
+-  assert.match(c, /\{rifiutate === 1 \? "1 persona non ha accettato" : `\$\{rifiutate\} persone non hanno accettato`\}/); const s = senzaCommenti(leggi("src", "lib", "proprietario", "possibili-server.ts")); assert.match(s, /nome: r\.stato === "inviata" \? nomiRichieste\.get\(r\.id as string\) \?\? null : null,/);
++test("Database (proprietario): la scheda non mostra reddito né contatti; mostra il badge, l'affidabilità, il match e le recensioni; un rifiuto non dice chi è", () => {
++  const sch = senzaCommenti(leggi("src", "components", "SchedaPersona.tsx")); const c = senzaCommenti(leggi("src", "components", "PossibiliMatch.tsx"));
++  for (const vietato of ["reddito_mensile", "reddito_nucleo", "email", "telefono", "cognome", "protestato"]) { assert.ok(!sch.includes(vietato), `la scheda usa «${vietato}»`); assert.ok(!c.includes(vietato), `i possibili match usano «${vietato}»`); }
++  for (const x of ["<BadgeRaccomandato />", "Reddito verificato", "Affidabilità", "Match", "testoRecensioni(dati.recensioni)"]) assert.ok(sch.includes(x), `manca «${x}»`);
++  assert.match(c, /\{rifiutate === 1 \? "1 persona non ha accettato" : `\$\{rifiutate\} persone non hanno accettato`\}/); const s2 = senzaCommenti(leggi("src", "lib", "proprietario", "possibili-server.ts")); assert.match(s2, /nome: r\.stato === "inviata" \? nomiRichieste\.get\(r\.id as string\) \?\? null : null,/);
+ });
+ 
+ test("«I tuoi match» (inquilino): una nota dice cosa vedono i proprietari e come nascondersi, chi si è nascosto può tornare visibile, si risponde con «Sì, mi interessa» / «No, grazie», accettando si apre la chat; il numero sulla scheda e sulla barra conta solo le richieste in attesa", () => {
+@@ -217,7 +218,7 @@ test("una candidatura nata da una richiesta si riconosce («Ti ha scelto il prop
+ });
+ 
+ test("stile del proprietario: i pulsanti «Fai match» e di conferma sono grandi (almeno 56 px), e i testi delle schede sono da 15 px in su", () => {
+-  const css = leggi("src", "app", "globals.css"); const h = (c) => Number((css.match(new RegExp(`${c.replace(/\./g, "\\.")} \\{[^}]*min-height:\\s*(\\d+)px`)) ?? [])[1]); assert.ok(h(".scheda-match") >= 56 && h(".possibili-conferma .opp-cta") >= 56, `${h(".scheda-match")}, ${h(".possibili-conferma .opp-cta")}`);
+-  assert.match(css, /\.scheda-etichette \.badge-raccomandato \{[^}]*font-size: 15px;/, "il badge nelle schede è piccolo: per il proprietario deve essere da 15 px"); assert.ok(!/<BadgeRaccomandato compatto/.test(leggi("src", "components", "PossibiliInquilini.tsx")), "nelle schede non si usa la versione compatta (11 px)");
+-  const blocco = css.slice(css.indexOf("/* ---- Database: le schede dei possibili inquilini e la richiesta ---- */")); const misure = [...blocco.matchAll(/font-size:\s*(\d+(?:\.\d+)?)px/g)].map((m) => Number(m[1])); assert.ok(misure.length >= 10 && Math.min(...misure) >= 15, `caratteri: ${Math.min(...misure)} px`);
++  const css = leggi("src", "app", "globals.css"); const h = (c) => Number((css.match(new RegExp(`${c.replace(/\./g, "\\.")} \\{[^}]*min-height:\\s*(\\d+)px`)) ?? [])[1]); assert.ok(h(".persona-primario") >= 56 && h(".persona-secondario") >= 52 && h(".possibili-conferma .opp-cta") >= 56 && h(".sezione-testa") >= 64, `${h(".persona-primario")}, ${h(".persona-secondario")}, ${h(".possibili-conferma .opp-cta")}, ${h(".sezione-testa")}`);
++  assert.match(css, /\.persona-etichette \.badge-raccomandato \{[^}]*font-size: 15px;/, "il badge nelle schede è piccolo: per il proprietario deve essere da 15 px"); assert.ok(!/<BadgeRaccomandato compatto/.test(leggi("src", "components", "SchedaPersona.tsx")) && !/<BadgeRaccomandato compatto/.test(leggi("src", "components", "PossibiliMatch.tsx")), "nelle schede non si usa la versione compatta (11 px)");
++  const blocco = css.slice(css.indexOf("/* ---- Database: le case, le schede delle persone e le richieste ---- */")); const misure = [...blocco.matchAll(/font-size:\s*(\d+(?:\.\d+)?)px/g)].map((m) => Number(m[1])); assert.ok(misure.length >= 10 && Math.min(...misure) >= 15, `caratteri: ${Math.min(...misure)} px`);
+ });
+diff --git a/src/app/(app)/database/DatabaseClient.tsx b/src/app/(app)/database/DatabaseClient.tsx
+index 04286c7..fb21206 100644
+--- a/src/app/(app)/database/DatabaseClient.tsx
++++ b/src/app/(app)/database/DatabaseClient.tsx
+@@ -1,207 +1,311 @@
+ "use client";
+ 
+-import { stelleTesto, testoRecensioni } from "@/lib/recensioni";
+-import { BadgeRaccomandato } from "@/components/BadgeRaccomandato";
+-import { PossibiliInquilini } from "@/components/PossibiliInquilini";
+-import type { PossibiliPerCasa } from "@/lib/proprietario/possibili-server";
+-import { useState, useTransition } from "react";
++import { Fragment, useState, useTransition } from "react";
+ import Link from "next/link";
+ import { Sheet } from "@/components/Sheet";
+-import type { CandidaturaRicevuta } from "@/lib/types";
+-import { ordinaCandidati } from "@/lib/match";
+-import { valutaCandidatura } from "./actions";
+ import { PageContainer } from "@/components/ui/PageContainer";
+ import { Chip } from "@/components/ui/Chip";
+-import { MOTIVI_RIFIUTO } from "@/lib/motivi-rifiuto";
+-import type { ChiaveMotivoRifiuto } from "@/lib/motivi-rifiuto";
+ import { IconPersone } from "@/components/icons";
++import { BadgeRaccomandato } from "@/components/BadgeRaccomandato";
++import { PossibiliMatch } from "@/components/PossibiliMatch";
+ import { RicercaCandidati } from "@/components/RicercaCandidati";
+-import {
+-  FILTRI_VUOTI,
+-  TESTO_NESSUN_RISULTATO,
+-  filtraCandidature,
+-  filtriValidi,
+-  haPunteggi,
+-  opzioniAnnunci,
+-  type Filtri,
+-} from "@/lib/ricerca-candidati";
+-
+-const BADGE: Record<string, string> = {
+-  in_attesa: "is-wait",
+-  accettata: "is-match",
+-  rifiutata: "is-off",
+-};
+-const LABEL: Record<string, string> = {
+-  in_attesa: "Da valutare",
+-  accettata: "Accettata",
+-  rifiutata: "Rifiutata",
+-};
+-const SIMBOLO = { ok: "✓", no: "–", non_indicato: "?" } as const;
++import { SchedaPersona } from "@/components/SchedaPersona";
++import { SezioneApribile } from "@/components/SezioneApribile";
++import { stelleTesto, testoRecensioni } from "@/lib/recensioni";
++import { MOTIVI_RIFIUTO } from "@/lib/motivi-rifiuto";
++import type { ChiaveMotivoRifiuto } from "@/lib/motivi-rifiuto";
++import { azioniPerStato } from "@/lib/decisioni";
++import { conteggiGruppo, datiSchedaCandidato, raggruppaPerAnnuncio, type CasaDatabase, type GruppoAnnuncio } from "@/lib/database-proprietario";
++import { testoPrezzo } from "@/lib/proprietario/home";
++import type { PossibiliPerCasa } from "@/lib/proprietario/possibili-server";
++import type { CandidaturaRicevuta } from "@/lib/types";
++import { FILTRI_VUOTI, TESTO_NESSUN_RISULTATO, filtraCandidature, filtriValidi, haPunteggi, numeroFiltriAttivi, opzioniAnnunci, type Filtri } from "@/lib/ricerca-candidati";
++import { riapriCandidatura, valutaCandidatura } from "./actions";
+ 
+-/** Colore del badge in base alla percentuale, con le stesse soglie delle etichette. */
+-function classePercentuale(pct: number): string {
+-  if (pct >= 70) return "is-match";
+-  if (pct >= 50) return "is-wait";
+-  return "is-off";
+-}
++const SIMBOLO = { ok: "✓", no: "–", non_indicato: "?" } as const;
+ 
+-type Annuncio = {
+-  id: string;
+-  titolo: string;
+-  zona: string;
+-  candidature: CandidaturaRicevuta[];
+-};
++type Stato = "in_attesa" | "accettata" | "rifiutata";
++type Dialogo = { tipo: "match" | "scarta" | "annulla_match"; c: CandidaturaRicevuta };
+ 
++/**
++ * Il Database inquilini: diviso per CASA. Dentro ogni casa tre sezioni: le candidature spontanee (chi si è candidato da solo),
++ * i possibili match (chi cerca una casa come la tua ma non si è candidato) e i già valutati (match e scartati). Ogni persona ha
++ * la sua scheda con i pulsanti giusti: «Fai match» e «Scarta» per chi aspetta, «Apri chat» e «Annulla match» per chi è un match,
++ * «Annulla scarto» per chi è stato scartato. In fondo la ricerca.
++ */
+ export function DatabaseClient({
+   candidature,
++  case_ = [],
+   possibili = [],
+ }: {
+   candidature: CandidaturaRicevuta[];
+-  /** per ogni casa che gli inquilini vedono: quanti inquilini cercano una casa come quella (un numero, mai un elenco) */
++  /** le case del proprietario, con la prima foto */
++  case_?: CasaDatabase[];
++  /** per ogni casa che gli inquilini vedono: quanti cercano una casa come quella, chi si può contattare, le richieste mandate */
+   possibili?: PossibiliPerCasa[];
+ }) {
+-  const [selezionata, setSelezionata] = useState<CandidaturaRicevuta | null>(
+-    null
+-  );
++  const [selezionata, setSelezionata] = useState<CandidaturaRicevuta | null>(null);
+   const [pending, startTransition] = useTransition();
+   const [errore, setErrore] = useState<string | null>(null);
+-  // Accettare e rifiutare non si annullano: prima si chiede conferma, e per
+-  // il rifiuto anche il motivo, che l'inquilino leggerà.
+-  const [confermando, setConfermando] = useState<"accettata" | "rifiutata" | null>(null);
++  const [dialogo, setDialogo] = useState<Dialogo | null>(null);
+   const [motivo, setMotivo] = useState<ChiaveMotivoRifiuto | null>(null);
+-  const [aggiornate, setAggiornate] = useState<
+-    Record<string, "accettata" | "rifiutata">
+-  >({});
++  // Lo stato che il proprietario ha appena dato (finché la pagina si ricarica con i dati nuovi)
++  const [aggiornate, setAggiornate] = useState<Record<string, Stato>>({});
++  const [avviso, setAvviso] = useState<{ testo: string; chat?: string } | null>(null);
+   // La ricerca e i filtri restano in questa pagina: non si salvano né si inviano.
+   const [filtriScelti, setFiltriScelti] = useState<Filtri>(FILTRI_VUOTI);
+ 
+-  function stato(c: CandidaturaRicevuta): string {
+-    return aggiornate[c.id] ?? c.status;
+-  }
++  const stato = (c: CandidaturaRicevuta): string => aggiornate[c.id] ?? c.status;
+ 
+-  function chiudi() {
+-    setSelezionata(null);
++  function chiudiDialogo() {
++    setDialogo(null);
+     setErrore(null);
+-    setConfermando(null);
+     setMotivo(null);
+   }
+-
+-  function apri(c: CandidaturaRicevuta) {
++  function apriDialogo(tipo: Dialogo["tipo"], c: CandidaturaRicevuta) {
+     setErrore(null);
+-    setConfermando(null);
+     setMotivo(null);
+-    setSelezionata(c);
++    setSelezionata(null);
++    setDialogo({ tipo, c });
+   }
+ 
+-  function valuta(c: CandidaturaRicevuta, nuovo: "accettata" | "rifiutata") {
++  function dopo(c: CandidaturaRicevuta, nuovo: Stato, testo: string, chat?: string) {
++    setAggiornate((prev) => ({ ...prev, [c.id]: nuovo }));
++    setAvviso({ testo, chat });
++  }
++
++  function conferma() {
++    if (!dialogo) return;
++    const { tipo, c } = dialogo;
++    const nome = datiSchedaCandidato(c).nome;
+     setErrore(null);
+     startTransition(async () => {
+-      const res = await valutaCandidatura(
+-        c.id,
+-        nuovo,
+-        nuovo === "rifiutata" ? (motivo ?? undefined) : undefined
+-      );
+-      if (res?.error) {
+-        setErrore(res.error);
+-        return;
++      if (tipo === "annulla_match") {
++        const r = await riapriCandidatura(c.id);
++        if (!r.ok) return setErrore(r.error);
++        dopo(c, "in_attesa", `Match annullato: ${nome} è di nuovo tra le candidature da valutare.`);
++      } else {
++        const res = await valutaCandidatura(c.id, tipo === "match" ? "accettata" : "rifiutata", tipo === "scarta" ? (motivo ?? undefined) : undefined);
++        if (res?.error) return setErrore(res.error);
++        if (tipo === "match") dopo(c, "accettata", `Match fatto con ${nome}: ora potete scrivervi.`, `/chat/${c.id}`);
++        else dopo(c, "rifiutata", `Hai scartato ${nome}: se cambi idea, puoi annullare lo scarto.`);
+       }
+-      setAggiornate((prev) => ({ ...prev, [c.id]: nuovo }));
+-      chiudi();
++      chiudiDialogo();
+     });
+   }
+ 
+-  // ---- ricerca e filtri ----
+-  // L'elenco si ricarica quando si decide: i filtri che non hanno più senso
+-  // (un annuncio sparito, una soglia senza percentuali) si ripuliscono, altrimenti
+-  // la schermata resterebbe vuota senza che si capisca perché.
++  function annullaScarto(c: CandidaturaRicevuta) {
++    setErrore(null);
++    startTransition(async () => {
++      const r = await riapriCandidatura(c.id);
++      if (!r.ok) return setAvviso({ testo: r.error });
++      dopo(c, "in_attesa", `Scarto annullato: ${datiSchedaCandidato(c).nome} è di nuovo tra le candidature da valutare.`);
++    });
++  }
++
++  // ---- i gruppi, per casa ----
++  const gruppi = raggruppaPerAnnuncio({ case_, candidature, possibili, stato });
++  const totaleDaValutare = gruppi.reduce((s, g) => s + g.spontanei.length, 0);
++  const totalePossibili = gruppi.reduce((s, g) => s + conteggiGruppo(g).possibili, 0);
++  const primoConPossibili = gruppi.find((g) => g.possibili !== null)?.casa.id ?? null;
++
++  // ---- ricerca: sta in fondo, e mostra i suoi risultati sotto la barra ----
+   const filtri = filtriValidi(filtriScelti, candidature);
+   const visibili = filtraCandidature(candidature, filtri, stato);
++  const cercando = numeroFiltriAttivi(filtri) > 0;
+ 
+-  // ---- raggruppo per annuncio (solo ciò che passa i filtri) ----
+-  const perAnnuncio = new Map<string, Annuncio>();
+-  for (const c of visibili) {
+-    const gruppo = perAnnuncio.get(c.listing_id) ?? {
+-      id: c.listing_id,
+-      titolo: c.listings?.titolo ?? "Annuncio",
+-      zona: c.listings?.zona ?? "",
+-      candidature: [],
+-    };
+-    gruppo.candidature.push(c);
+-    perAnnuncio.set(c.listing_id, gruppo);
++  /** I pulsanti di una candidatura, secondo il suo stato */
++  function azioni(c: CandidaturaRicevuta) {
++    const a = azioniPerStato(stato(c));
++    return (
++      <>
++        {a.faiMatch && (
++          <button type="button" className="opp-cta persona-primario" disabled={pending} onClick={() => apriDialogo("match", c)}>
++            Fai match
++          </button>
++        )}
++        {a.apriChat && (
++          <Link href={`/chat/${c.id}`} className="opp-cta persona-primario block text-center">
++            Apri chat
++          </Link>
++        )}
++        {a.scarta && (
++          <button type="button" className="richieste-secondario persona-secondario" disabled={pending} onClick={() => apriDialogo("scarta", c)}>
++            Scarta
++          </button>
++        )}
++        {a.annullaMatch && (
++          <button type="button" className="richieste-secondario persona-secondario" disabled={pending} onClick={() => apriDialogo("annulla_match", c)}>
++            Annulla match
++          </button>
++        )}
++        {a.annullaScarto && (
++          <button type="button" className="richieste-secondario persona-secondario" disabled={pending} onClick={() => annullaScarto(c)}>
++            Annulla scarto
++          </button>
++        )}
++      </>
++    );
+   }
+ 
+-  const daValutare = (a: Annuncio) =>
+-    a.candidature.filter((c) => stato(c) === "in_attesa").length;
++  function scheda(c: CandidaturaRicevuta) {
++    const s = stato(c);
++    const etichetta = s === "accettata" ? { testo: "Match fatto", tono: "ok" as const } : s === "rifiutata" ? { testo: "Scartato", tono: "no" as const } : s === "ritirata" ? { testo: "Ha ritirato la candidatura", tono: "neutro" as const } : null;
++    return (
++      <SchedaPersona dati={datiSchedaCandidato(c)} stato={etichetta} onApri={() => setSelezionata(c)}>
++        {azioni(c)}
++      </SchedaPersona>
++    );
++  }
+ 
+-  // prima gli annunci con più candidati in attesa
+-  const annunci = [...perAnnuncio.values()].sort(
+-    (a, b) => daValutare(b) - daValutare(a) || a.titolo.localeCompare(b.titolo)
+-  );
++  function casa(g: GruppoAnnuncio) {
++    const n = conteggiGruppo(g);
++    const zona = g.casa.zona.replace(", Milano", "");
++    return (
++      <article className="gruppo-casa" aria-label={`Casa: ${g.casa.titolo}`}>
++        <header className="gruppo-testa">
++          {g.casa.foto ? (
++            // eslint-disable-next-line @next/next/no-img-element
++            <img src={g.casa.foto} alt="" className="gruppo-foto" />
++          ) : (
++            <span className="gruppo-foto gruppo-foto-vuota" aria-hidden="true" />
++          )}
++          <div className="gruppo-titolo">
++            <h2>{g.casa.titolo}</h2>
++            <span>
++              {[zona, g.casa.prezzo ? testoPrezzo(g.casa.prezzo) : ""].filter(Boolean).join(" · ")}
++            </span>
++          </div>
++        </header>
++
++        <SezioneApribile titolo="Candidature spontanee" conteggio={n.daValutare} vuoto="Nessuno si è ancora candidato a questa casa.">
++          {g.spontanei.length > 0 && (
++            <ul className="schede-lista">
++              {g.spontanei.map((c) => (
++                <li key={c.id}>
++                  {scheda(c)}
++                </li>
++              ))}
++            </ul>
++          )}
++        </SezioneApribile>
++
++        {g.possibili !== null && (
++          <SezioneApribile id={g.casa.id === primoConPossibili ? "possibili" : undefined} titolo="Possibili match" conteggio={n.possibili}>
++            <PossibiliMatch casa={g.possibili} />
++          </SezioneApribile>
++        )}
+ 
+-  const totaleInAttesa = candidature.filter((c) => stato(c) === "in_attesa").length;
++        <SezioneApribile titolo="Già valutati" conteggio={n.valutati} aperta={n.daValutare === 0 && n.possibili === 0} vuoto="Quando fai un match o scarti qualcuno, lo trovi qui.">
++          {g.match.length > 0 && (
++            <>
++              <h3 className="sotto-titolo">Match</h3>
++              <ul className="schede-lista">
++                {g.match.map((c) => (
++                  <li key={c.id}>
++                    {scheda(c)}
++                  </li>
++                ))}
++              </ul>
++            </>
++          )}
++          {g.scartati.length > 0 && (
++            <>
++              <h3 className="sotto-titolo">Scartati</h3>
++              <ul className="schede-lista">
++                {g.scartati.map((c) => (
++                  <li key={c.id}>
++                    {scheda(c)}
++                  </li>
++                ))}
++              </ul>
++            </>
++          )}
++          {g.ritirati.length > 0 && (
++            <>
++              <h3 className="sotto-titolo">Hanno ritirato la candidatura</h3>
++              <ul className="schede-lista">
++                {g.ritirati.map((c) => (
++                  <li key={c.id}>
++                    {scheda(c)}
++                  </li>
++                ))}
++              </ul>
++            </>
++          )}
++        </SezioneApribile>
++      </article>
++    );
++  }
+ 
+   return (
+     <PageContainer wide>
+       <h1 className="screen-title">Database inquilini</h1>
+-
+-      {/* Dove porta la tessera «Possibili inquilini» della Home */}
+-      <PossibiliInquilini possibili={possibili} />
+       <p className="screen-sub">
+-        {candidature.length === 0
+-          ? "Le candidature ricevute sui tuoi annunci arrivano qui."
+-          : `${candidature.length} candidatur${candidature.length === 1 ? "a ricevuta" : "e ricevute"} · ${totaleInAttesa} da valutare.`}
++        {candidature.length === 0 && totalePossibili === 0
++          ? "Le candidature e i possibili match delle tue case arrivano qui."
++          : `${totaleDaValutare} candidatur${totaleDaValutare === 1 ? "a" : "e"} da valutare · ${totalePossibili} possibil${totalePossibili === 1 ? "e match" : "i match"}.`}
+       </p>
+ 
+-      {candidature.length === 0 && (
+-        <div className="empty-inline">
+-          <IconPersone className="icon-empty" />
+-          <h3>Nessuna candidatura ancora</h3>
+-          <p>
+-            Appena qualcuno si candiderà su un tuo annuncio pubblicato, lo
+-            vedrai qui.
+-          </p>
++      {avviso && (
++        <div className="possibili-avviso" role="status">
++          {avviso.testo}
++          {avviso.chat && (
++            <Link href={avviso.chat} className="richieste-link">
++              Apri la chat ›
++            </Link>
++          )}
+         </div>
+       )}
+ 
+-      {candidature.length > 0 && (
+-        <RicercaCandidati
+-          filtri={filtri}
+-          onCambia={setFiltriScelti}
+-          annunci={opzioniAnnunci(candidature)}
+-          conPunteggi={haPunteggi(candidature)}
+-          visibili={visibili.length}
+-          totale={candidature.length}
+-        />
+-      )}
+-
+-      {candidature.length > 0 && visibili.length === 0 && (
++      {gruppi.length === 0 && (
+         <div className="empty-inline">
+           <IconPersone className="icon-empty" />
+-          <h3>{TESTO_NESSUN_RISULTATO}</h3>
+-          <button type="button" className="redo-link" onClick={() => setFiltriScelti(FILTRI_VUOTI)}>
+-            Azzera filtri
+-          </button>
++          <h3>Ancora nessuna casa da mostrare</h3>
++          <p>Appena una tua casa sarà pubblicata, qui vedrai chi si candida e chi potrebbe fare al caso tuo.</p>
+         </div>
+       )}
+ 
+-      {annunci.map((a) => (
+-        <SezioneAnnuncio
+-          key={a.id}
+-          annuncio={a}
+-          stato={stato}
+-          onSelect={apri}
+-        />
++      {gruppi.map((g) => (
++        <Fragment key={g.casa.id}>{casa(g)}</Fragment>
+       ))}
+ 
+-      <Sheet
+-        open={selezionata !== null}
+-        onClose={chiudi}
+-        title={
+-          selezionata
+-            ? `${selezionata.nome ?? "Inquilino"} ${selezionata.cognome ?? ""}`
+-            : "Candidatura"
+-        }
+-      >
++      {/* ---- la ricerca sta in fondo ---- */}
++      {candidature.length > 0 && (
++        <section className="ricerca-fondo" aria-label="Cerca tra i candidati">
++          <h2 className="ricerca-fondo-titolo">Cerca tra i candidati</h2>
++          <RicercaCandidati
++            filtri={filtri}
++            onCambia={setFiltriScelti}
++            annunci={opzioniAnnunci(candidature)}
++            conPunteggi={haPunteggi(candidature)}
++            visibili={visibili.length}
++            totale={candidature.length}
++          />
++          {cercando && visibili.length === 0 && (
++            <div className="empty-inline">
++              <IconPersone className="icon-empty" />
++              <h3>{TESTO_NESSUN_RISULTATO}</h3>
++              <button type="button" className="redo-link" onClick={() => setFiltriScelti(FILTRI_VUOTI)}>
++                Azzera filtri
++              </button>
++            </div>
++          )}
++          {cercando && visibili.length > 0 && (
++            <ul className="schede-lista" aria-label="Risultati della ricerca">
++              {visibili.map((c) => (
++                <li key={c.id}>
++                  <p className="risultato-casa">{c.listings?.titolo ?? "Annuncio"}</p>
++                  {scheda(c)}
++                </li>
++              ))}
++            </ul>
++          )}
++        </section>
++      )}
++
++      {/* ---- la scheda completa ---- */}
++      <Sheet open={selezionata !== null} onClose={() => setSelezionata(null)} title={selezionata ? `${selezionata.nome ?? "Inquilino"} ${selezionata.cognome ?? ""}` : "Candidatura"}>
+         {selezionata && (
+           <>
+             {selezionata.tenant_profiles?.avatar_url && (
+@@ -284,120 +388,72 @@ export function DatabaseClient({
+               </div>
+             )}
+ 
++            <div className="persona-azioni" style={{ marginTop: 18 }}>
++              {azioni(selezionata)}
++            </div>
++          </>
++        )}
++      </Sheet>
++
++      {/* ---- le conferme: fai match, scarta, annulla match ---- */}
++      <Sheet
++        open={dialogo !== null}
++        onClose={chiudiDialogo}
++        title={
++          dialogo
++            ? dialogo.tipo === "match"
++              ? `Fai match con ${datiSchedaCandidato(dialogo.c).nome}?`
++              : dialogo.tipo === "scarta"
++                ? `Perché scarti ${datiSchedaCandidato(dialogo.c).nome}?`
++                : `Annullare il match con ${datiSchedaCandidato(dialogo.c).nome}?`
++            : "Conferma"
++        }
++      >
++        {dialogo && (
++          <>
++            {dialogo.tipo === "match" && (
++              <>
++                <p className="conferma-testo">Si apre la chat e la persona riceve una notifica. Se cambi idea, potrai annullare il match.</p>
++                {dialogo.c.valutazione?.match.bloccato && (
++                  <div className="note-stop">Attenzione: non soddisfa un criterio obbligatorio che hai chiesto ({dialogo.c.valutazione.match.mancanti.join(", ")}).</div>
++                )}
++              </>
++            )}
++            {dialogo.tipo === "scarta" && (
++              <>
++                <p className="conferma-testo">La persona leggerà il motivo che scegli. Se cambi idea, potrai annullare lo scarto.</p>
++                <div className="chip-row" style={{ marginBottom: 16 }}>
++                  {MOTIVI_RIFIUTO.map((m) => (
++                    <Chip key={m.chiave} label={m.scelta} active={motivo === m.chiave} onClick={() => setMotivo(m.chiave)} />
++                  ))}
++                </div>
++              </>
++            )}
++            {dialogo.tipo === "annulla_match" && (
++              <p className="conferma-testo">
++                La chat si chiude e la persona riceve un avviso: la candidatura torna tra quelle da valutare. I messaggi non si perdono. Se c&apos;è già un contratto o una
++                visita in programma, il match non si può annullare.
++              </p>
++            )}
+             {errore && (
+-              <p className="note-error" style={{ marginTop: 14 }}>
++              <p className="note-error" role="alert">
+                 {errore}
+               </p>
+             )}
+-
+-            {stato(selezionata) === "in_attesa" ? (
+-              confermando === null ? (
+-                <div className="flex gap-3 mt-6">
+-                  <button
+-                    onClick={() => setConfermando("rifiutata")}
+-                    className="btn-danger-outline"
+-                  >
+-                    Rifiuta
+-                  </button>
+-                  <button
+-                    onClick={() => setConfermando("accettata")}
+-                    className="opp-cta"
+-                  >
+-                    Accetta
+-                  </button>
+-                </div>
+-              ) : confermando === "accettata" ? (
+-                <div className="conferma">
+-                  <p className="conferma-titolo">
+-                    Accettare {selezionata.nome ?? "questo candidato"}?
+-                  </p>
+-                  <p className="conferma-testo">
+-                    Si apre la chat con il candidato. La decisione non si può
+-                    annullare.
+-                  </p>
+-                  {selezionata.valutazione?.match.bloccato && (
+-                    <div className="note-stop">
+-                      Attenzione: non soddisfa un criterio obbligatorio che hai
+-                      chiesto ({selezionata.valutazione.match.mancanti.join(", ")}).
+-                    </div>
+-                  )}
+-                  <div className="flex gap-3">
+-                    <button
+-                      onClick={() => setConfermando(null)}
+-                      disabled={pending}
+-                      className="btn-danger-outline"
+-                      style={{ borderColor: "rgba(16,21,26,.14)", color: "var(--ink)" }}
+-                    >
+-                      Annulla
+-                    </button>
+-                    <button
+-                      onClick={() => valuta(selezionata, "accettata")}
+-                      disabled={pending}
+-                      className="opp-cta"
+-                    >
+-                      {pending ? "Un momento..." : "Sì, accetta"}
+-                    </button>
+-                  </div>
+-                </div>
+-              ) : (
+-                <div className="conferma">
+-                  <p className="conferma-titolo">Perché rifiuti?</p>
+-                  <p className="conferma-testo">
+-                    L&apos;inquilino leggerà il motivo che scegli. La decisione
+-                    non si può annullare.
+-                  </p>
+-                  <div className="chip-row" style={{ marginBottom: 16 }}>
+-                    {MOTIVI_RIFIUTO.map((m) => (
+-                      <Chip
+-                        key={m.chiave}
+-                        label={m.scelta}
+-                        active={motivo === m.chiave}
+-                        onClick={() => setMotivo(m.chiave)}
+-                      />
+-                    ))}
+-                  </div>
+-                  <div className="flex gap-3">
+-                    <button
+-                      onClick={() => setConfermando(null)}
+-                      disabled={pending}
+-                      className="btn-danger-outline"
+-                      style={{ borderColor: "rgba(16,21,26,.14)", color: "var(--ink)" }}
+-                    >
+-                      Annulla
+-                    </button>
+-                    <button
+-                      onClick={() => valuta(selezionata, "rifiutata")}
+-                      disabled={pending || motivo === null}
+-                      className="opp-cta"
+-                      style={{ background: motivo ? "var(--clay)" : undefined }}
+-                    >
+-                      {pending ? "Un momento..." : "Conferma il rifiuto"}
+-                    </button>
+-                  </div>
+-                </div>
+-              )
+-            ) : (
+-              <div className="flex flex-col gap-3 mt-6">
+-                <div
+-                  className={
+-                    stato(selezionata) === "accettata" ? "note-ok" : "note-box"
+-                  }
+-                  style={{ marginTop: 0 }}
+-                >
+-                  {stato(selezionata) === "accettata"
+-                    ? "Hai accettato questa candidatura."
+-                    : "Hai rifiutato questa candidatura."}
+-                </div>
+-                {stato(selezionata) === "accettata" && (
+-                  <Link
+-                    href={`/chat/${selezionata.id}`}
+-                    className="opp-cta block text-center"
+-                  >
+-                    Apri chat
+-                  </Link>
+-                )}
+-              </div>
+-            )}
++            <div className="possibili-conferma">
++              <button
++                type="button"
++                className="opp-cta"
++                disabled={pending || (dialogo.tipo === "scarta" && motivo === null)}
++                style={dialogo.tipo === "scarta" && motivo ? { background: "var(--clay)" } : undefined}
++                onClick={conferma}
++              >
++                {pending ? "Un momento..." : dialogo.tipo === "match" ? "Sì, fai match" : dialogo.tipo === "scarta" ? "Conferma lo scarto" : "Sì, annulla il match"}
++              </button>
++              <button type="button" className="richieste-secondario" disabled={pending} onClick={chiudiDialogo}>
++                No, torna indietro
++              </button>
++            </div>
+           </>
+         )}
+       </Sheet>
+@@ -407,132 +463,6 @@ export function DatabaseClient({
+ 
+ // ------------------------------------------------------------
+ 
+-function SezioneAnnuncio({
+-  annuncio,
+-  stato,
+-  onSelect,
+-}: {
+-  annuncio: Annuncio;
+-  stato: (c: CandidaturaRicevuta) => string;
+-  onSelect: (c: CandidaturaRicevuta) => void;
+-}) {
+-  const attesa = annuncio.candidature.filter((c) => stato(c) === "in_attesa");
+-  const valutate = annuncio.candidature.filter((c) => stato(c) !== "in_attesa");
+-
+-  // In attesa: prima chi soddisfa i criteri obbligatori, poi per percentuale,
+-  // a parità per affidabilità. Se manca la valutazione resta l'ordine di arrivo.
+-  const ordinate = attesa.every((c) => c.valutazione)
+-    ? ordinaCandidati(
+-        attesa.map((c) => ({
+-          c,
+-          match: c.valutazione!.match,
+-          affidabilita: c.valutazione!.affidabilita,
+-          recensioni: c.valutazione!.recensioni ?? null,
+-          raccomandato: c.valutazione!.raccomandato === true,
+-        }))
+-      ).map((v) => v.c)
+-    : attesa;
+-
+-  return (
+-    <>
+-      <div className="pref-label" style={{ marginTop: 26 }}>
+-        <span>
+-          {annuncio.titolo}
+-          {annuncio.zona && ` · ${annuncio.zona.replace(", Milano", "")}`}
+-        </span>
+-        <b>
+-          {attesa.length} da valutare
+-        </b>
+-      </div>
+-
+-      {ordinate.length > 0 && (
+-        <div className="card-grid">
+-          {ordinate.map((c) => (
+-            <Scheda key={c.id} c={c} stato={stato(c)} onSelect={onSelect} />
+-          ))}
+-        </div>
+-      )}
+-
+-      {valutate.length > 0 && (
+-        <>
+-          <div className="sotto-label">Già valutate — {valutate.length}</div>
+-          <div className="card-grid">
+-            {valutate.map((c) => (
+-              <Scheda key={c.id} c={c} stato={stato(c)} onSelect={onSelect} />
+-            ))}
+-          </div>
+-        </>
+-      )}
+-    </>
+-  );
+-}
+-
+-function Scheda({
+-  c,
+-  stato,
+-  onSelect,
+-}: {
+-  c: CandidaturaRicevuta;
+-  stato: string;
+-  onSelect: (c: CandidaturaRicevuta) => void;
+-}) {
+-  const iniziali = `${c.nome?.[0] ?? ""}${c.cognome?.[0] ?? ""}`.toUpperCase();
+-  const v = c.valutazione;
+-  const inAttesa = stato === "in_attesa";
+-
+-  let badge = (
+-    <div className={`mc-pct ${BADGE[stato]}`}>{LABEL[stato]}</div>
+-  );
+-  if (inAttesa && v) {
+-    if (v.match.bloccato) {
+-      badge = (
+-        <div className="mc-pct is-alert">
+-          Bloccato<span>obbligatorio</span>
+-        </div>
+-      );
+-    } else if (v.match.punteggio !== null) {
+-      badge = (
+-        <div className={`mc-pct ${classePercentuale(v.match.punteggio)}`}>
+-          {v.match.punteggio}%<span>compatibile</span>
+-        </div>
+-      );
+-    }
+-  }
+-
+-  return (
+-    <button onClick={() => onSelect(c)} className="match-card">
+-      {c.tenant_profiles?.avatar_url ? (
+-        // eslint-disable-next-line @next/next/no-img-element
+-        <img src={c.tenant_profiles.avatar_url} alt="" />
+-      ) : (
+-        <div className="mc-avatar">{iniziali || "IN"}</div>
+-      )}
+-      <div className="mc-body">
+-        <div className="mc-zona">
+-          {c.tenant_profiles?.professione ?? "Profilo inquilino"}
+-        </div>
+-        <div className="mc-title">
+-          {c.nome} {c.cognome}
+-        </div>
+-        {v?.raccomandato === true && (
+-          <div style={{ margin: "3px 0" }}>
+-            <BadgeRaccomandato compatto />
+-          </div>
+-        )}
+-        <div className="mc-meta">
+-          {v ? `Affidabilità ${v.affidabilita}` : ""}
+-          {v?.recensioni && v.recensioni.numero > 0 && ` · ★ ${v.recensioni.media?.toLocaleString("it-IT", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} (${v.recensioni.numero})`}
+-          {v?.match.incompleto && inAttesa && " · dati incompleti"}
+-          {!inAttesa && v?.match.punteggio != null && ` · compatibilità ${v.match.punteggio}%`}
+-        </div>
+-      </div>
+-      {badge}
+-    </button>
+-  );
+-}
+-
+-// ------------------------------------------------------------
+-
+ /**
+  * "Perché vedi questo numero", dal lato del proprietario: i criteri che ha
+  * chiesto, quali il candidato soddisfa, e se qualcuno obbligatorio manca.
+diff --git a/src/app/(app)/database/actions.ts b/src/app/(app)/database/actions.ts
+index 8c8e1be..6c94eb2 100644
+--- a/src/app/(app)/database/actions.ts
++++ b/src/app/(app)/database/actions.ts
+@@ -9,6 +9,7 @@ import { motivoRifiutoValido } from "@/lib/motivi-rifiuto";
+ import { profiloDaVista } from "@/lib/candidati";
+ import { messaggioErroreVerifica } from "@/lib/verifica";
+ import { eUuid, messaggioErroreRichiesta, messaggioPulito } from "@/lib/richieste";
++import { messaggioErroreRiapertura } from "@/lib/decisioni";
+ 
+ export async function valutaCandidatura(
+   candidaturaId: string,
+@@ -120,3 +121,24 @@ export async function faiMatch(listingId: string, tenantId: string, messaggio?:
+   revalidatePath("/");
+   return { ok: true };
+ }
++
++/**
++ * Annullare una decisione: un match o uno scarto. La candidatura torna «in attesa» e l'inquilino riceve un avviso. Le regole (è tua,
++ * è stata decisa, non c'è un contratto né una visita in programma) le controlla il database; qui si traduce l'errore in parole.
++ */
++export async function riapriCandidatura(candidaturaId: string): Promise<{ ok: true } | { ok: false; error: string }> {
++  if (!eUuid(candidaturaId)) return { ok: false, error: messaggioErroreRiapertura("CANDIDATURA_NON_TUA: x") };
++  const supabase = await createClient();
++  const {
++    data: { user },
++  } = await supabase.auth.getUser();
++  if (!user) return { ok: false, error: messaggioErroreRiapertura("NON_AUTENTICATO: x") };
++
++  const { error } = await supabase.rpc("riapri_candidatura", { p_candidatura: candidaturaId });
++  if (error) return { ok: false, error: messaggioErroreRiapertura(error.message) };
++
++  revalidatePath("/database");
++  revalidatePath("/");
++  revalidatePath("/messaggi");
++  return { ok: true };
++}
+diff --git a/src/app/(app)/database/page.tsx b/src/app/(app)/database/page.tsx
+index de0aae8..be823cc 100644
+--- a/src/app/(app)/database/page.tsx
++++ b/src/app/(app)/database/page.tsx
+@@ -1,6 +1,7 @@
+ import type { RecensioneGrezza } from "@/lib/recensioni";
+ import { createClient } from "@/lib/supabase/server";
+ import { DatabaseClient } from "./DatabaseClient";
++import type { CasaDatabase } from "@/lib/database-proprietario";
+ import { possibiliPerCasaDelProprietario } from "@/lib/proprietario/possibili-server";
+ import { criteriDaRighe } from "@/lib/match";
+ import type { CriterioRichiesto, RigaCriterioDb } from "@/lib/match";
+@@ -28,9 +29,25 @@ export default async function DatabasePage() {
+     .eq("listings.owner_id", user!.id)
+     .order("created_at", { ascending: false });
+ 
+-  // Quanti inquilini cercano una casa come le mie (un numero, mai un elenco)
++  // Per ogni casa: quanti inquilini cercano una casa come quella, le persone che si possono contattare e le richieste già mandate
+   const possibili = await possibiliPerCasaDelProprietario(supabase, user!.id);
+ 
++  // Le mie case, con la prima foto: il Database è diviso per casa
++  const { data: caseRighe } = await supabase
++    .from("listings")
++    .select("id, titolo, zona, prezzo, pubblicato, verifica_stato, listing_photos(url, ordine)")
++    .eq("owner_id", user!.id)
++    .order("created_at", { ascending: false });
++  const case_: CasaDatabase[] = (caseRighe ?? []).map((l) => ({
++    id: l.id as string,
++    titolo: l.titolo as string,
++    zona: l.zona as string,
++    prezzo: l.prezzo as number,
++    foto: [...(l.listing_photos ?? [])].sort((a, b) => (a.ordine ?? 0) - (b.ordine ?? 0))[0]?.url ?? null,
++    pubblicata: l.pubblicato === true,
++    verificata: l.verifica_stato === "verificato",
++  }));
++
+   const righe = (candidature ?? []) as unknown as RigaCandidatura[];
+   const tenantIds = [...new Set(righe.map((c) => c.tenant_id))];
+   const listingIds = [...new Set(righe.map((c) => c.listing_id))];
+@@ -72,6 +89,7 @@ export default async function DatabasePage() {
+ 
+   return (
+     <DatabaseClient
++      case_={case_}
+       possibili={possibili}
+       candidature={assemblaCandidature({
+         candidature: righe,
+diff --git a/src/app/globals.css b/src/app/globals.css
+index faa4a07..7665ee8 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -4291,91 +4291,243 @@ button.contratto-testa:focus-visible {
+   color: var(--body-soft);
+ }
+ 
+-/* ---- Database: le schede dei possibili inquilini e la richiesta ---- */
+-.possibili-casa + .possibili-casa {
+-  margin-top: 14px;
+-  padding-top: 14px;
+-  border-top: 2px solid rgba(16, 21, 26, 0.08);
++/* ---- Database: le case, le schede delle persone e le richieste ---- */
++.gruppo-casa {
++  margin: 0 0 30px;
+ }
+-.possibili-avviso {
+-  margin: 0 0 10px;
+-  padding: 10px 14px;
+-  border-radius: 14px;
+-  background: rgba(62, 107, 87, 0.14);
++.gruppo-testa {
++  display: flex;
++  align-items: center;
++  gap: 14px;
++  margin-bottom: 12px;
++}
++.gruppo-foto {
++  flex: none;
++  width: 72px;
++  height: 72px;
++  border-radius: 18px;
++  object-fit: cover;
++}
++.gruppo-foto-vuota {
++  background: linear-gradient(135deg, var(--moss), var(--moss-light));
++}
++.gruppo-titolo h2 {
++  margin: 0;
++  font-family: var(--font-display);
++  font-size: 26px;
++  font-weight: 600;
++  line-height: 1.1;
++  color: var(--ink);
++}
++.gruppo-titolo span {
+   font-size: 16px;
+-  font-weight: 700;
++  color: var(--body-soft);
++}
++
++/* le sezioni: candidature spontanee, possibili match, già valutati */
++.sezione-apribile {
++  margin-bottom: 12px;
++  scroll-margin-top: 16px;
++  overflow: hidden;
++  border-radius: 22px;
++  background: #fff;
++  box-shadow: 0 8px 22px rgba(16, 21, 26, 0.07);
++}
++.sezione-testa {
++  display: flex;
++  align-items: center;
++  gap: 12px;
++  width: 100%;
++  min-height: 64px;
++  padding: 12px 18px;
++  border: 0;
++  background: transparent;
+   color: var(--ink);
++  font: inherit;
++  text-align: left;
++  cursor: pointer;
+ }
+-.schede-inquilini {
+-  list-style: none;
++.sezione-testa:focus-visible {
++  outline: 3px solid var(--moss);
++  outline-offset: -3px;
++}
++.sezione-titolo {
++  flex: 1;
++  font-size: 19px;
++  font-weight: 800;
++}
++.sezione-numero {
++  min-width: 34px;
++  padding: 4px 10px;
++  border-radius: 999px;
++  background: rgba(16, 21, 26, 0.08);
++  color: var(--body-soft);
++  font-size: 16px;
++  font-weight: 800;
++  text-align: center;
++}
++.sezione-numero.pieno {
++  background: var(--gold);
++  color: var(--ink);
++}
++.sezione-freccia {
++  color: var(--body-soft);
++  font-size: 26px;
++  line-height: 1;
++  transition: transform 0.15s;
++}
++.sezione-freccia.su {
++  transform: rotate(90deg);
++}
++.sezione-corpo {
++  padding: 2px 14px 16px;
++}
++.sezione-vuota {
++  margin: 6px 4px 0;
++  font-size: 16px;
++  line-height: 1.45;
++  color: var(--body-text);
++}
++.sotto-titolo {
++  margin: 14px 0 8px;
++  font-size: 15px;
++  font-weight: 800;
++  letter-spacing: 0.05em;
++  text-transform: uppercase;
++  color: var(--body-soft);
++}
++.schede-lista {
++  display: grid;
++  gap: 14px;
+   margin: 8px 0 0;
+   padding: 0;
++  list-style: none;
+ }
+-.scheda-inquilino {
+-  margin-bottom: 12px;
++.risultato-casa {
++  margin: 0 0 6px;
++  font-size: 15px;
++  font-weight: 700;
++  color: var(--body-soft);
++}
++
++/* la scheda di una persona: in alto affidabilità e match, sotto foto e informazioni, in fondo i pulsanti */
++.persona {
+   padding: 14px;
+-  border-radius: 20px;
++  border: 1px solid rgba(16, 21, 26, 0.1);
++  border-radius: 22px;
+   background: var(--paper);
+-  border: 1px solid rgba(16, 21, 26, 0.08);
+ }
+-.scheda-testa {
++.persona-stato {
++  display: inline-block;
++  margin: 0 0 10px;
++  padding: 5px 12px;
++  border-radius: 999px;
++  font-size: 15px;
++  font-weight: 800;
++}
++.persona-stato.is-ok {
++  background: rgba(62, 107, 87, 0.16);
++  color: var(--moss);
++}
++.persona-stato.is-no {
++  background: rgba(201, 105, 78, 0.16);
++  color: var(--clay);
++}
++.persona-stato.is-neutro {
++  background: rgba(16, 21, 26, 0.08);
++  color: var(--body-soft);
++}
++.persona-cifre {
++  display: grid;
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  gap: 10px;
++}
++.cifra {
++  display: flex;
++  flex-direction: column;
++  align-items: center;
++  justify-content: center;
++  padding: 10px 8px;
++  border-radius: 16px;
++  background: rgba(16, 21, 26, 0.06);
++  text-align: center;
++}
++.cifra-numero {
++  font-family: var(--font-display);
++  font-size: 36px;
++  font-weight: 600;
++  line-height: 1;
++  color: var(--ink);
++}
++.cifra-nome {
++  margin-top: 4px;
++  font-size: 15px;
++  font-weight: 800;
++  line-height: 1.2;
++  color: var(--body-soft);
++}
++.cifra-match.is-match {
++  background: rgba(62, 107, 87, 0.16);
++}
++.cifra-match.is-match .cifra-numero {
++  color: var(--moss);
++}
++.cifra-match.is-wait {
++  background: rgba(201, 161, 90, 0.22);
++}
++.cifra-match.is-wait .cifra-numero {
++  color: var(--gold-ink);
++}
++.cifra-match.is-off,
++.cifra-match.is-alert {
++  background: rgba(201, 105, 78, 0.16);
++}
++.cifra-match.is-off .cifra-numero,
++.cifra-match.is-alert .cifra-numero {
++  color: var(--clay);
++}
++.persona-testa {
+   display: flex;
+   align-items: center;
+   gap: 12px;
++  margin-top: 14px;
+ }
+-.scheda-foto {
++.persona-foto {
+   flex: none;
+-  width: 56px;
+-  height: 56px;
++  width: 64px;
++  height: 64px;
+   border-radius: 50%;
+   object-fit: cover;
+ }
+-.scheda-iniziale {
++.persona-iniziale {
+   display: flex;
+   align-items: center;
+   justify-content: center;
+   background: linear-gradient(135deg, var(--moss), var(--moss-light));
+   color: #fff;
+   font-family: var(--font-display);
+-  font-size: 24px;
++  font-size: 28px;
+   font-weight: 600;
+ }
+-.scheda-chi {
++.persona-chi {
+   display: flex;
+-  flex: 1;
+   flex-direction: column;
+   min-width: 0;
+   font-size: 17px;
+   color: var(--body-text);
+ }
+-.scheda-chi b {
++.persona-chi b {
+   font-family: var(--font-display);
+-  font-size: 20px;
++  font-size: 22px;
+   color: var(--ink);
+ }
+-.scheda-compat {
+-  flex: none;
+-  display: flex;
+-  flex-direction: column;
+-  align-items: center;
+-  font-family: var(--font-display);
+-  font-size: 24px;
+-  font-weight: 600;
+-  color: var(--moss);
+-}
+-.scheda-compat small {
+-  font-family: var(--font-sans);
+-  font-size: 15px;
+-  font-weight: 700;
+-  color: var(--body-soft);
+-}
+-.scheda-etichette {
++.persona-etichette {
+   display: flex;
+   flex-wrap: wrap;
+   gap: 6px;
+-  margin: 10px 0 6px;
++  margin: 10px 0 4px;
+ }
+-.scheda-chip {
++.persona-chip {
+   padding: 4px 10px;
+   border-radius: 999px;
+   background: rgba(16, 21, 26, 0.06);
+@@ -4383,18 +4535,75 @@ button.contratto-testa:focus-visible {
+   font-weight: 600;
+   color: var(--body-text);
+ }
+-.scheda-presentazione {
+-  margin: 6px 0 10px;
++.persona-etichette .badge-raccomandato {
++  padding: 5px 12px 5px 9px;
++  font-size: 15px;
++}
++.persona-etichette .badge-raccomandato-icona {
++  width: 18px;
++  height: 18px;
++}
++.persona-avviso {
++  margin: 8px 0 0;
++  padding: 8px 12px;
++  border-radius: 12px;
++  background: rgba(201, 105, 78, 0.14);
++  font-size: 15px;
++  line-height: 1.35;
++  color: var(--ink);
++}
++.persona-presentazione {
++  margin: 8px 0 4px;
+   font-size: 16px;
+   line-height: 1.4;
+   color: var(--body-text);
+ }
+-.scheda-match {
++.persona-azioni {
++  display: flex;
++  flex-direction: column;
++  gap: 10px;
++  margin-top: 12px;
++}
++.persona-primario {
+   width: 100%;
+   min-height: 56px;
+-  margin: 4px 0 0;
++  margin: 0;
+   font-size: 18px;
+ }
++.persona-secondario {
++  width: 100%;
++  min-height: 52px;
++  font-size: 17px;
++}
++.persona-dettagli {
++  display: block;
++  width: 100%;
++  margin-top: 8px;
++  padding: 12px 4px;
++  border: 0;
++  background: transparent;
++  color: var(--moss);
++  font-size: 16px;
++  font-weight: 700;
++  text-align: center;
++  cursor: pointer;
++}
++
++/* la ricerca sta in fondo */
++.ricerca-fondo {
++  margin-top: 36px;
++  padding-top: 18px;
++  border-top: 2px solid rgba(16, 21, 26, 0.1);
++}
++.ricerca-fondo-titolo {
++  margin: 0 0 8px;
++  font-family: var(--font-display);
++  font-size: 24px;
++  font-weight: 600;
++  color: var(--ink);
++}
++
++/* la conferma e le richieste mandate */
+ .possibili-conferma {
+   display: flex;
+   flex-direction: column;
+@@ -4438,12 +4647,20 @@ button.contratto-testa:focus-visible {
+   text-decoration: underline;
+ }
+ 
+-/* nelle schede dei possibili inquilini il badge è leggibile come il resto (per chi non è pratico) */
+-.scheda-etichette .badge-raccomandato {
+-  padding: 5px 12px 5px 9px;
++/* la ricerca in fondo: stessi caratteri leggibili del resto della pagina */
++.ricerca-fondo .chip {
++  min-height: 44px;
++  padding: 8px 16px;
+   font-size: 15px;
+ }
+-.scheda-etichette .badge-raccomandato-icona {
+-  width: 18px;
+-  height: 18px;
++.ricerca-fondo .ricerca-input,
++.ricerca-fondo .ricerca-select {
++  min-height: 52px;
++  font-size: 17px;
++}
++.ricerca-fondo .ricerca-riepilogo {
++  font-size: 15px;
++}
++.ricerca-fondo .redo-link {
++  font-size: 16px;
+ }
+diff --git a/src/components/PossibiliInquilini.tsx b/src/components/PossibiliInquilini.tsx
+deleted file mode 100644
+index 3359fce..0000000
+--- a/src/components/PossibiliInquilini.tsx
++++ /dev/null
+@@ -1,203 +0,0 @@
+-"use client";
+-
+-import { useState, useTransition } from "react";
+-import Link from "next/link";
+-import { useRouter } from "next/navigation";
+-import { Sheet } from "@/components/Sheet";
+-import { BadgeRaccomandato } from "@/components/BadgeRaccomandato";
+-import { faiMatch } from "@/app/(app)/database/actions";
+-import { frasePossibili } from "@/lib/proprietario/home";
+-import { stelleTesto, testoRecensioni } from "@/lib/recensioni";
+-import { MESSAGGIO_RICHIESTA_MAX } from "@/lib/richieste";
+-import type { PossibiliPerCasa } from "@/lib/proprietario/possibili-server";
+-import type { SchedaInquilino } from "@/lib/proprietario/possibili-inquilini";
+-
+-/**
+- * La sezione «Possibili inquilini» del Database: per ogni casa quanti inquilini cercano una casa come quella, e le persone che
+- * si sono rese disponibili a essere contattate, con il pulsante «Fai match». Più sotto le richieste già mandate.
+- */
+-export function PossibiliInquilini({ possibili }: { possibili: PossibiliPerCasa[] }) {
+-  const router = useRouter();
+-  const [pending, startTransition] = useTransition();
+-  const [scelta, setScelta] = useState<{ casa: PossibiliPerCasa; scheda: SchedaInquilino } | null>(null);
+-  const [messaggio, setMessaggio] = useState("");
+-  const [errore, setErrore] = useState<string | null>(null);
+-  const [avviso, setAvviso] = useState<string | null>(null);
+-
+-  function chiudi() {
+-    setScelta(null);
+-    setMessaggio("");
+-    setErrore(null);
+-  }
+-
+-  function invia() {
+-    if (!scelta) return;
+-    setErrore(null);
+-    startTransition(async () => {
+-      const r = await faiMatch(scelta.casa.id, scelta.scheda.tenantId, messaggio);
+-      if (!r.ok) return setErrore(r.error);
+-      setAvviso(`Richiesta inviata a ${scelta.scheda.nome}`);
+-      chiudi();
+-      router.refresh();
+-    });
+-  }
+-
+-  return (
+-    <section id="possibili" className="possibili" aria-labelledby="possibili-titolo">
+-      <h2 id="possibili-titolo" className="possibili-titolo">
+-        Possibili inquilini
+-      </h2>
+-      {avviso && (
+-        <p className="possibili-avviso" role="status">
+-          {avviso}
+-        </p>
+-      )}
+-
+-      {possibili.length === 0 ? (
+-        <p className="possibili-testo">Quando la tua casa sarà pubblicata vedrai qui quanti inquilini cercano una casa come la tua.</p>
+-      ) : (
+-        possibili.map((p) => {
+-          const f = p.possibili === null ? null : frasePossibili(p.possibili);
+-          const inAttesa = p.richieste.filter((r) => r.stato === "inviata");
+-          const accettate = p.richieste.filter((r) => r.stato === "accettata");
+-          const rifiutate = p.richieste.filter((r) => r.stato === "rifiutata").length;
+-          return (
+-            <div key={p.id} className="possibili-casa">
+-              <div className="possibili-riga">
+-                <b className="possibili-numero">{f ? f.numero : "–"}</b>
+-                <span className="possibili-frase">
+-                  {f ? f.frase : "Il numero non è disponibile in questo momento"}
+-                  <small>
+-                    {p.titolo} · {p.zona}
+-                  </small>
+-                </span>
+-              </div>
+-
+-              {p.disponibili !== null && p.possibili !== null && p.possibili > 0 && (
+-                <p className="possibili-testo">
+-                  {p.disponibili.length === 0
+-                    ? "Queste persone hanno scelto di non farsi trovare dai proprietari: se una di loro si candida, la trovi tra le candidature."
+-                    : p.disponibili.length === 1
+-                      ? "Puoi contattare questa persona:"
+-                      : `Puoi contattare ${p.disponibili.length} di queste persone:`}
+-                </p>
+-              )}
+-
+-              {(p.disponibili ?? []).length > 0 && (
+-                <ul className="schede-inquilini" aria-label={`Persone disponibili per ${p.titolo}`}>
+-                  {(p.disponibili ?? []).map((s) => (
+-                    <li key={s.tenantId} className="scheda-inquilino">
+-                      <div className="scheda-testa">
+-                        {s.avatarUrl ? (
+-                          // eslint-disable-next-line @next/next/no-img-element
+-                          <img src={s.avatarUrl} alt="" className="scheda-foto" />
+-                        ) : (
+-                          <span className="scheda-foto scheda-iniziale" aria-hidden="true">
+-                            {s.nome.slice(0, 1)}
+-                          </span>
+-                        )}
+-                        <div className="scheda-chi">
+-                          <b>{s.nome}</b>
+-                          {s.professione && <span>{s.professione}</span>}
+-                        </div>
+-                        {s.compatibilita !== null && (
+-                          <span className="scheda-compat">
+-                            {s.compatibilita}%<small>adatto</small>
+-                          </span>
+-                        )}
+-                      </div>
+-                      <div className="scheda-etichette">
+-                        {s.raccomandato && <BadgeRaccomandato />}
+-                        {s.redditoVerificato && <span className="scheda-chip">Reddito verificato</span>}
+-                        <span className="scheda-chip">
+-                          Affidabilità {s.affidabilita} · {s.etichettaAffidabilita}
+-                        </span>
+-                        {s.recensioni.numero > 0 && (
+-                          <span className="scheda-chip">
+-                            <span aria-hidden="true">{stelleTesto(s.recensioni.media)}</span> {testoRecensioni(s.recensioni)}
+-                          </span>
+-                        )}
+-                      </div>
+-                      {s.presentazione && <p className="scheda-presentazione">{s.presentazione}</p>}
+-                      <button type="button" className="opp-cta scheda-match" disabled={pending} onClick={() => setScelta({ casa: p, scheda: s })}>
+-                        Fai match
+-                      </button>
+-                    </li>
+-                  ))}
+-                </ul>
+-              )}
+-
+-              {(inAttesa.length > 0 || accettate.length > 0 || rifiutate > 0) && (
+-                <div className="richieste-inviate">
+-                  <h3>Richieste mandate</h3>
+-                  <ul>
+-                    {inAttesa.map((r) => (
+-                      <li key={r.id}>
+-                        <b>{r.nome ?? "Una persona"}</b> · in attesa di risposta
+-                      </li>
+-                    ))}
+-                    {accettate.map((r) => (
+-                      <li key={r.id} className="accettata">
+-                        <b>Ha accettato!</b> Ora potete scrivervi.
+-                        {r.candidaturaId && (
+-                          <Link href={`/chat/${r.candidaturaId}`} className="richieste-link">
+-                            Apri la chat ›
+-                          </Link>
+-                        )}
+-                      </li>
+-                    ))}
+-                    {rifiutate > 0 && <li>{rifiutate === 1 ? "1 persona non ha accettato" : `${rifiutate} persone non hanno accettato`}</li>}
+-                  </ul>
+-                </div>
+-              )}
+-            </div>
+-          );
+-        })
+-      )}
+-
+-      <p className="possibili-testo">
+-        Sono persone iscritte che cercano una casa adatta alla tua. Chi ha scelto di non farsi trovare non compare, e i contatti di nessuno sono
+-        visibili: se accetta la tua richiesta, o se si candida, la trovi tra le candidature e potete scrivervi.
+-      </p>
+-
+-      <Sheet open={scelta !== null} onClose={chiudi} title={scelta ? `Fai match con ${scelta.scheda.nome}?` : "Fai match"}>
+-        {scelta && (
+-          <>
+-            <p className="possibili-testo" style={{ marginTop: 0 }}>
+-              Le arriverà una richiesta per <b>{scelta.casa.titolo}</b>. Se accetta, potete scrivervi in chat. Se non risponde o dice di no, non succede
+-              niente.
+-            </p>
+-            <label className="field-label" htmlFor="messaggio-richiesta">
+-              Vuoi aggiungere due parole? (facoltativo)
+-            </label>
+-            <textarea
+-              id="messaggio-richiesta"
+-              className="ob-textarea"
+-              rows={3}
+-              maxLength={MESSAGGIO_RICHIESTA_MAX}
+-              value={messaggio}
+-              onChange={(e) => setMessaggio(e.target.value)}
+-              placeholder="Per esempio: la casa è libera da dicembre, può venire a vederla quando vuole."
+-            />
+-            <small className="field-note">
+-              {messaggio.length}/{MESSAGGIO_RICHIESTA_MAX}
+-            </small>
+-            {errore && (
+-              <p className="note-error" role="alert">
+-                {errore}
+-              </p>
+-            )}
+-            <div className="possibili-conferma">
+-              <button type="button" className="opp-cta" disabled={pending} onClick={invia}>
+-                {pending ? "Invio…" : "Sì, invia la richiesta"}
+-              </button>
+-              <button type="button" className="richieste-secondario" disabled={pending} onClick={chiudi}>
+-                No, torna indietro
+-              </button>
+-            </div>
+-          </>
+-        )}
+-      </Sheet>
+-    </section>
+-  );
+-}
+diff --git a/src/components/PossibiliMatch.tsx b/src/components/PossibiliMatch.tsx
+new file mode 100644
+index 0000000..f689782
+--- /dev/null
++++ b/src/components/PossibiliMatch.tsx
+@@ -0,0 +1,164 @@
++"use client";
++
++import { useState, useTransition } from "react";
++import Link from "next/link";
++import { useRouter } from "next/navigation";
++import { Sheet } from "@/components/Sheet";
++import { SchedaPersona } from "@/components/SchedaPersona";
++import { faiMatch } from "@/app/(app)/database/actions";
++import { datiSchedaPossibile } from "@/lib/database-proprietario";
++import { frasePossibili } from "@/lib/proprietario/home";
++import { MESSAGGIO_RICHIESTA_MAX } from "@/lib/richieste";
++import type { PossibiliPerCasa } from "@/lib/proprietario/possibili-server";
++import type { SchedaInquilino } from "@/lib/proprietario/possibili-inquilini";
++
++/**
++ * I possibili match di una casa: quanti inquilini cercano una casa come questa e le persone che si possono contattare, con il
++ * pulsante «Fai match» (prima una conferma, con due parole facoltative). Più sotto le richieste già mandate.
++ */
++export function PossibiliMatch({ casa }: { casa: PossibiliPerCasa }) {
++  const router = useRouter();
++  const [pending, startTransition] = useTransition();
++  const [scelta, setScelta] = useState<SchedaInquilino | null>(null);
++  const [messaggio, setMessaggio] = useState("");
++  const [errore, setErrore] = useState<string | null>(null);
++  const [avviso, setAvviso] = useState<string | null>(null);
++
++  const f = casa.possibili === null ? null : frasePossibili(casa.possibili);
++  const disponibili = casa.disponibili ?? [];
++  const inAttesa = casa.richieste.filter((r) => r.stato === "inviata");
++  const accettate = casa.richieste.filter((r) => r.stato === "accettata");
++  const rifiutate = casa.richieste.filter((r) => r.stato === "rifiutata").length;
++
++  function chiudi() {
++    setScelta(null);
++    setMessaggio("");
++    setErrore(null);
++  }
++
++  function invia() {
++    if (!scelta) return;
++    setErrore(null);
++    startTransition(async () => {
++      const r = await faiMatch(casa.id, scelta.tenantId, messaggio);
++      if (!r.ok) return setErrore(r.error);
++      setAvviso(`Richiesta inviata a ${scelta.nome}`);
++      chiudi();
++      router.refresh();
++    });
++  }
++
++  return (
++    <div className="possibili-match">
++      {avviso && (
++        <p className="possibili-avviso" role="status">
++          {avviso}
++        </p>
++      )}
++
++      <p className="possibili-testo" style={{ marginTop: 0 }}>
++        {f ? (
++          <>
++            <b>
++              {f.numero} {f.numero === "0" ? "" : f.frase}
++            </b>
++            {f.numero === "0" && f.frase}
++          </>
++        ) : (
++          "Il numero non è disponibile in questo momento."
++        )}
++        {casa.possibili !== null && casa.possibili > 0 && casa.disponibili !== null && (
++          <>
++            {" "}
++            {disponibili.length === 0
++              ? "Hanno scelto di non farsi trovare dai proprietari: se una di loro si candida, la trovi tra le candidature."
++              : disponibili.length === 1
++                ? "Puoi contattare questa persona:"
++                : `Puoi contattare ${disponibili.length} di queste persone:`}
++          </>
++        )}
++      </p>
++
++      {disponibili.length > 0 && (
++        <ul className="schede-lista" aria-label={`Possibili match per ${casa.titolo}`}>
++          {disponibili.map((s) => (
++            <li key={s.tenantId}>
++              <SchedaPersona dati={datiSchedaPossibile(s)}>
++                <button type="button" className="opp-cta persona-primario" disabled={pending} onClick={() => setScelta(s)}>
++                  Fai match
++                </button>
++              </SchedaPersona>
++            </li>
++          ))}
++        </ul>
++      )}
++
++      {(inAttesa.length > 0 || accettate.length > 0 || rifiutate > 0) && (
++        <div className="richieste-inviate">
++          <h3>Richieste mandate</h3>
++          <ul>
++            {inAttesa.map((r) => (
++              <li key={r.id}>
++                <b>{r.nome ?? "Una persona"}</b> · in attesa di risposta
++              </li>
++            ))}
++            {accettate.map((r) => (
++              <li key={r.id} className="accettata">
++                <b>Ha accettato!</b> Ora potete scrivervi.
++                {r.candidaturaId && (
++                  <Link href={`/chat/${r.candidaturaId}`} className="richieste-link">
++                    Apri la chat ›
++                  </Link>
++                )}
++              </li>
++            ))}
++            {rifiutate > 0 && <li>{rifiutate === 1 ? "1 persona non ha accettato" : `${rifiutate} persone non hanno accettato`}</li>}
++          </ul>
++        </div>
++      )}
++
++      <p className="possibili-testo">
++        Sono persone iscritte che cercano una casa adatta alla tua. Chi ha scelto di non farsi trovare non compare, e i contatti di nessuno sono visibili:
++        se accetta la tua richiesta, o se si candida, la trovi tra le candidature e potete scrivervi.
++      </p>
++
++      <Sheet open={scelta !== null} onClose={chiudi} title={scelta ? `Fai match con ${scelta.nome}?` : "Fai match"}>
++        {scelta && (
++          <>
++            <p className="possibili-testo" style={{ marginTop: 0 }}>
++              Le arriverà una richiesta per <b>{casa.titolo}</b>. Se accetta, potete scrivervi in chat. Se non risponde o dice di no, non succede niente.
++            </p>
++            <label className="field-label" htmlFor="messaggio-richiesta">
++              Vuoi aggiungere due parole? (facoltativo)
++            </label>
++            <textarea
++              id="messaggio-richiesta"
++              className="ob-textarea"
++              rows={3}
++              maxLength={MESSAGGIO_RICHIESTA_MAX}
++              value={messaggio}
++              onChange={(e) => setMessaggio(e.target.value)}
++              placeholder="Per esempio: la casa è libera da dicembre, può venire a vederla quando vuole."
++            />
++            <small className="field-note">
++              {messaggio.length}/{MESSAGGIO_RICHIESTA_MAX}
++            </small>
++            {errore && (
++              <p className="note-error" role="alert">
++                {errore}
++              </p>
++            )}
++            <div className="possibili-conferma">
++              <button type="button" className="opp-cta" disabled={pending} onClick={invia}>
++                {pending ? "Invio…" : "Sì, invia la richiesta"}
++              </button>
++              <button type="button" className="richieste-secondario" disabled={pending} onClick={chiudi}>
++                No, torna indietro
++              </button>
++            </div>
++          </>
++        )}
++      </Sheet>
++    </div>
++  );
++}
+diff --git a/src/components/SchedaPersona.tsx b/src/components/SchedaPersona.tsx
+new file mode 100644
+index 0000000..56ed850
+--- /dev/null
++++ b/src/components/SchedaPersona.tsx
+@@ -0,0 +1,80 @@
++import { stelleTesto, testoRecensioni } from "@/lib/recensioni";
++import { BadgeRaccomandato } from "@/components/BadgeRaccomandato";
++import { classeMatch, type DatiScheda } from "@/lib/database-proprietario";
++
++/**
++ * La scheda di una persona nel Database del proprietario (candidata o possibile match): in alto le due cifre che contano,
++ * AFFIDABILITÀ e MATCH; sotto la foto, il nome, il lavoro e le informazioni; in fondo i pulsanti. Solo disegno: non decide niente.
++ * Pensata per chi non è pratico: caratteri da 15 px in su, cifre grandi, un'azione principale evidente.
++ */
++export function SchedaPersona({
++  dati,
++  stato,
++  onApri,
++  children,
++}: {
++  dati: DatiScheda;
++  /** una frase in alto a destra: «Match fatto», «Scartato», «Richiesta inviata»… */
++  stato?: { testo: string; tono: "ok" | "neutro" | "no" } | null;
++  /** apre la scheda completa */
++  onApri?: () => void;
++  /** i pulsanti */
++  children?: React.ReactNode;
++}) {
++  const iniziale = dati.nome.slice(0, 1).toUpperCase() || "?";
++  const m = dati.match;
++  return (
++    <article className="persona" aria-label={dati.nome}>
++      {stato && <div className={`persona-stato is-${stato.tono}`}>{stato.testo}</div>}
++
++      {/* ---- in alto: affidabilità e match ---- */}
++      <div className="persona-cifre">
++        <div className="cifra">
++          <span className="cifra-numero">{dati.affidabilita === null ? "–" : dati.affidabilita}</span>
++          <span className="cifra-nome">Affidabilità</span>
++        </div>
++        <div className={`cifra cifra-match ${m.tipo === "pct" ? classeMatch(m.valore) : m.tipo === "bloccato" ? "is-alert" : "is-nessuno"}`}>
++          <span className="cifra-numero">{m.tipo === "pct" ? `${m.valore}%` : m.tipo === "bloccato" ? "No" : "–"}</span>
++          <span className="cifra-nome">{m.tipo === "bloccato" ? "Manca un requisito" : m.tipo === "nessuno" ? "Match (nessun criterio)" : "Match"}</span>
++        </div>
++      </div>
++
++      {/* ---- sotto: foto e informazioni ---- */}
++      <div className="persona-testa">
++        {dati.avatarUrl ? (
++          // eslint-disable-next-line @next/next/no-img-element
++          <img src={dati.avatarUrl} alt="" className="persona-foto" />
++        ) : (
++          <span className="persona-foto persona-iniziale" aria-hidden="true">
++            {iniziale}
++          </span>
++        )}
++        <div className="persona-chi">
++          <b>{dati.nome}</b>
++          {dati.professione && <span>{dati.professione}</span>}
++        </div>
++      </div>
++
++      <div className="persona-etichette">
++        {dati.raccomandato && <BadgeRaccomandato />}
++        {dati.redditoVerificato && <span className="persona-chip">Reddito verificato</span>}
++        {dati.recensioni && dati.recensioni.numero > 0 && (
++          <span className="persona-chip">
++            <span aria-hidden="true">{stelleTesto(dati.recensioni.media)}</span> {testoRecensioni(dati.recensioni)}
++          </span>
++        )}
++        {dati.incompleto && <span className="persona-chip">Dati incompleti</span>}
++      </div>
++
++      {m.tipo === "bloccato" && m.mancanti.length > 0 && <p className="persona-avviso">Non soddisfa: {m.mancanti.join(", ")}.</p>}
++      {dati.presentazione && <p className="persona-presentazione">{dati.presentazione}</p>}
++
++      {children && <div className="persona-azioni">{children}</div>}
++      {onApri && (
++        <button type="button" className="persona-dettagli" onClick={onApri}>
++          Vedi la scheda completa ›
++        </button>
++      )}
++    </article>
++  );
++}
+diff --git a/src/components/SezioneApribile.tsx b/src/components/SezioneApribile.tsx
+new file mode 100644
+index 0000000..7d7b8d5
+--- /dev/null
++++ b/src/components/SezioneApribile.tsx
+@@ -0,0 +1,42 @@
++"use client";
++
++import { useState } from "react";
++
++/**
++ * Una sezione che si apre e si chiude con un tocco, con il titolo e il numero di persone che contiene. Il contenuto resta nella
++ * pagina anche da chiusa (nascosto, non smontato), così non si perde ciò che si stava facendo.
++ */
++export function SezioneApribile({
++  id,
++  titolo,
++  conteggio,
++  aperta = true,
++  vuoto,
++  children,
++}: {
++  id?: string;
++  titolo: string;
++  conteggio: number;
++  aperta?: boolean;
++  /** cosa dire se non c'è nessuno */
++  vuoto?: string;
++  children: React.ReactNode;
++}) {
++  const [stato, setStato] = useState(aperta);
++  const corpo = `${id ?? titolo.replace(/\s+/g, "-").toLowerCase()}-corpo`;
++  return (
++    <section id={id} className="sezione-apribile">
++      <button type="button" className="sezione-testa" aria-expanded={stato} aria-controls={corpo} onClick={() => setStato(!stato)}>
++        <span className="sezione-titolo">{titolo}</span>
++        <span className={`sezione-numero ${conteggio > 0 ? "pieno" : ""}`}>{conteggio}</span>
++        <span className={`sezione-freccia ${stato ? "su" : ""}`} aria-hidden="true">
++          ›
++        </span>
++      </button>
++      <div id={corpo} className="sezione-corpo" hidden={!stato}>
++        {conteggio === 0 && vuoto ? <p className="sezione-vuota">{vuoto}</p> : null}
++        {children}
++      </div>
++    </section>
++  );
++}
+diff --git a/src/lib/database-proprietario.ts b/src/lib/database-proprietario.ts
+new file mode 100644
+index 0000000..29e7f66
+--- /dev/null
++++ b/src/lib/database-proprietario.ts
+@@ -0,0 +1,158 @@
++import { ordinaCandidati } from "./match";
++import { estratto, nomeBreve, type SchedaInquilino } from "./proprietario/possibili-inquilini";
++import type { RiepilogoRecensioni } from "./recensioni";
++import type { CandidaturaRicevuta } from "./types";
++import type { PossibiliPerCasa } from "./proprietario/possibili-server";
++
++/**
++ * Il Database inquilini del proprietario: per ogni casa, tre gruppi di persone.
++ *   - CANDIDATURE SPONTANEE: chi si è candidato da solo e aspetta una risposta;
++ *   - POSSIBILI MATCH: chi non si è candidato ma cerca una casa come questa (si può mandare una richiesta);
++ *   - GIÀ VALUTATI: i match fatti e le persone scartate (e chi ha ritirato la candidatura).
++ * Logica pura, senza database: si prova con `npm test`.
++ */
++export type CasaDatabase = {
++  id: string;
++  titolo: string;
++  zona: string;
++  prezzo: number;
++  foto: string | null;
++  pubblicata: boolean;
++  verificata: boolean;
++};
++
++export type GruppoAnnuncio = {
++  casa: CasaDatabase;
++  spontanei: CandidaturaRicevuta[];
++  match: CandidaturaRicevuta[];
++  scartati: CandidaturaRicevuta[];
++  ritirati: CandidaturaRicevuta[];
++  /** i possibili match di questa casa; `null` se non si calcolano (casa non pubblicata, o numero non disponibile) */
++  possibili: PossibiliPerCasa | null;
++};
++
++const recente = (a: CandidaturaRicevuta, b: CandidaturaRicevuta) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0);
++
++/** Le candidature da valutare: prima chi rispetta i criteri obbligatori, poi per percentuale, badge, affidabilità. Senza valutazioni, l'ordine di arrivo. */
++function ordinaDaValutare(lista: CandidaturaRicevuta[]): CandidaturaRicevuta[] {
++  if (lista.length === 0 || !lista.every((c) => c.valutazione)) return [...lista].sort(recente);
++  return ordinaCandidati(
++    lista.map((c) => ({
++      c,
++      match: c.valutazione!.match,
++      affidabilita: c.valutazione!.affidabilita,
++      recensioni: c.valutazione!.recensioni ?? null,
++      raccomandato: c.valutazione!.raccomandato === true,
++    }))
++  ).map((v) => v.c);
++}
++
++export function raggruppaPerAnnuncio(input: {
++  case_: readonly CasaDatabase[];
++  candidature: readonly CandidaturaRicevuta[];
++  possibili: readonly PossibiliPerCasa[];
++  /** lo stato di una candidatura adesso (può essere appena cambiato dal proprietario) */
++  stato: (c: CandidaturaRicevuta) => string;
++}): GruppoAnnuncio[] {
++  const case_ = new Map<string, CasaDatabase>(input.case_.map((c) => [c.id, c]));
++  const perCasa = new Map<string, CandidaturaRicevuta[]>();
++  for (const c of input.candidature) {
++    perCasa.set(c.listing_id, [...(perCasa.get(c.listing_id) ?? []), c]);
++    // una casa che non è tra quelle note (cancellata, o non letta) si ricostruisce da ciò che dice la candidatura
++    if (!case_.has(c.listing_id)) {
++      case_.set(c.listing_id, { id: c.listing_id, titolo: c.listings?.titolo ?? "Annuncio", zona: c.listings?.zona ?? "", prezzo: c.listings?.prezzo ?? 0, foto: null, pubblicata: false, verificata: false });
++    }
++  }
++  const possibiliPer = new Map(input.possibili.map((p) => [p.id, p]));
++
++  const gruppi: GruppoAnnuncio[] = [];
++  for (const casa of case_.values()) {
++    const candidature = perCasa.get(casa.id) ?? [];
++    const possibili = possibiliPer.get(casa.id) ?? null;
++    // una casa senza candidati e che gli inquilini non vedono non ha niente da mostrare
++    if (candidature.length === 0 && !possibili && !(casa.pubblicata && casa.verificata)) continue;
++    const di = (stato: string) => candidature.filter((c) => input.stato(c) === stato);
++    gruppi.push({
++      casa,
++      spontanei: ordinaDaValutare(di("in_attesa")),
++      match: di("accettata").sort(recente),
++      scartati: di("rifiutata").sort(recente),
++      ritirati: di("ritirata").sort(recente),
++      possibili,
++    });
++  }
++
++  // prima le case con più candidature da valutare, poi con più possibili match, poi per titolo
++  return gruppi.sort((a, b) => b.spontanei.length - a.spontanei.length || (b.possibili?.disponibili?.length ?? 0) - (a.possibili?.disponibili?.length ?? 0) || a.casa.titolo.localeCompare(b.casa.titolo));
++}
++
++/** Quante persone ci sono in ogni gruppo di una casa. */
++export function conteggiGruppo(g: GruppoAnnuncio): { daValutare: number; possibili: number; match: number; scartati: number; valutati: number } {
++  const valutati = g.match.length + g.scartati.length + g.ritirati.length;
++  return { daValutare: g.spontanei.length, possibili: (g.possibili?.disponibili?.length ?? 0) + (g.possibili?.richieste.filter((r) => r.stato === "inviata").length ?? 0), match: g.match.length, scartati: g.scartati.length, valutati };
++}
++
++// ============================================================ la scheda di una persona
++
++/** Il match con i criteri del proprietario, nelle tre forme che la scheda sa mostrare. */
++export type MatchScheda = { tipo: "pct"; valore: number } | { tipo: "bloccato"; mancanti: string[] } | { tipo: "nessuno" };
++
++/** Tutto ciò che serve a disegnare la scheda di una persona (candidata o possibile), uguale per i due casi. */
++export type DatiScheda = {
++  nome: string;
++  professione: string | null;
++  avatarUrl: string | null;
++  /** da 0 a 100; `null` se non si sa */
++  affidabilita: number | null;
++  match: MatchScheda;
++  raccomandato: boolean;
++  recensioni: RiepilogoRecensioni | null;
++  redditoVerificato: boolean;
++  /** un estratto della presentazione, mai più di 160 caratteri */
++  presentazione: string | null;
++  /** manca qualche dato: il match è provvisorio */
++  incompleto: boolean;
++};
++
++export function datiSchedaCandidato(c: CandidaturaRicevuta): DatiScheda {
++  const v = c.valutazione;
++  let match: MatchScheda = { tipo: "nessuno" };
++  if (v) {
++    if (v.match.bloccato) match = { tipo: "bloccato", mancanti: [...v.match.mancanti] };
++    else if (v.match.punteggio !== null) match = { tipo: "pct", valore: v.match.punteggio };
++  }
++  return {
++    nome: nomeBreve(c.nome, c.cognome),
++    professione: c.tenant_profiles?.professione?.trim() || null,
++    avatarUrl: c.tenant_profiles?.avatar_url || null,
++    affidabilita: typeof v?.affidabilita === "number" ? v.affidabilita : null,
++    match,
++    raccomandato: v?.raccomandato === true,
++    recensioni: v?.recensioni ?? null,
++    redditoVerificato: c.tenant_profiles?.verificato === true,
++    presentazione: estratto(c.tenant_profiles?.presentazione),
++    incompleto: v?.match.incompleto === true,
++  };
++}
++
++export function datiSchedaPossibile(s: SchedaInquilino): DatiScheda {
++  return {
++    nome: s.nome,
++    professione: s.professione,
++    avatarUrl: s.avatarUrl,
++    affidabilita: s.affidabilita,
++    match: s.compatibilita === null ? { tipo: "nessuno" } : { tipo: "pct", valore: s.compatibilita },
++    raccomandato: s.raccomandato,
++    recensioni: s.recensioni,
++    redditoVerificato: s.redditoVerificato,
++    presentazione: s.presentazione,
++    incompleto: false,
++  };
++}
++
++/** Il colore della percentuale: le stesse soglie delle etichette del match. */
++export function classeMatch(pct: number): "is-match" | "is-wait" | "is-off" {
++  if (pct >= 70) return "is-match";
++  if (pct >= 50) return "is-wait";
++  return "is-off";
++}
+diff --git a/src/lib/decisioni.ts b/src/lib/decisioni.ts
+new file mode 100644
+index 0000000..6254798
+--- /dev/null
++++ b/src/lib/decisioni.ts
+@@ -0,0 +1,42 @@
++/**
++ * Le decisioni del proprietario sulle candidature: accettare («Fai match»), scartare, e ANNULLARE un match o uno scarto.
++ * Logica pura, senza database. Le regole vere (chi può annullare, cosa lo impedisce) stanno nella migrazione 0034; qui si
++ * traducono in parole.
++ */
++
++/** Le parole per ogni errore dell'annullamento: il codice sta all'inizio del messaggio del database. */
++export const ERRORI_RIAPERTURA: Readonly<Record<string, string>> = {
++  NON_AUTENTICATO: "Accedi di nuovo per continuare.",
++  CANDIDATURA_NON_TUA: "Non troviamo questa candidatura.",
++  NON_DECISA: "Non c'è niente da annullare: questa candidatura non ha una decisione.",
++  HA_UN_CONTRATTO: "C'è già un contratto: il match non si può più annullare.",
++  HA_UNA_VISITA: "C'è una visita in programma: annullala prima, poi potrai annullare il match.",
++};
++
++export const ERRORE_RIAPERTURA_GENERICO = "Qualcosa non ha funzionato. Riprova tra poco.";
++
++/** Dal messaggio del database («HA_UN_CONTRATTO: ...») alle parole per la persona; ciò che non si riconosce resta generico. */
++export function messaggioErroreRiapertura(messaggio: unknown): string {
++  if (typeof messaggio !== "string") return ERRORE_RIAPERTURA_GENERICO;
++  const m = messaggio.match(/^([A-Z][A-Z_]+):/);
++  return (m && ERRORI_RIAPERTURA[m[1]]) || ERRORE_RIAPERTURA_GENERICO;
++}
++
++/** Cosa si può fare con una candidatura, secondo il suo stato (anche quello che il proprietario ha appena cambiato). */
++export type AzioniCandidatura = {
++  faiMatch: boolean;
++  scarta: boolean;
++  apriChat: boolean;
++  annullaMatch: boolean;
++  annullaScarto: boolean;
++};
++
++export function azioniPerStato(stato: string): AzioniCandidatura {
++  return {
++    faiMatch: stato === "in_attesa",
++    scarta: stato === "in_attesa",
++    apriChat: stato === "accettata",
++    annullaMatch: stato === "accettata",
++    annullaScarto: stato === "rifiutata",
++  };
++}
+diff --git a/src/lib/notifiche.ts b/src/lib/notifiche.ts
+index 82730ec..b7bf86b 100644
+--- a/src/lib/notifiche.ts
++++ b/src/lib/notifiche.ts
+@@ -29,6 +29,7 @@ export const TIPI_NOTIFICA = [
+   "visita_annullata",
+   "richiesta_ricevuta",
+   "richiesta_accettata",
++  "candidatura_riaperta",
+ ] as const;
+ 
+ export type TipoNotifica = (typeof TIPI_NOTIFICA)[number];
+@@ -141,6 +142,11 @@ export function descriviNotifica(
+         testo: `${nome || "Un proprietario"} ha scelto il tuo profilo per ${annuncio(dati, "la sua casa")}. Se ti interessa, rispondi da «I tuoi match».`,
+       };
+     }
++    case "candidatura_riaperta":
++      return {
++        titolo: "La tua candidatura è di nuovo in attesa",
++        testo: `Il proprietario di ${annuncio(dati, "una casa")} ha annullato la sua decisione: sta rivalutando la tua candidatura.`,
++      };
+     case "richiesta_accettata":
+       return {
+         titolo: "Hai un nuovo match",
+diff --git a/supabase/migrations/0034_riapri_candidatura.sql b/supabase/migrations/0034_riapri_candidatura.sql
+new file mode 100644
+index 0000000..43a1546
+--- /dev/null
++++ b/supabase/migrations/0034_riapri_candidatura.sql
+@@ -0,0 +1,102 @@
++-- ============================================================
++-- Il proprietario può ANNULLARE una decisione: un match o uno scarto. La candidatura torna «in attesa».
++--
++-- Fino a qui una decisione era definitiva (trigger blocca_cambio_decisione). Ora il proprietario la può annullare, ma SOLO dalla
++-- funzione riapri_candidatura, che controlla tutto: nessuna schermata e nessun client può cambiare lo stato a mano (non c'è nessuna
++-- policy di modifica sulle candidature, e il trigger lascia passare solo la riapertura fatta dalla funzione).
++--
++-- Cosa succede:
++--   - la candidatura torna «in attesa» e il motivo del rifiuto si cancella;
++--   - la valutazione registrata alla decisione si cancella: la prossima decisione ne fotografa una nuova;
++--   - l'inquilino riceve una notifica («è di nuovo in attesa»);
++--   - se era un MATCH, la chat si chiude (i messaggi restano, si rivedono se si rifà il match);
++--   - un match NON si annulla se c'è già un contratto o una visita in programma (da annullare prima).
++-- ============================================================
++
++-- ---- 1. il trigger lascia passare la riapertura, e solo quella ----
++create or replace function public.blocca_cambio_decisione()
++returns trigger
++language plpgsql
++as $$
++begin
++  if old.status <> 'in_attesa' and new.status is distinct from old.status then
++    -- unica eccezione: accettata o rifiutata -> in attesa, fatta dalla funzione riapri_candidatura (che alza questo segnale)
++    if old.status in ('accettata', 'rifiutata') and new.status = 'in_attesa'
++       and current_setting('matchami.riapertura', true) = 'on' then
++      return new;
++    end if;
++    raise exception 'DECISIONE_DEFINITIVA: la candidatura è già stata valutata'
++      using errcode = 'P0001';
++  end if;
++  return new;
++end;
++$$;
++
++-- ---- 2. il tipo di notifica ----
++alter table notifiche drop constraint if exists notifiche_tipo_check;
++alter table notifiche add constraint notifiche_tipo_check check (tipo in (
++  'candidatura_ricevuta', 'candidatura_accettata', 'candidatura_rifiutata', 'candidatura_ritirata',
++  'immobile_verificato', 'immobile_respinto', 'reddito_verificato', 'reddito_respinto',
++  'affitto_verificato', 'affitto_respinto', 'rapporto_confermato', 'rapporto_rifiutato',
++  'feedback_ricevuto', 'visita_prenotata', 'visita_annullata',
++  'richiesta_ricevuta', 'richiesta_accettata',
++  'candidatura_riaperta'
++));
++
++-- ---- 3. annullare una decisione ----
++create or replace function public.riapri_candidatura(p_candidatura uuid)
++returns void
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  c candidature;
++  l listings;
++begin
++  if auth.uid() is null then
++    raise exception 'NON_AUTENTICATO: accedi per continuare' using errcode = 'P0001';
++  end if;
++
++  -- Un id inesistente e una candidatura altrui rispondono allo stesso modo.
++  select * into c from candidature where id = p_candidatura for update;
++  if not found then
++    raise exception 'CANDIDATURA_NON_TUA: candidatura non trovata' using errcode = 'P0001';
++  end if;
++  select * into l from listings where id = c.listing_id;
++  if l.owner_id is distinct from auth.uid() then
++    raise exception 'CANDIDATURA_NON_TUA: candidatura non trovata' using errcode = 'P0001';
++  end if;
++
++  -- si annulla solo un match o uno scarto: non una candidatura in attesa né una ritirata dall'inquilino
++  if c.status::text not in ('accettata', 'rifiutata') then
++    raise exception 'NON_DECISA: non c''è nessuna decisione da annullare' using errcode = 'P0001';
++  end if;
++
++  -- un match con un contratto o una visita in programma non si annulla
++  if c.status::text = 'accettata' then
++    if exists (select 1 from contratti where candidatura_id = c.id) then
++      raise exception 'HA_UN_CONTRATTO: c''è già un contratto, il match non si può annullare' using errcode = 'P0001';
++    end if;
++    if exists (select 1 from visite where candidatura_id = c.id and stato in ('proposta', 'confermata') and data_ora >= now()) then
++      raise exception 'HA_UNA_VISITA: c''è una visita in programma: annullala prima' using errcode = 'P0001';
++    end if;
++  end if;
++
++  -- il segnale vale solo dentro questa transazione
++  perform set_config('matchami.riapertura', 'on', true);
++  update candidature
++     set status = 'in_attesa', motivo_rifiuto = null, updated_at = now()
++   where id = c.id;
++  perform set_config('matchami.riapertura', 'off', true);
++
++  -- la prossima decisione fotografa una valutazione nuova
++  delete from valutazioni_candidati where candidatura_id = c.id;
++
++  perform public.crea_notifica(c.tenant_id, 'candidatura_riaperta',
++    jsonb_build_object('titolo', left(l.titolo, 80)), '/candidature');
++end;
++$$;
++
++revoke all on function public.riapri_candidatura(uuid) from public, anon;
++grant execute on function public.riapri_candidatura(uuid) to authenticated;
+-- 
+2.43.0
+

@@ -1,0 +1,711 @@
+From 69e57b626e8ef07f64a963a96c328c7280312079 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 15 Oct 2026 20:17:59 +0000
+Subject: [PATCH] =?UTF-8?q?feat(privacy):=20chi=20cerca=20casa=20=C3=A8=20?=
+ =?UTF-8?q?visibile=20ai=20proprietari=20di=20partenza=20(niente=20pi?=
+ =?UTF-8?q?=C3=B9=20=C2=ABmi=20rendo=20disponibile=C2=BB)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+DA APPLICARE DOPO fai-match.patch.
+RICHIEDE LA MIGRAZIONE 0033 (supabase/migrations/0033_visibile_di_default.sql): se la 0032 non è ancora sul database, vanno eseguite
+IN ORDINE la 0032 e poi la 0033, PRIMA del push del codice.
+
+LA SCELTA DI PRODOTTO. Nella versione precedente l'inquilino doveva accendere «Fatti trovare dai proprietari»: non piaceva. Ora è
+AUTOMATICO: chi si iscrive come inquilino è visibile ai proprietari con una casa verificata e adatta alla sua ricerca (stesse regole
+di prima: chi ha una ricerca in linea, non si è già candidato, non è bloccato dai criteri obbligatori del proprietario; il proprietario
+vede nome e iniziale, lavoro, foto, estratto della presentazione, affidabilità, badge, recensioni; NON il reddito né i contatti).
+Le richieste (conferma, 280 caratteri, 20 al giorno, accettazione dell'inquilino con la chat) non cambiano.
+
+LA 0033. Il valore di partenza di tenant_profiles.visibile_ai_proprietari diventa true e visibile_dal ha come valore di partenza now().
+Chi era GIÀ iscritto diventa visibile (update dove la colonna non è true; la data di chi lo era già non cambia). Nei dati chi non
+l'aveva mai acceso e chi l'aveva acceso e ritirato sono la stessa cosa: non c'è nessuna scelta precedente da rispettare (la funzione
+era nuova e spenta per tutti). Rieseguirla rende di nuovo visibile chi si fosse nascosto nel frattempo: va eseguita UNA volta.
+
+CHI NON VUOLE: SI NASCONDE. Resta una scelta per nascondersi, ma discreta: in 'Privacy e consensi' (Sì di partenza, «No» salva
+subito e nasconde) e, per chi si è nascosto, un riquadro 'Ti sei nascosto ai proprietari' con 'Torna visibile' nella scheda delle
+richieste. Per chi è visibile (quasi tutti) c'è solo una nota che dice cosa vedono i proprietari e come nascondersi. Tolti:
+la scheda 'Fatti trovare dai proprietari' con 'Mi rendo disponibile' e 'Non voglio più essere trovato'. Un test fallisce se la frase
+'rendersi disponibile' ricompare in un file dell'app.
+LATO SERVER non cambia niente di sensibile: i dati personali si leggono solo per chi ha un «sì» ESPLICITO sulla colonna (se la riga non si
+legge, non si mostra niente); lato schermata invece è nascosto solo chi ha un «no» esplicito (se non si sa, si è visibili come di partenza).
+
+SE UN PROPRIETARIO NON TROVA NESSUNO. Le frasi del Database cambiano: 'Puoi contattare questa persona / N di queste persone' e, se
+tutte si sono nascoste, 'Queste persone hanno scelto di non farsi trovare dai proprietari: se una di loro si candida, la trovi tra le
+candidature'. Prima si parlava di chi 'si è reso disponibile'.
+
+ISCRIZIONE. Chi si registra come inquilino legge, prima di creare l'account, sotto la casella della privacy: 'Il tuo profilo sarà visibile
+ai proprietari con una casa adatta alla tua ricerca: vedono nome e iniziale, lavoro, foto e affidabilità, non il reddito né i
+contatti. Puoi nasconderti quando vuoi dal Profilo.' Non compare per chi si registra come proprietario.
+
+INFORMATIVA — DECISIONE DA CONFERMARE COL LEGALE. Versione 2026-10-provvisoria-20, e le versioni precedenti NON sono più equivalenti
+(equivalenti: []): chi era già iscritto e aveva accettato la 19 o prima deve RIACCETTARE al prossimo accesso. L'ho fatto di proposito:
+rendere visibile di partenza il profilo di chi era già iscritto è un cambio del trattamento (non una precisazione), e fargli
+riaccettare è il modo per informarlo e dargli modo di nascondersi. Se il legale ritiene sufficiente un avviso, basta rimettere le
+versioni 20-... tra le equivalenti (è una riga). Il testo dice: visibile di partenza per ogni iscritto, cosa vedono i proprietari, che ci si può
+nascondere da Privacy e consensi, al massimo venti richieste al giorno, e che rifiutare o non rispondere non fa succedere niente.
+Il test sulle versioni equivalenti ora dice l'eccezione in modo esplicito (la 20 rinnova l'accettazione; da lì in poi le provvisorie
+successive sono di nuovo equivalenti tra loro) e un test nuovo impone che nessuna versione sotto la 20 sia equivalente.
+Per l'avviso da dare agli iscritti c'è anche il rimando alla base giuridica: visibilità = interesse legittimo/esecuzione del servizio;
+da valutare col legale, insieme al diritto di opposizione (che qui è il pulsante per nascondersi).
+
+COME È STATA PROVATA. Su PostgreSQL 16 vero: le 70 prove dello scenario delle richieste (aggiornate: i nuovi iscritti sono visibili, Bruno
+si nasconde da solo coi suoi permessi, chi si è nascosto non si può contattare) e uno scenario in due tempi per la 0033 (prima: tre
+inquilini già iscritti nei tre stati possibili; dopo: tutti visibili, la data di chi lo era già non cambia, i nuovi sono visibili con la data,
+chi si nasconde resta nascosto, rieseguirla non dà errori). In Chrome col dito: scheda delle richieste senza consenso da accendere, stato
+vuoto, riquadro 'Ti sei nascosto' con 'Torna visibile' (si salva solo la visibilità e la data), Privacy con Sì di partenza e No che salva
+subito, iscrizione con la frase per l'inquilino e senza per il proprietario.
+ALTERAZIONI: 20 sulle parti nuove (0033 sul database vero, schermate, informativa, iscrizione, server), tutte prese (una dopo aver
+stretto un controllo, una era equivalente e l'ho rifatta). Rifatte anche le 30 sulla 0032 con lo scenario nuovo: 29 prese; la trentesima
+(il valore di partenza della 0032) è ora equivalente perché lo stabilisce la 0033.
+
+DIFETTI MIEI TROVATI PROVANDO
+- la nota che ho aggiunto finiva in fondo al CSS, dentro il blocco di leggibilità del proprietario, con un carattere da 14 px: spostata nel suo blocco
+- il mio script delle alterazioni contava come «presa» qualunque prova che non desse 68: con le prove diventate 70 erano tutti falsi positivi. Corretto
+  e rifatte
+- un controllo sul valore di partenza della 0032 e un test sull'ultima migrazione descrivevano il passato: il secondo ora controlla tutte le
+  migrazioni dalla 0031 (non il nome dell'ultima)
+- il mio banco di prova non apriva il sito senza sessione e finiva nell'app invece che nella pagina di iscrizione: corretto
+
+Test: 1095 in tutto (1093 senza PostgreSQL collegato e due saltati, 1095 con).
+---
+ scripts/db/richieste.sql                      | 20 ++++++-----
+ scripts/db/visibilita-dopo.sql                | 18 ++++++++++
+ scripts/db/visibilita-prima.sql               | 16 +++++++++
+ scripts/test-accettazione.mjs                 |  4 ++-
+ scripts/test-affidabilita.mjs                 |  2 +-
+ scripts/test-db-richieste.mjs                 | 28 +++++++++++----
+ scripts/test-home-proprietario.mjs            |  4 +--
+ scripts/test-informativa.mjs                  | 17 +++++++--
+ scripts/test-profilo-gestione.mjs             |  7 ++--
+ scripts/test-raccomandato.mjs                 |  2 +-
+ scripts/test-richieste.mjs                    | 36 ++++++++++++++-----
+ .../(app)/candidature/CandidatureClient.tsx   |  2 +-
+ src/app/(app)/candidature/page.tsx            |  2 +-
+ src/app/(app)/profilo/ProfiloClient.tsx       |  2 +-
+ src/app/globals.css                           |  8 +++++
+ src/app/login/page.tsx                        |  6 ++++
+ src/components/PossibiliInquilini.tsx         | 10 +++---
+ src/components/PrivacySheet.tsx               |  8 ++---
+ src/components/RichiesteProprietari.tsx       | 32 +++++++++--------
+ src/content/informativa.ts                    | 27 +++-----------
+ src/lib/types.ts                              |  2 +-
+ .../migrations/0033_visibile_di_default.sql   | 24 +++++++++++++
+ 22 files changed, 193 insertions(+), 84 deletions(-)
+ create mode 100644 scripts/db/visibilita-dopo.sql
+ create mode 100644 scripts/db/visibilita-prima.sql
+ create mode 100644 supabase/migrations/0033_visibile_di_default.sql
+
+diff --git a/scripts/db/richieste.sql b/scripts/db/richieste.sql
+index 1f538ca..9a14fee 100644
+--- a/scripts/db/richieste.sql
++++ b/scripts/db/richieste.sql
+@@ -58,12 +58,16 @@ insert into listings (id, owner_id, titolo, zona, prezzo, pubblicato, verifica_s
+  ('aaaaaaaa-0000-0000-0000-000000000003', '22222222-0000-0000-0000-000000000001', 'Monolocale non pubblicato', 'Isola, Milano', 800, false, 'verificato'),
+  ('aaaaaaaa-0000-0000-0000-000000000004', '22222222-0000-0000-0000-000000000001', 'Casa in verifica', 'Isola, Milano', 900, true, 'in_verifica');
+ 
+-select t.ok((select visibile_ai_proprietari from tenant_profiles where profile_id = '11111111-0000-0000-0000-000000000002') is false, '01 un inquilino nuovo NON è visibile ai proprietari (lo accende lui)');
+-select t.ok((select visibile_dal from tenant_profiles where profile_id = '11111111-0000-0000-0000-000000000002') is null, '02 senza consenso non c''è nemmeno una data');
+-select t.ok((select origine from candidature limit 1) is null, '03 (nessuna candidatura ancora)');
++select t.ok((select count(*) from tenant_profiles where visibile_ai_proprietari is true) = 4, '01 chi si iscrive come inquilino è VISIBILE ai proprietari di partenza (tutti e quattro)');
++select t.ok((select count(*) from tenant_profiles where visibile_dal is not null) = 4, '02 e c''è la data da cui lo è');
++select t.ok((select origine from candidature limit 1) is null, '03a (nessuna candidatura ancora)');
+ 
+--- t1 e t3 e t4 si rendono disponibili, t2 no
+-update tenant_profiles set visibile_ai_proprietari = true, visibile_dal = now() where profile_id in ('11111111-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000003', '11111111-0000-0000-0000-000000000004');
++-- Bruno (t2) si nasconde: gli altri restano visibili come di partenza. Si nasconde da solo, con i suoi permessi.
++select t.come('11111111-0000-0000-0000-000000000002');
++update tenant_profiles set visibile_ai_proprietari = false, visibile_dal = null where profile_id = '11111111-0000-0000-0000-000000000002';
++select t.torna();
++select t.ok((select visibile_ai_proprietari from tenant_profiles where profile_id = '11111111-0000-0000-0000-000000000002') is false, '03b Bruno può nascondersi da solo, con i suoi permessi');
++select t.ok((select count(*) from tenant_profiles where visibile_ai_proprietari is true) = 3, '03c gli altri tre restano visibili');
+ 
+ -- ---- chi può e chi non può mandare una richiesta ----
+ select t.come(null);
+@@ -78,7 +82,7 @@ select t.come('22222222-0000-0000-0000-000000000001');
+ select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000001', null)$q$, 'NON_TUO_IMMOBILE', '06 un proprietario non può scrivere per la casa di un altro');
+ select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000003', '11111111-0000-0000-0000-000000000001', null)$q$, 'IMMOBILE_NON_PUBBLICATO', '07 per una casa non pubblicata no');
+ select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000004', '11111111-0000-0000-0000-000000000001', null)$q$, 'IMMOBILE_NON_PUBBLICATO', '08 per una casa in verifica no');
+-select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000002', null)$q$, 'INQUILINO_NON_DISPONIBILE', '09 a chi non ha dato il consenso no');
++select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000002', null)$q$, 'INQUILINO_NON_DISPONIBILE', '09 a chi si è nascosto no');
+ select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000001', '99999999-0000-0000-0000-000000000009', null)$q$, 'INQUILINO_NON_DISPONIBILE', '10 a una persona che non esiste: lo stesso errore (non si capisce se esiste)');
+ select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', repeat('a', 281))$q$, 'MESSAGGIO_TROPPO_LUNGO', '11 un messaggio di 281 caratteri no');
+ select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000001', '22222222-0000-0000-0000-000000000002', null)$q$, 'INQUILINO_NON_DISPONIBILE', '12 a un altro proprietario no (non è un inquilino)');
+@@ -200,7 +204,7 @@ select t.torna();
+ -- ---- il consenso si può ritirare ----
+ update tenant_profiles set visibile_ai_proprietari = false where profile_id = '11111111-0000-0000-0000-000000000003';
+ select t.come('22222222-0000-0000-0000-000000000002');
+-select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000003', null)$q$, 'INQUILINO_NON_DISPONIBILE', '54 chi ritira il consenso non si può più contattare');
++select t.fallisce($q$select invia_richiesta_proprietario('aaaaaaaa-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000003', null)$q$, 'INQUILINO_NON_DISPONIBILE', '54 chi si nasconde dopo non si può più contattare');
+ select t.torna();
+ 
+ -- ---- la casa non c'è più al momento della risposta ----
+@@ -258,5 +262,5 @@ delete from auth.users where id = '11111111-0000-0000-0000-000000000001';
+ select t.ok((select count(*) from richieste_proprietari where tenant_id = '11111111-0000-0000-0000-000000000001') = 0, '66 cancellando un account spariscono le sue richieste');
+ delete from listings where id = 'aaaaaaaa-0000-0000-0000-000000000001';
+ select t.ok((select count(*) from richieste_proprietari where listing_id = 'aaaaaaaa-0000-0000-0000-000000000001') = 0, '67 cancellando una casa spariscono le sue richieste');
+-select t.ok((select count(*) from t.esiti) = 67, '68 nessun controllo è stato saltato (ne servono 67 prima di questo)');
++select t.ok((select count(*) from t.esiti) = 69, '70 nessun controllo è stato saltato (ne servono 69 prima di questo)');
+ select 'TUTTI I CONTROLLI: ' || count(*) from t.esiti;
+diff --git a/scripts/db/visibilita-dopo.sql b/scripts/db/visibilita-dopo.sql
+new file mode 100644
+index 0000000..1441e50
+--- /dev/null
++++ b/scripts/db/visibilita-dopo.sql
+@@ -0,0 +1,18 @@
++-- Dopo la 0033: tutti visibili, le date di chi lo era già non cambiano, i nuovi iscritti sono visibili di partenza.
++\set ON_ERROR_STOP on
++\set QUIET on
++create function t.ok(c boolean, msg text) returns void language plpgsql as $$
++begin
++  if c is not true then raise exception 'CONTROLLO FALLITO: %', msg; end if;
++  raise notice 'OK: %', msg;
++end $$;
++select t.ok((select count(*) from tenant_profiles where visibile_ai_proprietari is true) = 3, 'V1 dopo la 0033 anche chi era già iscritto è visibile (tutti e tre)');
++select t.ok((select visibile_dal from tenant_profiles where profile_id = '44444444-0000-0000-0000-00000000000b') = '2026-09-01T10:00:00Z', 'V2 la data di chi si era già reso visibile non cambia');
++select t.ok((select count(*) from tenant_profiles where visibile_dal is null) = 0, 'V3 ora tutti hanno la data da cui sono visibili');
++select t.ok((select count(*) from tenant_profiles where profile_id in ('44444444-0000-0000-0000-00000000000a', '44444444-0000-0000-0000-00000000000c') and visibile_dal > now() - interval '1 hour') = 2, 'V4 gli altri due hanno la data di oggi');
++insert into auth.users (id, email, raw_user_meta_data) values ('44444444-0000-0000-0000-00000000000d', 'd@x.it', '{"ruolo":"inquilino","nome":"Dino","privacy_accettata":true}');
++select t.ok((select visibile_ai_proprietari and visibile_dal is not null from tenant_profiles where profile_id = '44444444-0000-0000-0000-00000000000d'), 'V5 chi si iscrive dopo è visibile di partenza, con la data');
++select t.ok((select column_default from information_schema.columns where table_name = 'tenant_profiles' and column_name = 'visibile_ai_proprietari') = 'true', 'V6 il valore di partenza della colonna è «visibile»');
++-- Dino si nasconde: la scelta resta, e rieseguire la migrazione non lo rende di nuovo visibile
++update tenant_profiles set visibile_ai_proprietari = false, visibile_dal = null where profile_id = '44444444-0000-0000-0000-00000000000d';
++select t.ok((select visibile_ai_proprietari from tenant_profiles where profile_id = '44444444-0000-0000-0000-00000000000d') is false, 'V7 chi si nasconde dopo la 0033 resta nascosto');
+diff --git a/scripts/db/visibilita-prima.sql b/scripts/db/visibilita-prima.sql
+new file mode 100644
+index 0000000..4388740
+--- /dev/null
++++ b/scripts/db/visibilita-prima.sql
+@@ -0,0 +1,16 @@
++-- Dati PRIMA della 0033 (database con le migrazioni fino alla 0032): tre inquilini già iscritti, nei tre stati possibili.
++\set ON_ERROR_STOP on
++\set QUIET on
++create schema t;
++create table t.dati (chiave text primary key, valore text);
++insert into auth.users (id, email, raw_user_meta_data) values
++ ('44444444-0000-0000-0000-00000000000a', 'a@x.it', '{"ruolo":"inquilino","nome":"Alba","privacy_accettata":true}'),
++ ('44444444-0000-0000-0000-00000000000b', 'b@x.it', '{"ruolo":"inquilino","nome":"Berto","privacy_accettata":true}'),
++ ('44444444-0000-0000-0000-00000000000c', 'c@x.it', '{"ruolo":"inquilino","nome":"Cleo","privacy_accettata":true}');
++-- A: non ha mai toccato niente (era spento), B: lo aveva acceso (con la sua data), C: lo aveva acceso e poi ritirato
++update tenant_profiles set visibile_ai_proprietari = true, visibile_dal = '2026-09-01T10:00:00Z' where profile_id = '44444444-0000-0000-0000-00000000000b';
++update tenant_profiles set visibile_ai_proprietari = false, visibile_dal = null where profile_id in ('44444444-0000-0000-0000-00000000000a', '44444444-0000-0000-0000-00000000000c');
++do $$ begin
++  if (select count(*) from tenant_profiles where visibile_ai_proprietari is true) <> 1 then raise exception 'PRIMA: ne aspettavo uno solo visibile'; end if;
++  raise notice 'OK: prima della 0033 solo Berto è visibile';
++end $$;
+diff --git a/scripts/test-accettazione.mjs b/scripts/test-accettazione.mjs
+index c0fc2ab..e875b6c 100644
+--- a/scripts/test-accettazione.mjs
++++ b/scripts/test-accettazione.mjs
+@@ -90,8 +90,10 @@ test("L'INSIDIA: chi ha accettato PIÙ versioni (quindi ha più righe) passa lo
+ });
+ 
+ test("la controprova: una lettura con maybeSingle su più righe darebbe «non accettata» (il finto lo riproduce)", async () => {
++  // due righe tra le versioni ammesse: succede quando una versione ne ha di equivalenti (oggi l'elenco è vuoto, in futuro no)
++  const ammesseConUnaVecchia = [...AMMESSE, "2026-10-provvisoria-3"];
+   const db = finto([riga(U1, "2026-10-provvisoria-3"), riga(U1, INFORMATIVA.versione)]);
+-  const { data, error } = await db.from("accettazioni_informativa").select("versione").eq("user_id", U1).in("versione", AMMESSE).maybeSingle();
++  const { data, error } = await db.from("accettazioni_informativa").select("versione").eq("user_id", U1).in("versione", ammesseConUnaVecchia).maybeSingle();
+   assert.equal(data, null); assert.match(error.message, /multiple/);
+ });
+ 
+diff --git a/scripts/test-affidabilita.mjs b/scripts/test-affidabilita.mjs
+index 63026bc..72a1d60 100644
+--- a/scripts/test-affidabilita.mjs
++++ b/scripts/test-affidabilita.mjs
+@@ -275,7 +275,7 @@ test("informativa: i numeri vengono dalle regole del calcolo (nessun punteggio s
+ test("informativa legale: dice che i protesti (o non rispondere) fanno scendere il punteggio, con lo stesso numero della formula e nuova versione senza far riaccettare", () => {
+   const inf = caricaTs(path.join(radice, "src", "content", "informativa.ts")); const testo = JSON.stringify(inf.INFORMATIVA);
+   assert.ok(testo.includes(`la risposta è obbligatoria e «non indicato» vale come «sì»), il punteggio di affidabilità scende di ${af.PUNTI_AFFIDABILITA.protesti} punti`)); assert.ok(testo.includes("Il punteggio non è mai inferiore a zero"));
+-  const vN = Number(inf.INFORMATIVA.versione.match(/^2026-10-provvisoria-(\d+)$/)?.[1]); assert.ok(vN >= 19, "versione: " + inf.INFORMATIVA.versione); for (let v = 15; v < vN; v++) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} deve restare equivalente`);
++  const vN = Number(inf.INFORMATIVA.versione.match(/^2026-10-provvisoria-(\d+)$/)?.[1]); assert.ok(vN >= 20, "versione: " + inf.INFORMATIVA.versione); for (let v = 20; v < vN; v++) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} deve restare equivalente`); assert.ok(inf.INFORMATIVA.equivalenti.every((e) => Number(e.split("-").pop()) >= 20), "le versioni prima della 20 non sono equivalenti: cambia chi vede il profilo");
+ });
+ 
+ test("stile: una voce che toglie punti ha un aspetto suo (come la voce presa e quella non presa)", () => {
+diff --git a/scripts/test-db-richieste.mjs b/scripts/test-db-richieste.mjs
+index 65cba04..e9b0268 100644
+--- a/scripts/test-db-richieste.mjs
++++ b/scripts/test-db-richieste.mjs
+@@ -1,6 +1,6 @@
+ /**
+  * Prova la migrazione 0032 (richieste dei proprietari) su un PostgreSQL VERO: applica lo stub di Supabase e tutte le migrazioni
+- * su un database nuovo, poi esegue scripts/db/richieste.sql (68 controlli con identità diverse: inquilino, proprietario, anonimo).
++ * su un database nuovo, poi esegue scripts/db/richieste.sql (70 controlli con identità diverse: inquilino, proprietario, anonimo).
+  *
+  * Gira solo se è impostata la variabile MATCHAMI_PSQL, con il comando psql da usare (un utente che può creare database), per esempio:
+  *     MATCHAMI_PSQL="psql -h localhost -U postgres"  npm test
+@@ -18,13 +18,13 @@ const psqlCmd = process.env.MATCHAMI_PSQL;
+ const sql = fs.readFileSync(path.join(radice, "scripts", "db", "richieste.sql"), "utf8");
+ 
+ test("le prove SQL sono tutte presenti (nessun controllo tolto), e lo stub di Supabase c'è", () => {
+-  const controlli = [...sql.matchAll(/select t\.(ok|fallisce)\(/g)].length; assert.ok(controlli >= 66, `controlli nel file: ${controlli}`);
+-  assert.match(sql, /select t\.ok\(\(select count\(\*\) from t\.esiti\) = 67,/, "l'autocontrollo sul numero di prove"); assert.ok(fs.existsSync(path.join(radice, "scripts", "db", "stub-supabase.sql")));
++  const controlli = [...sql.matchAll(/select t\.(ok|fallisce)\(/g)].length; assert.ok(controlli >= 68, `controlli nel file: ${controlli}`);
++  assert.match(sql, /select t\.ok\(\(select count\(\*\) from t\.esiti\) = 69,/, "l'autocontrollo sul numero di prove"); assert.ok(fs.existsSync(path.join(radice, "scripts", "db", "stub-supabase.sql")));
+   const testo = sql.replaceAll("''", "'"); // nel file gli apostrofi sono raddoppiati
+-  for (const tema of ["04 chi non ha fatto l'accesso", "09 a chi non ha dato il consenso no", "23 a chi si è già candidato", "25 un inquilino non può scrivere richieste a mano", "30 un proprietario non può scrivere richieste a mano", "39 nasce una candidatura GIÀ ACCETTATA", "42 e NON una finta", "45 la chat si apre", "52 dopo un rifiuto", "54 chi ritira il consenso", "58 dopo venti richieste"]) assert.ok(testo.includes(tema), `manca il controllo «${tema}»`);
++  for (const tema of ["01 chi si iscrive come inquilino è VISIBILE", "03b Bruno può nascondersi da solo", "04 chi non ha fatto l'accesso", "09 a chi si è nascosto no", "23 a chi si è già candidato", "25 un inquilino non può scrivere richieste a mano", "30 un proprietario non può scrivere richieste a mano", "39 nasce una candidatura GIÀ ACCETTATA", "42 e NON una finta", "45 la chat si apre", "52 dopo un rifiuto", "54 chi si nasconde dopo", "58 dopo venti richieste"]) assert.ok(testo.includes(tema), `manca il controllo «${tema}»`);
+ });
+ 
+-test("migrazione 0032 su PostgreSQL vero: tutti i 68 controlli passano", { skip: psqlCmd ? false : "imposta MATCHAMI_PSQL per eseguire le prove SQL su un PostgreSQL vero" }, () => {
++test("migrazione 0032 e 0033 su PostgreSQL vero: tutti i 70 controlli passano", { skip: psqlCmd ? false : "imposta MATCHAMI_PSQL per eseguire le prove SQL su un PostgreSQL vero" }, () => {
+   const [bin, ...args] = psqlCmd.split(/\s+/); const db = "matchami_test_richieste"; const esegui = (extra, opzioni = {}) => spawnSync(bin, [...args, "-X", "-q", ...extra], { encoding: "utf8", ...opzioni });
+   const migrazioni = fs.readdirSync(path.join(radice, "supabase", "migrations")).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
+   assert.ok(migrazioni.includes("0032_richieste_proprietari.sql"));
+@@ -35,6 +35,22 @@ test("migrazione 0032 su PostgreSQL vero: tutti i 68 controlli passano", { skip:
+     const uscita = path.join(os.tmpdir(), `matchami-richieste-${process.pid}.txt`);
+     r = esegui(["-d", db, "-o", uscita, "-f", path.join(radice, "scripts", "db", "richieste.sql")]); fs.rmSync(uscita, { force: true });
+     assert.ok(!/CONTROLLO FALLITO/.test(r.stderr), "un controllo è fallito:\n" + r.stderr.split("\n").filter((l) => /FALLITO|ERROR/.test(l)).slice(0, 4).join("\n")); assert.equal(r.status, 0, r.stderr.slice(0, 500));
+-    const riusciti = (r.stderr.match(/NOTICE:\s+OK:/g) ?? []).length; assert.equal(riusciti, 68, `controlli riusciti: ${riusciti}`);
++    const riusciti = (r.stderr.match(/NOTICE:\s+OK:/g) ?? []).length; assert.equal(riusciti, 70, `controlli riusciti: ${riusciti}`);
+   } finally { esegui(["-d", "postgres", "-c", `drop database if exists ${db}`]); }
+ });
++
++test("migrazione 0033 su PostgreSQL vero: chi era già iscritto diventa visibile, le date non cambiano, i nuovi sono visibili e chi si nasconde resta nascosto", { skip: psqlCmd ? false : "imposta MATCHAMI_PSQL per eseguire le prove SQL su un PostgreSQL vero" }, () => {
++  const [bin, ...args] = psqlCmd.split(/\s+/); const db = "matchami_test_visibilita"; const esegui = (extra) => spawnSync(bin, [...args, "-X", "-q", ...extra], { encoding: "utf8" });
++  const migrazioni = fs.readdirSync(path.join(radice, "supabase", "migrations")).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort(); const m0033 = migrazioni.find((f) => f.startsWith("0033_")); assert.ok(m0033, "manca la migrazione 0033");
++  const nullo = path.join(os.tmpdir(), `matchami-vis-${process.pid}.txt`);
++  try {
++    let r = esegui(["-d", "postgres", "-c", `drop database if exists ${db}`, "-c", `create database ${db}`]); assert.equal(r.status, 0, r.stderr);
++    r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "scripts", "db", "stub-supabase.sql")]); assert.equal(r.status, 0, r.stderr);
++    for (const m of migrazioni.filter((f) => f < "0033")) { r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m)]); assert.equal(r.status, 0, `${m}: ${r.stderr.slice(0, 300)}`); }
++    r = esegui(["-d", db, "-o", nullo, "-f", path.join(radice, "scripts", "db", "visibilita-prima.sql")]); assert.equal(r.status, 0, "prima della 0033: " + r.stderr.slice(0, 300));
++    r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m0033)]); assert.equal(r.status, 0, "la 0033 non si applica: " + r.stderr.slice(0, 300));
++    r = esegui(["-d", db, "-o", nullo, "-f", path.join(radice, "scripts", "db", "visibilita-dopo.sql")]); assert.ok(!/CONTROLLO FALLITO/.test(r.stderr), r.stderr.split("\n").filter((l) => /FALLITO/.test(l)).join("\n")); assert.equal(r.status, 0, r.stderr.slice(0, 300)); assert.equal((r.stderr.match(/NOTICE:\s+OK:/g) ?? []).length, 7);
++    // rieseguirla non fa danni: chi si è nascosto (Dino) resta nascosto? No: la 0033 rende visibile chi non lo è. Per questo va eseguita UNA volta sola, come ogni migrazione.
++    r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m0033)]); assert.equal(r.status, 0, "rieseguire la 0033 non deve dare errori: " + r.stderr.slice(0, 300));
++  } finally { fs.rmSync(nullo, { force: true }); esegui(["-d", "postgres", "-c", `drop database if exists ${db}`]); }
++});
+diff --git a/scripts/test-home-proprietario.mjs b/scripts/test-home-proprietario.mjs
+index b9e2e0c..c3cabd4 100644
+--- a/scripts/test-home-proprietario.mjs
++++ b/scripts/test-home-proprietario.mjs
+@@ -238,12 +238,12 @@ test("la chiave di servizio manca: la Home non crolla e non mostra numeri invent
+ });
+ 
+ test("Database: la sezione «Possibili inquilini» c'è, ha l'ancora a cui porta la tessera, dice che non si vede chi sono, e funziona anche senza numeri", () => {
+-  const d = leggi("src", "app", "(app)", "database", "DatabaseClient.tsx"); const c = leggi("src", "components", "PossibiliInquilini.tsx"); assert.match(d, /<PossibiliInquilini possibili=\{possibili\} \/>/); assert.match(c, /<section id="possibili" className="possibili" aria-labelledby="possibili-titolo">/); assert.match(c, /Vedi solo chi ha scelto di farsi trovare, e non i suoi contatti/); assert.match(c, /Il numero non è disponibile in questo momento/); assert.match(c, /Quando la tua casa sarà pubblicata vedrai qui quanti inquilini cercano una casa come la tua\./);
++  const d = leggi("src", "app", "(app)", "database", "DatabaseClient.tsx"); const c = leggi("src", "components", "PossibiliInquilini.tsx"); assert.match(d, /<PossibiliInquilini possibili=\{possibili\} \/>/); assert.match(c, /<section id="possibili" className="possibili" aria-labelledby="possibili-titolo">/); assert.match(c, /Chi ha scelto di non farsi trovare non compare, e i contatti di nessuno sono/); assert.match(c, /Il numero non è disponibile in questo momento/); assert.match(c, /Quando la tua casa sarà pubblicata vedrai qui quanti inquilini cercano una casa come la tua\./);
+   assert.ok(d.indexOf("<PossibiliInquilini") > 0 && d.indexOf("<PossibiliInquilini") < d.indexOf("<RicercaCandidati"), "la sezione sta prima della ricerca delle candidature"); const p = leggi("src", "app", "(app)", "database", "page.tsx"); assert.match(p, /const possibili = await possibiliPerCasaDelProprietario\(supabase, user!\.id\);/); assert.match(p, /<DatabaseClient\s+possibili=\{possibili\}/);
+   assert.match(leggi("src", "app", "globals.css"), /\.possibili \{[^}]*scroll-margin-top: 16px;/);
+ });
+ 
+ test("informativa: dice che ai proprietari si mostra solo un NUMERO anonimo di inquilini compatibili, con la nuova versione; chi aveva le precedenti non deve riaccettare", () => {
+   const testo = JSON.stringify(inf.INFORMATIVA); assert.ok(testo.includes("QUANTI inquilini hanno una ricerca compatibile con il loro immobile")); assert.ok(testo.includes("è un numero anonimo, non vedono chi sono né nessun loro dato")); assert.ok(testo.includes("Se uno di loro si candida, il proprietario vede la candidatura come tutte le altre"));
+-  const vN = Number(inf.INFORMATIVA.versione.match(/^2026-10-provvisoria-(\d+)$/)?.[1]); assert.ok(vN >= 19, "versione: " + inf.INFORMATIVA.versione); for (let v = 15; v < vN; v++) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} deve restare equivalente`); assert.ok(!inf.INFORMATIVA.equivalenti.includes(inf.INFORMATIVA.versione));
++  const vN = Number(inf.INFORMATIVA.versione.match(/^2026-10-provvisoria-(\d+)$/)?.[1]); assert.ok(vN >= 20, "versione: " + inf.INFORMATIVA.versione); for (let v = 20; v < vN; v++) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} deve restare equivalente`); assert.ok(inf.INFORMATIVA.equivalenti.every((e) => Number(e.split("-").pop()) >= 20), "le versioni prima della 20 non sono equivalenti: cambia chi vede il profilo"); assert.ok(!inf.INFORMATIVA.equivalenti.includes(inf.INFORMATIVA.versione));
+ });
+diff --git a/scripts/test-informativa.mjs b/scripts/test-informativa.mjs
+index d2aa1c4..dd1f822 100644
+--- a/scripts/test-informativa.mjs
++++ b/scripts/test-informativa.mjs
+@@ -504,12 +504,18 @@ test("equivalenti: ben formate, senza doppioni, e diverse dalla versione in vigo
+   for (const v of eq) assert.ok(regola.test(v) && v.length <= 60, `versione non valida: ${v}`);
+ });
+ 
+-test("equivalenti: se il testo è PROVVISORIO, chi ha accettato una versione provvisoria precedente non viene fermato", () => {
+-  // La versione è «<prefisso>-N»: devono esserci tutte le precedenti, da 1 a N-1. Se si cambia la
++// La versione 20 ha reso il profilo di chi cerca casa VISIBILE ai proprietari di partenza (anche per chi era già iscritto): è un
++// cambiamento di trattamento, quindi chi aveva accettato una versione precedente deve riaccettare. Da lì in poi vale la regola di
++// sempre: le versioni provvisorie successive sono equivalenti tra loro.
++const PRIMA_VERSIONE_EQUIVALENTE = 20;
++
++test("equivalenti: se il testo è PROVVISORIO, chi ha accettato una versione provvisoria precedente non viene fermato (dalla versione 20 in poi: la 20 rinnova l'accettazione di tutti)", () => {
++  // La versione è «<prefisso>-N»: devono esserci tutte le precedenti da 20 a N-1 (e NESSUNA sotto la 20). Se si cambia la
+   // versione senza aggiungere la vecchia all'elenco, chi l'aveva accettata verrebbe fermato di nuovo.
+   const m = INFORMATIVA.versione.match(/^(.*-provvisoria)-(\d+)$/);
+   assert.ok(m, `la versione provvisoria non ha la forma «…-provvisoria-N»: ${INFORMATIVA.versione}`);
+-  const attese = Array.from({ length: Number(m[2]) - 1 }, (_, i) => `${m[1]}-${i + 1}`);
++  assert.ok(Number(m[2]) >= PRIMA_VERSIONE_EQUIVALENTE, "la versione deve essere almeno la 20");
++  const attese = Array.from({ length: Number(m[2]) - PRIMA_VERSIONE_EQUIVALENTE }, (_, i) => `${m[1]}-${PRIMA_VERSIONE_EQUIVALENTE + i}`);
+   assert.deepEqual([...INFORMATIVA.equivalenti].sort(), attese.sort(), "mancano versioni precedenti tra le equivalenti (o ce ne sono di non previste)");
+ });
+ 
+@@ -524,3 +530,8 @@ test("equivalenti: la guardia sa riconoscere un testo definitivo con equivalenti
+   const finto = { provvisoria: false, equivalenti: ["2026-10-provvisoria-1"] };
+   assert.ok(!finto.provvisoria && finto.equivalenti.length > 0, "il caso che la guardia deve fermare");
+ });
++
++test("la versione 20 NON ha come equivalenti quelle precedenti: chi era già iscritto e aveva accettato la 19 (o prima) deve riaccettare, perché il suo profilo diventa visibile ai proprietari", () => {
++  for (let v = 1; v < PRIMA_VERSIONE_EQUIVALENTE; v++) assert.ok(!INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} non deve essere equivalente: cambia chi vede il profilo`);
++  assert.ok(!INFORMATIVA.equivalenti.includes(INFORMATIVA.versione));
++});
+diff --git a/scripts/test-profilo-gestione.mjs b/scripts/test-profilo-gestione.mjs
+index 1bae1cb..3330e59 100644
+--- a/scripts/test-profilo-gestione.mjs
++++ b/scripts/test-profilo-gestione.mjs
+@@ -90,10 +90,9 @@ test("notifiche: il link resta sempre dentro il sito, anche per i tipi spostati;
+   assert.match(leggi("src", "app", "(app)", "notifiche", "NotificheLista.tsx"), /router\.push\(linkNotifica\(n\)\)/);
+ });
+ 
+-test("le notifiche del database non cambiano: il sistema le corregge in lettura (nessuna migrazione, nessun dato toccato)", () => {
+-  const cartella = path.join(radice, "supabase", "migrations"); const ultima = fs.readdirSync(cartella).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort().at(-1); assert.equal(ultima, "0032_richieste_proprietari.sql", "è comparsa una migrazione nuova: aggiorna questo test");
+-  // la correzione dei link degli affitti resta in lettura: la 0032 non crea né cambia le notifiche degli affitti
+-  const m = fs.readFileSync(path.join(cartella, ultima), "utf8"); assert.ok(!/crea_notifica\([^;]*'(affitto_|rapporto_)/.test(m), "la 0032 non deve toccare le notifiche degli affitti");
++test("le notifiche degli affitti non si correggono nel database: il sistema le corregge in lettura (nessuna migrazione dalla 0031 in poi le tocca)", () => {
++  const cartella = path.join(radice, "supabase", "migrations"); const nuove = fs.readdirSync(cartella).filter((f) => /^\d{4}_.*\.sql$/.test(f) && f > "0031").sort(); assert.ok(nuove.length >= 2, "dalla 0031 in poi ci sono almeno la 0032 e la 0033");
++  for (const f of nuove) { const m = fs.readFileSync(path.join(cartella, f), "utf8"); assert.ok(!/crea_notifica\([^;]*'(affitto_|rapporto_)/.test(m), `${f} non deve creare notifiche degli affitti`); assert.ok(!/update\s+notifiche\b/i.test(m), `${f} non deve riscrivere i dati delle notifiche già salvate`); }
+ });
+ 
+ // ============================================================ le frasi che non sono più vere
+diff --git a/scripts/test-raccomandato.mjs b/scripts/test-raccomandato.mjs
+index e354916..85320d9 100644
+--- a/scripts/test-raccomandato.mjs
++++ b/scripts/test-raccomandato.mjs
+@@ -170,7 +170,7 @@ test("il badge non tocca il punteggio né la percentuale: affidabilita.ts non lo
+ 
+ test("informativa: dice del badge (chi lo vede, filtro, ordine, nessun effetto sul punteggio), con una nuova versione; chi aveva la precedente non deve riaccettare (testo ancora provvisorio)", () => {
+   const testo = JSON.stringify(inf.INFORMATIVA); assert.ok(testo.includes("Il badge «Inquilino raccomandato» lo ottieni in automatico con almeno due recensioni positive (da 4 stelle in su) scritte da due proprietari diversi")); assert.ok(testo.includes("possono cercare solo gli inquilini raccomandati")); assert.ok(testo.includes("Non cambia il punteggio di affidabilità")); assert.ok(testo.includes("resta sempre del proprietario"));
+-  const vN = Number(inf.INFORMATIVA.versione.match(/^2026-10-provvisoria-(\d+)$/)?.[1]); assert.ok(vN >= 19, "versione: " + inf.INFORMATIVA.versione); for (let v = 15; v < vN; v++) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} deve restare equivalente`); assert.ok(!inf.INFORMATIVA.equivalenti.includes(inf.INFORMATIVA.versione));
++  const vN = Number(inf.INFORMATIVA.versione.match(/^2026-10-provvisoria-(\d+)$/)?.[1]); assert.ok(vN >= 20, "versione: " + inf.INFORMATIVA.versione); for (let v = 20; v < vN; v++) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} deve restare equivalente`); assert.ok(inf.INFORMATIVA.equivalenti.every((e) => Number(e.split("-").pop()) >= 20), "le versioni prima della 20 non sono equivalenti: cambia chi vede il profilo"); assert.ok(!inf.INFORMATIVA.equivalenti.includes(inf.INFORMATIVA.versione));
+ });
+ 
+ test("il simbolo del badge esiste, è sul reticolo 24x24 e la spunta non è riempita", () => {
+diff --git a/scripts/test-richieste.mjs b/scripts/test-richieste.mjs
+index 9dd733b..c52c035 100644
+--- a/scripts/test-richieste.mjs
++++ b/scripts/test-richieste.mjs
+@@ -149,11 +149,28 @@ test("azioni: gli identificativi si controllano PRIMA di chiamare il database, i
+   assert.match(r, /\.update\(\{ visibile_ai_proprietari: visibile, visibile_dal: visibile \? new Date\(\)\.toISOString\(\) : null \}\)\s+\.eq\("profile_id", user\.id\)/, "si cambia solo il proprio consenso");
+ });
+ 
+-test("il consenso è spento di partenza nel database, nel tipo e nell'informativa; ritirarlo si salva subito", () => {
+-  assert.match(migrazione, /add column if not exists visibile_ai_proprietari boolean not null default false/); assert.match(leggi("src", "lib", "types.ts"), /visibile_ai_proprietari\?: boolean;/); assert.match(leggi("src", "app", "(app)", "candidature", "page.tsx"), /visibile=\{profilo\?\.visibile_ai_proprietari === true\}/, "se la lettura del profilo non riesce, NON si deve risultare disponibili: solo un «sì» esplicito conta");
+-  const p = leggi("src", "components", "PrivacySheet.tsx"); assert.match(p, /visibileProprietariIniziale\?: boolean;/); assert.match(p, /useState\(visibileProprietariIniziale === true\)/); assert.match(p, /\{visibileProprietariIniziale !== undefined && \(\s+<Field label="Fatti trovare dai proprietari">/); assert.match(p, /const r = await impostaVisibilita\(nuova\);/);
+-  assert.match(leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx"), /visibileProprietariIniziale=\{tenant\.visibile_ai_proprietari === true\}/); assert.ok(!/visibileProprietariIniziale/.test(leggi("src", "app", "(app)", "profilo", "OwnerProfiloClient.tsx")), "il proprietario non ha questo consenso");
+-  const t = JSON.stringify(inf.INFORMATIVA); assert.ok(t.includes("è spento finché non lo accendi tu, e lo puoi ritirare quando vuoi")); assert.ok(t.includes("Non vedono il reddito né i contatti")); assert.ok(t.includes(`al massimo ${{ 20: "venti" }[rq.RICHIESTE_AL_GIORNO]} al giorno`));
++const migrazione33 = leggi("supabase", "migrations", "0033_visibile_di_default.sql");
++
++test("di partenza si è VISIBILI ai proprietari (dalla 0033, anche per chi era già iscritto); si può nascondere subito; lato server si mostra solo chi ha un «sì» esplicito", () => {
++  assert.match(migrazione33, /alter column visibile_ai_proprietari set default true;/); assert.match(migrazione33, /alter column visibile_dal set default now\(\);/); assert.match(migrazione33, /update tenant_profiles\s+set visibile_ai_proprietari = true,\s+visibile_dal = coalesce\(visibile_dal, now\(\)\)\s+where visibile_ai_proprietari is not true;/);
++  assert.match(leggi("src", "lib", "types.ts"), /visibile_ai_proprietari\?: boolean;/);
++  // la schermata: solo un «no» esplicito vuol dire «nascosto»; se non si sa, si è visibili come di partenza
++  assert.match(leggi("src", "app", "(app)", "candidature", "page.tsx"), /visibile=\{profilo\?\.visibile_ai_proprietari !== false\}/); assert.match(leggi("src", "app", "(app)", "candidature", "CandidatureClient.tsx"), /visibile = true,/);
++  assert.match(leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx"), /visibileProprietariIniziale=\{tenant\.visibile_ai_proprietari !== false\}/); assert.ok(!/visibileProprietariIniziale/.test(leggi("src", "app", "(app)", "profilo", "OwnerProfiloClient.tsx")), "il proprietario non ha questa scelta");
++  const p = leggi("src", "components", "PrivacySheet.tsx"); assert.match(p, /visibileProprietariIniziale\?: boolean;/); assert.match(p, /useState\(visibileProprietariIniziale === true\)/); assert.match(p, /\{visibileProprietariIniziale !== undefined && \(\s+<Field label="Fatti trovare dai proprietari">/); assert.match(p, /const r = await impostaVisibilita\(nuova\);/); assert.ok(p.includes("Di partenza i proprietari con una casa adatta alla tua ricerca possono vedere il tuo profilo") && p.includes("Con «No» non ti vedono più. Si salva subito."));
++  // il server: chi ESPONE guarda il database, e lo fa con un «sì» esplicito (se la riga non si legge, non si mostra niente)
++  const srv = senzaCommenti(leggi("src", "lib", "proprietario", "possibili-server.ts")); assert.match(srv, /visibile: t\.visibile_ai_proprietari === true,/); assert.match(srv, /det\.visibile_ai_proprietari !== true\) continue;/);
++  const t = JSON.stringify(inf.INFORMATIVA); assert.ok(t.includes("È così per ogni iscritto, ma puoi nasconderti quando vuoi da Privacy e consensi: da quel momento non compari più")); assert.ok(t.includes("Non vedono il reddito né i contatti")); assert.ok(t.includes(`al massimo ${{ 20: "venti" }[rq.RICHIESTE_AL_GIORNO]} al giorno`)); assert.ok(!t.includes("è spento finché non lo accendi tu"), "l'informativa dice ancora che è spento");
++});
++
++test("iscrizione: chi si registra come inquilino legge, prima di creare l'account, che il suo profilo sarà visibile ai proprietari e che può nasconderlo; il proprietario no", () => {
++  const l = leggi("src", "app", "login", "page.tsx"); assert.match(l, /\{ruolo === "inquilino" && \(\s+<p className="login-consent"[^>]*>\s+Il tuo profilo sarà visibile ai proprietari con una casa adatta alla tua ricerca: vedono nome e iniziale, lavoro, foto e affidabilità, non il\s+reddito né i contatti\. Puoi nasconderti quando vuoi dal Profilo\.\s+<\/p>\s+\)\}/);
++  assert.ok(l.indexOf("Il tuo profilo sarà visibile ai proprietari") < l.indexOf("Crea il tuo account"), "la frase sta prima del pulsante");
++});
++
++test("NESSUNA schermata chiede più di «rendersi disponibili»: la parola non compare in nessun file dell'app", () => {
++  const trovati = []; const visita = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) visita(p); else if (/\.(ts|tsx)$/.test(e.name) && /Mi rendo disponibile|rendersi disponibil|ti rendi disponibile/i.test(fs.readFileSync(p, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, ""))) trovati.push(path.relative(radice, p)); } };
++  visita(path.join(radice, "src")); assert.deepEqual(trovati, [], "ci sono ancora richieste di rendersi disponibili: " + trovati.join(", "));
+ });
+ 
+ // ============================================================ le schermate
+@@ -161,6 +178,8 @@ test("Database (proprietario): «Fai match» NON invia subito: apre una conferma
+   const c = senzaCommenti(leggi("src", "components", "PossibiliInquilini.tsx"));
+   assert.match(c, /onClick=\{\(\) => setScelta\(\{ casa: p, scheda: s \}\)\}>\s+Fai match/); assert.equal([...c.matchAll(/faiMatch\(/g)].length, 1, "faiMatch si chiama in un solo punto"); assert.ok(c.indexOf("faiMatch(") > c.indexOf("function invia()") && c.indexOf("faiMatch(") < c.indexOf("function invia()") + 400, "solo dentro «invia»");
+   for (const x of ["Fai match con ${scelta.scheda.nome}?", "Le arriverà una richiesta per", "Se non risponde o dice di no, non succede\n              niente", "Sì, invia la richiesta", "No, torna indietro", "Vuoi aggiungere due parole? (facoltativo)"]) assert.ok(c.includes(x) || c.replace(/\s+/g, " ").includes(x.replace(/\s+/g, " ")), `manca «${x}»`);
++  for (const x of ["Queste persone hanno scelto di non farsi trovare dai proprietari: se una di loro si candida, la trovi tra le candidature.", "Puoi contattare questa persona:", "Puoi contattare ${p.disponibili.length} di queste persone:", "Sono persone iscritte che cercano una casa adatta alla tua."]) assert.ok(c.replace(/\s+/g, " ").includes(x), `manca la frase «${x}»`);
++  for (const vecchia of ["si è ancora reso disponibile", "si sono rese disponibili", "si è resa disponibile", "Vedi solo chi ha scelto di farsi trovare"]) assert.ok(!c.includes(vecchia), `c'è ancora la frase vecchia «${vecchia}»`);
+   assert.match(c, /className="ob-textarea"/, "il campo del messaggio deve usare la classe che esiste (con bordo e sfondo)"); assert.ok(!/textarea-base/.test(c)); assert.match(leggi("src", "app", "globals.css"), /\.ob-textarea \{/, "la classe del campo di testo deve esistere nel CSS");
+   assert.match(c, /maxLength=\{MESSAGGIO_RICHIESTA_MAX\}/); assert.match(c, /\{messaggio\.length\}\/\{MESSAGGIO_RICHIESTA_MAX\}/);
+ });
+@@ -171,9 +190,10 @@ test("Database (proprietario): la scheda non mostra reddito né contatti; mostra
+   assert.match(c, /\{rifiutate === 1 \? "1 persona non ha accettato" : `\$\{rifiutate\} persone non hanno accettato`\}/); const s = senzaCommenti(leggi("src", "lib", "proprietario", "possibili-server.ts")); assert.match(s, /nome: r\.stato === "inviata" \? nomiRichieste\.get\(r\.id as string\) \?\? null : null,/);
+ });
+ 
+-test("«I tuoi match» (inquilino): il consenso è spiegato, si risponde con «Sì, mi interessa» / «No, grazie», accettando si apre la chat; il numero sulla scheda e sulla barra conta solo le richieste in attesa", () => {
+-  const c = senzaCommenti(leggi("src", "components", "RichiesteProprietari.tsx")); for (const x of ["Fatti trovare dai proprietari", "Mi rendo disponibile", "Non voglio più essere trovato", "Sì, mi interessa", "No, grazie", "È un match!", "Apri la chat", "Nessuna richiesta per ora", "non il reddito né i contatti"]) assert.ok(c.replace(/\s+/g, " ").includes(x), `manca «${x}»`);
+-  assert.match(c, /href=\{`\/chat\/\$\{esito\.candidaturaId\}`\}/); assert.match(c, /disabled=\{pending \|\| !r\.casa\}/, "non si accetta una casa che non c'è più");
++test("«I tuoi match» (inquilino): una nota dice cosa vedono i proprietari e come nascondersi, chi si è nascosto può tornare visibile, si risponde con «Sì, mi interessa» / «No, grazie», accettando si apre la chat; il numero sulla scheda e sulla barra conta solo le richieste in attesa", () => {
++  const c = senzaCommenti(leggi("src", "components", "RichiesteProprietari.tsx")); for (const x of ["non il reddito né i contatti", "Per non farti trovare: Profilo › Privacy e consensi", "Ti sei nascosto ai proprietari", "Torna visibile", "Sì, mi interessa", "No, grazie", "È un match!", "Apri la chat", "Nessuna richiesta per ora", "Finché sei nascosto nessun proprietario può scriverti"]) assert.ok(c.replace(/\s+/g, " ").includes(x), `manca «${x}»`);
++  for (const x of ["Mi rendo disponibile", "Non voglio più essere trovato"]) assert.ok(!c.includes(x), `c'è ancora «${x}»`);
++  assert.match(c, /\{vis \? \(\s+<p className="richieste-nota">/, "chi è visibile vede solo la nota"); assert.match(c, /onClick=\{\(\) => cambiaVisibilita\(true\)\}/, "chi si è nascosto può solo TORNARE visibile da qui");
+   const l = leggi("src", "app", "(app)", "layout.tsx"); assert.match(l, /ruolo === "inquilino"\s+\? await supabase\.from\("richieste_proprietari"\)\.select\("id", \{ count: "exact", head: true \}\)\.eq\("stato", "inviata"\)\s+: \{ count: 0 \}/); assert.match(leggi("src", "components", "Navigation.tsx"), /"\/candidature": \{ etichetta: etichettaConteggio\(richiesteInAttesa\), descrizione: "richieste dei proprietari a cui rispondere" \}/);
+   assert.match(leggi("src", "app", "(app)", "candidature", "CandidatureClient.tsx"), /\{s\.id === "richieste" && nRichieste > 0 && <span className="conteggio da-leggere">\{nRichieste\}<\/span>\}/);
+ });
+diff --git a/src/app/(app)/candidature/CandidatureClient.tsx b/src/app/(app)/candidature/CandidatureClient.tsx
+index a9d28b9..162fd07 100644
+--- a/src/app/(app)/candidature/CandidatureClient.tsx
++++ b/src/app/(app)/candidature/CandidatureClient.tsx
+@@ -25,7 +25,7 @@ import { IconChevronSu, IconMatch } from "@/components/icons";
+ export function CandidatureClient({
+   candidature,
+   richieste = [],
+-  visibile = false,
++  visibile = true,
+   schedaIniziale = "candidature",
+ }: {
+   candidature: CandidaturaConAnnuncio[];
+diff --git a/src/app/(app)/candidature/page.tsx b/src/app/(app)/candidature/page.tsx
+index 6fdadf4..3b169de 100644
+--- a/src/app/(app)/candidature/page.tsx
++++ b/src/app/(app)/candidature/page.tsx
+@@ -31,7 +31,7 @@ export default async function CandidaturePage({ searchParams }: { searchParams:
+     <CandidatureClient
+       candidature={(candidature ?? []) as unknown as CandidaturaConAnnuncio[]}
+       richieste={lista}
+-      visibile={profilo?.visibile_ai_proprietari === true}
++      visibile={profilo?.visibile_ai_proprietari !== false}
+       schedaIniziale={schedaMatchDaParametro((await searchParams).scheda)}
+     />
+   );
+diff --git a/src/app/(app)/profilo/ProfiloClient.tsx b/src/app/(app)/profilo/ProfiloClient.tsx
+index 4c0b582..2b553de 100644
+--- a/src/app/(app)/profilo/ProfiloClient.tsx
++++ b/src/app/(app)/profilo/ProfiloClient.tsx
+@@ -227,7 +227,7 @@ export function ProfiloClient({
+         onClose={() => setSheetAperta(null)}
+         consensoMarketingIniziale={consensoMarketingIniziale}
+         consensoTerziIniziale={consensoTerziIniziale}
+-        visibileProprietariIniziale={tenant.visibile_ai_proprietari === true}
++        visibileProprietariIniziale={tenant.visibile_ai_proprietari !== false}
+       />
+       <FaqSheet open={sheetAperta === "faq"} onClose={() => setSheetAperta(null)} />
+         </PageContainer>
+diff --git a/src/app/globals.css b/src/app/globals.css
+index 0a11657..faa4a07 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -4283,6 +4283,14 @@ button.contratto-testa:focus-visible {
+   color: var(--ink);
+ }
+ 
++/* nota discreta sulla visibilità ai proprietari (per chi è visibile, cioè quasi tutti) */
++.richieste-nota {
++  margin: 2px 0 16px;
++  font-size: 14px;
++  line-height: 1.45;
++  color: var(--body-soft);
++}
++
+ /* ---- Database: le schede dei possibili inquilini e la richiesta ---- */
+ .possibili-casa + .possibili-casa {
+   margin-top: 14px;
+diff --git a/src/app/login/page.tsx b/src/app/login/page.tsx
+index d074571..3b02277 100644
+--- a/src/app/login/page.tsx
++++ b/src/app/login/page.tsx
+@@ -134,6 +134,12 @@ function LoginForm() {
+               e accetto il trattamento dei dati necessario al funzionamento di
+               MatchAmI.
+             </label>
++            {ruolo === "inquilino" && (
++              <p className="login-consent" style={{ margin: "0 0 2px 0" }}>
++                Il tuo profilo sarà visibile ai proprietari con una casa adatta alla tua ricerca: vedono nome e iniziale, lavoro, foto e affidabilità, non il
++                reddito né i contatti. Puoi nasconderti quando vuoi dal Profilo.
++              </p>
++            )}
+ 
+             {signupState?.error && (
+               <p className="login-error">{signupState.error}</p>
+diff --git a/src/components/PossibiliInquilini.tsx b/src/components/PossibiliInquilini.tsx
+index 0433c39..3359fce 100644
+--- a/src/components/PossibiliInquilini.tsx
++++ b/src/components/PossibiliInquilini.tsx
+@@ -76,10 +76,10 @@ export function PossibiliInquilini({ possibili }: { possibili: PossibiliPerCasa[
+               {p.disponibili !== null && p.possibili !== null && p.possibili > 0 && (
+                 <p className="possibili-testo">
+                   {p.disponibili.length === 0
+-                    ? "Nessuno di loro si è ancora reso disponibile a essere contattato: se una di queste persone si candida, la trovi tra le candidature."
++                    ? "Queste persone hanno scelto di non farsi trovare dai proprietari: se una di loro si candida, la trovi tra le candidature."
+                     : p.disponibili.length === 1
+-                      ? "Una di queste persone si è resa disponibile a essere contattata:"
+-                      : `${p.disponibili.length} di queste persone si sono rese disponibili a essere contattate:`}
++                      ? "Puoi contattare questa persona:"
++                      : `Puoi contattare ${p.disponibili.length} di queste persone:`}
+                 </p>
+               )}
+ 
+@@ -156,8 +156,8 @@ export function PossibiliInquilini({ possibili }: { possibili: PossibiliPerCasa[
+       )}
+ 
+       <p className="possibili-testo">
+-        Sono persone che hanno impostato una ricerca adatta alla tua casa. Vedi solo chi ha scelto di farsi trovare, e non i suoi contatti: se
+-        accetta la tua richiesta, o se si candida, la trovi tra le candidature e potete scrivervi.
++        Sono persone iscritte che cercano una casa adatta alla tua. Chi ha scelto di non farsi trovare non compare, e i contatti di nessuno sono
++        visibili: se accetta la tua richiesta, o se si candida, la trovi tra le candidature e potete scrivervi.
+       </p>
+ 
+       <Sheet open={scelta !== null} onClose={chiudi} title={scelta ? `Fai match con ${scelta.scheda.nome}?` : "Fai match"}>
+diff --git a/src/components/PrivacySheet.tsx b/src/components/PrivacySheet.tsx
+index c18d3be..6830ac4 100644
+--- a/src/components/PrivacySheet.tsx
++++ b/src/components/PrivacySheet.tsx
+@@ -35,8 +35,8 @@ export function PrivacySheet({
+   );
+   const [marketing, setMarketing] = useState(consensoMarketingIniziale);
+   const [terzi, setTerzi] = useState(consensoTerziIniziale);
+-  // Il consenso a farsi trovare dai proprietari si salva subito, a ogni scelta (non col pulsante «Salva preferenze»):
+-  // ritirarlo deve essere immediato.
++  // Farsi trovare dai proprietari si salva subito, a ogni scelta (non col pulsante «Salva preferenze»): nascondersi deve essere
++  // immediato.
+   const [visibile, setVisibile] = useState(visibileProprietariIniziale === true);
+   const [erroreVisibilita, setErroreVisibilita] = useState<string | null>(null);
+   const [inCorsoVisibilita, avviaVisibilita] = useTransition();
+@@ -119,8 +119,8 @@ export function PrivacySheet({
+         {visibileProprietariIniziale !== undefined && (
+           <Field label="Fatti trovare dai proprietari">
+             <p className="field-note" style={{ margin: "-4px 0 10px 0" }}>
+-              I proprietari con una casa adatta alla tua ricerca possono vedere il tuo profilo (nome e iniziale del cognome, lavoro, foto, affidabilità
+-              e recensioni, non il reddito né i contatti) e scriverti. Tu decidi se rispondere. Si salva subito, e lo puoi ritirare quando vuoi.
++              Di partenza i proprietari con una casa adatta alla tua ricerca possono vedere il tuo profilo (nome e iniziale del cognome, lavoro, foto,
++              affidabilità e recensioni, non il reddito né i contatti) e scriverti. Tu decidi se rispondere. Con «No» non ti vedono più. Si salva subito.
+             </p>
+             <div className="chip-row">
+               <Chip label="Sì" active={visibile} onClick={() => !inCorsoVisibilita && scegliVisibilita(true)} />
+diff --git a/src/components/RichiesteProprietari.tsx b/src/components/RichiesteProprietari.tsx
+index a08c637..5f5d94e 100644
+--- a/src/components/RichiesteProprietari.tsx
++++ b/src/components/RichiesteProprietari.tsx
+@@ -10,8 +10,8 @@ import { IconMatch } from "@/components/icons";
+ type Esito = { stato: "accettata"; candidaturaId: string | null } | { stato: "rifiutata" };
+ 
+ /**
+- * La scheda «Richieste dei proprietari» di «I tuoi match»: prima il consenso a farsi trovare (spento di partenza), poi le
+- * richieste a cui rispondere. Accettare crea un match con la chat; rifiutare chiude la richiesta.
++ * La scheda «Richieste dei proprietari» di «I tuoi match»: di partenza si è visibili ai proprietari (chi si è nascosto lo vede e può
++ * tornare visibile), poi le richieste a cui rispondere. Accettare crea un match con la chat; rifiutare chiude la richiesta.
+  */
+ export function RichiesteProprietari({ richieste, visibile }: { richieste: RichiestaPerInquilino[]; visibile: boolean }) {
+   const router = useRouter();
+@@ -44,19 +44,21 @@ export function RichiesteProprietari({ richieste, visibile }: { richieste: Richi
+ 
+   return (
+     <div className="richieste">
+-      {/* ---- il consenso ---- */}
+-      <div className={`richieste-consenso ${vis ? "attivo" : ""}`}>
+-        <h3>{vis ? "Sei disponibile ai proprietari" : "Fatti trovare dai proprietari"}</h3>
+-        <p>
+-          {vis
+-            ? "I proprietari con una casa adatta alla tua ricerca possono vedere il tuo profilo (nome e iniziale del cognome, lavoro, foto, affidabilità e recensioni, non il reddito né i contatti) e scriverti. Tu decidi se rispondere."
+-            : "Se ti rendi disponibile, i proprietari con una casa adatta alla tua ricerca possono vedere il tuo profilo (nome e iniziale del cognome, lavoro, foto, affidabilità e recensioni, non il reddito né i contatti) e scriverti. Tu decidi se rispondere. Puoi cambiare idea quando vuoi."}
++      {/* ---- la visibilità: di partenza si è visibili; qui si dice com'è, e chi si è nascosto può tornare visibile ---- */}
++      {vis ? (
++        <p className="richieste-nota">
++          I proprietari con una casa adatta alla tua ricerca possono vedere il tuo profilo (nome e iniziale del cognome, lavoro, foto, affidabilità e
++          recensioni, non il reddito né i contatti) e scriverti. Tu decidi se rispondere. Per non farti trovare: Profilo › Privacy e consensi.
+         </p>
+-        <button type="button" className={vis ? "richieste-secondario" : "opp-cta"} disabled={pending} onClick={() => cambiaVisibilita(!vis)}>
+-          {vis ? "Non voglio più essere trovato" : "Mi rendo disponibile"}
+-        </button>
+-        {!vis && <small>La ricerca che hai impostato serve a trovare le case adatte a te: è la stessa con cui i proprietari ti trovano.</small>}
+-      </div>
++      ) : (
++        <div className="richieste-consenso">
++          <h3>Ti sei nascosto ai proprietari</h3>
++          <p>I proprietari non vedono il tuo profilo e non possono scriverti. Puoi tornare visibile quando vuoi.</p>
++          <button type="button" className="opp-cta" disabled={pending} onClick={() => cambiaVisibilita(true)}>
++            Torna visibile
++          </button>
++        </div>
++      )}
+ 
+       {errore && (
+         <p className="note-error" role="alert">
+@@ -69,7 +71,7 @@ export function RichiesteProprietari({ richieste, visibile }: { richieste: Richi
+         <div className="empty-inline">
+           <IconMatch className="icon-empty" />
+           <h3>Nessuna richiesta per ora</h3>
+-          <p>{vis ? "Quando un proprietario sceglie il tuo profilo, la trovi qui e puoi rispondere." : "Rendendoti disponibile, i proprietari potranno scriverti: le richieste arrivano qui."}</p>
++          <p>{vis ? "Quando un proprietario sceglie il tuo profilo, la trovi qui e puoi rispondere." : "Finché sei nascosto nessun proprietario può scriverti."}</p>
+         </div>
+       ) : (
+         <ul className="richieste-lista" aria-label="Richieste dei proprietari">
+diff --git a/src/content/informativa.ts b/src/content/informativa.ts
+index 5005ddd..1980b46 100644
+--- a/src/content/informativa.ts
++++ b/src/content/informativa.ts
+@@ -28,7 +28,7 @@ export const INFORMATIVA = {
+    * controllo che fa il database (migrazione 0017): un test fallisce se
+    * questa stringa non lo supera.
+    */
+-  versione: "2026-10-provvisoria-19",
++  versione: "2026-10-provvisoria-20",
+   /**
+    * Versioni precedenti che chi le ha accettate NON deve riaccettare.
+    *
+@@ -42,26 +42,9 @@ export const INFORMATIVA = {
+    * vuoto su un testo definitivo: lì un cambio di dati trattati richiede davvero
+    * una nuova accettazione.
+    */
+-  equivalenti: [
+-    "2026-10-provvisoria-1",
+-    "2026-10-provvisoria-2",
+-    "2026-10-provvisoria-3",
+-    "2026-10-provvisoria-4",
+-    "2026-10-provvisoria-5",
+-    "2026-10-provvisoria-6",
+-    "2026-10-provvisoria-7",
+-    "2026-10-provvisoria-8",
+-    "2026-10-provvisoria-9",
+-    "2026-10-provvisoria-10",
+-    "2026-10-provvisoria-11",
+-    "2026-10-provvisoria-12",
+-    "2026-10-provvisoria-13",
+-    "2026-10-provvisoria-14",
+-    "2026-10-provvisoria-15",
+-    "2026-10-provvisoria-16",
+-    "2026-10-provvisoria-17",
+-    "2026-10-provvisoria-18",
+-  ] as readonly string[],
++  // Dalla versione 20 il profilo di chi cerca casa è visibile ai proprietari di partenza: è un cambiamento che riguarda anche chi era
++  // già iscritto, quindi le versioni precedenti NON sono equivalenti e chi le aveva accettate deve riaccettare al prossimo accesso.
++  equivalenti: [] as readonly string[],
+   provvisoria: true,
+   titolo: "Informativa sulla privacy",
+   aggiornata: "ottobre 2026",
+@@ -101,7 +84,7 @@ export const INFORMATIVA = {
+       titolo: "Punteggi calcolati automaticamente",
+       paragrafi: [
+         "La compatibilità (match) e l'affidabilità sono calcolate automaticamente da ciò che dichiari. Servono a ordinare annunci e candidati. La decisione di accettare o rifiutare una candidatura resta sempre del proprietario.",
+-        "Se scegli «Fatti trovare dai proprietari» (è spento finché non lo accendi tu, e lo puoi ritirare quando vuoi da Privacy e consensi), i proprietari con una casa verificata e adatta alla tua ricerca possono vedere il tuo nome e l'iniziale del cognome, il lavoro, la foto, un estratto della presentazione, l'affidabilità e le recensioni. Non vedono il reddito né i contatti. Un proprietario può mandarti una richiesta, al massimo venti al giorno: tu decidi se rispondere. Se accetti nasce un match e potete scriverti; se rifiuti, o non rispondi, non succede niente.",
++        "Se cerchi casa, il tuo profilo è visibile ai proprietari con una casa verificata e adatta alla tua ricerca: possono vedere il tuo nome e l'iniziale del cognome, il lavoro, la foto, un estratto della presentazione, l'affidabilità e le recensioni. Non vedono il reddito né i contatti. È così per ogni iscritto, ma puoi nasconderti quando vuoi da Privacy e consensi: da quel momento non compari più. Un proprietario può mandarti una richiesta, al massimo venti al giorno: tu decidi se rispondere. Se accetti nasce un match e potete scrivervi; se rifiuti, o non rispondi, non succede niente.",
+         "Ai proprietari mostriamo anche QUANTI inquilini hanno una ricerca compatibile con il loro immobile (budget, zona, locali, caratteristiche): è un numero anonimo, non vedono chi sono né nessun loro dato. Se uno di loro si candida, il proprietario vede la candidatura come tutte le altre.",
+         "Se dichiari dei protesti o segnalazioni in centrale rischi, o non rispondi alla domanda (la risposta è obbligatoria e «non indicato» vale come «sì»), il punteggio di affidabilità scende di 30 punti. Il reddito verificato dallo staff e un garante o una fideiussione dichiarati lo fanno salire. Il punteggio non è mai inferiore a zero.",
+         "Il badge «Inquilino raccomandato» lo ottieni in automatico con almeno due recensioni positive (da 4 stelle in su) scritte da due proprietari diversi, se negli ultimi quattro anni non hai recensioni negative. Lo vedono i proprietari a cui ti candidi, possono cercare solo gli inquilini raccomandati e, a parità di compatibilità, i candidati con il badge compaiono prima. Non cambia il punteggio di affidabilità. La decisione di accettare o rifiutare una candidatura resta sempre del proprietario.",
+diff --git a/src/lib/types.ts b/src/lib/types.ts
+index 964878a..682c764 100644
+--- a/src/lib/types.ts
++++ b/src/lib/types.ts
+@@ -3,7 +3,7 @@ export type NucleoFamiliare = "single" | "coppia";
+ 
+ export type TenantProfile = {
+   profile_id: string;
+-  /** l'inquilino ha scelto di farsi trovare dai proprietari (spento di partenza) */
++  /** `false` = l'inquilino si è nascosto ai proprietari; di partenza (e se non si sa) è visibile */
+   visibile_ai_proprietari?: boolean;
+   professione: string | null;
+   reddito_mensile: number | null;
+diff --git a/supabase/migrations/0033_visibile_di_default.sql b/supabase/migrations/0033_visibile_di_default.sql
+new file mode 100644
+index 0000000..0c858eb
+--- /dev/null
++++ b/supabase/migrations/0033_visibile_di_default.sql
+@@ -0,0 +1,24 @@
++-- ============================================================
++-- Chi si iscrive come inquilino è VISIBILE ai proprietari di partenza.
++--
++-- Nella 0032 il consenso «Fatti trovare dai proprietari» era spento e lo doveva accendere l'inquilino. Ora è il contrario: chi
++-- si iscrive può essere trovato dai proprietari con una casa verificata e adatta alla sua ricerca, e ha un modo per
++-- NASCONDERSI quando vuole (Profilo > Privacy e consensi). La colonna resta la stessa: `true` = visibile, `false` = si è
++-- nascosto. Le regole di chi può scrivere a chi (funzione invia_richiesta_proprietario) non cambiano: guarda sempre la colonna.
++--
++-- ATTENZIONE: questo cambia il modo in cui sono trattati i dati di chi è GIÀ iscritto. L'informativa nuova (versione 20) non è
++-- equivalente alle precedenti: chi ha accettato prima la deve riaccettare al prossimo accesso.
++-- ============================================================
++
++alter table tenant_profiles alter column visibile_ai_proprietari set default true;
++alter table tenant_profiles alter column visibile_dal set default now();
++
++-- Chi era già iscritto diventa visibile. La funzione era nuova e spenta per tutti: non c'è nessuna scelta precedente da rispettare
++-- (chi non l'aveva mai accesa e chi l'aveva accesa e poi ritirata sono, nei dati, la stessa cosa).
++update tenant_profiles
++   set visibile_ai_proprietari = true,
++       visibile_dal = coalesce(visibile_dal, now())
++ where visibile_ai_proprietari is not true;
++
++comment on column tenant_profiles.visibile_ai_proprietari is
++  'true = i proprietari con un immobile verificato e adatto alla sua ricerca possono vedere il profilo (nome e iniziale, lavoro, foto, affidabilità, recensioni; non il reddito né i contatti) e mandargli una richiesta. È così di partenza per ogni iscritto; false = l''inquilino si è nascosto.';
+-- 
+2.43.0
+
