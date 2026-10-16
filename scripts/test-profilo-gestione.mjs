@@ -48,8 +48,8 @@ test("Profilo: in alto il nome (titolo della pagina), le iniziali nell'avatar, l
   assert.ok(alto.indexOf("avatar-name") < alto.indexOf("CampanellaNovita"), "la campanella sta dopo il nome, nell'angolo"); assert.ok(!/In cerca a Milano/.test(p), "una frase falsa da quando c'è anche Bergamo"); assert.ok(!/\(nome \?\? "\?"\)\.slice/.test(p), "le iniziali sono ancora quelle vecchie");
 });
 
-test("Profilo: la riga «Novità» non c'è più per l'inquilino (resta quella del proprietario), né le righe e le schede di affitti e inviti", () => {
-  const p = profiloClient(); assert.ok(!/RigaNovita/.test(p), "la riga Novità è ancora nel Profilo dell'inquilino"); assert.match(leggi("src", "app", "(app)", "profilo", "OwnerProfiloClient.tsx"), /<RigaNovita /, "la riga del proprietario non va toccata");
+test("Profilo: la riga «Novità» non c'è più né per l'inquilino né per il proprietario (c'è la campanella nell'angolo), né le righe e le schede di affitti e inviti", () => {
+  const p = profiloClient(); assert.ok(!/RigaNovita/.test(p), "la riga Novità è ancora nel Profilo dell'inquilino"); assert.ok(!/RigaNovita/.test(leggi("src", "app", "(app)", "profilo", "OwnerProfiloClient.tsx")), "la riga Novità è ancora nel Profilo del proprietario"); assert.ok(!fs.existsSync(path.join(radice, "src", "components", "RigaNovita.tsx")), "il componente della riga Novità non serve più");
   for (const vietato of ["I tuoi affitti", "Invita il tuo proprietario", "InvitaProprietarioSheet", "affittiPanel", "inviti:", "inviti,", 'sheetAperta === "invito"', 'sheetAperta === "affitti"', "IconPersone", "IconDocumento"]) assert.ok(!p.includes(vietato), `nel Profilo resta «${vietato}»`);
   for (const resta of ["Preferiti", 'title="La tua ricerca"', 'title="Account e accesso"', 'title="Privacy e consensi"', 'title="FAQ e bonus affitto"', "<DatiSheet", "<RicercaSheet"]) assert.ok(p.includes(resta) || leggi("src", "components", "RigaPreferiti.tsx").includes("Preferiti"), `è sparito «${resta}»`);
 });

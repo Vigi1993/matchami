@@ -7,7 +7,7 @@ import { sezioneProfilo } from "@/lib/home";
 import { profiloRicercaDaRighe } from "@/lib/match";
 import type { Luogo } from "@/lib/luoghi";
 import { OwnerProfiloClient } from "./OwnerProfiloClient";
-import type { TenantProfile, OwnerProfile } from "@/lib/types";
+import type { TenantProfile } from "@/lib/types";
 import { redirect } from "next/navigation";
 
 export default async function ProfiloPage({ searchParams }: { searchParams: Promise<{ apri?: string | string[] }> }) {
@@ -30,19 +30,12 @@ export default async function ProfiloPage({ searchParams }: { searchParams: Prom
     .single();
 
   if (profile?.ruolo === "proprietario") {
-    const { data: owner } = await supabase
-      .from("owner_profiles")
-      .select("*")
-      .eq("profile_id", user!.id)
-      .single();
-
     return (
       <OwnerProfiloClient
         nonLette={nonLette}
         nome={profile?.nome ?? null}
         cognome={profile?.cognome ?? null}
         email={user!.email ?? null}
-        owner={owner as OwnerProfile}
         consensoMarketingIniziale={profile?.consenso_marketing ?? false}
         consensoTerziIniziale={profile?.consenso_terzi ?? false}
       />
