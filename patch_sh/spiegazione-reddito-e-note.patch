@@ -1,0 +1,799 @@
+From 258fba8b0bfd6bd093411d96fffff858e6108413 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 17 Oct 2026 13:55:01 +0000
+Subject: [PATCH] =?UTF-8?q?feat(iscrizione):=20pagina=20=C2=ABCome=20funzi?=
+ =?UTF-8?q?ona=C2=BB=20in=20testa=20al=20benvenuto;=20reddito=20con=20barr?=
+ =?UTF-8?q?a=20e=20cifra=20a=20mano;=20note=20sulla=20documentazione=20fut?=
+ =?UTF-8?q?ura?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+DA APPLICARE DOPO benvenuto-e-conferma-password.patch. Nessuna migrazione.
+
+1) REDDITO CON LA BARRA E IL NUMERO A MANO. Per il reddito netto mensile (barra fino a 8000) e per quello di tutto il nucleo (barra fino a 15000) accanto alla barra c'è un campo dove scrivere la cifra: le due
+cose restano allineate (muovendo la barra cambia la cifra, scrivendo la cifra si sposta la barra, che si ferma in fondo se la cifra è più alta). La cifra è sempre un intero tra 0 e 100000; di partenza 0
+(= «non indicato», com'era). Vale anche per la scheda «I tuoi dati» di Home e Profilo (è lo stesso modulo). Si legge «1.800» come milleottocento, «1800,50» arrotonda, vuoto/lettere/negativi = 0.
+DIFETTO TROVATO PROVANDO NEL BROWSER: con un campo NUMERICO e il valore di partenza 0, scrivendo 2500 si vedeva «02500» (il browser non riscrive una cifra numericamente uguale): ora è un campo di testo con la
+tastiera dei numeri, che mostra sempre la cifra pulita (un test impedisce di tornare al campo numerico).
+
+2) NOTE SULLA DOCUMENTAZIONE FUTURA. Durante l'iscrizione, nella scheda «Reddito e famiglia» e in quella «Garanzie e protesti», una nota in evidenza dice che DOPO verrà chiesta la documentazione: per il reddito
+documento d'identità + busta paga recente, CU o dichiarazione dei redditi («senza documenti il reddito resta dichiarato e non dà punti di affidabilità»); per i protesti il certificato dei protesti (Camera di
+Commercio, anche online) + documento d'identità («il risultato dello staff vale più di questa risposta»). Le note si vedono solo nel benvenuto, NON nella scheda «I tuoi dati» dell'app.
+
+3) PAGINA «COME FUNZIONA» IN TESTA (primo passo, per inquilino e per proprietario). Cinque blocchi brevi (da 1 a 3 paragrafi): cos'è MatchAmI · MATCH · AFFIDABILITÀ · perché contano i documenti · cosa facciamo adesso.
+  INQUILINO: match = quanto una casa va bene per lui (necessario/preferito); affidabilità = numero da 0 a 100 che i proprietari vedono, con i punti veri (reddito verificato +50, nessun protesto +30, garante o
+  fideiussione +20, protesti o risposta non data −30) e le fasce vere (Scarsa 0-29, Buona 30-59, Molto buona 60-84, Eccellente 85-100), il badge «Inquilino raccomandato», e perché i documenti contano: ciò che dichiari
+  vale poco, ciò che lo staff verifica vale molto, con le sole dichiarazioni non si va oltre «Buona», quali documenti servono, che li vede solo lo staff (ai proprietari arriva «verificato» sì/no), che verranno chiesti
+  alla fine e che finché non si caricano il punteggio resta basso.
+  PROPRIETARIO: match = quanto un inquilino va bene per la sua casa (criteri obbligatori che escludono, preferenziali che spostano la percentuale; «fai match» apre la chat); affidabilità con gli stessi punti e fasce e
+  il fatto che vede se reddito e protesti sono verificati (mai i documenti); e perché verificare la casa: gli inquilini vedono l'annuncio solo dopo la verifica dello staff (identità + visura o atto), finché non lo fa la
+  casa resta invisibile. Al proprietario NON si parla dei documenti del reddito.
+  I NUMERI NON SONO SCRITTI A MANO: punti, massimo, fasce e nome del badge vengono dalle stesse costanti del punteggio vero (un test lo verifica e vieta numeri scritti nel testo), quindi la spiegazione non può
+  dire una cosa diversa da ciò che l'app fa; anche il numero di schede («5 schede» / «3 schede») è quello vero.
+  La pagina è la prima scheda (Passo 1 di 6 per l'inquilino, 1 di 4 per il proprietario), senza «obbligatoria/facoltativa», con il pulsante «Ho capito, cominciamo». Chi ha già cominciato a compilare (lavoro per l'inquilino,
+  identità o casa per il proprietario) non la rivede ogni volta che rientra. Caratteri da 15 px in su; alta circa due schermi e mezzo.
+
+PROVATO in Chrome col dito (nessuna immagine allegata): i due ruoli dall'inizio (blocchi, punti, fasce, pulsante, scheda successiva, niente documenti del reddito al proprietario), il campo del reddito (partenza da 0,
+scrivere 2500, oltre la fine della barra, cancellare, cifra enorme, barra del nucleo, nomi per i lettori di schermo), le due note, e che la scheda dell'app non le mostri: 29 controlli. ALTERAZIONI: 36, 35 prese; la
+restante è equivalente (togliere il controllo del vuoto non cambia il risultato: una cifra vuota diventa comunque 0).
+DIFETTI MIEI: la prima versione della pagina mostrava DUE frasi quasi uguali sotto il titolo («Cosa vuol dire match e affidabilità…» e «Un minuto per capire le due parole…»), tolta la seconda; il triplo clic nello
+script di prova non seleziona nell'emulazione da telefono (errore dello script, non dell'app).
+Test: 1250 in tutto, tutti verdi con PostgreSQL vero.
+---
+ scripts/test-benvenuto.mjs            | 105 +++++++++++++++----
+ src/app/benvenuto/BenvenutoClient.tsx |  15 ++-
+ src/app/globals.css                   | 119 ++++++++++++++++++++++
+ src/components/CampoImporto.tsx       |  53 ++++++++++
+ src/components/DatiForm.tsx           |  24 ++---
+ src/components/IntroBenvenuto.tsx     |  45 +++++++++
+ src/lib/benvenuto-testi.ts            | 140 ++++++++++++++++++++++++++
+ src/lib/benvenuto.ts                  |  23 ++++-
+ src/lib/importo.ts                    |  26 +++++
+ 9 files changed, 509 insertions(+), 41 deletions(-)
+ create mode 100644 src/components/CampoImporto.tsx
+ create mode 100644 src/components/IntroBenvenuto.tsx
+ create mode 100644 src/lib/benvenuto-testi.ts
+ create mode 100644 src/lib/importo.ts
+
+diff --git a/scripts/test-benvenuto.mjs b/scripts/test-benvenuto.mjs
+index f1969b1..d5bec7a 100644
+--- a/scripts/test-benvenuto.mjs
++++ b/scripts/test-benvenuto.mjs
+@@ -20,23 +20,23 @@ const inq = (o = {}) => ({ professione: null, redditoMensile: null, protestato:
+ const prop = (o = {}) => ({ nImmobili: 0, haIdentita: false, haProva: false, ...o });
+ 
+ // ============================================================ la logica pura
+-test("schede dell'inquilino: cinque, nell'ordine; obbligatorie solo quelle dei dati essenziali (lavoro, protesti, budget); ognuna è completa quando i suoi dati ci sono", () => {
++test("schede dell'inquilino: la spiegazione e poi cinque, nell'ordine; obbligatorie solo quelle dei dati essenziali (lavoro, protesti, budget); ognuna è completa quando i suoi dati ci sono", () => {
+   const p = bw.passiInquilino(inq());
+-  assert.deepEqual(p.map((x) => x.id), ["persona", "reddito", "garanzie", "ricerca", "documenti"]); assert.deepEqual(p.map((x) => x.titolo), ["Chi sei", "Reddito e famiglia", "Garanzie e protesti", "La tua ricerca", "I tuoi documenti"]);
+-  assert.deepEqual(p.map((x) => x.obbligatorio), [true, false, true, true, false]); assert.ok(p.every((x) => x.completo === false), "all'inizio nessuna è completa");
++  assert.deepEqual(p.map((x) => x.id), ["intro", "persona", "reddito", "garanzie", "ricerca", "documenti"]); assert.deepEqual(p.map((x) => x.titolo), ["Come funziona", "Chi sei", "Reddito e famiglia", "Garanzie e protesti", "La tua ricerca", "I tuoi documenti"]);
++  assert.deepEqual(p.map((x) => x.obbligatorio), [false, true, false, true, true, false]); assert.ok(p.every((x) => x.completo === false), "all'inizio nessuna è completa");
+   const c = (o) => Object.fromEntries(bw.passiInquilino(inq(o)).map((x) => [x.id, x.completo]));
+-  assert.equal(c({ professione: "Studente" }).persona, true); assert.equal(c({ professione: "   " }).persona, false); assert.equal(c({ professione: "" }).persona, false);
++  assert.equal(c({ professione: "Studente" }).persona, true); assert.equal(c({}).intro, false, "chi non ha cominciato vede la spiegazione"); assert.equal(c({ professione: "Studente" }).intro, true, "chi ha già cominciato non la rivede ogni volta che rientra"); assert.equal(c({ professione: "   " }).persona, false); assert.equal(c({ professione: "" }).persona, false);
+   assert.equal(c({ redditoMensile: 1800 }).reddito, true); assert.equal(c({ redditoMensile: 0 }).reddito, false);
+   assert.equal(c({ protestato: false }).garanzie, true); assert.equal(c({ protestato: true }).garanzie, true, "anche «sì» è una risposta"); assert.equal(c({ protestato: null }).garanzie, false);
+   assert.equal(c({ budgetMax: 1200 }).ricerca, true); for (const b of [0, -5, null, NaN]) assert.equal(c({ budgetMax: b }).ricerca, false, String(b));
+   assert.equal(c({ documenti: ["identita"] }).documenti, true); assert.equal(c({ documenti: ["reddito", "protesti"] }).documenti, false, "senza identità non è completa");
+ });
+ 
+-test("schede del proprietario: tre, nell'ordine; obbligatoria solo «La tua casa» (almeno un immobile); documenti e prova di proprietà si possono fare dopo", () => {
++test("schede del proprietario: la spiegazione e poi tre, nell'ordine; obbligatoria solo «La tua casa» (almeno un immobile); documenti e prova di proprietà si possono fare dopo", () => {
+   const p = bw.passiProprietario(prop());
+-  assert.deepEqual(p.map((x) => x.id), ["identita", "casa", "prova"]); assert.deepEqual(p.map((x) => x.titolo), ["I tuoi documenti", "La tua casa", "Prova di proprietà"]); assert.deepEqual(p.map((x) => x.obbligatorio), [false, true, false]);
++  assert.deepEqual(p.map((x) => x.id), ["intro", "identita", "casa", "prova"]); assert.deepEqual(p.map((x) => x.titolo), ["Come funziona", "I tuoi documenti", "La tua casa", "Prova di proprietà"]); assert.deepEqual(p.map((x) => x.obbligatorio), [false, false, true, false]);
+   const c = (o) => Object.fromEntries(bw.passiProprietario(prop(o)).map((x) => [x.id, x.completo]));
+-  assert.deepEqual(c({}), { identita: false, casa: false, prova: false }); assert.deepEqual(c({ nImmobili: 1, haIdentita: true, haProva: true }), { identita: true, casa: true, prova: true }); assert.equal(c({ nImmobili: 3 }).casa, true);
++  assert.deepEqual(c({}), { intro: false, identita: false, casa: false, prova: false }); assert.deepEqual(c({ nImmobili: 1, haIdentita: true, haProva: true }), { intro: true, identita: true, casa: true, prova: true }); assert.equal(c({ haIdentita: true }).intro, true, "chi ha caricato l'identità ha già cominciato"); assert.equal(c({ nImmobili: 3 }).casa, true);
+ });
+ 
+ test("COERENZA CON IL DATABASE: le schede obbligatorie sono esattamente i dati che completa_onboarding pretende (inquilino: lavoro, protesti, budget; proprietario: un immobile)", () => {
+@@ -51,22 +51,22 @@ test("COERENZA CON IL DATABASE: le schede obbligatorie sono esattamente i dati c
+ 
+ test("non si salta avanti: il limite è la prima scheda obbligatoria non completa (o l'ultima se sono tutte a posto)", () => {
+   const l = (o) => bw.limitePasso(bw.passiInquilino(inq(o)));
+-  assert.equal(l({}), 0); assert.equal(l({ professione: "Studente" }), 2, "lavoro fatto: si arriva alle garanzie (la scheda del reddito è facoltativa)"); assert.equal(l({ professione: "Studente", protestato: false }), 3); assert.equal(l({ professione: "Studente", protestato: false, budgetMax: 800 }), 4);
+-  assert.equal(bw.limitePasso(bw.passiProprietario(prop())), 1); assert.equal(bw.limitePasso(bw.passiProprietario(prop({ nImmobili: 1 }))), 2);
++  assert.equal(l({}), 1, "all'inizio si arriva a «Chi sei» (la spiegazione è facoltativa)"); assert.equal(l({ professione: "Studente" }), 3, "lavoro fatto: si arriva alle garanzie (la scheda del reddito è facoltativa)"); assert.equal(l({ professione: "Studente", protestato: false }), 4); assert.equal(l({ professione: "Studente", protestato: false, budgetMax: 800 }), 5);
++  assert.equal(bw.limitePasso(bw.passiProprietario(prop())), 2); assert.equal(bw.limitePasso(bw.passiProprietario(prop({ nImmobili: 1 }))), 3);
+ });
+ 
+ test("la scheda da mostrare: quella chiesta dall'indirizzo (da 1) se ci si può arrivare, altrimenti il limite; senza richiesta la prima non completa; richieste strane ignorate", () => {
+   const pr = (o) => bw.passiInquilino(inq(o)); const m = (passi, r) => bw.passoDaMostrare(passi, r);
+-  assert.equal(m(pr({}), undefined), 0); assert.equal(m(pr({}), "1"), 0); assert.equal(m(pr({}), "4"), 0, "oltre il limite torna al limite");
+-  const quasi = pr({ professione: "Studente", protestato: false }); assert.equal(m(quasi, "1"), 0, "si può tornare indietro"); assert.equal(m(quasi, "2"), 1); assert.equal(m(quasi, "4"), 3); assert.equal(m(quasi, "5"), 3, "la ricerca è obbligatoria: non si va ai documenti");
+-  assert.equal(m(quasi, undefined), 1, "senza richiesta: la prima non completa (il reddito, facoltativo ma non fatto)");
+-  const tutto = pr({ professione: "Studente", redditoMensile: 1000, protestato: false, budgetMax: 800, documenti: ["identita"] }); assert.equal(m(tutto, undefined), 4, "tutto fatto: l'ultima"); assert.equal(m(tutto, "5"), 4);
+-  for (const r of ["0", "-1", "abc", "2.5", "", " 2", "99", null, undefined, 3, {}, []]) assert.ok(m(quasi, r) >= 0 && m(quasi, r) <= 3, String(JSON.stringify(r)));
+-  assert.equal(m(quasi, "0"), 1, "«0» non è una scheda: si ignora"); assert.equal(m(quasi, "99"), 1);
++  assert.equal(m(pr({}), undefined), 0, "chi è nuovo comincia dalla spiegazione"); assert.equal(m(pr({}), "1"), 0); assert.equal(m(pr({}), "2"), 1); assert.equal(m(pr({}), "4"), 1, "oltre il limite torna al limite");
++  const quasi = pr({ professione: "Studente", protestato: false }); assert.equal(m(quasi, "1"), 0, "si può tornare indietro"); assert.equal(m(quasi, "2"), 1); assert.equal(m(quasi, "4"), 3); assert.equal(m(quasi, "5"), 4); assert.equal(m(quasi, "6"), 4, "la ricerca è obbligatoria: non si va ai documenti");
++  assert.equal(m(quasi, undefined), 2, "senza richiesta: la prima non completa (il reddito, facoltativo ma non fatto: la spiegazione e «Chi sei» sono già a posto)");
++  const tutto = pr({ professione: "Studente", redditoMensile: 1000, protestato: false, budgetMax: 800, documenti: ["identita"] }); assert.equal(m(tutto, undefined), 5, "tutto fatto: l'ultima"); assert.equal(m(tutto, "6"), 5);
++  for (const r of ["0", "-1", "abc", "2.5", "", " 2", "99", null, undefined, 3, {}, []]) assert.ok(m(quasi, r) >= 0 && m(quasi, r) <= 4, String(JSON.stringify(r)));
++  assert.equal(m(quasi, "0"), 2, "«0» non è una scheda: si ignora"); assert.equal(m(quasi, "99"), 2);
+ });
+ 
+ test("avanti, fine, indirizzi e barra: solo le schede facoltative o già salvate si superano; si finisce solo con le obbligatorie a posto; i passi si contano da 1", () => {
+-  const [persona, reddito] = bw.passiInquilino(inq({ redditoMensile: null })); assert.equal(bw.puoAndareAvanti(persona), false); assert.equal(bw.puoAndareAvanti({ ...persona, completo: true }), true); assert.equal(bw.puoAndareAvanti(reddito), true, "facoltativa: sempre");
++  const [, persona, reddito] = bw.passiInquilino(inq({ redditoMensile: null })); const intro = bw.passiInquilino(inq())[0]; assert.equal(bw.puoAndareAvanti(intro), true, "la spiegazione si supera sempre"); assert.equal(intro.azione, "Ho capito, cominciamo"); assert.equal(bw.puoAndareAvanti(persona), false); assert.equal(bw.puoAndareAvanti({ ...persona, completo: true }), true); assert.equal(bw.puoAndareAvanti(reddito), true, "facoltativa: sempre");
+   assert.equal(bw.puoFinire(bw.passiInquilino(inq())), false);
+   assert.equal(bw.indirizzoPasso(0), "/benvenuto?passo=1"); assert.equal(bw.indirizzoPasso(4), "/benvenuto?passo=5"); assert.equal(bw.testoProgresso(0, 5), "Passo 1 di 5"); assert.equal(bw.testoProgresso(4, 5), "Passo 5 di 5");
+   assert.deepEqual([0, 1, 2, 3, 4].map((i) => bw.percentualeProgresso(i, 5)), [20, 40, 60, 80, 100]); assert.equal(bw.percentualeProgresso(0, 0), 0);
+@@ -115,7 +115,7 @@ test("schermo del benvenuto: marchio, saluto, barra con il numero del passo, pun
+ });
+ 
+ test("schermo del benvenuto: «Indietro» tranne alla prima; «Avanti» spento se la scheda è obbligatoria e non salvata (si chiama «Lo faccio dopo» se facoltativa e non fatta); all'ultima «Entra in MatchAmI», spento senza le obbligatorie", () => {
+-  assert.match(client, /\{indice > 0 && \(\s+<button type="button" className="richieste-secondario" onClick=\{\(\) => vai\(indice - 1\)\}>/); assert.match(client, /disabled=\{!puoAndareAvanti\(passo\)\} onClick=\{avanti\}>\s+\{passo\.completo \|\| passo\.obbligatorio \? TESTI_BENVENUTO\.avanti : TESTI_BENVENUTO\.saltaPerOra\}/);
++  assert.match(client, /\{indice > 0 && \(\s+<button type="button" className="richieste-secondario" onClick=\{\(\) => vai\(indice - 1\)\}>/); assert.match(client, /disabled=\{!puoAndareAvanti\(passo\)\} onClick=\{avanti\}>\s+\{passo\.azione \?\? \(passo\.completo \|\| passo\.obbligatorio \? TESTI_BENVENUTO\.avanti : TESTI_BENVENUTO\.saltaPerOra\)\}/);
+   assert.match(client, /\{!ultimo \? \([\s\S]*?\) : \(\s+<form action=\{azioneFine\}>\s+<button type="submit" className="opp-cta" disabled=\{!puoFinire\(passi\) \|\| inCorso\}>/); assert.match(client, /const vai = \(i: number\) => router\.push\(indirizzoPasso\(i\)\);/);
+   assert.match(client, /\{stato\?\.error && \(\s+<p className="note-error" role="alert">\s+\{stato\.error\}/);
+ });
+@@ -173,3 +173,74 @@ test("il DB test esegue anche le prove del benvenuto (20 controlli in due tempi)
+   for (const tema of ["B1 chi era già iscritto", "B3 l'inquilino non può segnarsi «completato» da solo", "B5 senza la situazione lavorativa", "B7 senza aver risposto sui protesti", "B8 senza un budget massimo", "B14 senza nessun immobile", "B15 l'immobile di un altro proprietario non conta", "B16 con un immobile suo", "B17 lo staff non ha dati da compilare", "B18 chi non ha fatto l'accesso", "B20 anche chi inserisce da sé il proprio profilo"]) assert.ok(d.replaceAll("''", "'").includes(tema), `manca «${tema}»`);
+   assert.match(leggi("scripts", "db", "benvenuto-prima.sql"), /gli iscritti esistenti risultano tutti «non completato»/);
+ });
++
++// ============================================================ la pagina «Come funziona», i testi sulla documentazione, l'importo a mano
++const tt = caricaTs(path.join(radice, "src", "lib", "benvenuto-testi.ts"));
++const af = caricaTs(path.join(radice, "src", "lib", "affidabilita.ts"));
++const im = caricaTs(path.join(radice, "src", "lib", "importo.ts"));
++
++test("«Come funziona»: ha i cinque blocchi (cos'è, match, affidabilità, documenti, cosa facciamo adesso) per tutti e due i ruoli, brevi ma completi", () => {
++  for (const ruolo of ["inquilino", "proprietario"]) {
++    const t = tt.testiIntro(ruolo); assert.deepEqual(t.blocchi.map((b) => b.id), ["cosa", "match", "affidabilita", "documenti", "adesso"], ruolo); assert.ok(!("sottotitolo" in t), "niente seconda frase sotto il titolo: la scheda ha già la sua descrizione");
++    for (const b of t.blocchi) { assert.ok(b.titolo.length > 8, `${ruolo}/${b.id}: titolo`); assert.ok(b.paragrafi.length >= 1 && b.paragrafi.length <= 3, `${ruolo}/${b.id}: ${b.paragrafi.length} paragrafi`); for (const p of b.paragrafi) assert.ok(p.length >= 40 && p.length <= 380, `${ruolo}/${b.id}: paragrafo di ${p.length} caratteri («breve ma esaustivo»)`); }
++    const parole = t.blocchi.flatMap((b) => [b.titolo, ...b.paragrafi]).join(" ").split(/\s+/).length; assert.ok(parole >= 150 && parole <= 420, `${ruolo}: ${parole} parole in tutto`);
++    assert.match(t.blocchi[1].titolo, /^Match:/); assert.match(t.blocchi[2].titolo, /^Affidabilità:/);
++  }
++});
++
++test("«Come funziona» spiega MATCH e AFFIDABILITÀ con i NUMERI VERI del punteggio (presi dalle stesse costanti): punti, massimo, fasce, badge; i numeri non sono scritti a mano", () => {
++  for (const ruolo of ["inquilino", "proprietario"]) {
++    const a = tt.testiIntro(ruolo).blocchi.find((b) => b.id === "affidabilita"); assert.ok(a.paragrafi[0].includes(`da 0 a ${af.PUNTEGGIO_MASSIMO}`), "il massimo viene dal punteggio"); assert.ok(a.paragrafi[0].includes("«Inquilino raccomandato»"), "il badge ha il suo nome");
++    assert.deepEqual(a.voci.map((v) => [v.etichetta, v.valore, v.tono]), [["Reddito verificato dal nostro staff", `+${af.PUNTI_AFFIDABILITA.reddito}`, "piu"], ["Nessun protesto", `+${af.PUNTI_AFFIDABILITA.protesti}`, "piu"], ["Garante o fideiussione", `+${af.PUNTI_AFFIDABILITA.garanzia}`, "piu"], ["Protesti, o risposta non data", `−${af.PUNTI_AFFIDABILITA.protesti}`, "meno"]], ruolo);
++    assert.deepEqual(a.fasce, af.fasceAffidabilita().map((f) => ({ etichetta: f.label, intervallo: `${f.da}-${f.a}` })), "le fasce sono quelle vere"); assert.deepEqual(a.fasce.map((f) => f.etichetta), ["Scarsa", "Buona", "Molto buona", "Eccellente"]);
++  }
++  assert.deepEqual(tt.fasceTesto().map((f) => f.intervallo), ["0-29", "30-59", "60-84", "85-100"]);
++  const c = leggi("src", "lib", "benvenuto-testi.ts"); assert.ok(!/\b(50|30|20)\b(?!\))/.test(c.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "").replace(/\$\{[^}]*\}/g, "")), "nessun punteggio scritto a mano nei testi");
++});
++
++test("«Come funziona» dell'INQUILINO: match = quanto una casa va bene per lui (necessario/preferito); i documenti: dichiarato vale poco, verificato molto; con le sole dichiarazioni non si va oltre «Buona»; servono identità, prova del reddito, certificato dei protesti; li vede solo lo staff; «te li chiederemo alla fine»", () => {
++  const t = tt.testiIntro("inquilino"); const testo = (id) => t.blocchi.find((b) => b.id === id).paragrafi.join(" ");
++  assert.match(testo("match"), /quanto una casa somiglia a ciò che cerchi/); assert.match(testo("match"), /necessario \(se la casa non ce l'ha, non te la mostriamo\)/); assert.match(testo("match"), /preferito \(fa salire o scendere la percentuale\)/);
++  assert.match(testo("documenti"), /Ciò che dichiari vale poco, ciò che il nostro staff verifica vale molto/); assert.match(testo("documenti"), /con le sole dichiarazioni non si va oltre «Buona»/); assert.match(testo("documenti"), /documento d'identità e una busta paga, la CU o la dichiarazione dei redditi/); assert.match(testo("documenti"), /certificato dei protesti/);
++  assert.match(testo("documenti"), /li vede solo il nostro staff: ai proprietari arriva solo «verificato», sì o no/); assert.match(testo("documenti"), /Te li chiederemo alla fine di questi passaggi/); assert.match(testo("documenti"), /finché non lo fai il tuo punteggio resta basso/);
++  assert.match(testo("adesso"), /5 schede, pochi minuti: chi sei, reddito e famiglia, garanzie e protesti, la tua ricerca e infine i documenti/); assert.equal(tt.SCHEDE_DOPO_INTRO.inquilino, bw.passiInquilino(inq()).length - 1, "il numero di schede detto è quello vero"); assert.match(testo("affidabilita"), /Non cambia la percentuale di match: a parità di match/);
++});
++
++test("«Come funziona» del PROPRIETARIO: match = quanto un inquilino va bene per la sua casa (criteri obbligatori e preferenziali, «fai match» apre la chat); affidabilità = quanto fidarsi, con verificato/dichiarato; la casa resta invisibile finché lo staff non verifica la proprietà", () => {
++  const t = tt.testiIntro("proprietario"); const testo = (id) => t.blocchi.find((b) => b.id === id).paragrafi.join(" ");
++  assert.match(testo("match"), /quanto il suo profilo risponde ai criteri che scegli tu per la casa/); assert.match(testo("match"), /un criterio obbligatorio esclude chi non lo rispetta, uno preferenziale fa salire o scendere la percentuale/); assert.match(testo("match"), /fai match: si apre la chat/);
++  assert.match(testo("affidabilita"), /sulla scheda vedi se reddito e protesti sono verificati\. I documenti non li vedi mai/); assert.match(testo("documenti"), /Gli inquilini vedono il tuo annuncio solo dopo che il nostro staff ha verificato che la casa è tua/); assert.match(testo("documenti"), /visura catastale o l'atto di proprietà/); assert.match(testo("documenti"), /finché non lo fai la casa resta invisibile/);
++  assert.match(testo("adesso"), /3 schede, pochi minuti: i tuoi documenti, la tua casa \(con le foto\) e la prova di proprietà/); assert.equal(tt.SCHEDE_DOPO_INTRO.proprietario, bw.passiProprietario(prop()).length - 1);
++  assert.ok(!/reddito|busta paga|CU\b/.test(testo("documenti")), "al proprietario non si parla dei documenti del reddito");
++});
++
++test("le note sulla documentazione futura: durante l'iscrizione (schede «reddito» e «garanzie») dicono che DOPO verrà chiesta, cosa e perché; la scheda «I tuoi dati» di Home e Profilo non le mostra", () => {
++  assert.match(tt.NOTE_DOCUMENTI.reddito, /^Dopo ti chiederemo la documentazione: nella scheda «I tuoi documenti» caricherai un documento d'identità e una busta paga recente, la CU o la dichiarazione dei redditi\./); assert.match(tt.NOTE_DOCUMENTI.reddito, /Senza documenti il reddito resta «dichiarato» e non dà punti di affidabilità\./);
++  assert.match(tt.NOTE_DOCUMENTI.protesti, /^Dopo ti chiederemo la documentazione: nella scheda «I tuoi documenti» caricherai il certificato dei protesti \(si chiede alla Camera di Commercio, anche online\) e un documento d'identità\./); assert.match(tt.NOTE_DOCUMENTI.protesti, /il suo risultato vale più di questa risposta/);
++  assert.match(dati, /\{sezione === "reddito" && <p className="nota-documenti" role="note">\{NOTE_DOCUMENTI\.reddito\}<\/p>\}/); assert.match(dati, /\{sezione === "garanzie" && <p className="nota-documenti" role="note">\{NOTE_DOCUMENTI\.protesti\}<\/p>\}/);
++  const iRed = dati.indexOf("NOTE_DOCUMENTI.reddito"), iPro = dati.indexOf("NOTE_DOCUMENTI.protesti"); assert.ok(dati.indexOf("<CampoImporto valore={reddito}") < iRed && iRed < dati.indexOf('id="dati-garante"'), "la nota sta subito dopo il reddito"); assert.ok(dati.indexOf('id="dati-protesti"') < iPro && iPro < dati.indexOf('{mostra("reddito") && (\n        <Field label="Nucleo familiare"') || iPro > dati.indexOf('id="dati-protesti"'), "la nota sta dopo la domanda sui protesti");
++  assert.ok(!/NOTE_DOCUMENTI/.test(senzaCommenti(leggi("src", "components", "DatiSheet.tsx"))), "la scheda intera non le ha");
++});
++
++test("la pagina «Come funziona» è la PRIMA scheda, per tutti e due; non dice «obbligatoria/facoltativa»; il suo pulsante dice «Ho capito, cominciamo»", () => {
++  assert.equal(bw.passiInquilino(inq())[0].id, "intro"); assert.equal(bw.passiProprietario(prop())[0].id, "intro");
++  assert.match(client, /if \(passo\.id === "intro"\) return <IntroBenvenuto ruolo="inquilino" \/>;/); assert.match(client, /if \(passo\.id === "intro"\) return <IntroBenvenuto ruolo="proprietario" \/>;/); assert.match(client, /\{passo\.id !== "intro" && \(\s+<p className=\{`benvenuto-tipo/);
++  const ib = senzaCommenti(leggi("src", "components", "IntroBenvenuto.tsx")); assert.match(ib, /const t = testiIntro\(ruolo\);/); assert.ok(!/sottotitolo/.test(ib), "il componente non mostra una frase doppia sotto il titolo"); assert.match(ib, /\{b\.voci && \(\s+<ul className="intro-voci" aria-label="Cosa dà o toglie punti">/); assert.match(ib, /\{b\.fasce && \(\s+<ul className="intro-fasce" aria-label="Le fasce di affidabilità">/);
++  const css = leggi("src", "app", "globals.css"); const m = css.slice(css.indexOf("La pagina «Come funziona» (prima scheda del benvenuto)")); const misure = [...m.matchAll(/font-size:\s*(\d+)px/g)].map((x) => Number(x[1])); assert.ok(misure.length >= 6 && Math.min(...misure) >= 15, `caratteri: ${Math.min(...misure)} px (${misure.length} regole)`);
++});
++
++test("importo a mano: un intero tra 0 e il massimo; di partenza 0; «1.800», «1800,50», vuoto, lettere e negativi si leggono in modo sensato", () => {
++  const d = im.importoDaTesto; assert.equal(d("1800"), 1800); assert.equal(d("0"), 0); assert.equal(d(""), 0); assert.equal(d("   "), 0); assert.equal(d(null), 0); assert.equal(d(undefined), 0); assert.equal(d({}), 0);
++  assert.equal(d("1.800"), 1800, "il punto separa le migliaia"); assert.equal(d("12.345.678"), im.IMPORTO_MASSIMO, "oltre il massimo si ferma al massimo"); assert.equal(d("1800,50"), 1801); assert.equal(d("1800.4"), 1800); assert.equal(d("1 800"), 1800);
++  assert.equal(d("-5"), 0); assert.equal(d("abc"), 0); assert.equal(d("12abc"), 0); assert.equal(d("1e3"), 1000, "i numeri di tipo number con esponente"); assert.equal(d(2500), 2500); assert.equal(d(2500.6), 2501); assert.equal(d(NaN), 0); assert.equal(d(Infinity), 0);
++  assert.equal(d("999999"), im.IMPORTO_MASSIMO); assert.equal(d("9000", 8000), 8000); assert.equal(d("5", -1), 5, "un massimo non valido torna al massimo di sempre"); assert.equal(im.IMPORTO_MASSIMO, 100000);
++  assert.equal(im.posizioneBarra(3000, 8000), 3000); assert.equal(im.posizioneBarra(12000, 8000), 8000, "la barra si ferma in fondo"); assert.equal(im.posizioneBarra(-1, 8000), 0); assert.equal(im.posizioneBarra(NaN, 8000), 0);
++});
++
++test("campo del reddito: la barra E il numero a mano, allineati, per il reddito mensile (barra fino a 8000) e per quello del nucleo (fino a 15000); di partenza 0", () => {
++  const c = senzaCommenti(leggi("src", "components", "CampoImporto.tsx")); assert.match(c, /<input\s+type="range"\s+min=\{0\}\s+max=\{massimoBarra\}\s+step=\{50\}\s+value=\{posizioneBarra\(valore, massimoBarra\)\}\s+onChange=\{\(e\) => onChange\(Number\(e\.target\.value\)\)\}/);
++  assert.match(c, /<input\s+type="text"\s+inputMode="numeric"\s+pattern="\[0-9\]\*"\s+autoComplete="off"\s+value=\{String\(valore\)\}\s+onChange=\{\(e\) => onChange\(importoDaTesto\(e\.target\.value\.replace\(\/\[\^\\d\.,\]\/g, ""\)\)\)\}/); assert.ok(!/type="number"/.test(c), "non un campo numerico: lascerebbe lo zero davanti («02500»)"); assert.match(c, /aria-label=\{`\$\{nome\}: barra`\}/); assert.match(c, /aria-label=\{`\$\{nome\}: scrivi la cifra`\}/);
++  assert.match(dati, /<CampoImporto valore=\{reddito\} onChange=\{setReddito\} massimoBarra=\{8000\} nome="Reddito netto mensile" \/>/); assert.match(dati, /<CampoImporto valore=\{redditoNucleo\} onChange=\{setRedditoNucleo\} massimoBarra=\{15000\} nome="Reddito netto mensile di tutto il nucleo" \/>/);
++  assert.match(dati, /useState\(tenant\.reddito_mensile \?\? 0\)/); assert.match(dati, /useState\(tenant\.reddito_nucleo \?\? 0\)/); assert.equal([...dati.matchAll(/type="range"/g)].length, 0, "nessuna barra senza il numero accanto");
++  const css = leggi("src", "app", "globals.css"); assert.match(css, /\.campo-importo-cifra input \{\s+width: 140px;\s+min-height: 48px;/); assert.match(css, /\.campo-importo-cifra input \{[^}]*font-size: 18px;/, "16 px o più: sul telefono non fa ingrandire la pagina");
++});
+diff --git a/src/app/benvenuto/BenvenutoClient.tsx b/src/app/benvenuto/BenvenutoClient.tsx
+index f8cc464..2bf3b25 100644
+--- a/src/app/benvenuto/BenvenutoClient.tsx
++++ b/src/app/benvenuto/BenvenutoClient.tsx
+@@ -9,6 +9,7 @@ import { ImmobileForm } from "@/app/(app)/immobili/ImmobiliClient";
+ import { DatiForm, type SezioneDati } from "@/components/DatiForm";
+ import { RicercaSheet } from "@/components/RicercaSheet";
+ import { CaricaIdentita } from "@/components/CaricaIdentita";
++import { IntroBenvenuto } from "@/components/IntroBenvenuto";
+ import { VerificaImmobile } from "@/components/VerificaImmobile";
+ import {
+   TESTI_BENVENUTO,
+@@ -105,9 +106,11 @@ export function BenvenutoClient(p: BenvenutoProps) {
+           {passo.titolo}
+         </h1>
+         <p className="benvenuto-descrizione">{passo.descrizione}</p>
+-        <p className={`benvenuto-tipo ${passo.obbligatorio ? "obbligatoria" : ""}`.trim()}>
+-          {passo.obbligatorio ? TESTI_BENVENUTO.obbligatorio : TESTI_BENVENUTO.facoltativo}
+-        </p>
++        {passo.id !== "intro" && (
++          <p className={`benvenuto-tipo ${passo.obbligatorio ? "obbligatoria" : ""}`.trim()}>
++            {passo.obbligatorio ? TESTI_BENVENUTO.obbligatorio : TESTI_BENVENUTO.facoltativo}
++          </p>
++        )}
+ 
+         <div className="benvenuto-contenuto">
+           {p.ruolo === "inquilino" ? <ContenutoInquilino p={p} passo={passo} avanti={avanti} /> : <ContenutoProprietario p={p} passo={passo} router={router} />}
+@@ -122,7 +125,7 @@ export function BenvenutoClient(p: BenvenutoProps) {
+         )}
+         {!ultimo ? (
+           <button type="button" className="opp-cta" disabled={!puoAndareAvanti(passo)} onClick={avanti}>
+-            {passo.completo || passo.obbligatorio ? TESTI_BENVENUTO.avanti : TESTI_BENVENUTO.saltaPerOra}
++            {passo.azione ?? (passo.completo || passo.obbligatorio ? TESTI_BENVENUTO.avanti : TESTI_BENVENUTO.saltaPerOra)}
+           </button>
+         ) : (
+           <form action={azioneFine}>
+@@ -151,6 +154,8 @@ function ContenutoInquilino({ p, passo, avanti }: { p: Extract<BenvenutoProps, {
+   const router = useRouter();
+   const [ricercaAperta, setRicercaAperta] = useState(false);
+ 
++  if (passo.id === "intro") return <IntroBenvenuto ruolo="inquilino" />;
++
+   if (passo.id === "persona" || passo.id === "reddito" || passo.id === "garanzie") {
+     // una scheda del modulo dei dati: salvando si passa alla successiva
+     return <DatiForm key={passo.id} tenant={p.tenant} sezione={SEZIONE_DATI[passo.id]} etichettaSalva="Salva e continua" onSalvata={avanti} />;
+@@ -199,6 +204,8 @@ function ContenutoInquilino({ p, passo, avanti }: { p: Extract<BenvenutoProps, {
+ }
+ 
+ function ContenutoProprietario({ p, passo, router }: { p: Extract<BenvenutoProps, { ruolo: "proprietario" }>; passo: Passo; router: ReturnType<typeof useRouter> }) {
++  if (passo.id === "intro") return <IntroBenvenuto ruolo="proprietario" />;
++
+   if (passo.id === "identita") {
+     return <CaricaIdentita nomiCaricati={p.nomiIdentita} />;
+   }
+diff --git a/src/app/globals.css b/src/app/globals.css
+index 6313cfc..31b557e 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -5108,3 +5108,122 @@ button.contratto-testa:focus-visible {
+ .carica-identita .field-note {
+   margin: 0 0 10px;
+ }
++
++/* ---- Importo mensile: la barra e, accanto, il numero scritto a mano ---- */
++.campo-importo {
++  display: flex;
++  flex-direction: column;
++  gap: 10px;
++}
++.campo-importo-cifra {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++  font-size: 16px;
++  color: var(--body-soft);
++}
++.campo-importo-euro {
++  font-size: 18px;
++  font-weight: 700;
++  color: var(--ink);
++}
++.campo-importo-cifra input {
++  width: 140px;
++  min-height: 48px;
++  padding: 0 12px;
++  border: 1.5px solid rgba(16, 21, 26, 0.18);
++  border-radius: 14px;
++  background: #fff;
++  font-size: 18px;
++  font-weight: 700;
++  color: var(--ink);
++}
++.campo-importo-cifra input:focus {
++  outline: none;
++  border-color: var(--moss);
++}
++/* ---- La nota che dice che dopo verrà chiesta la documentazione (schede dell'iscrizione) ---- */
++.nota-documenti {
++  margin: 4px 0 18px;
++  padding: 12px 14px;
++  border-radius: 14px;
++  background: rgba(201, 161, 90, 0.16);
++  font-size: 15px;
++  line-height: 1.45;
++  color: var(--ink);
++}
++
++/* ---- La pagina «Come funziona» (prima scheda del benvenuto) ---- */
++.intro-blocco {
++  padding: 14px 0;
++  border-top: 1px solid rgba(16, 21, 26, 0.1);
++}
++.intro-blocco:first-of-type {
++  border-top: none;
++}
++.intro-titolo {
++  margin: 0 0 6px;
++  font-family: var(--font-display);
++  font-size: 20px;
++  font-weight: 700;
++  line-height: 1.2;
++  color: var(--ink);
++}
++.intro-testo {
++  margin: 6px 0 0;
++  font-size: 16px;
++  line-height: 1.5;
++  color: var(--body-text);
++}
++.intro-voci {
++  margin: 12px 0 0;
++  padding: 0;
++  list-style: none;
++  border-radius: 14px;
++  background: rgba(16, 21, 26, 0.04);
++}
++.intro-voci li {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 12px;
++  padding: 11px 14px;
++  font-size: 16px;
++  line-height: 1.3;
++  color: var(--ink);
++}
++.intro-voci li + li {
++  border-top: 1px solid rgba(16, 21, 26, 0.08);
++}
++.intro-voci li b {
++  flex: none;
++  font-size: 18px;
++}
++.intro-voci li.piu b {
++  color: var(--moss);
++}
++.intro-voci li.meno b {
++  color: var(--clay);
++}
++.intro-fasce {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 8px;
++  margin: 12px 0 0;
++  padding: 0;
++  list-style: none;
++}
++.intro-fasce li {
++  display: flex;
++  flex-direction: column;
++  padding: 8px 12px;
++  border-radius: 12px;
++  background: rgba(62, 107, 87, 0.12);
++  font-size: 15px;
++  line-height: 1.25;
++  color: var(--ink);
++}
++.intro-fasce li span {
++  font-size: 15px;
++  color: var(--body-soft);
++}
+diff --git a/src/components/CampoImporto.tsx b/src/components/CampoImporto.tsx
+new file mode 100644
+index 0000000..02fcee9
+--- /dev/null
++++ b/src/components/CampoImporto.tsx
+@@ -0,0 +1,53 @@
++"use client";
++
++import { importoDaTesto, posizioneBarra } from "@/lib/importo";
++
++/**
++ * Un importo mensile con la barra E la possibilità di scrivere il numero a mano. Le due cose restano allineate: spostando la barra cambia la cifra,
++ * scrivendo la cifra si sposta la barra (che si ferma in fondo se la cifra è più alta). Il valore è sempre un intero tra 0 e il massimo; di partenza 0.
++ */
++export function CampoImporto({
++  valore,
++  onChange,
++  massimoBarra,
++  nome,
++}: {
++  valore: number;
++  onChange: (nuovo: number) => void;
++  /** dove finisce la barra */
++  massimoBarra: number;
++  /** come si chiama il campo, per chi usa un lettore di schermo */
++  nome: string;
++}) {
++  return (
++    <div className="campo-importo">
++      <input
++        type="range"
++        min={0}
++        max={massimoBarra}
++        step={50}
++        value={posizioneBarra(valore, massimoBarra)}
++        onChange={(e) => onChange(Number(e.target.value))}
++        className="w-full"
++        aria-label={`${nome}: barra`}
++      />
++      <label className="campo-importo-cifra">
++        <span className="campo-importo-euro" aria-hidden="true">
++          €
++        </span>
++        {/* un campo di TESTO con la tastiera dei numeri, non un campo numerico: con il valore di partenza 0 un campo numerico lascia lo zero davanti
++            («02500» scrivendo 2500) perché non riscrive una cifra numericamente uguale; il campo di testo mostra sempre la cifra pulita */}
++        <input
++          type="text"
++          inputMode="numeric"
++          pattern="[0-9]*"
++          autoComplete="off"
++          value={String(valore)}
++          onChange={(e) => onChange(importoDaTesto(e.target.value.replace(/[^\d.,]/g, "")))}
++          aria-label={`${nome}: scrivi la cifra`}
++        />
++        <span className="campo-importo-mese">al mese</span>
++      </label>
++    </div>
++  );
++}
+diff --git a/src/components/DatiForm.tsx b/src/components/DatiForm.tsx
+index d0d0c30..9448269 100644
+--- a/src/components/DatiForm.tsx
++++ b/src/components/DatiForm.tsx
+@@ -11,6 +11,8 @@ import { Field } from "@/components/ui/Field";
+ import { Stepper } from "@/components/ui/Stepper";
+ import { SaveButton } from "@/components/ui/SaveButton";
+ import { AvatarUpload } from "@/components/AvatarUpload";
++import { CampoImporto } from "@/components/CampoImporto";
++import { NOTE_DOCUMENTI } from "@/lib/benvenuto-testi";
+ 
+ /**
+  * Il modulo dei dati personali: lavoro, reddito, garante, protesti, nucleo e presentazione. Sta dentro la scheda
+@@ -131,15 +133,7 @@ export function DatiForm({
+ 
+         {mostra("reddito") && (
+         <Field label={`Reddito netto mensile · €${reddito.toLocaleString("it-IT")}`}>
+-          <input
+-            type="range"
+-            min={0}
+-            max={8000}
+-            step={50}
+-            value={reddito}
+-            onChange={(e) => setReddito(Number(e.target.value))}
+-            className="w-full"
+-          />
++          <CampoImporto valore={reddito} onChange={setReddito} massimoBarra={8000} nome="Reddito netto mensile" />
+           {tenant.verificato && (
+             <p className="field-note">
+               Il tuo reddito è verificato: se cambi lavoro o reddito (anche quello del nucleo) la verifica decade e va rifatta.
+@@ -147,6 +141,7 @@ export function DatiForm({
+           )}
+         </Field>
+         )}
++        {sezione === "reddito" && <p className="nota-documenti" role="note">{NOTE_DOCUMENTI.reddito}</p>}
+ 
+         {mostra("garanzie") && (
+         <>
+@@ -184,6 +179,7 @@ export function DatiForm({
+         </Field>
+         </>
+         )}
++        {sezione === "garanzie" && <p className="nota-documenti" role="note">{NOTE_DOCUMENTI.protesti}</p>}
+ 
+         {mostra("garanzie") && (
+         <Field label="Disponibile a firmare una fideiussione?">
+@@ -223,15 +219,7 @@ export function DatiForm({
+               : "Reddito netto mensile di tutto il nucleo · non indicato"
+           }
+         >
+-          <input
+-            type="range"
+-            min={0}
+-            max={15000}
+-            step={50}
+-            value={redditoNucleo}
+-            onChange={(e) => setRedditoNucleo(Number(e.target.value))}
+-            className="w-full"
+-          />
++          <CampoImporto valore={redditoNucleo} onChange={setRedditoNucleo} massimoBarra={15000} nome="Reddito netto mensile di tutto il nucleo" />
+           <p className="field-note">
+             La somma dei redditi di tutte le persone che vivono nella casa. I
+             proprietari lo usano per capire quanto pesa l&apos;affitto sul
+diff --git a/src/components/IntroBenvenuto.tsx b/src/components/IntroBenvenuto.tsx
+new file mode 100644
+index 0000000..adc5457
+--- /dev/null
++++ b/src/components/IntroBenvenuto.tsx
+@@ -0,0 +1,45 @@
++import { testiIntro, type Ruolo } from "@/lib/benvenuto-testi";
++
++/**
++ * La pagina «Come funziona» all'inizio del percorso: cosa vuol dire match, cosa vuol dire affidabilità (con i punti e le fasce vere) e perché contano i documenti.
++ * Breve ma completa: pochi paragrafi per blocco. I numeri vengono dalle stesse costanti del punteggio (lib/benvenuto-testi.ts).
++ */
++export function IntroBenvenuto({ ruolo }: { ruolo: Ruolo }) {
++  const t = testiIntro(ruolo);
++  return (
++    <div className="intro-benvenuto">
++      {t.blocchi.map((b) => (
++        <section key={b.id} className={`intro-blocco intro-${b.id}`} aria-labelledby={`intro-${b.id}`}>
++          <h2 id={`intro-${b.id}`} className="intro-titolo">
++            {b.titolo}
++          </h2>
++          {b.paragrafi.map((p, i) => (
++            <p key={i} className="intro-testo">
++              {p}
++            </p>
++          ))}
++          {b.voci && (
++            <ul className="intro-voci" aria-label="Cosa dà o toglie punti">
++              {b.voci.map((v) => (
++                <li key={v.etichetta} className={v.tono}>
++                  <span>{v.etichetta}</span>
++                  <b>{v.valore}</b>
++                </li>
++              ))}
++            </ul>
++          )}
++          {b.fasce && (
++            <ul className="intro-fasce" aria-label="Le fasce di affidabilità">
++              {b.fasce.map((f) => (
++                <li key={f.etichetta}>
++                  <b>{f.etichetta}</b>
++                  <span>{f.intervallo}</span>
++                </li>
++              ))}
++            </ul>
++          )}
++        </section>
++      ))}
++    </div>
++  );
++}
+diff --git a/src/lib/benvenuto-testi.ts b/src/lib/benvenuto-testi.ts
+new file mode 100644
+index 0000000..b1dac50
+--- /dev/null
++++ b/src/lib/benvenuto-testi.ts
+@@ -0,0 +1,140 @@
++/**
++ * I testi del percorso di benvenuto: la pagina «Come funziona» (cosa vuol dire match e affidabilità, perché contano i documenti) e le note che dicono,
++ * durante l'iscrizione, che dopo verrà chiesta la documentazione. I numeri (punti, fasce, soglie) NON sono scritti a mano: vengono dalle stesse costanti
++ * che usa il punteggio vero, così le spiegazioni non possono dire una cosa diversa da ciò che l'app fa. Logica pura: si prova con `npm test`.
++ */
++import { PUNTI_AFFIDABILITA, PUNTEGGIO_MASSIMO, fasceAffidabilita } from "@/lib/affidabilita";
++import { NOME_BADGE_RACCOMANDATO } from "@/lib/recensioni";
++
++export type Ruolo = "inquilino" | "proprietario";
++
++export type BloccoIntro = {
++  id: "cosa" | "match" | "affidabilita" | "documenti" | "adesso";
++  titolo: string;
++  /** i paragrafi, brevi */
++  paragrafi: string[];
++  /** per l'affidabilità: le voci che danno o tolgono punti */
++  voci?: { etichetta: string; valore: string; tono: "piu" | "meno" }[];
++  /** per l'affidabilità: le fasce («Scarsa 0-29»...) */
++  fasce?: { etichetta: string; intervallo: string }[];
++};
++
++export type TestiIntro = { blocchi: BloccoIntro[] };
++
++const piu = (n: number) => `+${n}`;
++const meno = (n: number) => `−${n}`;
++
++/** Le fasce come si leggono: «Scarsa · 0-29». */
++export function fasceTesto(): { etichetta: string; intervallo: string }[] {
++  return fasceAffidabilita().map((f) => ({ etichetta: f.label, intervallo: `${f.da}-${f.a}` }));
++}
++
++/** Il numero di schede che seguono la pagina «Come funziona» (per dirlo: «5 schede»). */
++export const SCHEDE_DOPO_INTRO = { inquilino: 5, proprietario: 3 } as const;
++
++const VOCI_AFFIDABILITA: BloccoIntro["voci"] = [
++  { etichetta: "Reddito verificato dal nostro staff", valore: piu(PUNTI_AFFIDABILITA.reddito), tono: "piu" },
++  { etichetta: "Nessun protesto", valore: piu(PUNTI_AFFIDABILITA.protesti), tono: "piu" },
++  { etichetta: "Garante o fideiussione", valore: piu(PUNTI_AFFIDABILITA.garanzia), tono: "piu" },
++  { etichetta: "Protesti, o risposta non data", valore: meno(PUNTI_AFFIDABILITA.protesti), tono: "meno" },
++];
++
++export function testiIntro(ruolo: Ruolo): TestiIntro {
++  if (ruolo === "inquilino") {
++    return {
++      blocchi: [
++        {
++          id: "cosa",
++          titolo: "Cos'è MatchAmI",
++          paragrafi: [
++            "Cerchi casa tra annunci verificati, e i proprietari scelgono tra persone che hanno un profilo chiaro: chi sei, cosa cerchi, quanto sei affidabile.",
++          ],
++        },
++        {
++          id: "match",
++          titolo: "Match: quanto una casa va bene per te",
++          paragrafi: [
++            "È una percentuale che dice quanto una casa somiglia a ciò che cerchi: budget, zone, locali e le caratteristiche che indichi. Più è alta, più la casa fa per te.",
++            "Nella tua ricerca scegli cosa è necessario (se la casa non ce l'ha, non te la mostriamo) e cosa è solo preferito (fa salire o scendere la percentuale).",
++          ],
++        },
++        {
++          id: "affidabilita",
++          titolo: "Affidabilità: quanto i proprietari possono fidarsi di te",
++          paragrafi: [
++            `È un numero da 0 a ${PUNTEGGIO_MASSIMO} che i proprietari vedono accanto alla tua candidatura. Non cambia la percentuale di match: a parità di match, passa avanti chi ha il badge «${NOME_BADGE_RACCOMANDATO}» e poi chi ha l'affidabilità più alta.`,
++          ],
++          voci: VOCI_AFFIDABILITA,
++          fasce: fasceTesto(),
++        },
++        {
++          id: "documenti",
++          titolo: "Perché è importante caricare i documenti",
++          paragrafi: [
++            "Ciò che dichiari vale poco, ciò che il nostro staff verifica vale molto. Il reddito dà punti solo se verificato: con le sole dichiarazioni non si va oltre «Buona».",
++            "Per verificarlo servono un documento d'identità e una busta paga, la CU o la dichiarazione dei redditi; per i protesti, il certificato dei protesti. I documenti li vede solo il nostro staff: ai proprietari arriva solo «verificato», sì o no.",
++            "Te li chiederemo alla fine di questi passaggi. Se non li hai sottomano puoi caricarli più tardi, ma finché non lo fai il tuo punteggio resta basso.",
++          ],
++        },
++        {
++          id: "adesso",
++          titolo: "Cosa facciamo adesso",
++          paragrafi: [
++            `${SCHEDE_DOPO_INTRO.inquilino} schede, pochi minuti: chi sei, reddito e famiglia, garanzie e protesti, la tua ricerca e infine i documenti.`,
++          ],
++        },
++      ],
++    };
++  }
++
++  return {
++    blocchi: [
++      {
++        id: "cosa",
++        titolo: "Cos'è MatchAmI",
++        paragrafi: [
++          "Metti online la tua casa e ricevi candidature di persone che hanno un profilo chiaro: chi sono, quanto guadagnano, quanto sono affidabili. Puoi anche contattare tu chi cerca una casa come la tua.",
++        ],
++      },
++      {
++        id: "match",
++        titolo: "Match: quanto un inquilino va bene per la tua casa",
++        paragrafi: [
++          "È una percentuale che vedi per ogni persona: quanto il suo profilo risponde ai criteri che scegli tu per la casa. Più è alta, più è adatta.",
++          "Per ogni casa decidi cosa conta: un criterio obbligatorio esclude chi non lo rispetta, uno preferenziale fa salire o scendere la percentuale. Quando una persona ti convince fai match: si apre la chat.",
++        ],
++      },
++      {
++        id: "affidabilita",
++        titolo: "Affidabilità: quanto puoi fidarti di un inquilino",
++        paragrafi: [
++          `È un numero da 0 a ${PUNTEGGIO_MASSIMO} che vedi accanto a ogni candidato. Non cambia la percentuale di match: a parità di match, passa avanti chi ha il badge «${NOME_BADGE_RACCOMANDATO}» e poi chi ha l'affidabilità più alta.`,
++          "Conta di più ciò che il nostro staff ha verificato di ciò che la persona dichiara: sulla scheda vedi se reddito e protesti sono verificati. I documenti non li vedi mai.",
++        ],
++        voci: VOCI_AFFIDABILITA,
++        fasce: fasceTesto(),
++      },
++      {
++        id: "documenti",
++        titolo: "Perché è importante verificare la tua casa",
++        paragrafi: [
++          "Gli inquilini vedono il tuo annuncio solo dopo che il nostro staff ha verificato che la casa è tua: servono un documento d'identità e la visura catastale o l'atto di proprietà. Li vede solo il nostro staff.",
++          "Te li chiederemo durante questi passaggi. Se non li hai sottomano puoi caricarli più tardi, ma finché non lo fai la casa resta invisibile.",
++        ],
++      },
++      {
++        id: "adesso",
++        titolo: "Cosa facciamo adesso",
++        paragrafi: [`${SCHEDE_DOPO_INTRO.proprietario} schede, pochi minuti: i tuoi documenti, la tua casa (con le foto) e la prova di proprietà.`],
++      },
++    ],
++  };
++}
++
++/** Le note che dicono, nelle schede dell'iscrizione, che DOPO verrà chiesta la documentazione. */
++export const NOTE_DOCUMENTI = {
++  reddito:
++    "Dopo ti chiederemo la documentazione: nella scheda «I tuoi documenti» caricherai un documento d'identità e una busta paga recente, la CU o la dichiarazione dei redditi. Il nostro staff li controlla. Senza documenti il reddito resta «dichiarato» e non dà punti di affidabilità.",
++  protesti:
++    "Dopo ti chiederemo la documentazione: nella scheda «I tuoi documenti» caricherai il certificato dei protesti (si chiede alla Camera di Commercio, anche online) e un documento d'identità. Il nostro staff li controlla e il suo risultato vale più di questa risposta.",
++} as const;
+diff --git a/src/lib/benvenuto.ts b/src/lib/benvenuto.ts
+index a63515d..6c6b8d1 100644
+--- a/src/lib/benvenuto.ts
++++ b/src/lib/benvenuto.ts
+@@ -9,8 +9,8 @@
+ 
+ export type Ruolo = "inquilino" | "proprietario";
+ 
+-export type PassoInquilino = "persona" | "reddito" | "garanzie" | "ricerca" | "documenti";
+-export type PassoProprietario = "identita" | "casa" | "prova";
++export type PassoInquilino = "intro" | "persona" | "reddito" | "garanzie" | "ricerca" | "documenti";
++export type PassoProprietario = "intro" | "identita" | "casa" | "prova";
+ export type PassoId = PassoInquilino | PassoProprietario;
+ 
+ export type Passo = {
+@@ -22,6 +22,8 @@ export type Passo = {
+   obbligatorio: boolean;
+   /** i dati di questa scheda ci sono già */
+   completo: boolean;
++  /** il testo del pulsante per andare avanti, se non è il solito «Avanti» / «Lo faccio dopo» */
++  azione?: string;
+ };
+ 
+ /** Ciò che serve sapere dell'inquilino per decidere a che punto è. */
+@@ -48,6 +50,15 @@ const positivo = (v: number | null | undefined): boolean => typeof v === "number
+ 
+ export function passiInquilino(d: DatiBenvenutoInquilino): Passo[] {
+   return [
++    {
++      id: "intro",
++      titolo: "Come funziona",
++      descrizione: "Cosa vuol dire match e affidabilità, e perché conta caricare i documenti. Si legge in un minuto.",
++      obbligatorio: false,
++      // chi ha già cominciato a compilare non rivede la spiegazione ogni volta che rientra
++      completo: pieno(d.professione),
++      azione: "Ho capito, cominciamo",
++    },
+     {
+       id: "persona",
+       titolo: "Chi sei",
+@@ -88,6 +99,14 @@ export function passiInquilino(d: DatiBenvenutoInquilino): Passo[] {
+ 
+ export function passiProprietario(d: DatiBenvenutoProprietario): Passo[] {
+   return [
++    {
++      id: "intro",
++      titolo: "Come funziona",
++      descrizione: "Cosa vuol dire match e affidabilità, e perché conta verificare la tua casa. Si legge in un minuto.",
++      obbligatorio: false,
++      completo: d.nImmobili > 0 || d.haIdentita,
++      azione: "Ho capito, cominciamo",
++    },
+     {
+       id: "identita",
+       titolo: "I tuoi documenti",
+diff --git a/src/lib/importo.ts b/src/lib/importo.ts
+new file mode 100644
+index 0000000..a076885
+--- /dev/null
++++ b/src/lib/importo.ts
+@@ -0,0 +1,26 @@
++/**
++ * Un importo mensile scritto a mano accanto alla barra (reddito): sempre un numero intero tra 0 e un massimo.
++ * Il valore di partenza è 0 (= «non indicato»). Logica pura: si prova con `npm test`.
++ */
++
++/** Il massimo che si può scrivere a mano (la barra arriva meno in alto: serve a non fermare chi guadagna di più). */
++export const IMPORTO_MASSIMO = 100000;
++
++/** Da ciò che la persona scrive (anche «1.800», «1800,50», «», «abc», «-5») a un intero tra 0 e il massimo. Ciò che non è un numero vale 0. */
++export function importoDaTesto(testo: unknown, massimo: number = IMPORTO_MASSIMO): number {
++  const limite = Number.isFinite(massimo) && massimo > 0 ? Math.floor(massimo) : IMPORTO_MASSIMO;
++  if (typeof testo !== "string" && typeof testo !== "number") return 0;
++  const pulito = String(testo).trim().replace(/\s+/g, "");
++  if (pulito === "") return 0;
++  // «1.800» è milleottocento (il punto separa le migliaia), «1800,50» è milleottocento e cinquanta centesimi: i centesimi si arrotondano
++  const normale = /^\d{1,3}(\.\d{3})+(,\d+)?$/.test(pulito) ? pulito.replace(/\./g, "").replace(",", ".") : pulito.replace(",", ".");
++  const n = Number(normale);
++  if (!Number.isFinite(n)) return 0;
++  return Math.min(limite, Math.max(0, Math.round(n)));
++}
++
++/** La posizione della barra: l'importo, ma mai oltre la fine della barra (se si è scritta una cifra più alta la barra resta in fondo). */
++export function posizioneBarra(importo: number, massimoBarra: number): number {
++  if (!Number.isFinite(importo) || importo < 0) return 0;
++  return Math.min(importo, massimoBarra);
++}
+-- 
+2.43.0
+

@@ -1,0 +1,627 @@
+From a8d6f8f2acd0924d52a3110ff4ed51e39648c241 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 16 Oct 2026 10:45:40 +0000
+Subject: [PATCH] fix(stile): Home e Database del proprietario parlano la
+ lingua del resto dell'app; via una collisione di nomi che storpiava anche
+ l'inquilino
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+DA APPLICARE DOPO togli-dati-proprietario.patch. Nessuna migrazione. Solo stile e struttura delle due pagine.
+
+IL DIFETTO VERO. Avevo dato a una mia classe lo stesso nome di una classe esistente: .gruppo-testa, l'intestazione dei gruppi della pagina 'I tuoi match'
+dell'INQUILINO (maiuscolo piccolo 12 px con la freccia). Gli stili si sommavano: nel Database il nome della casa usciva in MAIUSCOLO SPAZIATO e piccolo
+('BILOCALE LUMINOSO', 'ISOLA · € 1250 AL MESE'), e in più la pagina dell'inquilino prendeva spazio in più sotto le intestazioni senza che nessuno l'avesse deciso.
+Ora .gruppo-testa ha UNA sola definizione, quella originale. Controllati tutti i nomi che avevo introdotto: era l'unica collisione.
+
+LE DUE PAGINE PARLAVANO UN DIALETTO DIVERSO. Home e Database usavano angoli da 22-28 px (l'app: 20), ombre molto più pesanti, un banner oro (l'app usa il verde per
+l'azione principale), un saluto sopra il titolo (le altre pagine hanno titolo + sottotitolo grigio), e nel Database un box bianco con dentro un altro box beige.
+Ora riusano gli stessi mattoni dell'app, tenendo i caratteri da 15 px in su:
+- HOME: titolo 'La tua casa' + sottotitolo grigio 'Buongiorno, Mario.' (come Immobili); l'invito alle candidature è un pulsante VERDE (come '+ Nuovo annuncio'); casa in grande
+  e due tessere con angoli da 20 e l'ombra delle altre schede; numeri 44 px (erano 56), titolo della casa 26 px (come il titolo di pagina), altezza 260 (era 300).
+- DATABASE: la casa è la STESSA scheda della pagina Immobili (foto, zona in verde, titolo, prezzo); i gruppi (candidature spontanee, possibili match, già valutati) usano
+  l'intestazione dei gruppi dell'inquilino ('Titolo — N' con la freccia); ogni persona è UNA scheda bianca come le altre (non più beige con bordo dentro un'altra scheda).
+- via il CSS rimasto dai disegni precedenti (cinque regole che nessun file usava più).
+
+CONTROLLO NUOVO (scripts/test-stile.mjs, 6 test) perché non succeda più: nessuna classe del CSS nuovo può avere lo stesso nome di una già definita; '.gruppo-testa' deve restare
+l'originale; ogni classe del CSS nuovo deve essere usata da qualche file; stessi angoli (20 px) e stessa ombra delle altre schede e nessun banner oro; titolo/sottotitolo e scheda della
+casa come le altre pagine; le classi dell'app (titolo, scheda, pulsante) non si ridefiniscono.
+
+PROVATO. Misurato in Chrome col dito, pagina per pagina (5 del proprietario e 2 dell'inquilino): stesso titolo (26 px, stesso carattere e peso) e stessi contenitori. Rifatte tutte le prove
+di funzionamento del Database dopo il cambio di struttura (fai match, scarta, annulla match e scarto, errori in italiano, ricerca in fondo, scheda completa, due case).
+ALTERAZIONI: 14 difetti reintrodotti di proposito, tutti presi (compresa la collisione originale).
+
+DIFETTI MIEI TROVATI PROVANDO
+- tre sostituzioni nel CSS non sono state salvate perché lo script scrive il file solo alla fine e una si è fermata: le ho viste dai test, non dal silenzio
+- un test (il 55) falliva già sull'originale dopo la pulizia del CSS (cercava una classe che avevo tolto perché inutilizzata): le prime alterazioni risultavano 'prese' da un test già rotto,
+  le ho rifatte tutte dopo averlo corretto
+Test: 1158 in tutto (6 nuovi; 1153 senza PostgreSQL collegato e cinque saltati, 1158 con). Nessuna immagine allegata, come richiesto.
+---
+ package.json                              |   2 +-
+ scripts/test-home-proprietario.mjs        |  13 +-
+ scripts/test-richieste.mjs                |   2 +-
+ scripts/test-stile.mjs                    |  62 ++++++
+ src/app/(app)/OwnerHomeClient.tsx         |   3 +-
+ src/app/(app)/database/DatabaseClient.tsx |  16 +-
+ src/app/globals.css                       | 218 +++++-----------------
+ src/components/SezioneApribile.tsx        |  17 +-
+ 8 files changed, 139 insertions(+), 194 deletions(-)
+ create mode 100644 scripts/test-stile.mjs
+
+diff --git a/package.json b/package.json
+index 0376375..630b5ff 100644
+--- a/package.json
++++ b/package.json
+@@ -8,7 +8,7 @@
+     "start": "next start",
+     "lint": "eslint",
+     "pretest": "node scripts/controlla-dipendenze.mjs",
+-    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-affidabilita.mjs scripts/test-profilo-gestione.mjs scripts/test-avvisi-profilo.mjs scripts/test-raccomandato.mjs scripts/test-home-proprietario.mjs scripts/test-richieste.mjs scripts/test-database-proprietario.mjs scripts/test-affitto-contratto.mjs scripts/test-profilo-proprietario.mjs scripts/test-db-richieste.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-dati-immobile.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-affidabilita.mjs scripts/test-profilo-gestione.mjs scripts/test-avvisi-profilo.mjs scripts/test-raccomandato.mjs scripts/test-home-proprietario.mjs scripts/test-richieste.mjs scripts/test-database-proprietario.mjs scripts/test-affitto-contratto.mjs scripts/test-profilo-proprietario.mjs scripts/test-stile.mjs scripts/test-db-richieste.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-dati-immobile.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-home-proprietario.mjs b/scripts/test-home-proprietario.mjs
+index 553f66a..3cbb9b6 100644
+--- a/scripts/test-home-proprietario.mjs
++++ b/scripts/test-home-proprietario.mjs
+@@ -185,8 +185,9 @@ test("nessuna casa: lo si dice con parole semplici e c'è un pulsante grande per
+   const h = pagina({ case_: [] }); const t = testoDi(h); assert.ok(t.includes("Non hai ancora nessuna casa") && t.includes("Aggiungi la tua casa") && t.includes("Le tue case")); assert.deepEqual(link(h), ["/immobili"]); assert.ok(!h.includes("<article"));
+ });
+ 
+-test("saluto e titolo: senza nome solo il saluto; l'ora cambia il saluto", () => {
+-  assert.ok(testoDi(pagina({ nome: null })).startsWith("Buongiorno La tua casa")); assert.ok(testoDi(pagina({ ora: 15 })).startsWith("Buon pomeriggio, Mario")); assert.ok(testoDi(pagina({ ora: 21 })).startsWith("Buonasera, Mario"));
++test("saluto e titolo: il titolo è «La tua casa» e il saluto sta nel sottotitolo grigio (come in tutte le altre pagine); senza nome solo il saluto; l'ora cambia il saluto", () => {
++  const h = pagina(); assert.match(h, /<h1 class="screen-title">La tua casa<\/h1><p class="screen-sub">Buongiorno, Mario\.<\/p>/, "titolo e sottotitolo nell'ordine delle altre pagine"); assert.ok(!/casa-saluto/.test(h), "il saluto non sta più sopra il titolo");
++  assert.ok(testoDi(pagina({ nome: null })).startsWith("La tua casa Buongiorno.")); assert.ok(testoDi(pagina({ ora: 15 })).startsWith("La tua casa Buon pomeriggio, Mario.")); assert.ok(testoDi(pagina({ ora: 21 })).startsWith("La tua casa Buonasera, Mario."));
+ });
+ 
+ // ============================================================ per chi non è pratico
+@@ -199,15 +200,15 @@ function bloccoCss() {
+ 
+ test("leggibilità: nessun carattere sotto i 15 px nella Home e nella sezione del Database; i testi di lettura da 16 px in su", () => {
+   const css = bloccoCss(); const misure = [...css.matchAll(/font-size:\s*(\d+(?:\.\d+)?)px/g)].map((m) => Number(m[1])); assert.ok(misure.length >= 20, "pochi caratteri trovati: " + misure.length); assert.ok(Math.min(...misure) >= 15, `un carattere è troppo piccolo: ${Math.min(...misure)} px`);
+-  for (const [classe, minimo] of [[".casa-frase", 0], [".tessera-frase", 17], [".casa-invito", 19], [".casa-dati", 18], [".casa-titolo", 24], [".tessera-numero", 56], [".possibili-testo", 16], [".possibili-frase", 17]]) { if (!minimo) continue; const m = css.match(new RegExp(`${classe.replace(".", "\\.")} \\{[^}]*font-size:\\s*(\\d+)px`)); assert.ok(m && Number(m[1]) >= minimo, `${classe}: serve almeno ${minimo}px`); }
++  for (const [classe, minimo] of [[".casa-frase", 0], [".tessera-frase", 17], [".casa-invito", 17], [".casa-dati", 16], [".casa-titolo", 26], [".tessera-numero", 44], [".possibili-testo", 16]]) { if (!minimo) continue; const m = css.match(new RegExp(`${classe.replace(".", "\\.")} \\{[^}]*font-size:\\s*(\\d+)px`)); assert.ok(m && Number(m[1]) >= minimo, `${classe}: serve almeno ${minimo}px`); }
+ });
+ 
+ test("leggibilità: i bersagli da toccare sono larghi (pulsante delle candidature e frase d'attesa almeno 64 px, tessere almeno 180 px) e c'è un contorno quando si naviga da tastiera", () => {
+   const css = bloccoCss(); const alt = (c) => Number((css.match(new RegExp(`${c.replace(".", "\\.")} \\{[^}]*min-height:\\s*(\\d+)px`)) ?? [])[1]);
+-  assert.ok(alt(".casa-invito") >= 64 && alt(".casa-attesa") >= 64 && alt(".tessera") >= 180, `${alt(".casa-invito")}, ${alt(".casa-attesa")}, ${alt(".tessera")}`);
++  assert.ok(alt(".casa-invito") >= 64 && alt(".casa-attesa") >= 64 && alt(".tessera") >= 170, `${alt(".casa-invito")}, ${alt(".casa-attesa")}, ${alt(".tessera")}`);
+   for (const c of [".tessera:focus-visible", ".casa-hero:focus-visible", ".casa-invito:focus-visible"]) assert.ok(css.includes(c), `manca il contorno per la tastiera: ${c}`); assert.match(css, /outline: 3px solid var\(--moss\)/);
+   assert.match(css, /\.casa-tessere \{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/, "le due tessere devono avere sempre la stessa larghezza"); assert.match(css, /\.tessera \{[^}]*min-width: 0;/);
+-  assert.match(css, /\.casa-hero \{[^}]*height: 300px;/); assert.match(css, /\.casa\.compatta \.casa-hero \{\s+height: 210px;/);
++  assert.match(css, /\.casa-hero \{[^}]*height: 260px;/); assert.match(css, /\.casa\.compatta \.casa-hero \{\s+height: 190px;/);
+ });
+ 
+ test("leggibilità: il testo sulla foto sta sopra una sfumatura scura (leggibile con qualunque foto) e le etichette dello stato hanno uno sfondo proprio", () => {
+@@ -242,7 +243,7 @@ test("Database: ogni casa ha la sezione «Possibili match», con l'ancora a cui
+   assert.match(d, /<SezioneApribile id=\{g\.casa\.id === primoConPossibili \? "possibili" : undefined\} titolo="Possibili match" conteggio=\{n\.possibili\}>\s+<PossibiliMatch casa=\{g\.possibili\} \/>/); assert.match(d, /const primoConPossibili = gruppi\.find\(\(g\) => g\.possibili !== null\)\?\.casa\.id \?\? null;/);
+   assert.match(c, /Chi ha scelto di non farsi trovare non compare, e i contatti di nessuno sono/); assert.match(c, /Il numero non è disponibile in questo momento/); assert.match(d, /Appena una tua casa sarà pubblicata, qui vedrai chi si candida e chi potrebbe fare al caso tuo\./);
+   assert.ok(d.indexOf("{gruppi.map") > 0 && d.indexOf("{gruppi.map") < d.indexOf("<RicercaCandidati"), "le case stanno PRIMA della ricerca (la ricerca è in fondo)"); const p = leggi("src", "app", "(app)", "database", "page.tsx"); assert.match(p, /const possibili = await possibiliPerCasaDelProprietario\(supabase, user!\.id\);/); assert.match(p, /<DatabaseClient\s+case_=\{case_\}\s+possibili=\{possibili\}/);
+-  assert.match(leggi("src", "app", "globals.css"), /\.sezione-apribile \{[^}]*scroll-margin-top: 16px;/, "la sezione a cui porta l'ancora non deve finire sotto il bordo");
++  assert.match(leggi("src", "app", "globals.css"), /\.sezione-db \{\s+scroll-margin-top: 16px;/, "la sezione a cui porta l'ancora non deve finire sotto il bordo");
+ });
+ 
+ test("informativa: dice che ai proprietari si mostra solo un NUMERO anonimo di inquilini compatibili, con la nuova versione; chi aveva le precedenti non deve riaccettare", () => {
+diff --git a/scripts/test-richieste.mjs b/scripts/test-richieste.mjs
+index a64ed60..e438306 100644
+--- a/scripts/test-richieste.mjs
++++ b/scripts/test-richieste.mjs
+@@ -218,7 +218,7 @@ test("una candidatura nata da una richiesta si riconosce («Ti ha scelto il prop
+ });
+ 
+ test("stile del proprietario: i pulsanti «Fai match» e di conferma sono grandi (almeno 56 px), e i testi delle schede sono da 15 px in su", () => {
+-  const css = leggi("src", "app", "globals.css"); const h = (c) => Number((css.match(new RegExp(`${c.replace(/\./g, "\\.")} \\{[^}]*min-height:\\s*(\\d+)px`)) ?? [])[1]); assert.ok(h(".persona-primario") >= 56 && h(".persona-secondario") >= 52 && h(".possibili-conferma .opp-cta") >= 56 && h(".sezione-testa") >= 64, `${h(".persona-primario")}, ${h(".persona-secondario")}, ${h(".possibili-conferma .opp-cta")}, ${h(".sezione-testa")}`);
++  const css = leggi("src", "app", "globals.css"); const h = (c) => Number((css.match(new RegExp(`${c.replace(/\./g, "\\.")} \\{[^}]*min-height:\\s*(\\d+)px`)) ?? [])[1]); assert.ok(h(".persona-primario") >= 56 && h(".persona-secondario") >= 52 && h(".possibili-conferma .opp-cta") >= 56, `${h(".persona-primario")}, ${h(".persona-secondario")}, ${h(".possibili-conferma .opp-cta")}`);
+   assert.match(css, /\.persona-etichette \.badge-raccomandato \{[^}]*font-size: 15px;/, "il badge nelle schede è piccolo: per il proprietario deve essere da 15 px"); assert.ok(!/<BadgeRaccomandato compatto/.test(leggi("src", "components", "SchedaPersona.tsx")) && !/<BadgeRaccomandato compatto/.test(leggi("src", "components", "PossibiliMatch.tsx")), "nelle schede non si usa la versione compatta (11 px)");
+   const blocco = css.slice(css.indexOf("/* ---- Database: le case, le schede delle persone e le richieste ---- */")); const misure = [...blocco.matchAll(/font-size:\s*(\d+(?:\.\d+)?)px/g)].map((m) => Number(m[1])); assert.ok(misure.length >= 10 && Math.min(...misure) >= 15, `caratteri: ${Math.min(...misure)} px`);
+ });
+diff --git a/scripts/test-stile.mjs b/scripts/test-stile.mjs
+new file mode 100644
+index 0000000..a380349
+--- /dev/null
++++ b/scripts/test-stile.mjs
+@@ -0,0 +1,62 @@
++/**
++ * Coerenza di stile delle pagine del proprietario (Home, Database) con il resto dell'app. Nati da due difetti veri:
++ *  - una classe nuova aveva lo STESSO NOME di una classe esistente (l'intestazione dei gruppi dell'inquilino): gli stili si sommavano,
++ *    il titolo della casa usciva in maiuscolo spaziato e la pagina dell'inquilino cambiava senza che nessuno lo avesse deciso;
++ *  - le due pagine parlavano un «dialetto» diverso dalle altre (angoli, ombre, colori, titolo e sottotitolo).
++ * Si lancia con:   npm test
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { radice } from "./carica-ts.mjs";
++
++const leggi = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8").replace(/\r\n/g, "\n");
++const css = leggi("src", "app", "globals.css");
++const senzaCommenti = (s) => s.replace(/\/\*[\s\S]*?\*\//g, (m) => "\n".repeat(m.split("\n").length - 1));
++const MARCATORE = "Home del proprietario: la casa in grande e due tessere grandi.";
++const inizio = css.indexOf(MARCATORE); const nuovo = css.slice(inizio); const vecchio = css.slice(0, inizio);
++const blocco = (testo, sel) => { const m = testo.match(new RegExp(`(?:^|\\n)${sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\{([^}]*)\\}`)); return m ? m[1] : null; };
++const valore = (b, prop) => (b?.match(new RegExp(`${prop}:\\s*([^;]+);`)) ?? [])[1]?.trim();
++const componenti = ["src/app/(app)/OwnerHomeClient.tsx", "src/app/(app)/database/DatabaseClient.tsx", "src/components/SchedaPersona.tsx", "src/components/SezioneApribile.tsx", "src/components/PossibiliMatch.tsx", "src/components/ConfermaAffitto.tsx", "src/components/CaricaContrattoRapporto.tsx", "src/components/RichiesteProprietari.tsx"];
++
++test("NESSUNA classe nuova ha lo stesso nome di una classe già definita prima: gli stili si sommerebbero (è ciò che ha storpiato il Database e toccato la pagina dell'inquilino)", () => {
++  const base = (testo) => { const r = new Map(); const pulito = senzaCommenti(testo); pulito.split("\n").forEach((riga) => { const m = riga.match(/^(\.[a-zA-Z][a-zA-Z0-9_-]*)(?:[\s>.:+~[][^{,]*)?(?:\s*,\s*\.[^{]*)?\s*\{/); if (m) for (const sel of riga.replace(/\s*\{.*$/, "").split(/\s*,\s*/)) { const b = sel.match(/^\.[a-zA-Z][a-zA-Z0-9_-]*/); if (b) r.set(b[0], (r.get(b[0]) ?? 0) + 1); } }); return r; };
++  const prima = base(vecchio); const dopo = base(nuovo);
++  // riuso VOLUTO: «.match-schede» è la barra delle schede dell'inquilino, a cui una regola nuova aggiunge solo il numero rosso sulla scheda delle richieste
++  const consentiti = new Set([".match-schede"]);
++  const collisioni = [...dopo.keys()].filter((c) => prima.has(c) && !consentiti.has(c)); assert.deepEqual(collisioni, [], "classi definite sia prima sia nel CSS nuovo: " + collisioni.join(", "));
++});
++
++test("le classi dell'inquilino che prima erano libere non sono state toccate: «.gruppo-testa» ha UNA sola definizione, quella originale (maiuscolo piccolo, 12 px)", () => {
++  const tutte = [...css.matchAll(/(?:^|\n)\.gruppo-testa \{([^}]*)\}/g)]; assert.equal(tutte.length, 1, "più definizioni di .gruppo-testa"); const b = tutte[0][1];
++  assert.match(b, /text-transform: uppercase;/); assert.match(b, /font-size: 12px;/); assert.match(b, /letter-spacing: 0\.06em;/); assert.ok(!/\bgap:|margin-bottom:/.test(b), "alla vecchia intestazione si è aggiunto spazio");
++  assert.ok(tutte[0].index < inizio, "la definizione deve stare tra quelle vecchie");
++});
++
++test("ogni classe del CSS nuovo del proprietario è usata da qualche file (niente stili rimasti dai disegni precedenti)", () => {
++  const classi = new Set([...senzaCommenti(nuovo).matchAll(/\.([a-zA-Z][a-zA-Z0-9_-]+)/g)].map((m) => m[1]));
++  let sorgenti = ""; const visita = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) visita(f); else if (/\.(ts|tsx)$/.test(e.name)) sorgenti += fs.readFileSync(f, "utf8") + "\n"; } }; visita(path.join(radice, "src"));
++  const stati = /^(is-|con-|chiuso$|su$|fatto$|attivo$|una$|compatta$|pieno$|on$)/;
++  const inutili = [...classi].filter((c) => !stati.test(c) && !new RegExp(`(?<![a-zA-Z0-9_-])${c.replace(/[-]/g, "\\-")}(?![a-zA-Z0-9_-])`).test(sorgenti)); assert.deepEqual(inutili, [], "classi mai usate: " + inutili.join(", "));
++});
++
++test("Home e Database hanno la FORMA delle altre pagine: stessi angoli (20 px), stessa ombra delle schede, nessun angolo più grande, nessun banner oro", () => {
++  const ombraStandard = valore(blocco(vecchio, ".match-card"), "box-shadow"); assert.equal(ombraStandard, "0 8px 20px rgba(16, 21, 26, 0.06)");
++  for (const sel of [".tessera", ".persona", ".richiesta"]) { assert.equal(valore(blocco(nuovo, sel), "border-radius"), "20px", `${sel}: angoli`); assert.equal(valore(blocco(nuovo, sel), "box-shadow"), ombraStandard, `${sel}: ombra diversa da quella delle altre schede`); }
++  assert.equal(valore(blocco(nuovo, ".casa-hero"), "border-radius"), "20px"); assert.equal(valore(blocco(nuovo, ".conferma-affitto"), "border-radius"), "20px");
++  const grandi = [...senzaCommenti(nuovo).matchAll(/border-radius:\s*(\d+)px/g)].map((m) => Number(m[1])).filter((n) => n > 20 && n < 900); assert.deepEqual(grandi, [], "angoli più grandi di quelli dell'app: " + grandi.join(", "));
++  const invito = blocco(nuovo, ".casa-invito"); assert.match(invito, /background: var\(--moss\);/, "il pulsante principale è verde come «+ Nuovo annuncio»"); assert.ok(!/gold/.test(invito) && !/rgba\(201, 161, 90/.test(invito), "il banner oro non c'è più"); assert.equal(valore(invito, "border-radius"), "16px", "stessi angoli del pulsante principale dell'app (opp-cta)");
++});
++
++test("Home: titolo e sottotitolo come le altre pagine (screen-title + screen-sub), il saluto sta nel sottotitolo; Database: la casa è la scheda di «Immobili» e i gruppi hanno l'intestazione dei gruppi dell'inquilino", () => {
++  const home = leggi("src", "app", "(app)", "OwnerHomeClient.tsx"); assert.match(home, /<h1 className="screen-title">\{case_\.length === 1 \? "La tua casa" : "Le tue case"\}<\/h1>\s+\{\/\*[^*]*\*\/\}\s+<p className="screen-sub">\{saluto\(nome, ora\)\}\.<\/p>/);
++  const db = leggi("src", "app", "(app)", "database", "DatabaseClient.tsx"); assert.match(db, /<header className="match-card casa-intestazione">[\s\S]*?<div className="mc-body">\s+<div className="mc-zona">\{zona\}<\/div>\s+<div className="mc-title">\{g\.casa\.titolo\}<\/div>\s+<div className="mc-meta">/);
++  const s = leggi("src", "components", "SezioneApribile.tsx"); assert.match(s, /<section id=\{id\} className="gruppo-match sezione-db">\s+<button type="button" className="gruppo-testa"/); assert.match(s, /\{titolo\} — \{conteggio\}/); assert.match(s, /<IconChevronSu className=\{`gruppo-freccia \$\{stato \? "" : "chiuso"\}`\} \/>/);
++  const cand = leggi("src", "app", "(app)", "candidature", "CandidatureClient.tsx"); assert.match(cand, /className="gruppo-testa"/); assert.match(cand, /\{titolo\} — \{items\.length\}/, "l'intestazione dell'inquilino ha lo stesso formato");
++});
++
++test("le pagine del proprietario usano le classi dell'app per ciò che l'app ha già (titolo, scheda della casa, pulsante principale), senza ridefinirle", () => {
++  for (const sel of [".screen-title", ".screen-sub", ".match-card", ".mc-zona", ".mc-title", ".mc-meta", ".opp-cta", ".gruppo-testa"]) assert.equal(blocco(nuovo, sel), null, `${sel} è ridefinita nel CSS nuovo: si deve riusare quella dell'app`);
++  for (const f of componenti.slice(0, 2)) { const t = leggi(...f.split("/")); assert.ok(/className="[^"]*\b(screen-title|match-card)\b/.test(t), `${f} non usa le classi dell'app`); }
++});
+diff --git a/src/app/(app)/OwnerHomeClient.tsx b/src/app/(app)/OwnerHomeClient.tsx
+index 7ddaeff..2a3116f 100644
+--- a/src/app/(app)/OwnerHomeClient.tsx
++++ b/src/app/(app)/OwnerHomeClient.tsx
+@@ -26,8 +26,9 @@ export function OwnerHomeClient({ case_, nome, ora }: { case_: CasaHome[]; nome:
+ 
+   return (
+     <PageContainer wide>
+-      <p className="casa-saluto">{saluto(nome, ora)}</p>
+       <h1 className="screen-title">{case_.length === 1 ? "La tua casa" : "Le tue case"}</h1>
++      {/* il saluto sta nel sottotitolo grigio, come in tutte le altre pagine */}
++      <p className="screen-sub">{saluto(nome, ora)}.</p>
+ 
+       {/* Se c'è qualcosa da fare lo si dice per primo, con un pulsante grande */}
+       {invito && (
+diff --git a/src/app/(app)/database/DatabaseClient.tsx b/src/app/(app)/database/DatabaseClient.tsx
+index fb21206..601511a 100644
+--- a/src/app/(app)/database/DatabaseClient.tsx
++++ b/src/app/(app)/database/DatabaseClient.tsx
+@@ -163,18 +163,18 @@ export function DatabaseClient({
+     const zona = g.casa.zona.replace(", Milano", "");
+     return (
+       <article className="gruppo-casa" aria-label={`Casa: ${g.casa.titolo}`}>
+-        <header className="gruppo-testa">
++        {/* la stessa scheda della pagina Immobili: foto, zona, titolo, prezzo */}
++        <header className="match-card casa-intestazione">
+           {g.casa.foto ? (
+             // eslint-disable-next-line @next/next/no-img-element
+-            <img src={g.casa.foto} alt="" className="gruppo-foto" />
++            <img src={g.casa.foto} alt="" />
+           ) : (
+-            <span className="gruppo-foto gruppo-foto-vuota" aria-hidden="true" />
++            <div className="mc-avatar">{g.casa.titolo.slice(0, 2).toUpperCase()}</div>
+           )}
+-          <div className="gruppo-titolo">
+-            <h2>{g.casa.titolo}</h2>
+-            <span>
+-              {[zona, g.casa.prezzo ? testoPrezzo(g.casa.prezzo) : ""].filter(Boolean).join(" · ")}
+-            </span>
++          <div className="mc-body">
++            <div className="mc-zona">{zona}</div>
++            <div className="mc-title">{g.casa.titolo}</div>
++            <div className="mc-meta">{g.casa.prezzo ? testoPrezzo(g.casa.prezzo) : "—"}</div>
+           </div>
+         </header>
+ 
+diff --git a/src/app/globals.css b/src/app/globals.css
+index 77c1c2d..f5982a6 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -3845,37 +3845,30 @@ button.contratto-testa:focus-visible {
+    Pensata per chi non è pratico: caratteri grandi (mai sotto 15px), bersagli larghi
+    (almeno 64px), molto contrasto, una sola cosa da fare per volta.
+    ============================================================ */
+-.casa-saluto {
+-  margin: 0 0 2px;
+-  font-size: 18px;
+-  font-weight: 600;
+-  color: var(--body-soft);
+-}
+ .casa-invito {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+   gap: 14px;
+-  min-height: 68px;
+-  margin: 6px 0 20px;
+-  padding: 12px 14px 12px 20px;
+-  border-radius: 22px;
+-  background: var(--gold);
+-  color: var(--ink);
+-  font-size: 19px;
++  min-height: 64px;
++  margin: 0 0 16px;
++  padding: 12px 14px 12px 18px;
++  border-radius: 16px;
++  background: var(--moss);
++  color: var(--paper);
++  font-size: 17px;
+   font-weight: 700;
+   line-height: 1.25;
+   text-decoration: none;
+-  box-shadow: 0 10px 24px rgba(201, 161, 90, 0.35);
+   -webkit-tap-highlight-color: transparent;
+ }
+ .casa-invito b {
+   flex: none;
+-  padding: 11px 18px;
++  padding: 10px 16px;
+   border-radius: 999px;
+-  background: var(--ink);
+-  color: var(--paper);
+-  font-size: 18px;
++  background: var(--paper);
++  color: var(--ink);
++  font-size: 16px;
+ }
+ .casa-invito:focus-visible,
+ .casa-attesa:focus-visible,
+@@ -3884,22 +3877,22 @@ button.contratto-testa:focus-visible {
+   outline-offset: 3px;
+ }
+ .casa {
+-  margin-bottom: 28px;
++  margin-bottom: 24px;
+ }
+ .casa-hero {
+   position: relative;
+   display: block;
+-  height: 300px;
++  height: 260px;
+   overflow: hidden;
+-  border-radius: 28px;
++  border-radius: 20px;
+   background: var(--ink-soft);
+   color: #fff;
+   text-decoration: none;
+-  box-shadow: 0 18px 40px rgba(16, 21, 26, 0.22);
++  box-shadow: 0 8px 20px rgba(16, 21, 26, 0.12);
+   -webkit-tap-highlight-color: transparent;
+ }
+ .casa.compatta .casa-hero {
+-  height: 210px;
++  height: 190px;
+ }
+ .casa-foto {
+   position: absolute;
+@@ -3980,15 +3973,15 @@ button.contratto-testa:focus-visible {
+ }
+ .casa-titolo {
+   font-family: var(--font-display);
+-  font-size: 30px;
++  font-size: 26px;
+   font-weight: 600;
+   line-height: 1.1;
+ }
+ .casa.compatta .casa-titolo {
+-  font-size: 24px;
++  font-size: 22px;
+ }
+ .casa-dati {
+-  font-size: 18px;
++  font-size: 16px;
+   line-height: 1.3;
+ }
+ .casa-tessere {
+@@ -4006,13 +3999,13 @@ button.contratto-testa:focus-visible {
+   flex-direction: column;
+   gap: 6px;
+   min-width: 0;
+-  min-height: 190px;
+-  padding: 18px 16px 16px;
+-  border-radius: 24px;
++  min-height: 170px;
++  padding: 14px;
++  border-radius: 20px;
+   background: #fff;
+   color: var(--ink);
+   text-decoration: none;
+-  box-shadow: 0 10px 26px rgba(16, 21, 26, 0.08);
++  box-shadow: 0 8px 20px rgba(16, 21, 26, 0.06);
+   -webkit-tap-highlight-color: transparent;
+ }
+ .tessera:focus-visible {
+@@ -4040,7 +4033,7 @@ button.contratto-testa:focus-visible {
+ }
+ .tessera-numero {
+   font-family: var(--font-display);
+-  font-size: 56px;
++  font-size: 44px;
+   font-weight: 600;
+   line-height: 1;
+   color: var(--moss);
+@@ -4070,10 +4063,10 @@ button.contratto-testa:focus-visible {
+   align-items: center;
+   justify-content: space-between;
+   gap: 14px;
+-  min-height: 72px;
+-  margin-top: 14px;
+-  padding: 14px 20px;
+-  border-radius: 22px;
++  min-height: 64px;
++  margin-top: 12px;
++  padding: 12px 16px;
++  border-radius: 16px;
+   background: var(--paper-dim);
+   color: var(--ink);
+   font-size: 17px;
+@@ -4087,63 +4080,20 @@ button.contratto-testa:focus-visible {
+ }
+ @media (min-width: 768px) {
+   .casa-hero {
+-    height: 380px;
++    height: 320px;
+   }
+   .casa.compatta .casa-hero {
+-    height: 250px;
++    height: 220px;
+   }
+   .casa-titolo {
+-    font-size: 38px;
++    font-size: 32px;
+   }
+   .tessera-numero {
+-    font-size: 68px;
++    font-size: 52px;
+   }
+ }
+ 
+-/* Database: la sezione «Possibili inquilini» */
+-.possibili {
+-  margin: 4px 0 22px;
+-  padding: 18px 18px 14px;
+-  border-radius: 24px;
+-  background: #fff;
+-  box-shadow: 0 10px 26px rgba(16, 21, 26, 0.08);
+-  scroll-margin-top: 16px;
+-}
+-.possibili-titolo {
+-  margin: 0 0 10px;
+-  font-family: var(--font-display);
+-  font-size: 24px;
+-  font-weight: 600;
+-  color: var(--ink);
+-}
+-.possibili-riga {
+-  display: flex;
+-  align-items: center;
+-  gap: 16px;
+-  padding: 10px 0;
+-  border-top: 1px solid rgba(16, 21, 26, 0.08);
+-}
+-.possibili-numero {
+-  flex: none;
+-  min-width: 56px;
+-  font-family: var(--font-display);
+-  font-size: 44px;
+-  font-weight: 600;
+-  line-height: 1;
+-  color: var(--moss);
+-  text-align: center;
+-}
+-.possibili-frase {
+-  font-size: 17px;
+-  line-height: 1.3;
+-  color: var(--ink);
+-}
+-.possibili-frase small {
+-  display: block;
+-  margin-top: 2px;
+-  font-size: 15px;
+-  color: var(--body-soft);
+-}
++/* Database: testi dei possibili match */
+ .possibili-testo {
+   margin: 10px 0 0;
+   font-size: 16px;
+@@ -4293,97 +4243,27 @@ button.contratto-testa:focus-visible {
+ 
+ /* ---- Database: le case, le schede delle persone e le richieste ---- */
+ .gruppo-casa {
+-  margin: 0 0 30px;
+-}
+-.gruppo-testa {
+-  display: flex;
+-  align-items: center;
+-  gap: 14px;
+-  margin-bottom: 12px;
+-}
+-.gruppo-foto {
+-  flex: none;
+-  width: 72px;
+-  height: 72px;
+-  border-radius: 18px;
+-  object-fit: cover;
+-}
+-.gruppo-foto-vuota {
+-  background: linear-gradient(135deg, var(--moss), var(--moss-light));
+-}
+-.gruppo-titolo h2 {
+-  margin: 0;
+-  font-family: var(--font-display);
+-  font-size: 26px;
+-  font-weight: 600;
+-  line-height: 1.1;
+-  color: var(--ink);
++  margin: 0 0 26px;
+ }
+-.gruppo-titolo span {
+-  font-size: 16px;
+-  color: var(--body-soft);
++/* l'intestazione della casa è la scheda di «Immobili» (match-card): qui solo si toglie ciò che la fa sembrare un pulsante */
++.casa-intestazione {
++  cursor: default;
+ }
+ 
+-/* le sezioni: candidature spontanee, possibili match, già valutati */
+-.sezione-apribile {
+-  margin-bottom: 12px;
++/* i gruppi (candidature spontanee, possibili match, già valutati) usano l'intestazione dei gruppi dell'inquilino; qui solo il carattere, più grande */
++.sezione-db {
+   scroll-margin-top: 16px;
+-  overflow: hidden;
+-  border-radius: 22px;
+-  background: #fff;
+-  box-shadow: 0 8px 22px rgba(16, 21, 26, 0.07);
+ }
+-.sezione-testa {
+-  display: flex;
+-  align-items: center;
+-  gap: 12px;
+-  width: 100%;
+-  min-height: 64px;
+-  padding: 12px 18px;
+-  border: 0;
+-  background: transparent;
++.sezione-db .gruppo-testa {
++  padding: 12px 2px 8px;
+   color: var(--ink);
+-  font: inherit;
+-  text-align: left;
+-  cursor: pointer;
+-}
+-.sezione-testa:focus-visible {
+-  outline: 3px solid var(--moss);
+-  outline-offset: -3px;
+-}
+-.sezione-titolo {
+-  flex: 1;
+-  font-size: 19px;
+-  font-weight: 800;
+-}
+-.sezione-numero {
+-  min-width: 34px;
+-  padding: 4px 10px;
+-  border-radius: 999px;
+-  background: rgba(16, 21, 26, 0.08);
+-  color: var(--body-soft);
+-  font-size: 16px;
+-  font-weight: 800;
+-  text-align: center;
+-}
+-.sezione-numero.pieno {
+-  background: var(--gold);
+-  color: var(--ink);
+-}
+-.sezione-freccia {
+-  color: var(--body-soft);
+-  font-size: 26px;
+-  line-height: 1;
+-  transition: transform 0.15s;
+-}
+-.sezione-freccia.su {
+-  transform: rotate(90deg);
++  font-size: 15px;
+ }
+ .sezione-corpo {
+-  padding: 2px 14px 16px;
++  padding: 2px 0 8px;
+ }
+ .sezione-vuota {
+-  margin: 6px 4px 0;
++  margin: 6px 2px 0;
+   font-size: 16px;
+   line-height: 1.45;
+   color: var(--body-text);
+@@ -4398,7 +4278,7 @@ button.contratto-testa:focus-visible {
+ }
+ .schede-lista {
+   display: grid;
+-  gap: 14px;
++  gap: 12px;
+   margin: 8px 0 0;
+   padding: 0;
+   list-style: none;
+@@ -4413,9 +4293,9 @@ button.contratto-testa:focus-visible {
+ /* la scheda di una persona: in alto affidabilità e match, sotto foto e informazioni, in fondo i pulsanti */
+ .persona {
+   padding: 14px;
+-  border: 1px solid rgba(16, 21, 26, 0.1);
+-  border-radius: 22px;
+-  background: var(--paper);
++  border-radius: 20px;
++  background: #fff;
++  box-shadow: 0 8px 20px rgba(16, 21, 26, 0.06);
+ }
+ .persona-stato {
+   display: inline-block;
+@@ -4670,7 +4550,7 @@ button.contratto-testa:focus-visible {
+   margin: 12px 0 14px;
+   padding: 16px;
+   border: 2px solid var(--gold);
+-  border-radius: 22px;
++  border-radius: 20px;
+   background: rgba(201, 161, 90, 0.14);
+ }
+ .conferma-affitto.fatto {
+diff --git a/src/components/SezioneApribile.tsx b/src/components/SezioneApribile.tsx
+index 7d7b8d5..63116a6 100644
+--- a/src/components/SezioneApribile.tsx
++++ b/src/components/SezioneApribile.tsx
+@@ -1,10 +1,12 @@
+ "use client";
+ 
+ import { useState } from "react";
++import { IconChevronSu } from "@/components/icons";
+ 
+ /**
+- * Una sezione che si apre e si chiude con un tocco, con il titolo e il numero di persone che contiene. Il contenuto resta nella
+- * pagina anche da chiusa (nascosto, non smontato), così non si perde ciò che si stava facendo.
++ * Un gruppo che si apre e si chiude con un tocco, con il titolo e il numero di persone: LA STESSA intestazione dei gruppi della pagina
++ * «I tuoi match» dell'inquilino («Titolo — 3» con la freccia), così le pagine dell'app si assomigliano. Il contenuto resta nella pagina
++ * anche da chiuso (nascosto, non smontato), così non si perde ciò che si stava facendo.
+  */
+ export function SezioneApribile({
+   id,
+@@ -25,13 +27,12 @@ export function SezioneApribile({
+   const [stato, setStato] = useState(aperta);
+   const corpo = `${id ?? titolo.replace(/\s+/g, "-").toLowerCase()}-corpo`;
+   return (
+-    <section id={id} className="sezione-apribile">
+-      <button type="button" className="sezione-testa" aria-expanded={stato} aria-controls={corpo} onClick={() => setStato(!stato)}>
+-        <span className="sezione-titolo">{titolo}</span>
+-        <span className={`sezione-numero ${conteggio > 0 ? "pieno" : ""}`}>{conteggio}</span>
+-        <span className={`sezione-freccia ${stato ? "su" : ""}`} aria-hidden="true">
+-          ›
++    <section id={id} className="gruppo-match sezione-db">
++      <button type="button" className="gruppo-testa" aria-expanded={stato} aria-controls={corpo} onClick={() => setStato(!stato)}>
++        <span>
++          {titolo} — {conteggio}
+         </span>
++        <IconChevronSu className={`gruppo-freccia ${stato ? "" : "chiuso"}`} />
+       </button>
+       <div id={corpo} className="sezione-corpo" hidden={!stato}>
+         {conteggio === 0 && vuoto ? <p className="sezione-vuota">{vuoto}</p> : null}
+-- 
+2.43.0
+

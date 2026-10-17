@@ -1,0 +1,2479 @@
+From b34fb5b07071459b0136b6bac93e3c1ab7e5b590 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 17 Oct 2026 07:53:31 +0000
+Subject: [PATCH] feat(inquilino): la ricerca sotto le foto nella Home; i
+ protesti li verifica lo staff (migrazione 0038)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+DA APPLICARE DOPO verifica-prova-e-home-scura.patch.
+RICHIEDE LA MIGRAZIONE 0038 (supabase/migrations/0038_verifica_protesti.sql), da eseguire DOPO la 0037 e PRIMA del push del codice: il codice nuovo legge la colonna
+protesti_verificati dalla vista dei candidati, quindi senza la migrazione la pagina Database del proprietario si rompe.
+
+1) HOME DELL'INQUILINO: LA RICERCA SOTTO LE FOTO. «N case in linea con la tua ricerca», «+ N oltre la ricerca», «Modifica/Imposta la ricerca» e il riepilogo (Fino a €1500 · ...) stanno
+ora in una barra SOTTO l'area delle foto; il pannello in alto ha solo l'affidabilità e il badge. L'area delle foto riempie lo spazio sopra la barra (mazzo e pulsanti scarta/candidati
+sono relativi a lei, quindi restano sopra la barra). Il mazzo comincia 8-16 px sotto il pannello (prima restavano 84 px di vuoto): 164 px senza badge, 198 con il badge, 170/204 a schermo
+largo. Misurato in Chrome a 390x844, 360x640, 1280x800: la barra sta sotto le foto, i pulsanti sopra la barra, «Modifica ricerca» apre la scheda della ricerca.
+
+2) I PROTESTI LI VERIFICA LO STAFF. Percorso SEPARATO da quello del reddito (si può far verificare l'uno senza l'altro), stessi stati e stessi documenti:
+  - l'inquilino ha già risposto alla domanda (obbligatoria), carica il CERTIFICATO DEI PROTESTI e il documento d'identità (lo stesso del reddito) e chiede la verifica;
+  - lo staff decide: «Nessun protesto», «Ci sono protesti» oppure «Respingi» (con una nota che la persona legge); elenco «Protesti da verificare» e pagina dedicata (lo staff vede SOLO
+    identità e certificato, non la prova del reddito, con indirizzi temporanei di 5 minuti; non legge il profilo intero: ha solo due funzioni);
+  - il risultato dello staff PREVALE su ciò che era stato dichiarato (la colonna protestato prende il valore verificato) e da quel momento la risposta NON si cambia più da soli
+    (altrimenti si potrebbe ribaltare dopo il controllo): il modulo mostra «No, nessun protesto · verificato dallo staff» invece dei pulsanti Sì/No; riscrivere lo stesso valore non dà errore;
+  - i documenti si tolgono solo finché la verifica a cui servono non è partita (il certificato dipende dai protesti, la prova del reddito dal reddito, l'identità da entrambe), sia nella
+    tabella sia nell'archivio dei file; cambiare il reddito azzera SOLO la verifica del reddito;
+  - notifiche all'inquilino: «Protesti verificati» (dice il risultato) e «Verifica dei protesti non riuscita»;
+  - il PROPRIETARIO vede solo se i protesti sono verificati e con quale risultato: chip «Nessun protesto · verificato» o «Ha protesti · verificato» sulle schede dei candidati e dei possibili
+    inquilini; per chi ha solo DICHIARATO non compare niente (il dichiarato non si mostra come un fatto); mai i documenti né la nota. Il criterio «Nessun protesto» non dice più solo «dichiarato»;
+  - il PUNTEGGIO NON CAMBIA (+30 / −30): cambia chi li ha controllati (la voce diventa «Lo controlla lo staff») e le parole. «Come si calcola» non dice più «nessuno lo controlla».
+  SCELTE DA CONFERMARE: (a) «nessun protesto» dichiarato vale ancora +30 anche se non verificato (il reddito invece conta solo se verificato): se si vuole che valga solo se verificato è una decisione di
+  prodotto, toglierebbe 30 punti a tutti finché non verificano; (b) INFORMATIVA 2026-10-provvisoria-22 NON equivalente alla 21: tutti riaccettano (lo staff esamina un nuovo documento e il proprietario
+  vede se i protesti sono verificati), come già per la 20; da sottoporre al legale.
+
+COME È STATO PROVATO. Su PostgreSQL 16 VERO: 55 controlli (scripts/db/protesti.sql) sull'intera catena e sui casi vietati: nessuno scrive lo stato a mano, cosa serve per chiedere la verifica (risposta,
+identità, certificato), non si chiede due volte né se è già verificato, solo lo staff dà l'esito (anche un proprietario o l'inquilino stesso no), nota obbligatoria per respingere, il risultato prevale
+sulla dichiarazione, i protesti verificati non si cambiano da soli, i documenti e i FILE non si cancellano durante o dopo la verifica (anche l'identità condivisa), il reddito resta indipendente,
+il proprietario vede sì/no verificato e NIENTE per chi è scartato, notifiche, tipi ammessi; migrazione rieseguibile. In Chrome col dito (nessuna immagine allegata): tutti gli stati del pannello dell'inquilino
+(base, senza risposta, documenti, in verifica, verificato nessuno / con protesti, respinto con nota), caricamento del certificato (archivio di verifica, cartella dell'inquilino, tipo «protesti»), invio (la
+funzione dei protesti, non quella del reddito), il blocco della risposta dopo la verifica; le pagine dello staff (elenco, pagina con i soli documenti giusti, le tre scelte, rifiuto senza nota, errore in
+italiano, indirizzo non valido, nessun modulo se non è in verifica); i chip dei proprietari.
+ALTERAZIONI: 30 sulla migrazione (sul PostgreSQL vero, tutte prese) + 43 sul codice dell'app (tutte prese) + 14 sulla Home dell'inquilino (tutte prese).
+
+DIFETTI MIEI TROVATI PROVANDO
+- nessuna prova copriva il caso inverso (c'è il certificato ma manca il documento d'identità): un'alterazione passava, aggiunta la prova (P10b)
+- nessun controllo creava un candidato SCARTATO per verificare che il proprietario non veda niente sui protesti: aggiunto (P50b)
+- un test sul salvataggio dei dati guardava l'altra funzione dello stesso file (un'alterazione passava): ora guarda proprio quella
+- un controllo del pannello l'avevo scritto con una condizione sempre vera: l'ho rifatto
+- i miei script di prova usavano un nome di caso del caricatore che non esisteva, e il PostgreSQL di prova si spegneva tra una chiamata e l'altra: l'ho visto dagli errori
+Test: 1205 in tutto (1198 senza PostgreSQL collegato e sette saltati, 1205 con).
+---
+ package.json                                  |   2 +-
+ scripts/db/protesti.sql                       | 215 ++++++++++++
+ scripts/test-affidabilita.mjs                 |   4 +-
+ scripts/test-database-proprietario.mjs        |   2 +-
+ scripts/test-db-richieste.mjs                 |  15 +
+ scripts/test-home-proprietario.mjs            |   2 +-
+ scripts/test-home.mjs                         |  28 +-
+ scripts/test-informativa.mjs                  |  21 +-
+ scripts/test-notifiche.mjs                    |  10 +-
+ scripts/test-profilo-proprietario.mjs         |   2 +-
+ scripts/test-protesti.mjs                     | 153 +++++++++
+ scripts/test-raccomandato.mjs                 |  10 +-
+ scripts/test-richieste.mjs                    |   2 +-
+ src/app/(app)/HomeClient.tsx                  |  35 +-
+ src/app/(app)/page.tsx                        |  10 +
+ src/app/(app)/profilo/ProfiloClient.tsx       |   4 +
+ src/app/(app)/profilo/actions.ts              |   2 +-
+ src/app/(app)/profilo/page.tsx                |   9 +
+ src/app/globals.css                           |  62 +++-
+ src/app/staff/actions.ts                      |  28 ++
+ src/app/staff/page.tsx                        |  27 ++
+ .../staff/protesti/[id]/EsitoProtestiForm.tsx |  45 +++
+ src/app/staff/protesti/[id]/page.tsx          | 102 ++++++
+ src/components/ComeSiCalcola.tsx              |   2 +-
+ src/components/DatiForm.tsx                   |  19 +-
+ src/components/DatiSheet.tsx                  |  11 +
+ src/components/SchedaPersona.tsx              |   2 +
+ src/components/VerificaProtestiPanel.tsx      | 224 +++++++++++++
+ src/content/informativa.ts                    |  12 +-
+ src/lib/affidabilita.ts                       |   8 +-
+ src/lib/candidati.ts                          |   7 +-
+ src/lib/database-proprietario.ts              |   4 +
+ src/lib/match/candidato.ts                    |   3 +
+ src/lib/match/proprietario.ts                 |   4 +-
+ src/lib/notifiche.ts                          |  17 +
+ src/lib/proprietario/possibili-inquilini.ts   |   8 +-
+ src/lib/proprietario/possibili-server.ts      |   3 +-
+ src/lib/protesti.ts                           | 101 ++++++
+ src/lib/types.ts                              |   7 +
+ src/lib/verifica-inquilino.ts                 |   5 +-
+ src/lib/verifica.ts                           |  12 +-
+ .../migrations/0038_verifica_protesti.sql     | 316 ++++++++++++++++++
+ 42 files changed, 1487 insertions(+), 68 deletions(-)
+ create mode 100644 scripts/db/protesti.sql
+ create mode 100644 scripts/test-protesti.mjs
+ create mode 100644 src/app/staff/protesti/[id]/EsitoProtestiForm.tsx
+ create mode 100644 src/app/staff/protesti/[id]/page.tsx
+ create mode 100644 src/components/VerificaProtestiPanel.tsx
+ create mode 100644 src/lib/protesti.ts
+ create mode 100644 supabase/migrations/0038_verifica_protesti.sql
+
+diff --git a/package.json b/package.json
+index ed38ab7..8c171b9 100644
+--- a/package.json
++++ b/package.json
+@@ -8,7 +8,7 @@
+     "start": "next start",
+     "lint": "eslint",
+     "pretest": "node scripts/controlla-dipendenze.mjs",
+-    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-affidabilita.mjs scripts/test-profilo-gestione.mjs scripts/test-avvisi-profilo.mjs scripts/test-raccomandato.mjs scripts/test-home-proprietario.mjs scripts/test-richieste.mjs scripts/test-database-proprietario.mjs scripts/test-affitto-contratto.mjs scripts/test-profilo-proprietario.mjs scripts/test-stile.mjs scripts/test-verifica-immobile.mjs scripts/test-db-richieste.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-dati-immobile.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-affidabilita.mjs scripts/test-profilo-gestione.mjs scripts/test-avvisi-profilo.mjs scripts/test-raccomandato.mjs scripts/test-home-proprietario.mjs scripts/test-richieste.mjs scripts/test-database-proprietario.mjs scripts/test-affitto-contratto.mjs scripts/test-profilo-proprietario.mjs scripts/test-stile.mjs scripts/test-verifica-immobile.mjs scripts/test-protesti.mjs scripts/test-db-richieste.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-dati-immobile.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/db/protesti.sql b/scripts/db/protesti.sql
+new file mode 100644
+index 0000000..98cd3c9
+--- /dev/null
++++ b/scripts/db/protesti.sql
+@@ -0,0 +1,215 @@
++-- ============================================================
++-- Prova della migrazione 0038 (verifica dei protesti da parte dello staff) su un PostgreSQL vero.
++-- Database con lo stub di Supabase e TUTTE le migrazioni già applicate. Ogni controllo scrive «OK: ...» o ferma tutto.
++-- ============================================================
++\set ON_ERROR_STOP on
++\set QUIET on
++set client_min_messages = notice;
++
++create schema t;
++create table t.esiti (n serial, testo text);
++create function t.ok(c boolean, msg text) returns void language plpgsql as $$
++begin
++  if c is not true then raise exception 'CONTROLLO FALLITO: %', msg; end if;
++  insert into t.esiti (testo) values (msg);
++  raise notice 'OK: %', msg;
++end $$;
++create function t.fallisce(sql text, codice text, msg text) returns void language plpgsql as $$
++declare e text;
++begin
++  begin execute sql; exception when others then e := sqlerrm; end;
++  if e is null then raise exception 'CONTROLLO FALLITO (nessun errore): %', msg; end if;
++  if position(codice in e) = 0 then raise exception 'CONTROLLO FALLITO (errore diverso: %): %', e, msg; end if;
++  insert into t.esiti (testo) values (msg);
++  raise notice 'OK: %', msg;
++end $$;
++create function t.righe(sql text) returns int language plpgsql as $$
++declare n int;
++begin execute sql; get diagnostics n = row_count; return n; end $$;
++create function t.come(utente uuid) returns void language plpgsql as $$
++begin
++  perform set_config('request.jwt.claim.sub', coalesce(utente::text, ''), false);
++  if utente is null then set role anon; else set role authenticated; end if;
++end $$;
++create function t.torna() returns void language plpgsql as $$
++begin reset role; perform set_config('request.jwt.claim.sub', '', false); end $$;
++grant usage on schema t to anon, authenticated;
++grant select, insert on t.esiti to anon, authenticated;
++grant usage on all sequences in schema t to anon, authenticated;
++grant execute on all functions in schema t to anon, authenticated;
++create function t.utente(id uuid, email text, ruolo text, nome text) returns void language sql as $$
++  insert into auth.users (id, email, raw_user_meta_data) values (id, email, jsonb_build_object('ruolo', ruolo, 'nome', nome, 'cognome', 'Prova', 'privacy_accettata', true));
++$$;
++
++-- ---- i personaggi ----
++select t.utente('11111111-0000-0000-0000-000000000001', 't1@x.it', 'inquilino', 'Anna');
++select t.utente('11111111-0000-0000-0000-000000000002', 't2@x.it', 'inquilino', 'Bruno');
++select t.utente('11111111-0000-0000-0000-000000000003', 't3@x.it', 'inquilino', 'Carla');
++select t.utente('11111111-0000-0000-0000-000000000004', 't4@x.it', 'inquilino', 'Dario');
++select t.utente('22222222-0000-0000-0000-000000000001', 'o1@x.it', 'proprietario', 'Mario');
++select t.utente('99999999-0000-0000-0000-000000000001', 's1@x.it', 'proprietario', 'Staff');
++insert into staff (user_id) values ('99999999-0000-0000-0000-000000000001');
++-- una casa verificata dell'owner, con la sua prova (per la vista dei candidati)
++insert into listings (id, owner_id, titolo, zona, prezzo, pubblicato) values ('aaaaaaaa-0000-0000-0000-000000000001', '22222222-0000-0000-0000-000000000001', 'Bilocale luminoso', 'Isola, Milano', 1250, true);
++insert into documenti_verifica (owner_id, listing_id, tipo, percorso, nome_file) values ('22222222-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001', 'proprieta', '22222222-0000-0000-0000-000000000001/proprieta-1.pdf', 'visura.pdf');
++update listings set verifica_stato = 'verificato' where id = 'aaaaaaaa-0000-0000-0000-000000000001';
++-- Anna e Bruno si candidano
++select t.come('11111111-0000-0000-0000-000000000001'); insert into candidature (id, listing_id, tenant_id) values ('cccccccc-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001'); select t.torna();
++select t.come('11111111-0000-0000-0000-000000000002'); insert into candidature (id, listing_id, tenant_id) values ('cccccccc-0000-0000-0000-000000000002', 'aaaaaaaa-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000002'); select t.torna();
++
++select t.ok((select protesti_verifica_stato::text from tenant_profiles where profile_id = '11111111-0000-0000-0000-000000000001') = 'non_avviata', 'P01 ogni inquilino parte con la verifica dei protesti «non avviata»');
++
++-- ---- nessuno scrive lo stato a mano ----
++select t.come('11111111-0000-0000-0000-000000000001');
++select t.fallisce($q$update tenant_profiles set protesti_verifica_stato = 'verificato' where profile_id = '11111111-0000-0000-0000-000000000001'$q$, 'VERIFICA_RISERVATA', 'P02 l''inquilino non può mettersi «verificato» da solo');
++select t.fallisce($q$update tenant_profiles set protesti_verificati_at = now() where profile_id = '11111111-0000-0000-0000-000000000001'$q$, 'VERIFICA_RISERVATA', 'P03 né scriversi la data di verifica');
++select t.fallisce($q$update tenant_profiles set protesti_verifica_esito_note = 'tutto ok' where profile_id = '11111111-0000-0000-0000-000000000001'$q$, 'VERIFICA_RISERVATA', 'P04 né la nota dell''esito');
++select t.fallisce($q$update tenant_profiles set protesti_verifica_inviata_at = now() where profile_id = '11111111-0000-0000-0000-000000000001'$q$, 'VERIFICA_RISERVATA', 'P05 né la data di invio');
++select t.torna();
++
++-- ---- la richiesta: cosa serve ----
++select t.come('11111111-0000-0000-0000-000000000001');
++select t.fallisce($q$select richiedi_verifica_protesti()$q$, 'PROTESTI_NON_DICHIARATI', 'P06 senza aver risposto alla domanda sui protesti non si chiede la verifica (non c''è niente da confrontare)');
++update tenant_profiles set protestato = false where profile_id = '11111111-0000-0000-0000-000000000001';
++select t.fallisce($q$select richiedi_verifica_protesti()$q$, 'DOCUMENTI_PROTESTI_MANCANTI', 'P07 senza documenti nemmeno');
++select t.torna();
++insert into storage.objects (bucket_id, name) values
++ ('documenti-verifica', '11111111-0000-0000-0000-000000000001/inquilino-identita-a.pdf'),
++ ('documenti-verifica', '11111111-0000-0000-0000-000000000001/inquilino-protesti-a.pdf');
++select t.come('11111111-0000-0000-0000-000000000001');
++insert into documenti_inquilino (tenant_id, tipo, percorso, nome_file) values ('11111111-0000-0000-0000-000000000001', 'identita', '11111111-0000-0000-0000-000000000001/inquilino-identita-a.pdf', 'carta.pdf');
++select t.fallisce($q$select richiedi_verifica_protesti()$q$, 'DOCUMENTI_PROTESTI_MANCANTI', 'P08 con solo il documento d''identità manca il certificato dei protesti');
++select t.fallisce($q$insert into documenti_inquilino (tenant_id, tipo, percorso, nome_file) values ('11111111-0000-0000-0000-000000000001', 'protesti', '11111111-0000-0000-0000-000000000001/inquilino-reddito-zz.pdf', 'x.pdf')$q$, 'row-level security', 'P09 il certificato si registra solo con il nome che il caricamento dà ai certificati (non con quello di un''altra prova)');
++select t.fallisce($q$insert into documenti_inquilino (tenant_id, tipo, percorso, nome_file) values ('11111111-0000-0000-0000-000000000001', 'tipo_inventato', '11111111-0000-0000-0000-000000000001/inquilino-tipo_inventato-zz.pdf', 'x.pdf')$q$, 'documenti_inquilino_tipo_check', 'P10 i tipi di documento restano solo quelli noti');
++insert into documenti_inquilino (tenant_id, tipo, percorso, nome_file) values ('11111111-0000-0000-0000-000000000001', 'protesti', '11111111-0000-0000-0000-000000000001/inquilino-protesti-a.pdf', 'certificato-protesti.pdf');
++select t.torna();
++-- Dario ha il certificato ma NON il documento d'identità
++insert into storage.objects (bucket_id, name) values ('documenti-verifica', '11111111-0000-0000-0000-000000000004/inquilino-protesti-a.pdf');
++select t.come('11111111-0000-0000-0000-000000000004');
++update tenant_profiles set protestato = false where profile_id = '11111111-0000-0000-0000-000000000004';
++insert into documenti_inquilino (tenant_id, tipo, percorso, nome_file) values ('11111111-0000-0000-0000-000000000004', 'protesti', '11111111-0000-0000-0000-000000000004/inquilino-protesti-a.pdf', 'cert.pdf');
++select t.fallisce($q$select richiedi_verifica_protesti()$q$, 'DOCUMENTI_PROTESTI_MANCANTI', 'P10b con il solo certificato manca il documento d''identità');
++select t.torna();
++select t.come('22222222-0000-0000-0000-000000000001');
++select t.fallisce($q$select richiedi_verifica_protesti()$q$, 'NON_INQUILINO', 'P11 un proprietario non può chiedere la verifica dei protesti');
++select t.torna();
++select t.come(null);
++select t.fallisce($q$select richiedi_verifica_protesti()$q$, 'permission denied', 'P12 chi non ha fatto l''accesso nemmeno');
++select t.torna();
++
++-- ---- Anna chiede la verifica ----
++select t.come('11111111-0000-0000-0000-000000000001');
++select richiedi_verifica_protesti();
++select t.torna();
++select t.ok((select protesti_verifica_stato::text from tenant_profiles where profile_id = '11111111-0000-0000-0000-000000000001') = 'in_verifica' and (select protesti_verifica_inviata_at from tenant_profiles where profile_id = '11111111-0000-0000-0000-000000000001') is not null, 'P13 con la risposta, l''identità e il certificato la verifica parte: «in verifica», con la data di invio');
++select t.come('11111111-0000-0000-0000-000000000001');
++select t.fallisce($q$select richiedi_verifica_protesti()$q$, 'PROTESTI_GIA_IN_VERIFICA', 'P14 non si chiede due volte');
++select t.ok(t.righe($q$delete from documenti_inquilino where tipo = 'protesti' and tenant_id = '11111111-0000-0000-0000-000000000001'$q$) = 0, 'P15 mentre è in verifica il certificato non si toglie');
++select t.ok(t.righe($q$delete from documenti_inquilino where tipo = 'identita' and tenant_id = '11111111-0000-0000-0000-000000000001'$q$) = 0, 'P16 nemmeno il documento d''identità (serve anche per il reddito, ma qui serve allo staff)');
++select t.ok(t.righe($q$delete from storage.objects where name = '11111111-0000-0000-0000-000000000001/inquilino-protesti-a.pdf'$q$) = 0, 'P17 e il FILE del certificato non si cancella dall''archivio');
++select t.torna();
++
++-- ---- lo staff ----
++select t.come('11111111-0000-0000-0000-000000000002');
++select t.fallisce($q$select esito_verifica_protesti('11111111-0000-0000-0000-000000000001', 'nessun_protesto', null)$q$, 'NON_STAFF', 'P18 un inquilino non può dare l''esito (nemmeno su se stesso)');
++select t.fallisce($q$select * from protesti_da_verificare()$q$, 'NON_STAFF', 'P19 né vedere l''elenco');
++select t.fallisce($q$select * from dati_per_verifica_protesti('11111111-0000-0000-0000-000000000001')$q$, 'NON_STAFF', 'P20 né i dati di un altro');
++select t.torna();
++select t.come('22222222-0000-0000-0000-000000000001');
++select t.fallisce($q$select esito_verifica_protesti('11111111-0000-0000-0000-000000000001', 'nessun_protesto', null)$q$, 'NON_STAFF', 'P21 e nemmeno un proprietario');
++select t.torna();
++select t.come('99999999-0000-0000-0000-000000000001');
++select t.ok((select count(*) from protesti_da_verificare()) = 1 and (select nome from protesti_da_verificare()) = 'Anna', 'P22 lo staff vede nell''elenco solo chi è in verifica');
++select t.ok((select protestato from dati_per_verifica_protesti('11111111-0000-0000-0000-000000000001')) = false and (select protesti_verifica_stato from dati_per_verifica_protesti('11111111-0000-0000-0000-000000000001')) = 'in_verifica', 'P23 e legge ciò che la persona ha dichiarato (nessun protesto) per confrontarlo con il certificato');
++select t.fallisce($q$select esito_verifica_protesti('11111111-0000-0000-0000-000000000001', 'forse', null)$q$, 'ESITO_NON_VALIDO', 'P24 un esito inventato non vale');
++select t.fallisce($q$select esito_verifica_protesti('11111111-0000-0000-0000-000000000001', 'respingi', null)$q$, 'PROTESTI_NOTA_OBBLIGATORIA', 'P25 per respingere serve dire perché');
++select t.fallisce($q$select esito_verifica_protesti('11111111-0000-0000-0000-000000000001', 'respingi', '  ')$q$, 'PROTESTI_NOTA_OBBLIGATORIA', 'P26 una nota vuota non vale');
++select t.fallisce($q$select esito_verifica_protesti('11111111-0000-0000-0000-000000000003', 'nessun_protesto', null)$q$, 'PROTESTI_NON_IN_VERIFICA', 'P27 non si decide su chi non ha chiesto la verifica');
++select t.fallisce($q$select esito_verifica_protesti('99999999-0000-0000-0000-0000000000ff', 'nessun_protesto', null)$q$, 'INQUILINO_INESISTENTE', 'P28 né su chi non esiste');
++select esito_verifica_protesti('11111111-0000-0000-0000-000000000001', 'respingi', 'Il certificato è illeggibile: caricane uno più nitido');
++select t.torna();
++select t.ok((select protesti_verifica_stato::text from tenant_profiles where profile_id = '11111111-0000-0000-0000-000000000001') = 'non_avviata' and (select protesti_verifica_esito_note from tenant_profiles where profile_id = '11111111-0000-0000-0000-000000000001') = 'Il certificato è illeggibile: caricane uno più nitido', 'P29 respinto: torna «non avviata», con la nota che la persona leggerà');
++select t.ok((select count(*) from notifiche where user_id = '11111111-0000-0000-0000-000000000001' and tipo = 'protesti_respinti' and link = '/profilo') = 1, 'P30 e riceve una notifica «protesti respinti»');
++select t.come('11111111-0000-0000-0000-000000000001');
++select t.ok(t.righe($q$delete from documenti_inquilino where tipo = 'protesti' and tenant_id = '11111111-0000-0000-0000-000000000001'$q$) = 1, 'P31 dopo il rifiuto il certificato si può togliere (e caricarne un altro)');
++select t.torna();
++insert into documenti_inquilino (tenant_id, tipo, percorso, nome_file) values ('11111111-0000-0000-0000-000000000001', 'protesti', '11111111-0000-0000-0000-000000000001/inquilino-protesti-b.pdf', 'certificato-nuovo.pdf');
++select t.come('11111111-0000-0000-0000-000000000001');
++select richiedi_verifica_protesti();
++select t.torna();
++select t.ok((select protesti_verifica_esito_note from tenant_profiles where profile_id = '11111111-0000-0000-0000-000000000001') is null, 'P32 chiedendo di nuovo la nota vecchia sparisce');
++
++-- ---- nessun protesto: verificato ----
++select t.come('99999999-0000-0000-0000-000000000001');
++select esito_verifica_protesti('11111111-0000-0000-0000-000000000001', 'nessun_protesto', null);
++select t.torna();
++select t.ok((select protesti_verifica_stato::text from tenant_profiles where profile_id = '11111111-0000-0000-0000-000000000001') = 'verificato' and (select protestato from tenant_profiles where profile_id = '11111111-0000-0000-0000-000000000001') = false and (select protesti_verificati_at from tenant_profiles where profile_id = '11111111-0000-0000-0000-000000000001') is not null, 'P33 «nessun protesto»: verificato, protestato = no, con la data');
++select t.ok((select count(*) from notifiche where user_id = '11111111-0000-0000-0000-000000000001' and tipo = 'protesti_verificati' and (dati->>'protestato')::boolean = false) = 1, 'P34 la notifica dice che non risultano protesti');
++
++-- ---- una volta verificato, non si cambia da soli ----
++select t.come('11111111-0000-0000-0000-000000000001');
++select t.fallisce($q$update tenant_profiles set protestato = true where profile_id = '11111111-0000-0000-0000-000000000001'$q$, 'PROTESTI_VERIFICATI', 'P35 i protesti verificati non si cambiano da soli');
++update tenant_profiles set protestato = false where profile_id = '11111111-0000-0000-0000-000000000001';
++select t.ok(true, 'P36 riscrivere lo STESSO valore (come fa il salvataggio dei dati) non dà errore');
++update tenant_profiles set professione = 'Insegnante' where profile_id = '11111111-0000-0000-0000-000000000001';
++select t.ok((select professione from tenant_profiles where profile_id = '11111111-0000-0000-0000-000000000001') = 'Insegnante', 'P37 e il resto dei dati si modifica come prima');
++select t.fallisce($q$select richiedi_verifica_protesti()$q$, 'PROTESTI_GIA_VERIFICATI', 'P38 non si richiede una verifica già fatta');
++select t.ok(t.righe($q$delete from documenti_inquilino where tipo = 'protesti' and tenant_id = '11111111-0000-0000-0000-000000000001'$q$) = 0, 'P39 il certificato di una verifica fatta non si toglie');
++select t.torna();
++
++-- ---- il reddito è indipendente ----
++select t.ok((select verifica_stato::text from tenant_profiles where profile_id = '11111111-0000-0000-0000-000000000001') = 'non_avviata' and (select verificato from tenant_profiles where profile_id = '11111111-0000-0000-0000-000000000001') = false, 'P40 verificare i protesti non verifica il reddito');
++update tenant_profiles set verificato = true, verifica_stato = 'verificato' where profile_id = '11111111-0000-0000-0000-000000000001';
++select t.come('11111111-0000-0000-0000-000000000001');
++update tenant_profiles set reddito_mensile = 1800 where profile_id = '11111111-0000-0000-0000-000000000001';
++select t.torna();
++select t.ok((select verificato from tenant_profiles where profile_id = '11111111-0000-0000-0000-000000000001') = false and (select protesti_verifica_stato::text from tenant_profiles where profile_id = '11111111-0000-0000-0000-000000000001') = 'verificato', 'P41 cambiare il reddito azzera SOLO la verifica del reddito: i protesti restano verificati');
++
++-- ---- Bruno dichiarava «nessun protesto» ma il certificato dice il contrario ----
++insert into storage.objects (bucket_id, name) values ('documenti-verifica', '11111111-0000-0000-0000-000000000002/inquilino-identita-a.pdf'), ('documenti-verifica', '11111111-0000-0000-0000-000000000002/inquilino-protesti-a.pdf');
++select t.come('11111111-0000-0000-0000-000000000002');
++update tenant_profiles set protestato = false where profile_id = '11111111-0000-0000-0000-000000000002';
++insert into documenti_inquilino (tenant_id, tipo, percorso, nome_file) values ('11111111-0000-0000-0000-000000000002', 'identita', '11111111-0000-0000-0000-000000000002/inquilino-identita-a.pdf', 'carta.pdf'), ('11111111-0000-0000-0000-000000000002', 'protesti', '11111111-0000-0000-0000-000000000002/inquilino-protesti-a.pdf', 'cert.pdf');
++select richiedi_verifica_protesti();
++select t.torna();
++select t.come('99999999-0000-0000-0000-000000000001');
++select esito_verifica_protesti('11111111-0000-0000-0000-000000000002', 'protestato', null);
++select t.torna();
++select t.ok((select protestato from tenant_profiles where profile_id = '11111111-0000-0000-0000-000000000002') = true and (select protesti_verifica_stato::text from tenant_profiles where profile_id = '11111111-0000-0000-0000-000000000002') = 'verificato', 'P42 il risultato dello staff PREVALE sulla dichiarazione: dichiarava «nessun protesto», il certificato dice che ce ne sono: ora risulta protestato, verificato');
++select t.ok((select count(*) from notifiche where user_id = '11111111-0000-0000-0000-000000000002' and tipo = 'protesti_verificati' and (dati->>'protestato')::boolean = true) = 1, 'P43 e la notifica lo dice');
++
++-- ---- il documento d'identità serve alle due verifiche ----
++insert into storage.objects (bucket_id, name) values ('documenti-verifica', '11111111-0000-0000-0000-000000000003/inquilino-identita-a.pdf'), ('documenti-verifica', '11111111-0000-0000-0000-000000000003/inquilino-protesti-a.pdf');
++select t.come('11111111-0000-0000-0000-000000000003');
++update tenant_profiles set protestato = true where profile_id = '11111111-0000-0000-0000-000000000003';
++insert into documenti_inquilino (tenant_id, tipo, percorso, nome_file) values ('11111111-0000-0000-0000-000000000003', 'identita', '11111111-0000-0000-0000-000000000003/inquilino-identita-a.pdf', 'carta.pdf'), ('11111111-0000-0000-0000-000000000003', 'protesti', '11111111-0000-0000-0000-000000000003/inquilino-protesti-a.pdf', 'cert.pdf');
++select t.ok(t.righe($q$delete from storage.objects where name = '11111111-0000-0000-0000-000000000003/inquilino-protesti-a.pdf'$q$) = 1, 'P44 prima dell''invio il file del certificato si toglie dall''archivio');
++insert into storage.objects (bucket_id, name) values ('documenti-verifica', '11111111-0000-0000-0000-000000000003/inquilino-protesti-b.pdf');
++insert into documenti_inquilino (tenant_id, tipo, percorso, nome_file) values ('11111111-0000-0000-0000-000000000003', 'protesti', '11111111-0000-0000-0000-000000000003/inquilino-protesti-b.pdf', 'cert2.pdf');
++select richiedi_verifica_protesti();
++select t.ok(t.righe($q$delete from storage.objects where name = '11111111-0000-0000-0000-000000000003/inquilino-identita-a.pdf'$q$) = 0, 'P45 con i protesti in verifica il documento d''identità non si cancella dall''archivio (anche se il reddito non è partito)');
++select t.torna();
++
++-- ---- il proprietario vede solo «verificato: sì/no» ----
++select t.come('22222222-0000-0000-0000-000000000001');
++select t.ok((select protesti_verificati from candidati_del_proprietario where tenant_id = '11111111-0000-0000-0000-000000000001') = true, 'P46 il proprietario vede che i protesti di Anna sono verificati (sì)');
++select t.ok((select protesti_verificati from candidati_del_proprietario where tenant_id = '11111111-0000-0000-0000-000000000002') = true and (select protestato from candidati_del_proprietario where tenant_id = '11111111-0000-0000-0000-000000000002') = true, 'P47 e di Bruno: verificato, con il valore verificato (protestato)');
++select t.fallisce($q$select tenant_id, protesti_verifica_note from candidati_del_proprietario$q$, 'column', 'P48 ma non vede la nota dell''esito né lo stato interno');
++select t.ok((select count(*) from documenti_inquilino) = 0, 'P49 e non legge nessun documento degli inquilini');
++select t.torna();
++select t.come('11111111-0000-0000-0000-000000000002');
++select t.ok((select count(*) from documenti_inquilino) = 2 and (select count(*) from documenti_inquilino where tenant_id <> '11111111-0000-0000-0000-000000000002') = 0, 'P50 un inquilino vede solo i propri documenti');
++select t.torna();
++
++-- ---- chi è stato scartato: niente sui protesti ----
++select t.come('11111111-0000-0000-0000-000000000004'); insert into candidature (id, listing_id, tenant_id) values ('cccccccc-0000-0000-0000-000000000004', 'aaaaaaaa-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000004'); select t.torna();
++select t.come('22222222-0000-0000-0000-000000000001');
++select decidi_candidatura('cccccccc-0000-0000-0000-000000000004', 'rifiutata', 'altro_candidato', '{"match":{"punteggio":10}}'::jsonb);
++select t.ok((select protesti_verificati from candidati_del_proprietario where tenant_id = '11111111-0000-0000-0000-000000000004') is null and (select protestato from candidati_del_proprietario where tenant_id = '11111111-0000-0000-0000-000000000004') is null, 'P50b di un candidato SCARTATO il proprietario non vede più niente sui protesti (né il valore né se è verificato)');
++select t.torna();
++
++-- ---- i tipi di notifica ----
++select t.fallisce($q$insert into notifiche (user_id, tipo, link) values ('11111111-0000-0000-0000-000000000001', 'tipo_inventato', '/x')$q$, 'notifiche_tipo_check', 'P51 i tipi di notifica restano solo quelli noti');
++select t.ok((select count(*) from notifiche where tipo in ('protesti_verificati', 'protesti_respinti')) = 3, 'P52 i due tipi nuovi sono ammessi');
++select t.ok((select count(*) from t.esiti) = 54, 'P53 nessun controllo è stato saltato (ne servono 54 prima di questo)');
++select 'TUTTI I CONTROLLI: ' || count(*) from t.esiti;
+diff --git a/scripts/test-affidabilita.mjs b/scripts/test-affidabilita.mjs
+index 881d6c5..d206861 100644
+--- a/scripts/test-affidabilita.mjs
++++ b/scripts/test-affidabilita.mjs
+@@ -106,7 +106,7 @@ test("voci: chi controlla cosa (solo il reddito lo controlla lo staff) e dove si
+   const r = calcola(); const [red, pro, gar] = r.voci;
+   assert.deepEqual([red.origine, pro.origine, gar.origine], ["verificato", "dichiarato", "dichiarato"]); assert.deepEqual([red.massimo, pro.massimo, gar.massimo], [50, 30, 20]);
+   assert.deepEqual([red.sezione, pro.sezione, gar.sezione], ["verifica", "dati", "dati"]); assert.equal(red.suggerimento, "Verifica il tuo reddito"); assert.equal(pro.suggerimento, "Indica i protesti nei tuoi dati"); assert.equal(gar.suggerimento, "Indica un garante o una fideiussione");
+-  assert.match(calcola({ verificato: true }).voci[0].nota, /staff/); assert.match(calcola({ protestato: false }).voci[1].nota, /Nessuno lo controlla/); assert.match(calcola({ garante: true }).voci[2].nota, /Nessuno lo controlla/);
++  assert.match(calcola({ verificato: true }).voci[0].nota, /staff/); assert.match(calcola({ protestato: false }).voci[1].nota, /Non ancora verificato: vale quanto hai dichiarato/); assert.match(calcola({ protestato: false, protestiVerificati: true }).voci[1].nota, /Controllato dallo staff/); assert.match(calcola({ garante: true }).voci[2].nota, /Nessuno lo controlla/);
+ });
+ 
+ test("protesti: «No» dà +30; «Sì» e «non indicato» tolgono 30; solo il «non indicato» si può correggere (e vale 60 punti), chi ha dichiarato dei protesti non ha niente da guadagnare", () => {
+@@ -275,7 +275,7 @@ test("informativa: i numeri vengono dalle regole del calcolo (nessun punteggio s
+ test("informativa legale: dice che i protesti (o non rispondere) fanno scendere il punteggio, con lo stesso numero della formula e nuova versione senza far riaccettare", () => {
+   const inf = caricaTs(path.join(radice, "src", "content", "informativa.ts")); const testo = JSON.stringify(inf.INFORMATIVA);
+   assert.ok(testo.includes(`la risposta è obbligatoria e «non indicato» vale come «sì»), il punteggio di affidabilità scende di ${af.PUNTI_AFFIDABILITA.protesti} punti`)); assert.ok(testo.includes("Il punteggio non è mai inferiore a zero"));
+-  const vN = Number(inf.INFORMATIVA.versione.match(/^2026-10-provvisoria-(\d+)$/)?.[1]); assert.ok(vN >= 20, "versione: " + inf.INFORMATIVA.versione); for (let v = 20; v < vN; v++) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} deve restare equivalente`); assert.ok(inf.INFORMATIVA.equivalenti.every((e) => Number(e.split("-").pop()) >= 20), "le versioni prima della 20 non sono equivalenti: cambia chi vede il profilo");
++  const vN = Number(inf.INFORMATIVA.versione.match(/^2026-10-provvisoria-(\d+)$/)?.[1]); assert.ok(vN >= 22, "versione: " + inf.INFORMATIVA.versione); for (let v = 22; v < vN; v++) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} deve restare equivalente`); assert.ok(inf.INFORMATIVA.equivalenti.every((e) => Number(e.split("-").pop()) >= 20), "le versioni prima della 20 non sono equivalenti: cambia chi vede il profilo");
+ });
+ 
+ test("stile: una voce che toglie punti ha un aspetto suo (come la voce presa e quella non presa)", () => {
+diff --git a/scripts/test-database-proprietario.mjs b/scripts/test-database-proprietario.mjs
+index 10c2244..7956edb 100644
+--- a/scripts/test-database-proprietario.mjs
++++ b/scripts/test-database-proprietario.mjs
+@@ -99,7 +99,7 @@ test("raggruppa: su 300 insiemi casuali ogni candidatura compare una volta sola,
+ // ============================================================ la scheda
+ test("scheda di un candidato: nome breve, lavoro, affidabilità e match (percentuale, bloccato o nessun criterio), badge, recensioni, reddito verificato, estratto", () => {
+   const c = cand("A", "in_attesa", { valutazione: { match: { punteggio: 82, etichetta: "Ottima", bloccato: false, mancanti: [], criteri: [], incompleto: true }, affidabilita: 85, recensioni: { numero: 3, media: 4.3 }, raccomandato: true, congelata: false }, tenant_profiles: { professione: " Insegnante ", reddito_mensile: 2000, reddito_nucleo: null, verificato: true, presentazione: "x ".repeat(200), avatar_url: "a.jpg" } });
+-  const d = db.datiSchedaCandidato(c); assert.ok(d.presentazione.endsWith("…") && d.presentazione.length <= 161, "estratto tagliato con i puntini"); assert.deepEqual({ ...d, presentazione: "estratto" }, { nome: "Anna V.", professione: "Insegnante", avatarUrl: "a.jpg", affidabilita: 85, match: { tipo: "pct", valore: 82 }, raccomandato: true, recensioni: { numero: 3, media: 4.3 }, redditoVerificato: true, presentazione: "estratto", incompleto: true });
++  const d = db.datiSchedaCandidato(c); assert.ok(d.presentazione.endsWith("…") && d.presentazione.length <= 161, "estratto tagliato con i puntini"); assert.deepEqual({ ...d, presentazione: "estratto" }, { nome: "Anna V.", professione: "Insegnante", protestiVerificati: null, avatarUrl: "a.jpg", affidabilita: 85, match: { tipo: "pct", valore: 82 }, raccomandato: true, recensioni: { numero: 3, media: 4.3 }, redditoVerificato: true, presentazione: "estratto", incompleto: true });
+   const b = db.datiSchedaCandidato(cand("A", "in_attesa", { valutazione: { match: { punteggio: 95, etichetta: "x", bloccato: true, mancanti: ["Reddito verificato"], criteri: [], incompleto: false }, affidabilita: 20, recensioni: null, raccomandato: false, congelata: false } })); assert.deepEqual(b.match, { tipo: "bloccato", mancanti: ["Reddito verificato"] }, "bloccato conta più della percentuale");
+   assert.deepEqual(db.datiSchedaCandidato(cand("A", "in_attesa", { valutazione: { match: { punteggio: null, etichetta: null, bloccato: false, mancanti: [], criteri: [], incompleto: false }, affidabilita: 0, recensioni: null, raccomandato: false, congelata: false } })).match, { tipo: "nessuno" });
+ });
+diff --git a/scripts/test-db-richieste.mjs b/scripts/test-db-richieste.mjs
+index 770313f..0934ad6 100644
+--- a/scripts/test-db-richieste.mjs
++++ b/scripts/test-db-richieste.mjs
+@@ -110,3 +110,18 @@ test("migrazione 0037 su PostgreSQL vero: le case verificate senza prova di prop
+     r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m37)]); assert.equal(r.status, 0, "rieseguire la 0037 non deve dare errori: " + r.stderr.slice(0, 300)); assert.match(r.stderr, /tornate «da verificare»: 0/, "la seconda volta non c'è più niente da riallineare");
+   } finally { fs.rmSync(nullo, { force: true }); esegui(["-d", "postgres", "-c", `drop database if exists ${db}`]); }
+ });
++
++test("migrazione 0038 su PostgreSQL vero: la verifica dei protesti da parte dello staff (richiesta, esito, il risultato dello staff prevale, i protesti verificati non si cambiano da soli, documenti, notifiche, cosa vede il proprietario) (55 controlli)", { skip: psqlCmd ? false : "imposta MATCHAMI_PSQL per eseguire le prove SQL su un PostgreSQL vero" }, () => {
++  const [bin, ...args] = psqlCmd.split(/\s+/); const db = "matchami_test_protesti"; const esegui = (extra) => spawnSync(bin, [...args, "-X", "-q", ...extra], { encoding: "utf8" });
++  const migrazioni = fs.readdirSync(path.join(radice, "supabase", "migrations")).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort(); assert.ok(migrazioni.includes("0038_verifica_protesti.sql"), "manca la migrazione 0038");
++  const nullo = path.join(os.tmpdir(), `matchami-protesti-${process.pid}.txt`);
++  try {
++    let r = esegui(["-d", "postgres", "-c", `drop database if exists ${db}`, "-c", `create database ${db}`]); assert.equal(r.status, 0, r.stderr);
++    r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "scripts", "db", "stub-supabase.sql")]); assert.equal(r.status, 0, r.stderr);
++    for (const m of migrazioni) { r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m)]); assert.equal(r.status, 0, `la migrazione ${m} non si applica: ${r.stderr.slice(0, 300)}`); }
++    r = esegui(["-d", db, "-o", nullo, "-f", path.join(radice, "scripts", "db", "protesti.sql")]); assert.ok(!/CONTROLLO FALLITO/.test(r.stderr), r.stderr.split("\n").filter((l) => /FALLITO|ERROR/.test(l)).slice(0, 4).join("\n")); assert.equal(r.status, 0, r.stderr.slice(0, 500));
++    const riusciti = (r.stderr.match(/NOTICE:\s+OK:/g) ?? []).length; assert.equal(riusciti, 55, `controlli riusciti: ${riusciti}`);
++    // la migrazione si può rieseguire senza errori
++    r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", "0038_verifica_protesti.sql")]); assert.equal(r.status, 0, "rieseguire la 0038 non deve dare errori: " + r.stderr.slice(0, 300));
++  } finally { fs.rmSync(nullo, { force: true }); esegui(["-d", "postgres", "-c", `drop database if exists ${db}`]); }
++});
+diff --git a/scripts/test-home-proprietario.mjs b/scripts/test-home-proprietario.mjs
+index 9176240..7d4d1d0 100644
+--- a/scripts/test-home-proprietario.mjs
++++ b/scripts/test-home-proprietario.mjs
+@@ -261,5 +261,5 @@ test("Database: ogni casa ha la sezione «Possibili match», con l'ancora a cui
+ 
+ test("informativa: dice che ai proprietari si mostra solo un NUMERO anonimo di inquilini compatibili, con la nuova versione; chi aveva le precedenti non deve riaccettare", () => {
+   const testo = JSON.stringify(inf.INFORMATIVA); assert.ok(testo.includes("QUANTI inquilini hanno una ricerca compatibile con il loro immobile")); assert.ok(testo.includes("è un numero anonimo, non vedono chi sono né nessun loro dato")); assert.ok(testo.includes("Se uno di loro si candida, il proprietario vede la candidatura come tutte le altre"));
+-  const vN = Number(inf.INFORMATIVA.versione.match(/^2026-10-provvisoria-(\d+)$/)?.[1]); assert.ok(vN >= 20, "versione: " + inf.INFORMATIVA.versione); for (let v = 20; v < vN; v++) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} deve restare equivalente`); assert.ok(inf.INFORMATIVA.equivalenti.every((e) => Number(e.split("-").pop()) >= 20), "le versioni prima della 20 non sono equivalenti: cambia chi vede il profilo"); assert.ok(!inf.INFORMATIVA.equivalenti.includes(inf.INFORMATIVA.versione));
++  const vN = Number(inf.INFORMATIVA.versione.match(/^2026-10-provvisoria-(\d+)$/)?.[1]); assert.ok(vN >= 22, "versione: " + inf.INFORMATIVA.versione); for (let v = 22; v < vN; v++) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} deve restare equivalente`); assert.ok(inf.INFORMATIVA.equivalenti.every((e) => Number(e.split("-").pop()) >= 20), "le versioni prima della 20 non sono equivalenti: cambia chi vede il profilo"); assert.ok(!inf.INFORMATIVA.equivalenti.includes(inf.INFORMATIVA.versione));
+ });
+diff --git a/scripts/test-home.mjs b/scripts/test-home.mjs
+index d599367..613f960 100644
+--- a/scripts/test-home.mjs
++++ b/scripts/test-home.mjs
+@@ -73,7 +73,7 @@ test("Home: la ricerca si cambia da qui (nessun collegamento al Profilo), la sch
+ });
+ 
+ test("Home: nel pannello dell'affidabilità c'è UN solo pulsante, «Modifica dati»; l'anello non è un pulsante e «Come si calcola» non c'è più", () => {
+-  const h = leggi("src", "app", "(app)", "HomeClient.tsx"); const pannello = h.slice(h.indexOf('<div className="hi-punteggio"'), h.indexOf('<div className="hi-ricerca">'));
++  const h = leggi("src", "app", "(app)", "HomeClient.tsx"); const pannello = h.slice(h.indexOf('<div className="hi-punteggio"'), h.indexOf('<div className="home-area">'));
+   assert.match(pannello, /<div className="hi-punteggio" role="group" aria-label=\{`Affidabilità \$\{affidabilita\.punteggio\} su 100, \$\{affidabilita\.label\}`\}>/);
+   assert.match(pannello, /<button type="button" className="hi-azione" onClick=\{\(\) => setSchedaDati\(true\)\}>\s+Modifica dati\s+<\/button>/); assert.equal([...pannello.matchAll(/<button/g)].length, 1, "ci deve essere un solo pulsante");
+   assert.ok(!/Come si calcola/.test(h), "resta il vecchio pulsante «Come si calcola»"); assert.ok(!/schedaPunteggio|SchedaAffidabilita|DatiPersonaliSheet/.test(h), "restano pezzi delle schede vecchie");
+@@ -82,7 +82,7 @@ test("Home: nel pannello dell'affidabilità c'è UN solo pulsante, «Modifica da
+ 
+ test("Home: «Modifica dati» apre la scheda unica qui (punteggio, dati, verifica), montata solo se aperta; salvando si chiude e lo dice; niente più rimandi al Profilo", () => {
+   const h = leggi("src", "app", "(app)", "HomeClient.tsx"); assert.match(h, /import \{ DatiSheet \} from "@\/components\/DatiSheet"/);
+-  assert.match(h, /\{schedaDati && \(\s+<DatiSheet\s+open\s+onClose=\{\(\) => setSchedaDati\(false\)\}\s+tenant=\{tenant\}\s+affidabilita=\{affidabilita\}\s+recensioni=\{recensioni\}\s+raccomandazione=\{raccomandazione\}\s+verificaPanel=\{verificaPanel\}\s+onSalvata=\{\(\) => \{\s+setSchedaDati\(false\);\s+setAvviso\(\{ errore: false, testo: "Dati aggiornati\." \}\);/);
++  assert.match(h, /\{schedaDati && \(\s+<DatiSheet\s+open\s+onClose=\{\(\) => setSchedaDati\(false\)\}\s+tenant=\{tenant\}\s+affidabilita=\{affidabilita\}\s+recensioni=\{recensioni\}\s+raccomandazione=\{raccomandazione\}\s+verificaPanel=\{verificaPanel\}\s+protestiPanel=\{protestiPanel\}\s+onSalvata=\{\(\) => \{\s+setSchedaDati\(false\);\s+setAvviso\(\{ errore: false, testo: "Dati aggiornati\." \}\);/);
+   assert.ok(!/useRouter|router\.push/.test(h), "la Home rimanda ancora altrove"); assert.ok(!/href="\/profilo"/.test(h));
+   const pg = leggi("src", "app", "(app)", "page.tsx"); assert.match(pg, /from\("documenti_inquilino"\)\.select\("id, tipo, percorso, nome_file"\)\.eq\("tenant_id", userId\)/); assert.match(pg, /<VerificaRedditoPanel\s+stato=\{tenantProfile\.verifica_stato\}/);
+ });
+@@ -91,7 +91,7 @@ test("Profilo: una sola riga e una sola scheda per punteggio, dati e verifica (l
+   const p = leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx"); assert.match(p, /import \{ RicercaSheet \} from "@\/components\/RicercaSheet"/); assert.match(p, /import \{ DatiSheet \} from "@\/components\/DatiSheet"/);
+   assert.ok(!/function RicercaSheet/.test(p) && !/function DatiPersonaliSheet/.test(p) && !/function SaveButton/.test(p), "il Profilo ha ancora una copia di una scheda");
+   assert.equal([...p.matchAll(/onClick=\{\(\) => setSheetAperta\("(dati|affidabilita|verifica)"\)\}/g)].length, 1, "ci deve essere una riga sola per punteggio, dati e verifica"); assert.match(p, /onClick=\{\(\) => setSheetAperta\("dati"\)\}/);
+-  assert.match(p, /<DatiSheet[\s\S]*?recensioni=\{recensioni\}\s+raccomandazione=\{raccomandazione\}\s+verificaPanel=\{verificaPanel\}\s+scorriA=\{sheetAperta === "verifica" \? "verifica" : null\}/); assert.ok(!/SchedaAffidabilita|rigaProfilo|hasRecensioni|\.checks/.test(p), "il Profilo usa ancora pezzi vecchi");
++  assert.match(p, /<DatiSheet[\s\S]*?recensioni=\{recensioni\}\s+raccomandazione=\{raccomandazione\}\s+verificaPanel=\{verificaPanel\}\s+protestiPanel=\{protestiPanel\}\s+scorriA=\{sheetAperta === "verifica" \? "verifica" : null\}/); assert.ok(!/SchedaAffidabilita|rigaProfilo|hasRecensioni|\.checks/.test(p), "il Profilo usa ancora pezzi vecchi");
+   const pg = leggi("src", "app", "(app)", "profilo", "page.tsx"); assert.match(pg, /sezioneProfilo\(\(await searchParams\)\.apri\)/); assert.match(pg, /searchParams: Promise<\{ apri\?: string \| string\[\] \}>/); assert.match(pg, /recensioni=\{riepilogo\}/);
+ });
+ 
+@@ -113,3 +113,25 @@ test("CSS: il suggerimento sta sopra i pulsanti e la card sopra il suggerimento
+   const pulsanti = px(/\.actions \{[^}]*?bottom: (\d+)px/); const suggerimento = px(/\.swipe-hint \{[^}]*?bottom: (\d+)px/); const card = px(/\.card-info \{[^}]*?bottom: (\d+)px/);
+   assert.ok(suggerimento >= pulsanti + 64 + 8, `il suggerimento (${suggerimento}px) tocca i pulsanti (${pulsanti}px + 64)`); assert.ok(card >= suggerimento + 16, `la card (${card}px) tocca il suggerimento (${suggerimento}px)`);
+ });
++
++// ============================================================ la ricerca sta SOTTO le foto
++test("Home dell'inquilino: «quante case rispondono alla ricerca» e «Modifica/Imposta la ricerca» stanno SOTTO le foto (non più nel pannello in alto): il pannello ha solo affidabilità e badge, poi l'area delle foto con i pulsanti, poi la barra della ricerca", () => {
++  const h = leggi("src", "app", "(app)", "HomeClient.tsx");
++  const iPannello = h.indexOf('<div className="home-intro">'), iArea = h.indexOf('<div className="home-area">'), iDeck = h.indexOf('<div className="deck">'), iAzioni = h.indexOf('<div className="actions">'), iBarra = h.indexOf('<div className="home-ricerca">'), iRicerca = h.indexOf('<div className="hi-ricerca">');
++  assert.ok(iPannello > 0 && iPannello < iArea && iArea < iDeck && iDeck < iAzioni && iAzioni < iBarra && iBarra < iRicerca, "ordine: pannello, area delle foto (mazzo e pulsanti), barra della ricerca");
++  const pannello = h.slice(iPannello, iArea); assert.ok(!/hi-ricerca|hi-modifica|hi-riassunto|Modifica ricerca|Imposta la ricerca|testoCase/.test(pannello), "la ricerca non deve restare nel pannello in alto");
++  const barra = h.slice(iBarra, h.indexOf("La scheda unica «I tuoi dati»")); for (const x of ["<b>{testoCase.principale}</b>", "{testoCase.secondario && <span>{testoCase.secondario}</span>}", "hi-nascoste", '{mostraMatch ? "Modifica ricerca" : "Imposta la ricerca"}', "setSchedaRicerca(true)", 'className="hi-riassunto"']) assert.ok(barra.includes(x), `manca nella barra: ${x}`);
++  const area = h.slice(iArea, iBarra); assert.ok(area.includes('className="deck"') && area.includes('className="actions"'), "il mazzo e i pulsanti stanno nell'area delle foto, sopra la barra"); assert.ok(!/hi-ricerca/.test(area), "la barra della ricerca non sta dentro l'area delle foto");
++  assert.match(h, /<div className=\{`screen-dark home-inq \$\{raccomandazione\.raccomandato \? "con-badge" : ""\}`\}>/);
++});
++
++test("Home dell'inquilino, stile: l'area delle foto riempie lo spazio sopra la barra e le posizioni di mazzo e pulsanti sono RELATIVE a lei; la barra è alta quanto il suo contenuto, sopra il resto, con lo stesso aspetto che aveva nel pannello; il mazzo comincia subito sotto il pannello (non lascia un buco)", () => {
++  const css = leggi("src", "app", "globals.css");
++  assert.match(css, /\.home-inq \{\s+display: flex;\s+flex-direction: column;\s+\}/); assert.match(css, /\.home-area \{\s+position: relative;\s+flex: 1 1 0;\s+min-height: 0;\s+\}/);
++  assert.match(css, /\.home-ricerca \{\s+position: relative;\s+z-index: 60;\s+flex: none;\s+padding: 10px 14px 12px;\s+background: var\(--ink\);\s+border-top: 1px solid var\(--line\);\s+\}/); assert.match(css, /\.home-ricerca \.hi-ricerca \{\s+padding-top: 0;\s+border-top: none;\s+\}/);
++  for (const sel of [".hi-ricerca", ".hi-ricerca-testo", ".hi-ricerca-testo b", ".hi-ricerca-testo span", ".hi-riassunto", ".hi-modifica", ".hi-modifica:focus-visible", ".hi-ricerca-testo .hi-nascoste"]) assert.ok(css.includes(`.home-ricerca ${sel},\n.home-intro ${sel} {`), `la barra non ha lo stile di ${sel}`);
++  assert.match(css, /\.deck \{\s+position: absolute;\s+inset: 0;\s+top: 164px;/); assert.match(css, /\.screen-dark\.con-badge \.deck \{\s+top: 198px;/);
++  const desk = css.indexOf("@media (min-width: 768px) {\n  .home-ricerca {"); assert.ok(desk > 0, "la barra a schermo largo"); assert.match(css.slice(desk, desk + 200), /\.home-ricerca \{\s+align-self: center;\s+width: 460px;/);
++  // il mazzo deve cominciare tra 8 e 24 px sotto il pannello più alto (118 px con il badge, 82 senza)
++  const sopra = (top, pannelloFine) => top - pannelloFine; assert.ok(sopra(164, 64 + 82) >= 8 && sopra(164, 64 + 82) <= 24 && sopra(198, 64 + 118) >= 8 && sopra(198, 64 + 118) <= 24, "il mazzo è troppo lontano o troppo vicino al pannello");
++});
+diff --git a/scripts/test-informativa.mjs b/scripts/test-informativa.mjs
+index dd1f822..a250cc0 100644
+--- a/scripts/test-informativa.mjs
++++ b/scripts/test-informativa.mjs
+@@ -504,17 +504,18 @@ test("equivalenti: ben formate, senza doppioni, e diverse dalla versione in vigo
+   for (const v of eq) assert.ok(regola.test(v) && v.length <= 60, `versione non valida: ${v}`);
+ });
+ 
+-// La versione 20 ha reso il profilo di chi cerca casa VISIBILE ai proprietari di partenza (anche per chi era già iscritto): è un
+-// cambiamento di trattamento, quindi chi aveva accettato una versione precedente deve riaccettare. Da lì in poi vale la regola di
+-// sempre: le versioni provvisorie successive sono equivalenti tra loro.
+-const PRIMA_VERSIONE_EQUIVALENTE = 20;
+-
+-test("equivalenti: se il testo è PROVVISORIO, chi ha accettato una versione provvisoria precedente non viene fermato (dalla versione 20 in poi: la 20 rinnova l'accettazione di tutti)", () => {
+-  // La versione è «<prefisso>-N»: devono esserci tutte le precedenti da 20 a N-1 (e NESSUNA sotto la 20). Se si cambia la
++// La versione 20 ha reso il profilo di chi cerca casa VISIBILE ai proprietari di partenza (anche per chi era già iscritto); la 22 ha
++// introdotto la verifica dei PROTESTI da parte dello staff (un nuovo documento, il certificato dei protesti, che lo staff esamina; il
++// proprietario vede se i protesti sono verificati e con quale risultato). Sono cambiamenti di trattamento, quindi chi aveva accettato una
++// versione precedente deve riaccettare. Da lì in poi vale la regola di sempre: le versioni provvisorie successive sono equivalenti tra loro.
++const PRIMA_VERSIONE_EQUIVALENTE = 22;
++
++test("equivalenti: se il testo è PROVVISORIO, chi ha accettato una versione provvisoria precedente non viene fermato (dalla versione 22 in poi: la 22 rinnova l'accettazione di tutti)", () => {
++  // La versione è «<prefisso>-N»: devono esserci tutte le precedenti da 22 a N-1 (e NESSUNA sotto la 22). Se si cambia la
+   // versione senza aggiungere la vecchia all'elenco, chi l'aveva accettata verrebbe fermato di nuovo.
+   const m = INFORMATIVA.versione.match(/^(.*-provvisoria)-(\d+)$/);
+   assert.ok(m, `la versione provvisoria non ha la forma «…-provvisoria-N»: ${INFORMATIVA.versione}`);
+-  assert.ok(Number(m[2]) >= PRIMA_VERSIONE_EQUIVALENTE, "la versione deve essere almeno la 20");
++  assert.ok(Number(m[2]) >= PRIMA_VERSIONE_EQUIVALENTE, "la versione deve essere almeno la 22");
+   const attese = Array.from({ length: Number(m[2]) - PRIMA_VERSIONE_EQUIVALENTE }, (_, i) => `${m[1]}-${PRIMA_VERSIONE_EQUIVALENTE + i}`);
+   assert.deepEqual([...INFORMATIVA.equivalenti].sort(), attese.sort(), "mancano versioni precedenti tra le equivalenti (o ce ne sono di non previste)");
+ });
+@@ -531,7 +532,7 @@ test("equivalenti: la guardia sa riconoscere un testo definitivo con equivalenti
+   assert.ok(!finto.provvisoria && finto.equivalenti.length > 0, "il caso che la guardia deve fermare");
+ });
+ 
+-test("la versione 20 NON ha come equivalenti quelle precedenti: chi era già iscritto e aveva accettato la 19 (o prima) deve riaccettare, perché il suo profilo diventa visibile ai proprietari", () => {
+-  for (let v = 1; v < PRIMA_VERSIONE_EQUIVALENTE; v++) assert.ok(!INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} non deve essere equivalente: cambia chi vede il profilo`);
++test("la versione 22 NON ha come equivalenti quelle precedenti: chi aveva accettato la 21 (o prima) deve riaccettare, perché lo staff esamina un nuovo documento (il certificato dei protesti) e il proprietario vede se i protesti sono verificati", () => {
++  for (let v = 1; v < PRIMA_VERSIONE_EQUIVALENTE; v++) assert.ok(!INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} non deve essere equivalente: cambiano i dati trattati`);
+   assert.ok(!INFORMATIVA.equivalenti.includes(INFORMATIVA.versione));
+ });
+diff --git a/scripts/test-notifiche.mjs b/scripts/test-notifiche.mjs
+index 8adba4f..f8904c0 100644
+--- a/scripts/test-notifiche.mjs
++++ b/scripts/test-notifiche.mjs
+@@ -19,12 +19,13 @@ const sql0022 = fs.readFileSync(path.join(radice, "supabase", "migrations", "002
+ const sql0032 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0032_richieste_proprietari.sql"), "utf8");
+ const sql0034 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0034_riapri_candidatura.sql"), "utf8");
+ const sql0035 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0035_affitto_da_contratto.sql"), "utf8");
++const sql0038 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0038_verifica_protesti.sql"), "utf8");
+ 
+ /** I tipi che il vincolo sulla tabella ammette. */
+ function tipiDelDatabase() {
+   // l'ultima definizione del vincolo, in ordine di migrazione
+-  const tutte = [...(sql + "\n" + sql0020 + "\n" + sql0022 + "\n" + sql0032 + "\n" + sql0034 + "\n" + sql0035).matchAll(/check \(tipo in \(([\s\S]*?)\)\)/g)];
+-  assert.ok(tutte.length >= 6, "dovrei trovare il vincolo della 0019, quello della 0020, quello della 0022, quello della 0032, quello della 0034 e quello della 0035");
++  const tutte = [...(sql + "\n" + sql0020 + "\n" + sql0022 + "\n" + sql0032 + "\n" + sql0034 + "\n" + sql0035 + "\n" + sql0038).matchAll(/check \(tipo in \(([\s\S]*?)\)\)/g)];
++  assert.ok(tutte.length >= 7, "dovrei trovare il vincolo della 0019, quello della 0020, quello della 0022, quello della 0032, quello della 0034, quello della 0035 e quello della 0038");
+   return [...tutte[tutte.length - 1][1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
+ }
+ 
+@@ -45,7 +46,10 @@ const trigger =
+   sql0034.slice(sql0034.indexOf("create or replace function public.riapri_candidatura")) +
+   "\n" +
+   // la 0035: il trigger sul contratto e le due funzioni dell'affitto da contratto creano le notifiche «da confermare», «confermato», «non confermato»
+-  sql0035.slice(sql0035.indexOf("create or replace function public.avvisa_affitto_da_contratto"));
++  sql0035.slice(sql0035.indexOf("create or replace function public.avvisa_affitto_da_contratto")) +
++  "\n" +
++  // la 0038: il trigger sull'esito dei protesti crea le notifiche «protesti verificati» e «protesti respinti»
++  sql0038.slice(sql0038.indexOf("create or replace function public.notifica_protesti_esito"));
+ 
+ // ------------------------------------------------------------
+ // I tipi
+diff --git a/scripts/test-profilo-proprietario.mjs b/scripts/test-profilo-proprietario.mjs
+index 5df27a7..e8a4000 100644
+--- a/scripts/test-profilo-proprietario.mjs
++++ b/scripts/test-profilo-proprietario.mjs
+@@ -41,7 +41,7 @@ test("la notifica dell'inquilino e quella del proprietario passano dalla stessa
+ 
+ test("informativa: non elenca più tipo di proprietario, numero di immobili e obiettivo (non si raccolgono più); nuova versione, la precedente resta equivalente (si chiedono meno dati: nessuno deve riaccettare)", () => {
+   const t = JSON.stringify(inf.INFORMATIVA); assert.ok(!/tipo di proprietario|numero di immobili|obiettivo/.test(t), "l'informativa nomina ancora quei dati"); assert.ok(t.includes("Se sei proprietario: gli annunci con titolo, descrizione, zona, prezzo, caratteristiche, classe energetica e foto;"));
+-  const n = Number(inf.INFORMATIVA.versione.match(/-(\d+)$/)[1]); assert.ok(n >= 21, inf.INFORMATIVA.versione); assert.ok(inf.INFORMATIVA.equivalenti.includes("2026-10-provvisoria-20"), "la 20 deve restare equivalente");
++  const n = Number(inf.INFORMATIVA.versione.match(/-(\d+)$/)[1]); assert.ok(n >= 21, inf.INFORMATIVA.versione); for (let v = 22; v < n; v++) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} deve restare equivalente`);
+ });
+ 
+ test("migrazione 0036: toglie ESATTAMENTE le tre colonne e il loro tipo (niente altro), è rieseguibile e dice che è irreversibile", () => {
+diff --git a/scripts/test-protesti.mjs b/scripts/test-protesti.mjs
+new file mode 100644
+index 0000000..92cf2de
+--- /dev/null
++++ b/scripts/test-protesti.mjs
+@@ -0,0 +1,153 @@
++/**
++ * Test della VERIFICA DEI PROTESTI da parte dello staff (migrazione 0038 + app).
++ *  - l'inquilino risponde alla domanda sui protesti, carica il certificato dei protesti e il documento d'identità, e chiede la verifica;
++ *  - lo staff decide: «nessun protesto», «ci sono protesti» o «respingi» (con una nota); il risultato dello staff PREVALE su ciò che era stato dichiarato;
++ *  - una volta verificato, la risposta non si cambia più da soli; il proprietario vede solo «verificato» (e con quale risultato), mai i documenti.
++ * Le regole vere le prova test-db-richieste.mjs su un PostgreSQL vero. Si lancia con:   npm test
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const pr = caricaTs(path.join(radice, "src", "lib", "protesti.ts"));
++const af = caricaTs(path.join(radice, "src", "lib", "affidabilita.ts"));
++const vf = caricaTs(path.join(radice, "src", "lib", "verifica.ts"));
++const nt = caricaTs(path.join(radice, "src", "lib", "notifiche.ts"));
++const dbp = caricaTs(path.join(radice, "src", "lib", "database-proprietario.ts"));
++const inf = caricaTs(path.join(radice, "src", "content", "informativa.ts"));
++const leggi = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8").replace(/\r\n/g, "\n");
++const senzaCommenti = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
++const sql = leggi("supabase", "migrations", "0038_verifica_protesti.sql"); const sqlPulito = sql.replace(/--[^\n]*/g, "");
++
++// ============================================================ la logica pura
++test("cosa dire alla persona: ogni stato ha il suo titolo e il suo tono; da verificato dice il RISULTATO dello staff (nessun protesto / risultano protesti)", () => {
++  const d = pr.descriviStatoProtesti;
++  assert.deepEqual([d("non_avviata", null, false).titolo, d("non_avviata", null, false).tono], ["Non ancora verificato", "neutro"]); assert.match(d("non_avviata", null, null).testo, /Il risultato dello staff vale più di ciò che hai dichiarato\./);
++  assert.deepEqual([d("in_verifica", null, false).titolo, d("in_verifica", null, false).tono], ["In verifica", "attesa"]);
++  assert.deepEqual([d("verificato", null, false).titolo, d("verificato", null, false).tono], ["Protesti verificati: nessun protesto", "ok"]); assert.match(d("verificato", null, false).testo, /non risultano protesti/);
++  assert.deepEqual([d("verificato", null, true).titolo, d("verificato", null, true).tono], ["Protesti verificati: risultano dei protesti", "no"]); assert.match(d("verificato", null, true).testo, /Se qualcosa non è corretto, scrivici\./);
++  assert.deepEqual([d("non_avviata", "  Il certificato è illeggibile.  ", false).titolo, d("non_avviata", "Illeggibile.", false).tono], ["Verifica non riuscita", "no"]); assert.equal(d("non_avviata", "Il certificato è illeggibile.", false).testo, "Il certificato è illeggibile. Correggi e invia di nuovo."); assert.equal(d("non_avviata", "   ", false).titolo, "Non ancora verificato", "una nota vuota non conta");
++});
++
++test("cosa manca per chiedere la verifica: la risposta, l'identità, il certificato; con tutto si può inviare, e solo se non è già partita", () => {
++  const doc = (...tipi) => tipi.map((tipo) => ({ tipo })); const m = pr.cosaMancaProtesti;
++  assert.deepEqual(m({ documenti: doc("identita", "protesti"), protestato: false }), []); assert.deepEqual(m({ documenti: doc("identita", "protesti"), protestato: true }), [], "anche rispondendo «sì» si può far verificare");
++  assert.equal(m({ documenti: doc("identita", "protesti"), protestato: null }).length, 1); assert.match(m({ documenti: doc("identita", "protesti"), protestato: null })[0], /Rispondi alla domanda sui protesti/);
++  assert.deepEqual(m({ documenti: doc("protesti"), protestato: false }), ["Carica un documento d'identità"]); assert.deepEqual(m({ documenti: doc("identita"), protestato: false }), ["Carica il certificato dei protesti"]);
++  assert.equal(m({ documenti: doc("reddito", "identita"), protestato: false }).length, 1, "la prova del reddito non è il certificato dei protesti"); assert.equal(m({ documenti: [], protestato: null }).length, 3);
++  const ok = { documenti: doc("identita", "protesti"), protestato: false }; assert.equal(pr.puoInviareProtesti({ stato: "non_avviata", ...ok }), true);
++  for (const stato of ["in_verifica", "verificato"]) assert.equal(pr.puoInviareProtesti({ stato, ...ok }), false, stato); assert.equal(pr.puoInviareProtesti({ stato: "non_avviata", documenti: doc("identita"), protestato: false }), false);
++});
++
++test("regole sui documenti e sulla risposta: i documenti si tolgono solo prima dell'invio; la risposta è bloccata solo dopo la verifica; la nota sotto la domanda cambia con lo stato", () => {
++  assert.deepEqual(["non_avviata", "in_verifica", "verificato"].map(pr.puoTogliereDocumentiProtesti), [true, false, false]); assert.deepEqual(["non_avviata", "in_verifica", "verificato"].map(pr.rispostaBloccata), [false, false, true]);
++  assert.match(pr.notaDomandaProtesti("non_avviata"), /Lo verifica il nostro staff: carica il certificato dei protesti in «Verifica dei protesti»/); assert.match(pr.notaDomandaProtesti("in_verifica"), /Lo staff sta controllando/); assert.match(pr.notaDomandaProtesti("verificato"), /Verificato dallo staff: non si cambia da soli\./);
++  assert.deepEqual([...pr.TIPI_DOCUMENTO_PROTESTI], ["identita", "protesti"]); assert.equal(pr.ETICHETTE_DOCUMENTO_PROTESTI.protesti, "Certificato dei protesti"); assert.match(pr.TESTI_VERIFICA_PROTESTI.introduzione, /lo verifica il nostro staff/i); assert.match(pr.TESTI_VERIFICA_PROTESTI.riservatezza, /Il proprietario non li vede mai: vede solo se i protesti sono verificati, sì o no\./);
++});
++
++test("per il proprietario: «verificato dallo staff» si dice solo se lo è davvero; il dichiarato resta «dichiarato»; senza risposta «non indicati»", () => {
++  const e = pr.etichettaProtestiPerProprietario;
++  assert.equal(e(false, true), "Nessun protesto (verificato dallo staff)"); assert.equal(e(true, true), "Protesti (verificati dallo staff)"); assert.equal(e(false, false), "Nessun protesto dichiarato"); assert.equal(e(true, false), "Protesti dichiarati"); assert.equal(e(null, true), "Protesti non indicati"); assert.equal(e(null, false), "Protesti non indicati");
++});
++
++// ============================================================ gli errori e il punteggio
++test("errori: ogni codice che il database può restituire per la verifica dei protesti ha le sue parole in italiano, senza il codice", () => {
++  const corpo = sqlPulito.slice(sqlPulito.indexOf("create or replace function public.proteggi_verifica_inquilino"));
++  const codici = [...new Set([...corpo.matchAll(/raise exception '([A-Z_]+)/g)].map((m) => m[1]))].filter((c) => /PROTESTI|DOCUMENTI_PROTESTI|ESITO_NON_VALIDO|INQUILINO_INESISTENTE|NON_INQUILINO|NON_AUTENTICATO|NON_STAFF/.test(c));
++  assert.ok(codici.length >= 9, "codici: " + codici.join());
++  for (const c of codici) { const m = vf.messaggioErroreVerifica(`ERROR: ${c} (P0001)`); assert.ok(m.length > 15 && !m.includes(c), `${c}: «${m}»`); assert.ok(!/Riprova tra poco|Qualcosa non ha funzionato/.test(m) || c === "NON_STAFF", `${c} non ha parole sue`); }
++  assert.match(vf.messaggioErroreVerifica("PROTESTI_VERIFICATI: i protesti li ha verificato lo staff"), /I protesti li ha verificati lo staff: per cambiarli scrivici\./); assert.match(vf.messaggioErroreVerifica("PROTESTI_GIA_VERIFICATI"), /già verificati/);
++  assert.match(vf.messaggioErroreVerifica("DOCUMENTI_PROTESTI_MANCANTI"), /documento d'identità e il certificato dei protesti/); assert.match(vf.messaggioErroreVerifica("PROTESTI_NON_DICHIARATI"), /rispondi alla domanda sui protesti/);
++});
++
++test("punteggio: la verifica dei protesti NON cambia i punti (+30 / −30), cambia chi li ha controllati («verificato» o «dichiarato») e le parole", () => {
++  const c = (o) => af.computeAffidabilita({ verificato: false, protestato: null, garante: null, fideiussione: null, ...o }); const voce = (r) => r.voci.find((v) => v.id === "protesti");
++  for (const protestato of [false, true]) { const a = c({ protestato }), b = c({ protestato, protestiVerificati: true }); assert.equal(a.punteggio, b.punteggio, "i punti non cambiano"); assert.equal(voce(a).punti, voce(b).punti); assert.equal(voce(a).origine, "dichiarato"); assert.equal(voce(b).origine, "verificato"); }
++  assert.deepEqual([voce(c({ protestato: false, protestiVerificati: true })).etichetta, voce(c({ protestato: true, protestiVerificati: true })).etichetta, voce(c({ protestato: true })).etichetta], ["Nessun protesto", "Protesti verificati", "Protesti dichiarati"]);
++  assert.match(voce(c({ protestato: false, protestiVerificati: true })).nota, /Controllato dallo staff sul tuo certificato dei protesti\./); assert.match(voce(c({ protestato: true, protestiVerificati: true })).nota, /Lo staff ha controllato il tuo certificato: risultano dei protesti\. Tolgono 30 punti\./);
++  assert.equal(voce(c({ protestato: null, protestiVerificati: true })).origine, "dichiarato", "senza risposta non c'è niente di verificato"); assert.equal(c({ protestato: false }).punteggio, 30); assert.equal(c({ protestato: true }).grezzo, -30);
++});
++
++test("le notifiche: «protesti verificati» dice il risultato (nessuno / risultano), «respinti» manda alla nota; i tipi esistono", () => {
++  for (const t of ["protesti_verificati", "protesti_respinti"]) assert.ok(nt.TIPI_NOTIFICA.includes(t), t);
++  assert.match(nt.descriviNotifica("protesti_verificati", { protestato: false }).testo, /non risultano protesti\. I proprietari ora vedono «Protesti verificati»/); assert.match(nt.descriviNotifica("protesti_verificati", { protestato: true }).testo, /risultano dei protesti/); assert.match(nt.descriviNotifica("protesti_verificati", null).testo, /non risultano protesti/, "senza dati si dice la cosa più prudente e non inventa");
++  assert.equal(nt.descriviNotifica("protesti_respinti", {}).titolo, "Verifica dei protesti non riuscita"); assert.match(nt.descriviNotifica("protesti_respinti", {}).testo, /Leggi la nota/);
++});
++
++// ============================================================ l'inquilino
++const pannello = senzaCommenti(leggi("src", "components", "VerificaProtestiPanel.tsx"));
++test("pannello dell'inquilino: file nell'archivio di verifica con il nome «inquilino-protesti», poi registrato come «protesti»; la verifica si chiede con la funzione del database; lo stato non si scrive a mano", () => {
++  assert.match(pannello, /tipo: tipo === "identita" \? "inquilino-identita" : "inquilino-protesti"/); assert.match(pannello, /supabase\.storage\.from\(BUCKET\)\.upload\(percorso, file, \{ contentType: file\.type, upsert: false \}\)/); assert.match(pannello, /from\("documenti_inquilino"\)\.insert\(\{\s+tenant_id: user\.id,\s+tipo,\s+percorso,\s+nome_file: file\.name\.slice\(0, 200\),\s+\}\)/);
++  assert.ok(pannello.indexOf(".upload(percorso") < pannello.indexOf('.from("documenti_inquilino").insert'), "prima il file, poi la registrazione"); assert.match(pannello, /await supabase\.storage\.from\(BUCKET\)\.remove\(\[percorso\]\);/, "se la registrazione fallisce il file non resta nell'archivio");
++  assert.match(pannello, /createClient\(\)\.rpc\("richiedi_verifica_protesti"\)/); assert.ok(!/from\("tenant_profiles"\)/.test(pannello) && !/\.update\(|\.upsert\(/.test(pannello), "il pannello non scrive il profilo (lo stato lo cambia solo il database)"); assert.ok(!/documenti-contratto/.test(pannello));
++  assert.match(pannello, /const problema = validaFileDocumento\(file\);/); assert.match(pannello, /!tolti \|\| tolti\.length === 0/, "se il database non lascia togliere il file non si cancella la riga");
++});
++
++test("pannello dell'inquilino: i documenti si tolgono solo prima dell'invio; dopo la verifica non si carica altro; l'invio è spento finché manca qualcosa e compare solo se non è partita", () => {
++  assert.match(pannello, /const siTolgono = puoTogliereDocumentiProtesti\(stato\);/); assert.match(pannello, /\{siTolgono && \(\s+<button/); assert.match(pannello, /\{stato !== "verificato" && \(\s+<SelettoreFile/);
++  assert.match(pannello, /\{stato === "non_avviata" && \(\s+<>\s+\{manca\.length > 0 && <p className="field-note">Per inviare manca: \{manca\.join\("; "\)\}\.<\/p>\}/); assert.match(pannello, /disabled=\{!inviabile \|\| inCorso !== null\}/);
++  assert.match(pannello, /\{TIPI_DOCUMENTO_PROTESTI\.map\(\(tipo\) => \{/); assert.match(pannello, /TESTI_VERIFICA_PROTESTI\.riservatezza/); assert.match(pannello, /className=\{`note-box \$\{descrizione\.tono === "no" \? "is-no" : ""\}`\}/);
++});
++
++test("scheda «I tuoi dati»: la sezione «Verifica dei protesti» sta dopo quella del reddito, con la sua ancora; Home e Profilo costruiscono il pannello con lo stato, la nota, il valore che vale oggi e i documenti", () => {
++  const ds = senzaCommenti(leggi("src", "components", "DatiSheet.tsx")); assert.match(ds, /\{verificaPanel\}\s+<div id="dati-verifica-protesti" className="ancora-dati" \/>[\s\S]*?\{TESTI_VERIFICA_PROTESTI\.titolo\}[\s\S]*?\{TESTI_VERIFICA_PROTESTI\.introduzione\}[\s\S]*?\{protestiPanel\}/);
++  for (const [f, t] of [[["src", "app", "(app)", "page.tsx"], "tenantProfile"], [["src", "app", "(app)", "profilo", "page.tsx"], "\\(tenant as TenantProfile\\)"]]) { const p = senzaCommenti(leggi(...f)); assert.match(p, new RegExp(`protestiPanel=\\{\\s+<VerificaProtestiPanel\\s+stato=\\{${t}\\.protesti_verifica_stato \\?\\? "non_avviata"\\}\\s+nota=\\{${t}\\.protesti_verifica_esito_note \\?\\? null\\}\\s+protestato=\\{${t}\\.protestato\\}\\s+documenti=\\{\\(documentiRows \\?\\? \\[\\]\\) as DocumentoInquilino\\[\\]\\}`)); }
++  assert.match(senzaCommenti(leggi("src", "app", "(app)", "page.tsx")), /protestiVerificati: tenantProfile\.protesti_verifica_stato === "verificato",/); assert.match(senzaCommenti(leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx")), /protestiVerificati: tenant\.protesti_verifica_stato === "verificato",/);
++});
++
++test("la domanda sui protesti: dopo la verifica non ci sono più i pulsanti Sì/No ma «verificato dallo staff»; il valore resta nel modulo e il salvataggio traduce l'errore del database", () => {
++  const f = senzaCommenti(leggi("src", "components", "DatiForm.tsx")); assert.match(f, /\{rispostaBloccata\(statoProtesti\) \? \(/); assert.match(f, /<b>\{protestato \? "Sì, risultano protesti" : "No, nessun protesto"\}<\/b> · verificato dallo staff/); assert.match(f, /\{notaDomandaProtesti\(statoProtesti\)\}/); assert.match(f, /<input type="hidden" name="protestato" value=\{String\(protestato\)\} \/>/); assert.ok(!/nessuno lo controlla/i.test(f.slice(f.indexOf("dati-protesti"), f.indexOf("fideiussione"))), "i protesti non sono più «nessuno li controlla»");
++  const a = senzaCommenti(leggi("src", "app", "(app)", "profilo", "actions.ts")); const dati = a.slice(a.indexOf("export async function updateDatiPersonali"), a.indexOf("export async function updateRicerca")); assert.match(dati, /if \(error\) return \{ error: messaggioErroreVerifica\(error\.message\) \};\s+revalidatePath\("\/profilo"\);\s+revalidatePath\("\/"\);/, "il salvataggio dei dati traduce l'errore del database (proprio quella funzione)"); assert.match(senzaCommenti(leggi("src", "components", "ComeSiCalcola.tsx")), /lo può verificare il nostro staff sul certificato dei protesti: il risultato dello staff vale più di ciò che hai dichiarato e non si cambia più da soli/);
++});
++
++// ============================================================ lo staff
++test("staff: l'elenco mostra chi aspetta (funzione dedicata); la pagina legge solo ciò che serve (funzione dedicata), i documenti dei soli due tipi con indirizzi temporanei di 5 minuti; il modulo ha le tre scelte", () => {
++  const l = senzaCommenti(leggi("src", "app", "staff", "page.tsx")); assert.match(l, /supabase\.rpc\("protesti_da_verificare"\)/); assert.match(l, /Protesti da verificare/); assert.match(l, /href=\{`\/staff\/protesti\/\$\{q\.tenant_id\}`\}/);
++  const p = senzaCommenti(leggi("src", "app", "staff", "protesti", "[id]", "page.tsx")); assert.match(p, /if \(!èUuid\(id\)\) notFound\(\);/); assert.match(p, /supabase\.rpc\("dati_per_verifica_protesti", \{ p_tenant: id \}\)/); assert.ok(!/from\("tenant_profiles"\)/.test(p), "lo staff non legge il profilo intero");
++  assert.match(p, /\.in\("tipo", \[\.\.\.TIPI_DOCUMENTO_PROTESTI\]\)/); assert.match(p, /createSignedUrl\(d\.percorso, 300\)/); assert.match(p, /const decidibile = dati\.protesti_verifica_stato === "in_verifica";/); assert.match(p, /\{decidibile \? \(\s+<EsitoProtestiForm id=\{id\} \/>/);
++  const f = senzaCommenti(leggi("src", "app", "staff", "protesti", "[id]", "EsitoProtestiForm.tsx")); for (const v of ["nessun_protesto", "protestato", "respingi"]) assert.ok(f.includes(`name="esito" value="${v}"`), v); assert.match(f, /name="nota"/); assert.match(f, /useActionState<EsitoState, FormData>\(decidiProtesti, null\)/);
++});
++
++test("staff: l'azione controlla l'identificativo e la scelta PRIMA di chiamare il database, pretende la nota per respingere, usa la funzione giusta con i parametri giusti e traduce l'errore", () => {
++  const a = senzaCommenti(leggi("src", "app", "staff", "actions.ts")); const f = a.slice(a.indexOf("export async function decidiProtesti")); assert.match(f, /const supabase = await richiediStaff\(\);/); assert.match(f, /if \(!èUuid\(id\)\) return \{ error: "Inquilino non valido\." \};/); assert.match(f, /if \(esito !== "nessun_protesto" && esito !== "protestato" && esito !== "respingi"\) return \{ error: "Scelta non valida\." \};/);
++  assert.match(f, /if \(esito === "respingi" && nota\.length < 3\) \{\s+return \{ error: messaggioErroreVerifica\("PROTESTI_NOTA_OBBLIGATORIA"\) \};/); assert.match(f, /supabase\.rpc\("esito_verifica_protesti", \{\s+p_tenant: id,\s+p_esito: esito,\s+p_note: esito === "respingi" \? nota : null,\s+\}\)/);
++  assert.match(f, /if \(error\) return \{ error: messaggioErroreVerifica\(error\.message\) \};/); assert.ok(f.indexOf("èUuid(id)") < f.indexOf("rpc("), "prima i controlli"); assert.ok(!/from\("tenant_profiles"\)/.test(f), "lo stato non si scrive a mano");
++});
++
++// ============================================================ il proprietario
++test("proprietario: la vista dà «protesti verificati» (sì/no) e mai la nota o lo stato interno; la scheda mostra «Nessun protesto · verificato» o «Ha protesti · verificato» SOLO se lo staff ha verificato, altrimenti niente", () => {
++  const c = senzaCommenti(leggi("src", "lib", "candidati.ts")); assert.match(c, /COLONNE_VISTA_CANDIDATI =\s+"[^"]*nucleo_compilato, protesti_verificati";/); assert.match(c, /protestiVerificati: v\?\.protesti_verificati === true,/); assert.match(c, /protesti_verificati: v\?\.protesti_verificati === true,\s+protestato: v\?\.protestato \?\? null,/); assert.ok(!/protesti_verifica_esito_note|protesti_verifica_stato/.test(c), "il proprietario non legge lo stato interno né la nota");
++  const cand = (tp) => ({ nome: "Anna", cognome: "Verdi", tenant_profiles: tp, valutazione: undefined }); const d = (tp) => dbp.datiSchedaCandidato(cand(tp)).protestiVerificati;
++  assert.equal(d({ protesti_verificati: true, protestato: false }), "nessuno"); assert.equal(d({ protesti_verificati: true, protestato: true }), "si"); assert.equal(d({ protesti_verificati: false, protestato: false }), null, "il dichiarato non si mostra come verificato"); assert.equal(d({ protesti_verificati: false, protestato: true }), null); assert.equal(d({ protesti_verificati: true, protestato: null }), null); assert.equal(d(null), null); assert.equal(d({}), null);
++  const sp = senzaCommenti(leggi("src", "components", "SchedaPersona.tsx")); assert.match(sp, /\{dati\.protestiVerificati === "nessuno" && <span className="persona-chip">Nessun protesto · verificato<\/span>\}\s+\{dati\.protestiVerificati === "si" && <span className="persona-chip persona-chip-attenzione">Ha protesti · verificato<\/span>\}/);
++});
++
++test("proprietario: i possibili inquilini leggono lo stato dei protesti con la chiave riservata e lo trasformano in sì/no verificato; il criterio «Nessun protesto» non dice più solo «dichiarato»", () => {
++  const s = senzaCommenti(leggi("src", "lib", "proprietario", "possibili-server.ts")); assert.match(s, /protestato, protesti_verifica_stato, animali, nucleo, presentazione, verificato, avatar_url/); assert.match(s, /protestiVerificati: det\.protesti_verifica_stato === "verificato",/);
++  const p = senzaCommenti(leggi("src", "lib", "proprietario", "possibili-inquilini.ts")); assert.match(p, /protestiVerificati: d\.protestiVerificati === true && d\.protestato !== null \? \(d\.protestato \? "si" : "nessuno"\) : null,/); assert.match(p, /protestiVerificati: d\.protestiVerificati === true,/); assert.match(p, /garante: d\.garante, fideiussione: d\.fideiussione, protestiVerificati: d\.protestiVerificati === true \}\);/);
++  const m = senzaCommenti(leggi("src", "lib", "match", "proprietario.ts")); assert.match(m, /nome: "Nessun protesto",\s+descrizione: "Il candidato non ha protesti: lo dichiara, e se lo staff ha controllato il certificato vale il risultato dello staff\.",\s+etichetta: \(\) => "Nessun protesto",/);
++  assert.match(senzaCommenti(leggi("src", "lib", "match", "candidato.ts")), /protestiVerificati: profilo\.protestiVerificati === true,/);
++});
++
++// ============================================================ la migrazione e l'informativa
++test("migrazione 0038: il proprietario non può leggere nessun documento; i protetti non si scrivono a mano; i protesti verificati non si cambiano da soli (riscrivere lo stesso valore sì); lo staff ha solo due funzioni; è rieseguibile", () => {
++  assert.match(sqlPulito, /if old\.protesti_verifica_stato = 'verificato' and new\.protestato is distinct from old\.protestato then\s+raise exception 'PROTESTI_VERIFICATI:/); for (const col of ["protesti_verifica_stato", "protesti_verifica_esito_note", "protesti_verifica_inviata_at", "protesti_verificati_at"]) assert.match(sqlPulito, new RegExp(`or new\\.${col} is distinct from old\\.${col}`), `${col} non protetta`);
++  assert.match(sqlPulito, /if not public\.is_staff\(\) then\s+raise exception 'NON_STAFF'/); assert.equal([...sqlPulito.matchAll(/raise exception 'NON_STAFF'/g)].length, 3, "esito, elenco e dati: tutte e tre solo per lo staff");
++  assert.ok(!/create policy[^;]*documenti_inquilino[^;]*for select/i.test(sqlPulito), "la 0038 non apre la lettura dei documenti"); assert.ok(!/documenti_inquilino/.test(sqlPulito.slice(sqlPulito.indexOf("create or replace view public.candidati_del_proprietario"))), "la vista dei candidati non tocca i documenti");
++  assert.match(sqlPulito, /case when c\.status <> 'rifiutata' then \(t\.protesti_verifica_stato = 'verificato'\) end as protesti_verificati/); assert.ok(!/protesti_verifica_esito_note/.test(sqlPulito.slice(sqlPulito.indexOf("create or replace view public.candidati_del_proprietario"))), "la nota non arriva al proprietario");
++  assert.match(sqlPulito, /drop trigger if exists notifica_protesti_esito on tenant_profiles;/); assert.match(sqlPulito, /add column if not exists protesti_verifica_stato stato_verifica not null default 'non_avviata'/); assert.match(sql, /IL RISULTATO dello staff PREVALE|PREVALE su ciò che/);
++  for (const f of ["richiedi_verifica_protesti()", "esito_verifica_protesti(uuid, text, text)", "protesti_da_verificare()", "dati_per_verifica_protesti(uuid)"]) { const e = f.replace(/[()]/g, "\\$&"); assert.match(sqlPulito, new RegExp(`revoke all on function public\\.${e} from public, anon;`)); assert.match(sqlPulito, new RegExp(`grant execute on function public\\.${e} to authenticated;`)); }
++});
++
++test("il DB test esegue anche le prove dei protesti (55 controlli) e non se ne perde nessuno", () => {
++  const s = leggi("scripts", "db", "protesti.sql"); const n = [...s.matchAll(/select t\.(ok|fallisce)\(/g)].length; assert.ok(n >= 54, `controlli: ${n}`); assert.match(s, /select t\.ok\(\(select count\(\*\) from t\.esiti\) = 54,/);
++  for (const tema of ["P02 l'inquilino non può mettersi «verificato» da solo", "P06 senza aver risposto alla domanda sui protesti", "P10b con il solo certificato manca il documento d'identità", "P15 mentre è in verifica il certificato non si toglie", "P17 e il FILE del certificato non si cancella", "P18 un inquilino non può dare l'esito", "P35 i protesti verificati non si cambiano da soli", "P41 cambiare il reddito azzera SOLO la verifica del reddito", "P42 il risultato dello staff PREVALE", "P45 con i protesti in verifica il documento d'identità non si cancella", "P47 e di Bruno", "P50b di un candidato SCARTATO"]) assert.ok(s.replaceAll("''", "'").includes(tema), `manca «${tema}»`);
++});
++
++test("informativa 22: dice del certificato dei protesti, che il risultato dello staff prevale, e cosa vede il proprietario; chi aveva accettato la 21 deve riaccettare", () => {
++  const t = JSON.stringify(inf.INFORMATIVA); assert.match(t, /se vuoi, li verifica il nostro staff sul certificato dei protesti che carichi, e il risultato dello staff prevale su ciò che hai dichiarato/); assert.ok(!/non vengono verificati/.test(t), "i protesti non sono più «non verificati»");
++  assert.match(t, /se chiedi di verificare i protesti, un documento d'identità e il certificato dei protesti intestato a te/); assert.match(t, /i protesti \(quelli che hai dichiarato o, se li ha verificati lo staff, il risultato dello staff, con l'indicazione che è verificato\)/); assert.match(t, /e se i protesti sono verificati dallo staff \(e con quale risultato\)/);
++  assert.equal(inf.INFORMATIVA.versione, "2026-10-provvisoria-22"); assert.deepEqual([...inf.INFORMATIVA.equivalenti], [], "la 22 non ha equivalenti: tutti riaccettano");
++});
+diff --git a/scripts/test-raccomandato.mjs b/scripts/test-raccomandato.mjs
+index 0408779..32d3054 100644
+--- a/scripts/test-raccomandato.mjs
++++ b/scripts/test-raccomandato.mjs
+@@ -147,10 +147,10 @@ test("spiegazione: dice come si ottiene, come si perde, per quanto tempo e cosa
+ const home = () => leggi("src", "app", "(app)", "HomeClient.tsx");
+ 
+ test("Home: il badge sta nel pannello dell'affidabilità, solo per chi lo ha, e il mazzo scende solo in quel caso (stessa soglia dello schermo largo del mazzo)", () => {
+-  const h = home(); assert.match(h, /<div className=\{`screen-dark \$\{raccomandazione\.raccomandato \? "con-badge" : ""\}`\}>/); assert.match(h, /\{raccomandazione\.raccomandato && \(\s+<div className="hi-badge">\s+<BadgeRaccomandato \/>\s+<\/div>\s+\)\}/);
+-  assert.ok(h.indexOf('className="hi-punteggio"') < h.indexOf('className="hi-badge"') && h.indexOf('className="hi-badge"') < h.indexOf('className="hi-ricerca"'), "il badge sta sotto l'affidabilità e sopra la ricerca"); assert.match(h, /raccomandazione=\{raccomandazione\}\s+verificaPanel=\{verificaPanel\}/);
+-  const css = leggi("src", "app", "globals.css"); assert.match(css, /\.screen-dark\.con-badge \.deck \{\s+top: 266px;/); const i = css.indexOf("@media (min-width: 768px) {\n  .screen-dark.con-badge .deck"); assert.ok(i > 0, "a schermo largo il mazzo deve scendere con la stessa soglia delle altre regole del mazzo"); assert.match(css.slice(i, i + 200), /inset: 266px auto 130px 50%;/);
+-  assert.match(css, /\.deck \{\s+position: absolute;\s+inset: 0;\s+top: 232px;/, "senza badge il mazzo resta dov'era");
++  const h = home(); assert.match(h, /<div className=\{`screen-dark home-inq \$\{raccomandazione\.raccomandato \? "con-badge" : ""\}`\}>/); assert.match(h, /\{raccomandazione\.raccomandato && \(\s+<div className="hi-badge">\s+<BadgeRaccomandato \/>\s+<\/div>\s+\)\}/);
++  assert.ok(h.indexOf('className="hi-punteggio"') < h.indexOf('className="hi-badge"') && h.indexOf('className="hi-badge"') < h.indexOf('className="deck"') && h.indexOf('className="deck"') < h.indexOf('className="hi-ricerca"'), "il badge sta sotto l'affidabilità, poi le foto, e la ricerca sta SOTTO le foto"); assert.match(h, /raccomandazione=\{raccomandazione\}\s+verificaPanel=\{verificaPanel\}/);
++  const css = leggi("src", "app", "globals.css"); assert.match(css, /\.screen-dark\.con-badge \.deck \{\s+top: 198px;/); const i = css.indexOf("@media (min-width: 768px) {\n  .screen-dark.con-badge .deck"); assert.ok(i > 0, "a schermo largo il mazzo deve scendere con la stessa soglia delle altre regole del mazzo"); assert.match(css.slice(i, i + 200), /inset: 204px auto 130px 50%;/);
++  assert.match(css, /\.deck \{\s+position: absolute;\s+inset: 0;\s+top: 164px;/, "senza badge il mazzo comincia subito sotto il pannello più basso");
+ });
+ 
+ test("pagine: leggono chi ha scritto le recensioni e quando (servono per il badge), e passano il badge a Home e Profilo", () => {
+@@ -171,7 +171,7 @@ test("il badge non tocca il punteggio né la percentuale: affidabilita.ts non lo
+ 
+ test("informativa: dice del badge (chi lo vede, filtro, ordine, nessun effetto sul punteggio), con una nuova versione; chi aveva la precedente non deve riaccettare (testo ancora provvisorio)", () => {
+   const testo = JSON.stringify(inf.INFORMATIVA); assert.ok(testo.includes("Il badge «Inquilino raccomandato» lo ottieni in automatico con almeno due recensioni positive (da 4 stelle in su) scritte da due proprietari diversi")); assert.ok(testo.includes("possono cercare solo gli inquilini raccomandati")); assert.ok(testo.includes("Non cambia il punteggio di affidabilità")); assert.ok(testo.includes("resta sempre del proprietario"));
+-  const vN = Number(inf.INFORMATIVA.versione.match(/^2026-10-provvisoria-(\d+)$/)?.[1]); assert.ok(vN >= 20, "versione: " + inf.INFORMATIVA.versione); for (let v = 20; v < vN; v++) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} deve restare equivalente`); assert.ok(inf.INFORMATIVA.equivalenti.every((e) => Number(e.split("-").pop()) >= 20), "le versioni prima della 20 non sono equivalenti: cambia chi vede il profilo"); assert.ok(!inf.INFORMATIVA.equivalenti.includes(inf.INFORMATIVA.versione));
++  const vN = Number(inf.INFORMATIVA.versione.match(/^2026-10-provvisoria-(\d+)$/)?.[1]); assert.ok(vN >= 22, "versione: " + inf.INFORMATIVA.versione); for (let v = 22; v < vN; v++) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} deve restare equivalente`); assert.ok(inf.INFORMATIVA.equivalenti.every((e) => Number(e.split("-").pop()) >= 20), "le versioni prima della 20 non sono equivalenti: cambia chi vede il profilo"); assert.ok(!inf.INFORMATIVA.equivalenti.includes(inf.INFORMATIVA.versione));
+ });
+ 
+ test("il simbolo del badge esiste, è sul reticolo 24x24 e la spunta non è riempita", () => {
+diff --git a/scripts/test-richieste.mjs b/scripts/test-richieste.mjs
+index e438306..f1e9e34 100644
+--- a/scripts/test-richieste.mjs
++++ b/scripts/test-richieste.mjs
+@@ -115,7 +115,7 @@ test("schede: l'ordine è compatibilità, poi il badge «raccomandato», poi l'a
+ 
+ test("COSA VEDE IL PROPRIETARIO: solo nome e iniziale, lavoro, foto, estratto, affidabilità, badge, recensioni, reddito verificato sì/no, compatibilità; NIENTE reddito, contatti, cognome intero, identificativi interni oltre a quello per scrivere", () => {
+   const p = persona("a", { nome: "Anna", cognome: "Verdi", reddito_mensile: 4321, reddito_nucleo: 8765, protestato: true, garante: true, avatarUrl: "https://x/f.jpg", presentazione: "x ".repeat(200), verificato: true });
+-  const [s] = schede([p]); assert.deepEqual(Object.keys(s).sort(), ["affidabilita", "avatarUrl", "compatibilita", "etichettaAffidabilita", "nome", "presentazione", "professione", "raccomandato", "recensioni", "redditoVerificato", "tenantId"]);
++  const [s] = schede([p]); assert.deepEqual(Object.keys(s).sort(), ["affidabilita", "avatarUrl", "compatibilita", "etichettaAffidabilita", "nome", "presentazione", "professione", "protestiVerificati", "raccomandato", "recensioni", "redditoVerificato", "tenantId"]);
+   const json = JSON.stringify(s); for (const vietato of ["4321", "8765", "Verdi", "reddito_mensile", "reddito_nucleo", "email", "telefono", "protestato", "cognome"]) assert.ok(!json.includes(vietato), `una scheda contiene «${vietato}»`); assert.equal(s.nome, "Anna V."); assert.equal(s.redditoVerificato, true); assert.ok(s.presentazione.length <= 161);
+ });
+ 
+diff --git a/src/app/(app)/HomeClient.tsx b/src/app/(app)/HomeClient.tsx
+index 978293c..95c0020 100644
+--- a/src/app/(app)/HomeClient.tsx
++++ b/src/app/(app)/HomeClient.tsx
+@@ -49,6 +49,7 @@ export function HomeClient({
+   raccomandazione,
+   tenant,
+   verificaPanel,
++  protestiPanel,
+   listings,
+   esclusi,
+   mostraMatch,
+@@ -66,6 +67,7 @@ export function HomeClient({
+   tenant: TenantProfile;
+   /** il pannello per verificare il reddito con i documenti, costruito dal server */
+   verificaPanel: React.ReactNode;
++  protestiPanel: React.ReactNode;
+   /** la ricerca impostata: budget, taglio, zone e caratteristiche */
+   ricerca: ProfiloRicerca;
+   /** i luoghi che si possono cercare (provincia, città, quartiere) */
+@@ -293,7 +295,7 @@ export function HomeClient({
+   const fotoSuccessivaUrl = foto[fotoIdx + 1]?.url;
+ 
+   return (
+-    <div className={`screen-dark ${raccomandazione.raccomandato ? "con-badge" : ""}`}>
++    <div className={`screen-dark home-inq ${raccomandazione.raccomandato ? "con-badge" : ""}`}>
+       {/* ---- Barra in alto: il marchio. Niente contatore: il pannello dice già quante case sono in linea ---- */}
+       <div className="topbar">
+         <div className="brand">
+@@ -326,19 +328,10 @@ export function HomeClient({
+             <BadgeRaccomandato />
+           </div>
+         )}
+-        <div className="hi-ricerca">
+-          <div className="hi-ricerca-testo">
+-            <b>{testoCase.principale}</b>
+-            {testoCase.secondario && <span>{testoCase.secondario}</span>}
+-            {testoNascoste(nascostiPerNecessarie) && <span className="hi-nascoste">{testoNascoste(nascostiPerNecessarie)}</span>}
+-          </div>
+-          <button type="button" className="hi-modifica" onClick={() => setSchedaRicerca(true)}>
+-            {mostraMatch ? "Modifica ricerca" : "Imposta la ricerca"}
+-          </button>
+-        </div>
+-        {mostraMatch && riassuntoRicerca.length > 0 && <div className="hi-riassunto">{riassuntoRicerca.join(" · ")}</div>}
+       </div>
+ 
++      {/* l'area delle foto: il mazzo e i pulsanti; finisce dove comincia la barra della ricerca */}
++      <div className="home-area">
+       <div className="deck">
+         {/* ---- Nessun annuncio ---- */}
+         {mazzo.length === 0 && (
+@@ -569,6 +562,23 @@ export function HomeClient({
+         </div>
+       )}
+ 
++      </div>
++
++      {/* ---- Sotto le foto: quante case rispondono alla ricerca, e il modo di cambiarla ---- */}
++      <div className="home-ricerca">
++        <div className="hi-ricerca">
++          <div className="hi-ricerca-testo">
++            <b>{testoCase.principale}</b>
++            {testoCase.secondario && <span>{testoCase.secondario}</span>}
++            {testoNascoste(nascostiPerNecessarie) && <span className="hi-nascoste">{testoNascoste(nascostiPerNecessarie)}</span>}
++          </div>
++          <button type="button" className="hi-modifica" onClick={() => setSchedaRicerca(true)}>
++            {mostraMatch ? "Modifica ricerca" : "Imposta la ricerca"}
++          </button>
++        </div>
++        {mostraMatch && riassuntoRicerca.length > 0 && <div className="hi-riassunto">{riassuntoRicerca.join(" · ")}</div>}
++      </div>
++
+       {/* La scheda unica «I tuoi dati»: punteggio, dati da modificare, verifica del reddito. Come la ricerca, è montata solo
+           quando è aperta: ogni apertura parte dai dati di adesso. */}
+       {schedaDati && (
+@@ -580,6 +590,7 @@ export function HomeClient({
+           recensioni={recensioni}
+           raccomandazione={raccomandazione}
+           verificaPanel={verificaPanel}
++          protestiPanel={protestiPanel}
+           onSalvata={() => {
+             setSchedaDati(false);
+             setAvviso({ errore: false, testo: "Dati aggiornati." });
+diff --git a/src/app/(app)/page.tsx b/src/app/(app)/page.tsx
+index 9177419..f93bff7 100644
+--- a/src/app/(app)/page.tsx
++++ b/src/app/(app)/page.tsx
+@@ -14,6 +14,7 @@ import type { ProfiloRicerca } from "@/lib/match";
+ import type { TenantProfile, ListingConMatch } from "@/lib/types";
+ import { idsNascosti } from "@/lib/scelte";
+ import { VerificaRedditoPanel } from "@/components/VerificaRedditoPanel";
++import { VerificaProtestiPanel } from "@/components/VerificaProtestiPanel";
+ import type { DocumentoInquilino } from "@/lib/verifica-inquilino";
+ 
+ export default async function Home() {
+@@ -74,6 +75,7 @@ async function TenantHome({ userId }: { userId: string }) {
+     protestato: tenantProfile.protestato,
+     garante: tenantProfile.garante,
+     fideiussione: tenantProfile.fideiussione,
++    protestiVerificati: tenantProfile.protesti_verifica_stato === "verificato",
+   });
+ 
+   // ---- Tutti gli annunci pubblicati che l'inquilino non ha già scelto ----
+@@ -148,6 +150,14 @@ async function TenantHome({ userId }: { userId: string }) {
+           documenti={(documentiRows ?? []) as DocumentoInquilino[]}
+         />
+       }
++      protestiPanel={
++        <VerificaProtestiPanel
++          stato={tenantProfile.protesti_verifica_stato ?? "non_avviata"}
++          nota={tenantProfile.protesti_verifica_esito_note ?? null}
++          protestato={tenantProfile.protestato}
++          documenti={(documentiRows ?? []) as DocumentoInquilino[]}
++        />
++      }
+       listings={mazzo as unknown as ListingConMatch[]}
+       esclusi={esclusiPerBudget}
+       nascostiPerNecessarie={nascostiPerNecessarie}
+diff --git a/src/app/(app)/profilo/ProfiloClient.tsx b/src/app/(app)/profilo/ProfiloClient.tsx
+index 2b553de..d0dfe0b 100644
+--- a/src/app/(app)/profilo/ProfiloClient.tsx
++++ b/src/app/(app)/profilo/ProfiloClient.tsx
+@@ -35,6 +35,7 @@ type Props = {
+   preferiti?: number;
+   /** il pannello per verificare il reddito con i documenti, costruito dal server */
+   verificaPanel: React.ReactNode;
++  protestiPanel: React.ReactNode;
+   nome: string | null;
+   cognome: string | null;
+   email: string | null;
+@@ -61,6 +62,7 @@ export function ProfiloClient({
+   email,
+   tenant,
+   verificaPanel,
++  protestiPanel,
+   ricerca,
+   luoghi,
+   recensioni,
+@@ -85,6 +87,7 @@ export function ProfiloClient({
+     protestato: tenant.protestato,
+     garante: tenant.garante,
+     fideiussione: tenant.fideiussione,
++    protestiVerificati: tenant.protesti_verifica_stato === "verificato",
+   });
+ 
+   const completezza = computeProfileCompleteness({
+@@ -200,6 +203,7 @@ export function ProfiloClient({
+         recensioni={recensioni}
+         raccomandazione={raccomandazione}
+         verificaPanel={verificaPanel}
++        protestiPanel={protestiPanel}
+         scorriA={sheetAperta === "verifica" ? "verifica" : null}
+       />
+ 
+diff --git a/src/app/(app)/profilo/actions.ts b/src/app/(app)/profilo/actions.ts
+index 28c83ac..4154930 100644
+--- a/src/app/(app)/profilo/actions.ts
++++ b/src/app/(app)/profilo/actions.ts
+@@ -66,7 +66,7 @@ export async function updateDatiPersonali(
+     })
+     .eq("profile_id", user.id);
+ 
+-  if (error) return { error: error.message };
++  if (error) return { error: messaggioErroreVerifica(error.message) };
+ 
+   revalidatePath("/profilo");
+   revalidatePath("/"); // la Home ricalcola il punteggio di affidabilità
+diff --git a/src/app/(app)/profilo/page.tsx b/src/app/(app)/profilo/page.tsx
+index 3a11118..8b849cf 100644
+--- a/src/app/(app)/profilo/page.tsx
++++ b/src/app/(app)/profilo/page.tsx
+@@ -1,5 +1,6 @@
+ import { riepilogoRecensioni, statoRaccomandazione } from "@/lib/recensioni";
+ import { VerificaRedditoPanel } from "@/components/VerificaRedditoPanel";
++import { VerificaProtestiPanel } from "@/components/VerificaProtestiPanel";
+ import type { DocumentoInquilino } from "@/lib/verifica-inquilino";
+ import { createClient } from "@/lib/supabase/server";
+ import { ProfiloClient } from "./ProfiloClient";
+@@ -97,6 +98,14 @@ export default async function ProfiloPage({ searchParams }: { searchParams: Prom
+           documenti={(documentiRows ?? []) as DocumentoInquilino[]}
+         />
+       }
++      protestiPanel={
++        <VerificaProtestiPanel
++          stato={(tenant as TenantProfile).protesti_verifica_stato ?? "non_avviata"}
++          nota={(tenant as TenantProfile).protesti_verifica_esito_note ?? null}
++          protestato={(tenant as TenantProfile).protestato}
++          documenti={(documentiRows ?? []) as DocumentoInquilino[]}
++        />
++      }
+       ricerca={ricerca}
+       luoghi={(luoghiRighe ?? []) as Luogo[]}
+       recensioni={riepilogo}
+diff --git a/src/app/globals.css b/src/app/globals.css
+index 06411b8..cbb0924 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -989,6 +989,7 @@ input[type="range"]::-moz-range-thumb {
+   padding: 4px 0 7px;
+ }
+ .home-intro .hi-azione:focus-visible,
++.home-ricerca .hi-modifica:focus-visible,
+ .home-intro .hi-modifica:focus-visible {
+   outline: 2px solid var(--gold);
+   outline-offset: 3px;
+@@ -1057,6 +1058,7 @@ input[type="range"]::-moz-range-thumb {
+   -webkit-tap-highlight-color: transparent;
+ }
+ /* le case della ricerca, e il pulsante per cambiarla */
++.home-ricerca .hi-ricerca,
+ .home-intro .hi-ricerca {
+   display: flex;
+   align-items: center;
+@@ -1065,20 +1067,24 @@ input[type="range"]::-moz-range-thumb {
+   padding-top: 8px;
+   border-top: 1px solid var(--line);
+ }
++.home-ricerca .hi-ricerca-testo,
+ .home-intro .hi-ricerca-testo {
+   display: flex;
+   flex-direction: column;
+   min-width: 0;
+   line-height: 1.3;
+ }
++.home-ricerca .hi-ricerca-testo b,
+ .home-intro .hi-ricerca-testo b {
+   font-size: 13px;
+   color: var(--paper);
+ }
++.home-ricerca .hi-ricerca-testo span,
+ .home-intro .hi-ricerca-testo span {
+   font-size: 11px;
+   color: rgba(247, 244, 236, 0.75);
+ }
++.home-ricerca .hi-riassunto,
+ .home-intro .hi-riassunto {
+   margin-top: 6px;
+   font-size: 10.5px;
+@@ -1087,6 +1093,7 @@ input[type="range"]::-moz-range-thumb {
+   overflow: hidden;
+   text-overflow: ellipsis;
+ }
++.home-ricerca .hi-modifica,
+ .home-intro .hi-modifica {
+   -webkit-appearance: none;
+   appearance: none;
+@@ -1212,7 +1219,7 @@ input[type="range"]::-moz-range-thumb {
+ .deck {
+   position: absolute;
+   inset: 0;
+-  top: 232px;
++  top: 164px;
+ }
+ .card {
+   position: absolute;
+@@ -2008,7 +2015,7 @@ input[type="range"]::-moz-range-thumb {
+      Resta una pila di card da sfogliare (il trascinamento funziona
+      anche col mouse), ma diventa un pannello centrato. */
+   .deck {
+-    inset: 232px auto 130px 50%;
++    inset: 170px auto 130px 50%;
+     width: 460px;
+     transform: translateX(-50%);
+   }
+@@ -3445,6 +3452,7 @@ mark.segnaposto {
+   font-size: 14px;
+   color: var(--ink);
+ }
++.home-ricerca .hi-ricerca-testo .hi-nascoste,
+ .home-intro .hi-ricerca-testo .hi-nascoste {
+   color: var(--gold);
+ }
+@@ -3804,11 +3812,11 @@ button.contratto-testa:focus-visible {
+   padding: 0 0 8px;
+ }
+ .screen-dark.con-badge .deck {
+-  top: 266px;
++  top: 198px;
+ }
+ @media (min-width: 768px) {
+   .screen-dark.con-badge .deck {
+-    inset: 266px auto 130px 50%;
++    inset: 204px auto 130px 50%;
+   }
+ }
+ /* il blocco del badge nella scheda dei dati */
+@@ -4830,3 +4838,49 @@ button.contratto-testa:focus-visible {
+   opacity: 0.6;
+   cursor: default;
+ }
++
++/* ---- Home dell'inquilino: la ricerca sta SOTTO le foto, non più nel pannello in alto ---- */
++.home-inq {
++  display: flex;
++  flex-direction: column;
++}
++/* l'area delle foto riempie lo spazio sopra la barra; le posizioni del mazzo e dei pulsanti sono relative a lei */
++.home-area {
++  position: relative;
++  flex: 1 1 0;
++  min-height: 0;
++}
++.home-ricerca {
++  position: relative;
++  z-index: 60;
++  flex: none;
++  padding: 10px 14px 12px;
++  background: var(--ink);
++  border-top: 1px solid var(--line);
++}
++.home-ricerca .hi-ricerca {
++  padding-top: 0;
++  border-top: none;
++}
++@media (min-width: 768px) {
++  .home-ricerca {
++    align-self: center;
++    width: 460px;
++    box-sizing: border-box;
++  }
++}
++
++/* ---- La risposta sui protesti dopo la verifica dello staff ---- */
++.risposta-verificata {
++  margin: 0;
++  padding: 12px 14px;
++  border-radius: 14px;
++  background: rgba(62, 107, 87, 0.12);
++  font-size: 16px;
++  line-height: 1.4;
++  color: var(--ink);
++}
++.persona-chip-attenzione {
++  background: rgba(176, 90, 62, 0.14);
++  color: var(--clay);
++}
+diff --git a/src/app/staff/actions.ts b/src/app/staff/actions.ts
+index 77ec1c7..b9e18e5 100644
+--- a/src/app/staff/actions.ts
++++ b/src/app/staff/actions.ts
+@@ -103,3 +103,31 @@ export async function decidiInquilino(
+   revalidatePath("/staff");
+   redirect("/staff");
+ }
++
++/**
++ * Lo staff dà l'esito sui protesti di un inquilino: «nessun_protesto», «protestato» oppure «respingi» (con una nota). Il risultato dello staff PREVALE su ciò che la
++ * persona aveva dichiarato. I permessi stanno qui, nel layout e nella funzione del database (NON_STAFF per chiunque non lo sia).
++ */
++export async function decidiProtesti(_prev: EsitoState, formData: FormData): Promise<EsitoState> {
++  const supabase = await richiediStaff();
++
++  const id = String(formData.get("id") || "");
++  const esito = String(formData.get("esito") || "");
++  const nota = String(formData.get("nota") || "").trim();
++
++  if (!èUuid(id)) return { error: "Inquilino non valido." };
++  if (esito !== "nessun_protesto" && esito !== "protestato" && esito !== "respingi") return { error: "Scelta non valida." };
++  if (esito === "respingi" && nota.length < 3) {
++    return { error: messaggioErroreVerifica("PROTESTI_NOTA_OBBLIGATORIA") };
++  }
++
++  const { error } = await supabase.rpc("esito_verifica_protesti", {
++    p_tenant: id,
++    p_esito: esito,
++    p_note: esito === "respingi" ? nota : null,
++  });
++  if (error) return { error: messaggioErroreVerifica(error.message) };
++
++  revalidatePath("/staff");
++  redirect("/staff");
++}
+diff --git a/src/app/staff/page.tsx b/src/app/staff/page.tsx
+index 7c5604b..c74aff1 100644
+--- a/src/app/staff/page.tsx
++++ b/src/app/staff/page.tsx
+@@ -62,6 +62,10 @@ export default async function StaffPage() {
+ 
+   // Gli inquilini che hanno inviato i documenti del reddito. Lo staff non
+   // legge i profili: la funzione del database gli dà solo nome e data.
++  // Gli inquilini che hanno chiesto la verifica dei protesti (stessa regola: lo staff non legge i profili)
++  const { data: protestiData } = await supabase.rpc("protesti_da_verificare");
++  const protesti = (protestiData ?? []) as { tenant_id: string; nome: string | null; cognome: string | null; inviata_at: string | null }[];
++
+   const { data: inquiliniData } = await supabase.rpc("inquilini_da_verificare");
+   const inquilini = (inquiliniData ?? []) as {
+     tenant_id: string;
+@@ -152,6 +156,29 @@ export default async function StaffPage() {
+           );
+         })}
+       </div>
++
++      <h1 className="screen-title" style={{ marginTop: 36 }}>
++        Protesti da verificare
++      </h1>
++      <p className="screen-sub">
++        {protesti.length === 0 ? "Nessun inquilino in attesa." : `${protesti.length} in attesa, i più vecchi per primi.`}
++      </p>
++      <div className="staff-lista">
++        {protesti.map((q) => {
++          const nome = [q.nome, q.cognome].filter(Boolean).join(" ") || "Senza nome";
++          return (
++            <Link key={q.tenant_id} href={`/staff/protesti/${q.tenant_id}`} className="match-card">
++              <div className="mc-avatar">{nome.slice(0, 2).toUpperCase()}</div>
++              <div className="mc-body">
++                <div className="mc-zona">Inquilino</div>
++                <div className="mc-title">{nome}</div>
++                <div className="mc-meta">inviato {quandoFa(q.inviata_at)}</div>
++              </div>
++              <div className="mc-pct is-wait">Da controllare</div>
++            </Link>
++          );
++        })}
++      </div>
+     </>
+   );
+ }
+diff --git a/src/app/staff/protesti/[id]/EsitoProtestiForm.tsx b/src/app/staff/protesti/[id]/EsitoProtestiForm.tsx
+new file mode 100644
+index 0000000..5cd6d42
+--- /dev/null
++++ b/src/app/staff/protesti/[id]/EsitoProtestiForm.tsx
+@@ -0,0 +1,45 @@
++"use client";
++
++import { useActionState } from "react";
++import { decidiProtesti, type EsitoState } from "../../actions";
++
++/**
++ * Le tre scelte dello staff sui protesti: «Nessun protesto», «Ci sono protesti» oppure «Respingi» (documento illeggibile, nome diverso...), che vuole una nota
++ * che la persona leggerà. Il risultato dello staff PREVALE su ciò che la persona aveva dichiarato.
++ */
++export function EsitoProtestiForm({ id }: { id: string }) {
++  const [state, formAction, pending] = useActionState<EsitoState, FormData>(decidiProtesti, null);
++
++  return (
++    <form action={formAction} className="staff-esito">
++      <input type="hidden" name="id" value={id} />
++
++      <div className="pref-label">
++        <span>Cosa risulta dal certificato</span>
++      </div>
++      <div className="flex gap-3" style={{ marginTop: 6 }}>
++        <button type="submit" name="esito" value="nessun_protesto" disabled={pending} className="opp-cta">
++          Nessun protesto
++        </button>
++        <button type="submit" name="esito" value="protestato" disabled={pending} className="btn-danger-outline">
++          Ci sono protesti
++        </button>
++      </div>
++      <p className="field-note">Il risultato vale più di ciò che la persona ha dichiarato e non lo potrà più cambiare da sola.</p>
++
++      <div className="pref-label" style={{ marginTop: 22 }}>
++        <span>Se il documento non va, scrivi cosa non va</span>
++      </div>
++      <textarea name="nota" className="ob-textarea" placeholder="Es. Il certificato è illeggibile o è intestato a un'altra persona: caricane uno nuovo" rows={3} />
++      <p className="field-note">La persona leggerà questa nota. Serve solo per respingere.</p>
++
++      {state?.error && <p className="note-error">{state.error}</p>}
++
++      <div style={{ marginTop: 14 }}>
++        <button type="submit" name="esito" value="respingi" disabled={pending} className="btn-danger-outline">
++          Respingi
++        </button>
++      </div>
++    </form>
++  );
++}
+diff --git a/src/app/staff/protesti/[id]/page.tsx b/src/app/staff/protesti/[id]/page.tsx
+new file mode 100644
+index 0000000..195868d
+--- /dev/null
++++ b/src/app/staff/protesti/[id]/page.tsx
+@@ -0,0 +1,102 @@
++import Link from "next/link";
++import { notFound } from "next/navigation";
++import { richiediStaff, èUuid } from "@/lib/staff";
++import { ETICHETTE_DOCUMENTO_PROTESTI, TIPI_DOCUMENTO_PROTESTI } from "@/lib/protesti";
++import type { DocumentoInquilino } from "@/lib/verifica-inquilino";
++import { EsitoProtestiForm } from "./EsitoProtestiForm";
++
++/**
++ * Lo staff controlla il certificato dei protesti di un inquilino e decide: nessun protesto, ci sono protesti, oppure respinge il documento.
++ * Lo staff NON legge il profilo intero: la funzione del database gli restituisce solo ciò che serve (nome e risposta data).
++ */
++export default async function StaffProtestiPage({ params }: { params: Promise<{ id: string }> }) {
++  const supabase = await richiediStaff();
++  const { id } = await params;
++  // l'id arriva dall'indirizzo: si controlla prima di usarlo in una query
++  if (!èUuid(id)) notFound();
++
++  const { data } = await supabase.rpc("dati_per_verifica_protesti", { p_tenant: id });
++  const dati = (data ?? [])[0] as { nome: string | null; cognome: string | null; protestato: boolean | null; protesti_verifica_stato: string } | undefined;
++  if (!dati) notFound();
++
++  const nome = [dati.nome, dati.cognome].filter(Boolean).join(" ") || "Senza nome";
++
++  const { data: documentiData } = await supabase.from("documenti_inquilino").select("id, tipo, percorso, nome_file").eq("tenant_id", id).in("tipo", [...TIPI_DOCUMENTO_PROTESTI]).order("created_at", { ascending: true });
++  const documenti = (documentiData ?? []) as DocumentoInquilino[];
++
++  // I documenti: indirizzi temporanei di 5 minuti, mai pubblici.
++  const firmati = await Promise.all(
++    documenti.map(async (d) => {
++      const { data: f } = await supabase.storage.from("documenti-verifica").createSignedUrl(d.percorso, 300);
++      return { ...d, url: f?.signedUrl ?? null };
++    })
++  );
++
++  const decidibile = dati.protesti_verifica_stato === "in_verifica";
++  const dichiarato = dati.protestato === null ? "non ha risposto" : dati.protestato ? "ha dichiarato di avere protesti" : "ha dichiarato di NON avere protesti";
++
++  return (
++    <>
++      <Link href="/staff" className="redo-link">
++        ← Torna all&apos;elenco
++      </Link>
++      <h1 className="screen-title" style={{ marginTop: 14 }}>
++        {nome}
++      </h1>
++      <p className="screen-sub">Verifica dei protesti</p>
++
++      <div className="pref-label" style={{ marginTop: 6 }}>
++        <span>Ciò che ha dichiarato</span>
++      </div>
++      <div className="feat-row">
++        <span className="k">Nome</span>
++        <span className="v">{nome}</span>
++      </div>
++      <div className="feat-row">
++        <span className="k">Protesti</span>
++        <span className="v">{dichiarato}</span>
++      </div>
++
++      {TIPI_DOCUMENTO_PROTESTI.map((tipo) => {
++        const miei = firmati.filter((d) => d.tipo === tipo);
++        return (
++          <div key={tipo}>
++            <div className="pref-label" style={{ marginTop: 24 }}>
++              <span>{ETICHETTE_DOCUMENTO_PROTESTI[tipo]}</span>
++            </div>
++            {miei.length === 0 ? (
++              <p className="note-error">Nessun file caricato.</p>
++            ) : (
++              <div className="staff-documenti">
++                {miei.map((d) =>
++                  d.url ? (
++                    <a key={d.id} href={d.url} target="_blank" rel="noopener noreferrer" className="staff-doc">
++                      {d.nome_file}
++                    </a>
++                  ) : (
++                    <p key={d.id} className="note-error">
++                      {d.nome_file}: non si apre. Ricarica la pagina.
++                    </p>
++                  )
++                )}
++              </div>
++            )}
++          </div>
++        );
++      })}
++
++      <p className="field-note" style={{ marginTop: 14 }}>
++        Controlla che il nome sul documento d&apos;identità e sul certificato sia «{nome}» e che il certificato sia recente. Poi scegli cosa risulta: il tuo esito vale più di ciò che
++        la persona ha dichiarato. I link durano 5 minuti.
++      </p>
++
++      <div style={{ marginTop: 26 }}>
++        {decidibile ? (
++          <EsitoProtestiForm id={id} />
++        ) : (
++          <div className="note-box">Questa persona non ha una verifica dei protesti in attesa (stato: {dati.protesti_verifica_stato.replace("_", " ")}).</div>
++        )}
++      </div>
++    </>
++  );
++}
+diff --git a/src/components/ComeSiCalcola.tsx b/src/components/ComeSiCalcola.tsx
+index 20c6098..21db3d9 100644
+--- a/src/components/ComeSiCalcola.tsx
++++ b/src/components/ComeSiCalcola.tsx
+@@ -39,7 +39,7 @@ export function ComeSiCalcola() {
+             </b>
+           </div>
+           <small>
+-            Lo dichiari tu e nessuno lo controlla. «Nessun protesto» dà {PUNTI_AFFIDABILITA.protesti} punti; se dichiari dei protesti, o non rispondi, ne toglie{" "}
++            Lo dichiari tu, e lo può verificare il nostro staff sul certificato dei protesti: il risultato dello staff vale più di ciò che hai dichiarato e non si cambia più da soli. «Nessun protesto» dà {PUNTI_AFFIDABILITA.protesti} punti; se dichiari dei protesti, o non rispondi, ne toglie{" "}
+             {PUNTI_AFFIDABILITA.protesti}: «non indicato» vale come «sì». La domanda è obbligatoria.
+           </small>
+         </li>
+diff --git a/src/components/DatiForm.tsx b/src/components/DatiForm.tsx
+index f2566ae..015faa2 100644
+--- a/src/components/DatiForm.tsx
++++ b/src/components/DatiForm.tsx
+@@ -1,5 +1,6 @@
+ "use client";
+ 
++import { notaDomandaProtesti, rispostaBloccata } from "@/lib/protesti";
+ import { useActionState, useEffect, useRef, useState } from "react";
+ import { LAVORO_VOCAB } from "@/lib/constants";
+ import { PUNTI_AFFIDABILITA } from "@/lib/affidabilita";
+@@ -50,6 +51,7 @@ export function DatiForm({
+   const [protestato, setProtestato] = useState<boolean | null>(
+     tenant.protestato
+   );
++  const statoProtesti = tenant.protesti_verifica_stato ?? "non_avviata";
+   const [fideiussione, setFideiussione] = useState<boolean | null>(
+     tenant.fideiussione
+   );
+@@ -134,12 +136,19 @@ export function DatiForm({
+ 
+         <div id="dati-protesti" className="ancora-dati" />
+         <Field label="Hai protesti o segnalazioni in centrale rischi? · obbligatorio">
+-          <div className="chip-row">
+-            <Chip label="No" active={protestato === false} onClick={() => setProtestato(false)} />
+-            <Chip label="Sì" active={protestato === true} onClick={() => setProtestato(true)} />
+-          </div>
++          {rispostaBloccata(statoProtesti) ? (
++            // verificato dallo staff: non si cambia da soli (il valore resta nel modulo, nascosto, e viene riscritto uguale)
++            <p className="risposta-verificata" role="status">
++              <b>{protestato ? "Sì, risultano protesti" : "No, nessun protesto"}</b> · verificato dallo staff
++            </p>
++          ) : (
++            <div className="chip-row">
++              <Chip label="No" active={protestato === false} onClick={() => setProtestato(false)} />
++              <Chip label="Sì" active={protestato === true} onClick={() => setProtestato(true)} />
++            </div>
++          )}
+           <p className="field-note">
+-            Va indicato. Rispondere «No» vale +{PUNTI_AFFIDABILITA.protesti} nel punteggio; «Sì», o non rispondere, toglie {PUNTI_AFFIDABILITA.protesti}. Lo dichiari tu: nessuno lo controlla.
++            Va indicato. Rispondere «No» vale +{PUNTI_AFFIDABILITA.protesti} nel punteggio; «Sì», o non rispondere, toglie {PUNTI_AFFIDABILITA.protesti}. {notaDomandaProtesti(statoProtesti)}
+           </p>
+         </Field>
+ 
+diff --git a/src/components/DatiSheet.tsx b/src/components/DatiSheet.tsx
+index f0499dd..0134e9b 100644
+--- a/src/components/DatiSheet.tsx
++++ b/src/components/DatiSheet.tsx
+@@ -1,5 +1,6 @@
+ "use client";
+ 
++import { TESTI_VERIFICA_PROTESTI } from "@/lib/protesti";
+ import { useEffect, useRef, useState } from "react";
+ import { Sheet } from "@/components/Sheet";
+ import { DatiForm } from "@/components/DatiForm";
+@@ -24,6 +25,7 @@ export function DatiSheet({
+   recensioni,
+   raccomandazione,
+   verificaPanel,
++  protestiPanel,
+   onSalvata,
+   scorriA = null,
+ }: {
+@@ -35,6 +37,8 @@ export function DatiSheet({
+   raccomandazione: StatoRaccomandazione;
+   /** il pannello per verificare il reddito con i documenti, costruito dal server */
+   verificaPanel: React.ReactNode;
++  /** la verifica dei protesti: carica il certificato e lo controlla lo staff */
++  protestiPanel: React.ReactNode;
+   /** chiamata quando i dati vengono salvati (la Home chiude la scheda e lo dice) */
+   onSalvata?: () => void;
+   /** all'apertura scorre a questa parte (da un collegamento che porta alla verifica del reddito) */
+@@ -106,6 +110,13 @@ export function DatiSheet({
+             punteggio di affidabilità sale.
+           </p>
+           {verificaPanel}
++
++          <div id="dati-verifica-protesti" className="ancora-dati" />
++          <div className="pref-label" style={{ marginTop: 22 }}>
++            <span>{TESTI_VERIFICA_PROTESTI.titolo}</span>
++          </div>
++          <p className="sheet-sub">{TESTI_VERIFICA_PROTESTI.introduzione}</p>
++          {protestiPanel}
+         </div>
+       </div>
+     </Sheet>
+diff --git a/src/components/SchedaPersona.tsx b/src/components/SchedaPersona.tsx
+index 56ed850..3ecb090 100644
+--- a/src/components/SchedaPersona.tsx
++++ b/src/components/SchedaPersona.tsx
+@@ -58,6 +58,8 @@ export function SchedaPersona({
+       <div className="persona-etichette">
+         {dati.raccomandato && <BadgeRaccomandato />}
+         {dati.redditoVerificato && <span className="persona-chip">Reddito verificato</span>}
++        {dati.protestiVerificati === "nessuno" && <span className="persona-chip">Nessun protesto · verificato</span>}
++        {dati.protestiVerificati === "si" && <span className="persona-chip persona-chip-attenzione">Ha protesti · verificato</span>}
+         {dati.recensioni && dati.recensioni.numero > 0 && (
+           <span className="persona-chip">
+             <span aria-hidden="true">{stelleTesto(dati.recensioni.media)}</span> {testoRecensioni(dati.recensioni)}
+diff --git a/src/components/VerificaProtestiPanel.tsx b/src/components/VerificaProtestiPanel.tsx
+new file mode 100644
+index 0000000..aca7450
+--- /dev/null
++++ b/src/components/VerificaProtestiPanel.tsx
+@@ -0,0 +1,224 @@
++"use client";
++
++import { useState } from "react";
++import { useRouter } from "next/navigation";
++import { createClient } from "@/lib/supabase/client";
++import { SelettoreFile } from "@/components/SelettoreFile";
++import { estensioneDa, messaggioErroreVerifica, percorsoDocumento, validaFileDocumento } from "@/lib/verifica";
++import { LIMITE_DOCUMENTI, puoAggiungereDocumento, type DocumentoInquilino } from "@/lib/verifica-inquilino";
++import {
++  AIUTO_DOCUMENTO_PROTESTI,
++  ETICHETTE_DOCUMENTO_PROTESTI,
++  TESTI_VERIFICA_PROTESTI,
++  TIPI_DOCUMENTO_PROTESTI,
++  cosaMancaProtesti,
++  descriviStatoProtesti,
++  puoInviareProtesti,
++  puoTogliereDocumentiProtesti,
++  type StatoProtesti,
++} from "@/lib/protesti";
++
++const BUCKET = "documenti-verifica";
++
++type Tipo = (typeof TIPI_DOCUMENTO_PROTESTI)[number];
++
++/**
++ * Il pannello con cui l'inquilino carica il certificato dei protesti e chiede la verifica allo staff.
++ *
++ * Le regole vere (chi può cambiare lo stato, quali documenti servono, che i documenti si tolgano solo prima dell'invio, che il risultato dello staff prevale
++ * e non si cambia più da soli) stanno nel database. Qui si evita di far fare alla persona cose che il database rifiuterebbe.
++ */
++export function VerificaProtestiPanel({
++  stato,
++  nota,
++  protestato,
++  documenti,
++}: {
++  stato: StatoProtesti;
++  nota: string | null;
++  /** il valore che vale oggi (se verificato, è quello dello staff) */
++  protestato: boolean | null;
++  documenti: DocumentoInquilino[];
++}) {
++  const router = useRouter();
++  const [errore, setErrore] = useState<string | null>(null);
++  const [inCorso, setInCorso] = useState<string | null>(null);
++
++  const descrizione = descriviStatoProtesti(stato, nota, protestato);
++  const manca = cosaMancaProtesti({ documenti, protestato });
++  const inviabile = puoInviareProtesti({ stato, documenti, protestato });
++  const siTolgono = puoTogliereDocumentiProtesti(stato);
++
++  async function carica(tipo: Tipo, file: File | undefined) {
++    if (!file) return;
++    setErrore(null);
++
++    if (!puoAggiungereDocumento(documenti.length)) {
++      setErrore(`Hai già ${LIMITE_DOCUMENTI} documenti: toglierne uno, o scrivici.`);
++      return;
++    }
++    const problema = validaFileDocumento(file);
++    if (problema) {
++      setErrore(problema);
++      return;
++    }
++    const estensione = estensioneDa(file.type);
++    if (!estensione) {
++      setErrore("Il file deve essere un PDF, una foto JPG o una foto PNG.");
++      return;
++    }
++
++    setInCorso(`carica-${tipo}`);
++    try {
++      const supabase = createClient();
++      const {
++        data: { user },
++      } = await supabase.auth.getUser();
++      if (!user) {
++        setErrore(messaggioErroreVerifica("NON_AUTENTICATO"));
++        return;
++      }
++
++      const percorso = percorsoDocumento({
++        userId: user.id,
++        tipo: tipo === "identita" ? "inquilino-identita" : "inquilino-protesti",
++        listingId: null,
++        estensione,
++        id: crypto.randomUUID(),
++      });
++
++      const { error: eFile } = await supabase.storage.from(BUCKET).upload(percorso, file, { contentType: file.type, upsert: false });
++      if (eFile) {
++        setErrore("Non sono riuscito a caricare il file. Riprova.");
++        return;
++      }
++
++      const { error: eRiga } = await supabase.from("documenti_inquilino").insert({
++        tenant_id: user.id,
++        tipo,
++        percorso,
++        nome_file: file.name.slice(0, 200),
++      });
++      if (eRiga) {
++        // un documento personale non deve restare nel bucket senza che nessuno lo veda
++        await supabase.storage.from(BUCKET).remove([percorso]);
++        setErrore("Non è stato possibile registrare il documento. Riprova.");
++        return;
++      }
++      router.refresh();
++    } finally {
++      setInCorso(null);
++    }
++  }
++
++  async function togli(doc: DocumentoInquilino) {
++    setErrore(null);
++    setInCorso(`togli-${doc.id}`);
++    try {
++      const supabase = createClient();
++      const { data: tolti, error: eFile } = await supabase.storage.from(BUCKET).remove([doc.percorso]);
++      // La sicurezza del database, se non permette di togliere il file, non dà errore: restituisce un elenco vuoto.
++      // Senza questo controllo si cancellerebbe la riga lasciando il file.
++      if (eFile || !tolti || tolti.length === 0) {
++        setErrore("Non è stato possibile togliere il documento: forse hai già inviato la richiesta.");
++        return;
++      }
++      const { error: eRiga } = await supabase.from("documenti_inquilino").delete().eq("id", doc.id);
++      if (eRiga) {
++        setErrore("Il file è stato tolto ma non il suo elenco. Ricarica la pagina.");
++        return;
++      }
++      router.refresh();
++    } finally {
++      setInCorso(null);
++    }
++  }
++
++  async function invia() {
++    setErrore(null);
++    setInCorso("invia");
++    try {
++      const { error } = await createClient().rpc("richiedi_verifica_protesti");
++      if (error) {
++        setErrore(messaggioErroreVerifica(error.message));
++        return;
++      }
++      router.refresh();
++    } finally {
++      setInCorso(null);
++    }
++  }
++
++  return (
++    <div>
++      <div className={`note-box ${descrizione.tono === "no" ? "is-no" : ""}`} style={{ marginTop: 0, marginBottom: 16 }} role="status">
++        <b>{descrizione.titolo}</b>
++        <br />
++        {descrizione.testo}
++      </div>
++
++      {TIPI_DOCUMENTO_PROTESTI.map((tipo) => {
++        const miei = documenti.filter((d) => d.tipo === tipo);
++        return (
++          <div key={tipo} className="passo-verifica" style={{ marginBottom: 12 }}>
++            <div className="pref-label" style={{ margin: "0 0 4px 0" }}>
++              <span>{ETICHETTE_DOCUMENTO_PROTESTI[tipo]}</span>
++            </div>
++            <p className="field-note" style={{ margin: "0 0 8px 0" }}>
++              {AIUTO_DOCUMENTO_PROTESTI[tipo]}
++            </p>
++
++            {miei.length > 0 && (
++              <ul className="elenco-documenti">
++                {miei.map((d) => (
++                  <li key={d.id}>
++                    <span>{d.nome_file}</span>
++                    {siTolgono && (
++                      <button
++                        type="button"
++                        className="redo-link"
++                        disabled={inCorso !== null}
++                        aria-label={`Togli ${d.nome_file}`}
++                        onClick={() => togli(d)}
++                      >
++                        {inCorso === `togli-${d.id}` ? "Tolgo..." : "Togli"}
++                      </button>
++                    )}
++                  </li>
++                ))}
++              </ul>
++            )}
++
++            {stato !== "verificato" && (
++              <SelettoreFile
++                etichetta={miei.length > 0 ? "Aggiungi un altro file" : "Scegli un file"}
++                aria={`Carica: ${ETICHETTE_DOCUMENTO_PROTESTI[tipo]}`}
++                occupato={inCorso === `carica-${tipo}`}
++                onFile={(f) => carica(tipo, f)}
++              />
++            )}
++          </div>
++        );
++      })}
++
++      {stato === "non_avviata" && (
++        <>
++          {manca.length > 0 && <p className="field-note">Per inviare manca: {manca.join("; ")}.</p>}
++          <button type="button" className="opp-cta" style={{ marginTop: 10 }} disabled={!inviabile || inCorso !== null} onClick={invia}>
++            {inCorso === "invia" ? "Invio..." : "Invia per la verifica"}
++          </button>
++        </>
++      )}
++
++      {errore && (
++        <p className="note-error" style={{ marginTop: 10 }}>
++          {errore}
++        </p>
++      )}
++
++      <div className="note-box" style={{ marginTop: 20 }}>
++        <b>Chi vede i tuoi documenti.</b> {TESTI_VERIFICA_PROTESTI.riservatezza}
++      </div>
++    </div>
++  );
++}
+diff --git a/src/content/informativa.ts b/src/content/informativa.ts
+index cc567bd..1bd48bb 100644
+--- a/src/content/informativa.ts
++++ b/src/content/informativa.ts
+@@ -28,7 +28,7 @@ export const INFORMATIVA = {
+    * controllo che fa il database (migrazione 0017): un test fallisce se
+    * questa stringa non lo supera.
+    */
+-  versione: "2026-10-provvisoria-21",
++  versione: "2026-10-provvisoria-22",
+   /**
+    * Versioni precedenti che chi le ha accettate NON deve riaccettare.
+    *
+@@ -44,7 +44,7 @@ export const INFORMATIVA = {
+    */
+   // Dalla versione 20 il profilo di chi cerca casa è visibile ai proprietari di partenza: è un cambiamento che riguarda anche chi era
+   // già iscritto, quindi le versioni precedenti NON sono equivalenti e chi le aveva accettate deve riaccettare al prossimo accesso.
+-  equivalenti: ["2026-10-provvisoria-20"] as readonly string[],
++  equivalenti: [] as readonly string[],
+   provvisoria: true,
+   titolo: "Informativa sulla privacy",
+   aggiornata: "ottobre 2026",
+@@ -67,9 +67,9 @@ export const INFORMATIVA = {
+       titolo: "Quali dati raccogliamo",
+       elenco: [
+         "Account: email, password (conservata come impronta, non in chiaro), nome, cognome e ruolo, inquilino o proprietario.",
+-        "Se sei inquilino: lavoro, reddito tuo e del tuo nucleo, garante, fideiussione, protesti (li dichiari tu e non vengono verificati), animali, composizione del nucleo, numero di figli, presentazione, foto del profilo, le tue preferenze di ricerca (budget, zone, locali, metri, tipo di casa e di contratto, caratteristiche e se per te sono necessarie) e gli annunci che salvi tra i preferiti o che scarti.",
++        "Se sei inquilino: lavoro, reddito tuo e del tuo nucleo, garante, fideiussione, protesti (li dichiari tu; se vuoi, li verifica il nostro staff sul certificato dei protesti che carichi, e il risultato dello staff prevale su ciò che hai dichiarato), animali, composizione del nucleo, numero di figli, presentazione, foto del profilo, le tue preferenze di ricerca (budget, zone, locali, metri, tipo di casa e di contratto, caratteristiche e se per te sono necessarie) e gli annunci che salvi tra i preferiti o che scarti.",
+         "Se sei proprietario: gli annunci con titolo, descrizione, zona, prezzo, caratteristiche, classe energetica e foto; l'indirizzo preciso, se lo indichi, e la posizione sulla mappa che se ne ricava; i criteri che chiedi ai candidati.",
+-        "Per le verifiche: il documento d'identità e la prova di proprietà dell'immobile (proprietari); se sei inquilino e chiedi di verificare il reddito, un documento d'identità e una prova del reddito (una busta paga, la CU o la dichiarazione dei redditi); e i contratti di affitto caricati per dichiarare un affitto. Non chiediamo lo stato di famiglia.",
++        "Per le verifiche: il documento d'identità e la prova di proprietà dell'immobile (proprietari); se sei inquilino e chiedi di verificare il reddito, un documento d'identità e una prova del reddito (una busta paga, la CU o la dichiarazione dei redditi); se chiedi di verificare i protesti, un documento d'identità e il certificato dei protesti intestato a te; e i contratti di affitto caricati per dichiarare un affitto. Non chiediamo lo stato di famiglia.",
+         "Mentre usi l'app: candidature, messaggi, visite (giorno e ora, e chi le ha prenotate), contratti, recensioni, richieste di conferma di un affitto e inviti. Inoltre le notifiche sulle novità del tuo account, e le email che le riassumono (la tua impostazione, la data dell'ultimo invio e un registro di data, esito e numero di notifiche, senza contenuto né indirizzi, per 90 giorni) (per esempio l'esito di una verifica o la risposta a una candidatura): contengono il tipo di evento e, al massimo, il titolo di un annuncio e, per le visite, il giorno e l'ora; mai nomi di persone.",
+         "Dati di un'altra persona: se inviti il tuo proprietario, scrivi il suo nome e, se vuoi, la sua email.",
+       ],
+@@ -95,7 +95,7 @@ export const INFORMATIVA = {
+       titolo: "Chi vede cosa",
+       elenco: [
+         "Tu vedi tutti i tuoi dati.",
+-        "Il proprietario di un annuncio a cui ti candidi vede il tuo nome e cognome, il lavoro, il reddito, garante e fideiussione, i protesti che hai dichiarato, se il tuo reddito è verificato, la presentazione, la foto, il punteggio di affidabilità e la compatibilità. Non vede il numero di figli, la composizione del nucleo né se hai animali: sa solo se hai compilato quei campi, per contare quanto è completo il tuo profilo. Non vede le tue preferenze di ricerca.",
++        "Il proprietario di un annuncio a cui ti candidi vede il tuo nome e cognome, il lavoro, il reddito, garante e fideiussione, i protesti (quelli che hai dichiarato o, se li ha verificati lo staff, il risultato dello staff, con l'indicazione che è verificato), se il tuo reddito è verificato, la presentazione, la foto, il punteggio di affidabilità e la compatibilità. Non vede il numero di figli, la composizione del nucleo né se hai animali: sa solo se hai compilato quei campi, per contare quanto è completo il tuo profilo. Non vede le tue preferenze di ricerca.",
+         "Se rifiuta la tua candidatura, del tuo profilo gli resta solo il tuo nome, oltre alla valutazione che aveva già fatto. Tu vedi il motivo del rifiuto, non la sua valutazione completa.",
+         "Se ritiri una candidatura mentre è ancora in attesa, il proprietario non la vede più: non legge né il tuo profilo né le recensioni su di te, e riceve solo una notifica con il titolo dell'annuncio. La candidatura resta nel tuo elenco e non puoi candidarti di nuovo allo stesso annuncio.",
+         "I messaggi li leggono solo le due persone, dopo che la candidatura è stata accettata. L'app ricorda quali messaggi hai già letto, solo per mostrarti quanti ne restano da leggere: non lo mostra all'altra persona.",
+@@ -108,7 +108,7 @@ export const INFORMATIVA = {
+         "Nella chat, l'app evidenzia i messaggi che parlano di pagamenti sospetti (per esempio un IBAN, una caparra o un anticipo) e ti avvisa prima di inviarne uno così, per aiutarti a riconoscere una truffa. È un controllo automatico che fa parte della visualizzazione della chat: non salviamo il risultato e non lo comunichiamo a nessuno, e non impedisce mai di inviare un messaggio.",
+         "Le recensioni su un inquilino le leggono la persona recensita, chi le ha scritte e i proprietari a cui ha inviato una candidatura.",
+         "Gli annunci pubblicati e verificati li vedono tutti gli utenti connessi. L'indirizzo esatto degli immobili non lo raccogliamo.",
+-        "Il documento d'identità, la prova del reddito, la prova di proprietà e i contratti li vedono solo chi li ha caricati e il team di MatchAmI che li controlla. Un proprietario non vede mai i documenti di un inquilino: vede solo se il reddito è verificato, sì o no. L'altra parte di un affitto non vede il contratto.",
++        "Il documento d'identità, la prova del reddito, la prova di proprietà e i contratti li vedono solo chi li ha caricati e il team di MatchAmI che li controlla. Un proprietario non vede mai i documenti di un inquilino: vede solo se il reddito è verificato, sì o no, e se i protesti sono verificati dallo staff (e con quale risultato). L'altra parte di un affitto non vede il contratto.",
+         "Il team di MatchAmI vede nome e cognome di tutti, e gli annunci e gli affitti da verificare. Chi amministra il sistema ha un accesso tecnico a tutti i dati.",
+       ],
+     },
+diff --git a/src/lib/affidabilita.ts b/src/lib/affidabilita.ts
+index ebb6b4e..640f8fe 100644
+--- a/src/lib/affidabilita.ts
++++ b/src/lib/affidabilita.ts
+@@ -2,7 +2,7 @@
+  * Il punteggio di affidabilità: da 0 a 100, tre voci. I protesti TOLGONO punti.
+  *
+  *  - REDDITO VERIFICATO       +50  lo controlla lo staff sui documenti
+- *  - NESSUN PROTESTO          +30  lo dichiara la persona (non si verifica)
++ *  - NESSUN PROTESTO          +30  lo dichiara la persona; lo staff lo può VERIFICARE sul certificato dei protesti (il risultato prevale)
+  *    protesti, o NON INDICATO  −30  «non indicato» vale come «sì»: va risposto
+  *  - GARANTE o FIDEIUSSIONE   +20  lo dichiara la persona (non si verifica)
+  *
+@@ -17,6 +17,8 @@ export type AffidabilitaInput = {
+   protestato: boolean | null;
+   garante: boolean | null;
+   fideiussione: boolean | null;
++  /** lo staff ha verificato i protesti sul certificato: `protestato` è allora il risultato dello staff */
++  protestiVerificati?: boolean;
+ };
+ 
+ /** `protesti` è il peso della voce: +30 se non ne hai, −30 se ne hai o non hai risposto. */
+@@ -113,9 +115,9 @@ export function computeAffidabilita(p: AffidabilitaInput): AffidabilitaResult {
+   // «sì» e «non indicato» valgono lo stesso: tolgono i punti. Solo il «non indicato» si può ancora correggere.
+   const voceProtesti: VoceAffidabilita =
+     p.protestato === false
+-      ? { id: "protesti", etichetta: "Nessun protesto", punti: protesti, massimo: protesti, presa: true, origine: "dichiarato", potenziale: 0, suggerimento: null, sezione: null, nota: "Nessuno lo controlla: vale quanto hai dichiarato." }
++      ? { id: "protesti", etichetta: "Nessun protesto", punti: protesti, massimo: protesti, presa: true, origine: p.protestiVerificati ? "verificato" : "dichiarato", potenziale: 0, suggerimento: null, sezione: null, nota: p.protestiVerificati ? "Controllato dallo staff sul tuo certificato dei protesti." : "Non ancora verificato: vale quanto hai dichiarato. Puoi far controllare il certificato dei protesti dallo staff." }
+       : p.protestato === true
+-        ? { id: "protesti", etichetta: "Protesti dichiarati", punti: -protesti, massimo: protesti, presa: false, origine: "dichiarato", potenziale: 0, suggerimento: null, sezione: null, nota: `Hai dichiarato dei protesti o segnalazioni: tolgono ${protesti} punti.` }
++        ? { id: "protesti", etichetta: p.protestiVerificati ? "Protesti verificati" : "Protesti dichiarati", punti: -protesti, massimo: protesti, presa: false, origine: p.protestiVerificati ? "verificato" : "dichiarato", potenziale: 0, suggerimento: null, sezione: null, nota: p.protestiVerificati ? `Lo staff ha controllato il tuo certificato: risultano dei protesti. Tolgono ${protesti} punti.` : `Hai dichiarato dei protesti o segnalazioni: tolgono ${protesti} punti.` }
+         : { id: "protesti", etichetta: "Protesti non indicati", punti: -protesti, massimo: protesti, presa: false, origine: "dichiarato", potenziale: 2 * protesti, suggerimento: "Indica i protesti nei tuoi dati", sezione: "dati", nota: `Non indicati: valgono come se ci fossero e tolgono ${protesti} punti.` };
+ 
+   const haGaranzia = p.garante === true || p.fideiussione === true;
+diff --git a/src/lib/candidati.ts b/src/lib/candidati.ts
+index d880459..d60cdaf 100644
+--- a/src/lib/candidati.ts
++++ b/src/lib/candidati.ts
+@@ -33,11 +33,13 @@ export type RigaVistaCandidato = {
+   avatar_url: string | null;
+   animali_compilato: boolean | null;
+   nucleo_compilato: boolean | null;
++  /** lo staff ha verificato i protesti sul certificato: `protestato` è il risultato dello staff */
++  protesti_verificati: boolean | null;
+ };
+ 
+ /** Le colonne da chiedere alla vista, in un posto solo. */
+ export const COLONNE_VISTA_CANDIDATI =
+-  "candidatura_id, nome, cognome, professione, reddito_mensile, reddito_nucleo, garante, fideiussione, protestato, verificato, presentazione, avatar_url, animali_compilato, nucleo_compilato";
++  "candidatura_id, nome, cognome, professione, reddito_mensile, reddito_nucleo, garante, fideiussione, protestato, verificato, presentazione, avatar_url, animali_compilato, nucleo_compilato, protesti_verificati";
+ 
+ /** Dalla riga della vista al profilo che legge il calcolo del match. */
+ export function profiloDaVista(v: Partial<RigaVistaCandidato> | null | undefined): ProfiloCandidato {
+@@ -52,6 +54,7 @@ export function profiloDaVista(v: Partial<RigaVistaCandidato> | null | undefined
+     nucleo_compilato: v?.nucleo_compilato === true,
+     presentazione: v?.presentazione ?? null,
+     verificato: v?.verificato === true,
++    protestiVerificati: v?.protesti_verificati === true,
+   };
+ }
+ 
+@@ -108,6 +111,8 @@ export function assemblaCandidature(input: {
+         reddito_mensile: v?.reddito_mensile ?? null,
+         reddito_nucleo: v?.reddito_nucleo ?? null,
+         verificato: v?.verificato === true,
++        protesti_verificati: v?.protesti_verificati === true,
++        protestato: v?.protestato ?? null,
+         presentazione: v?.presentazione ?? null,
+         avatar_url: v?.avatar_url ?? null,
+       },
+diff --git a/src/lib/database-proprietario.ts b/src/lib/database-proprietario.ts
+index 29e7f66..b98ba0f 100644
+--- a/src/lib/database-proprietario.ts
++++ b/src/lib/database-proprietario.ts
+@@ -108,6 +108,8 @@ export type DatiScheda = {
+   raccomandato: boolean;
+   recensioni: RiepilogoRecensioni | null;
+   redditoVerificato: boolean;
++  /** come stanno i protesti SE li ha verificati lo staff; altrimenti `null` (il dichiarato non si mostra come un fatto) */
++  protestiVerificati: "nessuno" | "si" | null;
+   /** un estratto della presentazione, mai più di 160 caratteri */
+   presentazione: string | null;
+   /** manca qualche dato: il match è provvisorio */
+@@ -130,6 +132,7 @@ export function datiSchedaCandidato(c: CandidaturaRicevuta): DatiScheda {
+     raccomandato: v?.raccomandato === true,
+     recensioni: v?.recensioni ?? null,
+     redditoVerificato: c.tenant_profiles?.verificato === true,
++    protestiVerificati: c.tenant_profiles?.protesti_verificati === true && typeof c.tenant_profiles?.protestato === "boolean" ? (c.tenant_profiles.protestato ? "si" : "nessuno") : null,
+     presentazione: estratto(c.tenant_profiles?.presentazione),
+     incompleto: v?.match.incompleto === true,
+   };
+@@ -145,6 +148,7 @@ export function datiSchedaPossibile(s: SchedaInquilino): DatiScheda {
+     raccomandato: s.raccomandato,
+     recensioni: s.recensioni,
+     redditoVerificato: s.redditoVerificato,
++    protestiVerificati: s.protestiVerificati,
+     presentazione: s.presentazione,
+     incompleto: false,
+   };
+diff --git a/src/lib/match/candidato.ts b/src/lib/match/candidato.ts
+index 0006886..8834441 100644
+--- a/src/lib/match/candidato.ts
++++ b/src/lib/match/candidato.ts
+@@ -26,6 +26,8 @@ export type ProfiloCandidato = {
+   nucleo_compilato: boolean;
+   presentazione: string | null;
+   verificato: boolean;
++  /** lo staff ha verificato i protesti: `protestato` è allora il suo risultato */
++  protestiVerificati?: boolean;
+ };
+ 
+ /**
+@@ -104,6 +106,7 @@ export function valutaCandidato(input: {
+     protestato: profilo.protestato,
+     garante: profilo.garante,
+     fideiussione: profilo.fideiussione,
++    protestiVerificati: profilo.protestiVerificati === true,
+   }).punteggio;
+ 
+   return {
+diff --git a/src/lib/match/proprietario.ts b/src/lib/match/proprietario.ts
+index eb553ea..09bdfd5 100644
+--- a/src/lib/match/proprietario.ts
++++ b/src/lib/match/proprietario.ts
+@@ -93,8 +93,8 @@ export const CATALOGO_CRITERI: Record<ChiaveCriterio, DefinizioneCriterio> = {
+ 
+   nessunProtesto: {
+     nome: "Nessun protesto",
+-    descrizione: "Il candidato dichiara di non avere protesti.",
+-    etichetta: () => "Nessun protesto dichiarato",
++    descrizione: "Il candidato non ha protesti: lo dichiara, e se lo staff ha controllato il certificato vale il risultato dello staff.",
++    etichetta: () => "Nessun protesto",
+     valuta: (c) => {
+       if (c.protestato === null) return { stato: "non_indicato" };
+       return { stato: c.protestato ? "no" : "ok" };
+diff --git a/src/lib/notifiche.ts b/src/lib/notifiche.ts
+index ba43bd5..e373380 100644
+--- a/src/lib/notifiche.ts
++++ b/src/lib/notifiche.ts
+@@ -33,6 +33,8 @@ export const TIPI_NOTIFICA = [
+   "affitto_da_confermare",
+   "affitto_confermato",
+   "affitto_non_confermato",
++  "protesti_verificati",
++  "protesti_respinti",
+ ] as const;
+ 
+ export type TipoNotifica = (typeof TIPI_NOTIFICA)[number];
+@@ -104,6 +106,21 @@ export function descriviNotifica(
+         titolo: "Verifica del reddito non riuscita",
+         testo: "Leggi la nota nel Profilo, correggi i documenti e invia di nuovo.",
+       };
++    case "protesti_verificati":
++      return dati?.protestato === true
++        ? {
++            titolo: "Protesti verificati",
++            testo: "Lo staff ha controllato il tuo certificato: risultano dei protesti. Lo vedi nel tuo punteggio e i proprietari lo vedono come dato verificato.",
++          }
++        : {
++            titolo: "Protesti verificati",
++            testo: "Lo staff ha controllato il tuo certificato: non risultano protesti. I proprietari ora vedono «Protesti verificati» accanto al tuo nome.",
++          };
++    case "protesti_respinti":
++      return {
++        titolo: "Verifica dei protesti non riuscita",
++        testo: "Leggi la nota nei tuoi dati, correggi i documenti e invia di nuovo.",
++      };
+     case "affitto_verificato":
+       return {
+         titolo: "Affitto verificato",
+diff --git a/src/lib/proprietario/possibili-inquilini.ts b/src/lib/proprietario/possibili-inquilini.ts
+index 9b74e06..3d67ece 100644
+--- a/src/lib/proprietario/possibili-inquilini.ts
++++ b/src/lib/proprietario/possibili-inquilini.ts
+@@ -24,6 +24,8 @@ export type InquilinoDisponibile = {
+   presentazione: string | null;
+   verificato: boolean;
+   protestato: boolean | null;
++  /** lo staff ha verificato i protesti */
++  protestiVerificati?: boolean;
+   garante: boolean | null;
+   fideiussione: boolean | null;
+   reddito_mensile: number | null;
+@@ -50,6 +52,8 @@ export type SchedaInquilino = {
+   raccomandato: boolean;
+   recensioni: RiepilogoRecensioni;
+   redditoVerificato: boolean;
++  /** come stanno i protesti SE li ha verificati lo staff: «nessuno» o «si»; altrimenti `null` (non si mostra il dichiarato) */
++  protestiVerificati: "nessuno" | "si" | null;
+   /** quanto combacia con i criteri del proprietario, da 0 a 99; `null` se non ne ha chiesto nessuno */
+   compatibilita: number | null;
+ };
+@@ -114,6 +118,7 @@ export function schedeInquilini(input: {
+         nucleo_compilato: d.nucleoCompilato === true,
+         presentazione: d.presentazione,
+         verificato: d.verificato === true,
++        protestiVerificati: d.protestiVerificati === true,
+       },
+       recensioni: riepilogo,
+       raccomandato,
+@@ -121,7 +126,7 @@ export function schedeInquilini(input: {
+     // chi non rispetta un criterio OBBLIGATORIO del proprietario non si propone
+     if (valutazione.match.bloccato) continue;
+ 
+-    const aff = computeAffidabilita({ verificato: d.verificato === true, protestato: d.protestato, garante: d.garante, fideiussione: d.fideiussione });
++    const aff = computeAffidabilita({ verificato: d.verificato === true, protestato: d.protestato, garante: d.garante, fideiussione: d.fideiussione, protestiVerificati: d.protestiVerificati === true });
+     voci.push({
+       scheda: {
+         tenantId: d.tenantId,
+@@ -134,6 +139,7 @@ export function schedeInquilini(input: {
+         raccomandato,
+         recensioni: riepilogo,
+         redditoVerificato: d.verificato === true,
++        protestiVerificati: d.protestiVerificati === true && d.protestato !== null ? (d.protestato ? "si" : "nessuno") : null,
+         compatibilita: valutazione.match.punteggio,
+       },
+       match: { bloccato: false, punteggio: valutazione.match.punteggio },
+diff --git a/src/lib/proprietario/possibili-server.ts b/src/lib/proprietario/possibili-server.ts
+index 547362a..9ceeb3c 100644
+--- a/src/lib/proprietario/possibili-server.ts
++++ b/src/lib/proprietario/possibili-server.ts
+@@ -177,7 +177,7 @@ export async function possibiliPerCasaDelProprietario(
+         admin.from("profiles").select("id, nome, cognome").in("id", blocco),
+         admin
+           .from("tenant_profiles")
+-          .select("profile_id, visibile_ai_proprietari, professione, reddito_mensile, reddito_nucleo, garante, fideiussione, protestato, animali, nucleo, presentazione, verificato, avatar_url")
++          .select("profile_id, visibile_ai_proprietari, professione, reddito_mensile, reddito_nucleo, garante, fideiussione, protestato, protesti_verifica_stato, animali, nucleo, presentazione, verificato, avatar_url")
+           .in("profile_id", blocco),
+         admin.from("recensioni").select("tenant_id, voto, autore_id, created_at").in("tenant_id", blocco),
+       ]);
+@@ -210,6 +210,7 @@ export async function possibiliPerCasaDelProprietario(
+           presentazione: (det.presentazione as string | null) ?? null,
+           verificato: det.verificato === true,
+           protestato: (det.protestato as boolean | null) ?? null,
++          protestiVerificati: det.protesti_verifica_stato === "verificato",
+           garante: (det.garante as boolean | null) ?? null,
+           fideiussione: (det.fideiussione as boolean | null) ?? null,
+           reddito_mensile: (det.reddito_mensile as number | null) ?? null,
+diff --git a/src/lib/protesti.ts b/src/lib/protesti.ts
+new file mode 100644
+index 0000000..0c391f9
+--- /dev/null
++++ b/src/lib/protesti.ts
+@@ -0,0 +1,101 @@
++/**
++ * La verifica dei PROTESTI da parte dello staff: cosa dire alla persona, cosa manca per chiederla, cosa si può fare.
++ * Logica pura, senza database: si prova con `npm test`. Le regole vere stanno nella migrazione 0038.
++ *
++ * Funziona come la verifica del reddito (stessi stati, stessi documenti da caricare, stesso passaggio dallo staff) ma è un percorso SEPARATO: si può far
++ * verificare l'uno senza l'altro. Il risultato dello staff PREVALE su ciò che la persona aveva dichiarato, e una volta verificato non si cambia più da soli.
++ */
++import type { DescrizioneStato, DocumentoInquilino, StatoVerificaInquilino } from "@/lib/verifica-inquilino";
++
++export type StatoProtesti = StatoVerificaInquilino;
++
++/** I documenti che servono: il certificato dei protesti e il documento d'identità (lo stesso del reddito: se c'è già, vale). */
++export const TIPI_DOCUMENTO_PROTESTI = ["identita", "protesti"] as const;
++
++export const ETICHETTE_DOCUMENTO_PROTESTI: Record<(typeof TIPI_DOCUMENTO_PROTESTI)[number], string> = {
++  identita: "Documento d'identità",
++  protesti: "Certificato dei protesti",
++};
++
++export const AIUTO_DOCUMENTO_PROTESTI: Record<(typeof TIPI_DOCUMENTO_PROTESTI)[number], string> = {
++  identita: "Carta d'identità, patente o passaporto, fronte e retro. Se l'hai già caricato per il reddito, non serve di nuovo.",
++  protesti: "Il certificato o la visura dei protesti intestati a te, recente. Si chiede alla Camera di Commercio, anche online.",
++};
++
++/** Cosa dire alla persona sullo stato della sua verifica dei protesti (`protestato` è il valore che vale oggi). */
++export function descriviStatoProtesti(stato: StatoProtesti, nota: string | null, protestato: boolean | null): DescrizioneStato {
++  if (stato === "verificato") {
++    return protestato === true
++      ? {
++          titolo: "Protesti verificati: risultano dei protesti",
++          testo:
++            "Lo staff ha controllato il tuo certificato: risultano dei protesti. Il tuo punteggio di affidabilità ne tiene conto e i proprietari vedono che è un dato verificato. Se qualcosa non è corretto, scrivici.",
++          tono: "no",
++        }
++      : {
++          titolo: "Protesti verificati: nessun protesto",
++          testo:
++            "Lo staff ha controllato il tuo certificato: non risultano protesti. I proprietari vedono «Protesti verificati» accanto al tuo nome, e il tuo punteggio ne tiene conto.",
++          tono: "ok",
++        };
++  }
++  if (stato === "in_verifica") {
++    return { titolo: "In verifica", testo: "Stiamo controllando il certificato. Finché non rispondiamo non puoi toglierlo, ma puoi aggiungerne altri.", tono: "attesa" };
++  }
++  if (nota && nota.trim()) {
++    return { titolo: "Verifica non riuscita", testo: `${nota.trim()} Correggi e invia di nuovo.`, tono: "no" };
++  }
++  return {
++    titolo: "Non ancora verificato",
++    testo:
++      "Carica il certificato dei protesti e un documento d'identità: lo staff controlla se risulti protestato o no. Il risultato dello staff vale più di ciò che hai dichiarato.",
++    tono: "neutro",
++  };
++}
++
++/** Cosa manca prima di poter inviare. Vuoto: si può inviare. */
++export function cosaMancaProtesti(input: { documenti: Pick<DocumentoInquilino, "tipo">[]; protestato: boolean | null }): string[] {
++  const manca: string[] = [];
++  if (input.protestato === null) manca.push("Rispondi alla domanda sui protesti, in «I tuoi dati»");
++  if (!input.documenti.some((d) => d.tipo === "identita")) manca.push("Carica un documento d'identità");
++  if (!input.documenti.some((d) => d.tipo === "protesti")) manca.push("Carica il certificato dei protesti");
++  return manca;
++}
++
++/** Si può inviare solo se non è già stato inviato o verificato, e non manca niente. */
++export function puoInviareProtesti(input: { stato: StatoProtesti; documenti: Pick<DocumentoInquilino, "tipo">[]; protestato: boolean | null }): boolean {
++  return input.stato === "non_avviata" && cosaMancaProtesti(input).length === 0;
++}
++
++/** I documenti si tolgono solo finché la verifica dei protesti non è partita (regola del database). */
++export function puoTogliereDocumentiProtesti(stato: StatoProtesti): boolean {
++  return stato === "non_avviata";
++}
++
++/** La domanda sui protesti non si cambia più da soli quando lo staff l'ha verificata. */
++export function rispostaBloccata(stato: StatoProtesti): boolean {
++  return stato === "verificato";
++}
++
++/** Cosa si scrive sotto la domanda sui protesti nei dati: lo dice, a seconda dello stato, che li verifica lo staff. */
++export function notaDomandaProtesti(stato: StatoProtesti): string {
++  if (stato === "verificato") return "Verificato dallo staff: non si cambia da soli. Se qualcosa non è corretto, scrivici.";
++  if (stato === "in_verifica") return "Lo staff sta controllando il tuo certificato: il risultato vale più di questa risposta.";
++  return "Lo verifica il nostro staff: carica il certificato dei protesti in «Verifica dei protesti», qui sotto. Il risultato vale più di questa risposta.";
++}
++
++/** Le frasi sotto la sezione «Verifica dei protesti» della scheda dei dati. */
++export const TESTI_VERIFICA_PROTESTI = {
++  titolo: "Verifica dei protesti",
++  introduzione:
++    "Se risulti protestato o no lo verifica il nostro staff: carica il certificato dei protesti e un documento d'identità. Il risultato dello staff vale più di ciò che hai dichiarato, e i proprietari lo vedono come dato verificato.",
++  riservatezza:
++    "Li vedi tu e il team di MatchAmI che li controlla. Il proprietario non li vede mai: vede solo se i protesti sono verificati, sì o no. Non hanno un indirizzo pubblico e si cancellano insieme al tuo account. Finché non invii la richiesta puoi togliere un documento caricato per sbaglio.",
++} as const;
++
++/** Per i proprietari: come si chiama il dato quando lo ha verificato lo staff. */
++export function etichettaProtestiPerProprietario(protestato: boolean | null, verificati: boolean): string {
++  if (protestato === null) return "Protesti non indicati";
++  if (verificati) return protestato ? "Protesti (verificati dallo staff)" : "Nessun protesto (verificato dallo staff)";
++  return protestato ? "Protesti dichiarati" : "Nessun protesto dichiarato";
++}
+diff --git a/src/lib/types.ts b/src/lib/types.ts
+index 194819c..c9253fa 100644
+--- a/src/lib/types.ts
++++ b/src/lib/types.ts
+@@ -22,6 +22,9 @@ export type TenantProfile = {
+   /** perché la verifica non è riuscita, o è decaduta; lo scrive solo lo staff */
+   verifica_esito_note: string | null;
+   verifica_inviata_at: string | null;
++  /** la verifica dei protesti da parte dello staff (migrazione 0038): se «verificato», `protestato` è il valore dello staff */
++  protesti_verifica_stato?: "non_avviata" | "in_verifica" | "verificato";
++  protesti_verifica_esito_note?: string | null;
+   budget_max: number | null;
+   locali_min: number | null;
+   mq_min: number | null;
+@@ -123,6 +126,10 @@ export type CandidaturaRicevuta = {
+     reddito_mensile: number | null;
+     reddito_nucleo: number | null;
+     verificato: boolean;
++    /** lo staff ha verificato i protesti */
++    protesti_verificati?: boolean;
++    /** la risposta sui protesti (se verificati, quella dello staff) */
++    protestato?: boolean | null;
+     presentazione: string | null;
+     avatar_url: string | null;
+   } | null;
+diff --git a/src/lib/verifica-inquilino.ts b/src/lib/verifica-inquilino.ts
+index 25e9682..c346282 100644
+--- a/src/lib/verifica-inquilino.ts
++++ b/src/lib/verifica-inquilino.ts
+@@ -7,8 +7,9 @@
+  */
+ 
+ export type StatoVerificaInquilino = "non_avviata" | "in_verifica" | "verificato";
+-export type TipoDocumentoInquilino = "identita" | "reddito";
++export type TipoDocumentoInquilino = "identita" | "reddito" | "protesti";
+ 
++/** I documenti della verifica del REDDITO. Il certificato dei protesti è della verifica dei protesti (lib/protesti.ts). */
+ export const TIPI_DOCUMENTO_INQUILINO: readonly TipoDocumentoInquilino[] = ["identita", "reddito"];
+ 
+ /** Quanti documenti al massimo: è anche il limite del database (migrazione 0018). */
+@@ -17,11 +18,13 @@ export const LIMITE_DOCUMENTI = 12;
+ export const ETICHETTE_DOCUMENTO: Record<TipoDocumentoInquilino, string> = {
+   identita: "Documento d'identità",
+   reddito: "Prova del reddito",
++  protesti: "Certificato dei protesti",
+ };
+ 
+ export const AIUTO_DOCUMENTO: Record<TipoDocumentoInquilino, string> = {
+   identita: "Carta d'identità, patente o passaporto, fronte e retro. Serve a far coincidere il nome.",
+   reddito: "Una busta paga recente, la CU o la dichiarazione dei redditi.",
++  protesti: "Il certificato o la visura dei protesti intestati a te, recente.",
+ };
+ 
+ export type DocumentoInquilino = {
+diff --git a/src/lib/verifica.ts b/src/lib/verifica.ts
+index d3ad692..135604c 100644
+--- a/src/lib/verifica.ts
++++ b/src/lib/verifica.ts
+@@ -197,7 +197,7 @@ export function estensioneDa(tipo: string): string | null {
+  */
+ export function percorsoDocumento(input: {
+   userId: string;
+-  tipo: "identita" | "proprieta" | "contratto" | "inquilino-identita" | "inquilino-reddito";
++  tipo: "identita" | "proprieta" | "contratto" | "inquilino-identita" | "inquilino-reddito" | "inquilino-protesti";
+   listingId: string | null;
+   estensione: string;
+   id: string;
+@@ -212,7 +212,7 @@ export function percorsoDocumento(input: {
+   const base =
+     input.tipo === "identita" || input.tipo === "contratto"
+       ? input.tipo
+-      : input.tipo === "inquilino-identita" || input.tipo === "inquilino-reddito"
++      : input.tipo === "inquilino-identita" || input.tipo === "inquilino-reddito" || input.tipo === "inquilino-protesti"
+         ? input.tipo
+         : `proprieta-${pulito(input.listingId ?? "")}`;
+   return `${pulito(input.userId)}/${base}-${pulito(input.id)}.${pulito(input.estensione)}`;
+@@ -271,6 +271,14 @@ const MESSAGGI: Record<string, string> = {
+     "Prima completa il tuo profilo: indica il lavoro e il reddito mensile, così possiamo confrontarli con i documenti.",
+   INQUILINO_NON_IN_VERIFICA: "Questa persona non ha una verifica in attesa.",
+   INQUILINO_NOTA_OBBLIGATORIA: "Per respingere scrivi cosa non va: la persona la leggerà.",
++  // la verifica dei protesti
++  PROTESTI_GIA_VERIFICATI: "I tuoi protesti risultano già verificati.",
++  PROTESTI_GIA_IN_VERIFICA: "La tua richiesta sui protesti è già in verifica.",
++  PROTESTI_NON_DICHIARATI: "Prima rispondi alla domanda sui protesti, in «I tuoi dati».",
++  DOCUMENTI_PROTESTI_MANCANTI: "Per chiedere la verifica servono il documento d'identità e il certificato dei protesti.",
++  PROTESTI_VERIFICATI: "I protesti li ha verificati lo staff: per cambiarli scrivici.",
++  PROTESTI_NON_IN_VERIFICA: "Questa persona non ha una verifica dei protesti in attesa.",
++  PROTESTI_NOTA_OBBLIGATORIA: "Per respingere scrivi cosa non va: la persona la leggerà.",
+   INQUILINO_INESISTENTE: "Inquilino non trovato.",
+   // decisioni sulle candidature
+   CANDIDATURA_NON_TUA: "Questa candidatura non risulta tua.",
+diff --git a/supabase/migrations/0038_verifica_protesti.sql b/supabase/migrations/0038_verifica_protesti.sql
+new file mode 100644
+index 0000000..5825a22
+--- /dev/null
++++ b/supabase/migrations/0038_verifica_protesti.sql
+@@ -0,0 +1,316 @@
++-- ============================================================
++-- Il fatto di essere o no protestati lo VERIFICA lo staff.
++--
++-- Finora i protesti erano solo una risposta dell'inquilino («nessuno controlla»). Ora c'è un percorso di verifica, SEPARATO da quello del reddito (si può far
++-- verificare l'uno senza l'altro), con lo stesso schema:
++--   1. l'inquilino ha già risposto alla domanda sui protesti (obbligatoria) e carica il certificato dei protesti (+ il documento d'identità, lo stesso del reddito);
++--   2. chiede la verifica: lo stato passa a «in verifica»;
++--   3. lo staff guarda i documenti e decide: «nessun protesto», «ci sono protesti» oppure «respinto» (con una nota: documento illeggibile, nome diverso...);
++--   4. se verificato, il risultato dello staff PREVALE su ciò che l'inquilino aveva dichiarato (la colonna protestato prende il valore verificato) e da quel momento la
++--      risposta NON si cambia più da soli: altrimenti si potrebbe ribaltare dopo il controllo. Per cambiarla si scrive allo staff.
++-- Il punteggio non cambia: la voce «protesti» pesa quanto prima; cambia che adesso può essere «verificata» e lo si vede (a chi la guarda e ai proprietari).
++-- Il proprietario vede solo «protesti verificati: sì/no» (mai i documenti). Nessun dato nuovo oltre ai documenti che la persona carica apposta per lo staff.
++-- ============================================================
++
++-- ---- 1. un nuovo tipo di documento ----
++alter table documenti_inquilino drop constraint if exists documenti_inquilino_tipo_check;
++alter table documenti_inquilino add constraint documenti_inquilino_tipo_check check (tipo in ('identita', 'reddito', 'protesti'));
++
++-- ---- 2. lo stato della verifica dei protesti ----
++alter table tenant_profiles
++  add column if not exists protesti_verifica_stato stato_verifica not null default 'non_avviata',
++  add column if not exists protesti_verifica_inviata_at timestamptz,
++  add column if not exists protesti_verifica_esito_note text,
++  add column if not exists protesti_verificati_at timestamptz;
++
++-- ---- 3. nessuno scrive a mano lo stato; i protesti verificati non si cambiano da soli ----
++create or replace function public.proteggi_verifica_inquilino()
++returns trigger
++language plpgsql
++as $$
++begin
++  -- chi lavora dal pannello SQL, o le funzioni sotto, non è limitato
++  if current_user not in ('authenticated', 'anon') then
++    return new;
++  end if;
++
++  if tg_op = 'INSERT' then
++    new.verificato := false;
++    new.verifica_stato := 'non_avviata';
++    new.verifica_esito_note := null;
++    new.verifica_inviata_at := null;
++    new.protesti_verifica_stato := 'non_avviata';
++    new.protesti_verifica_esito_note := null;
++    new.protesti_verifica_inviata_at := null;
++    new.protesti_verificati_at := null;
++    return new;
++  end if;
++
++  if new.verificato is distinct from old.verificato
++     or new.verifica_stato is distinct from old.verifica_stato
++     or new.verifica_esito_note is distinct from old.verifica_esito_note
++     or new.verifica_inviata_at is distinct from old.verifica_inviata_at
++     or new.protesti_verifica_stato is distinct from old.protesti_verifica_stato
++     or new.protesti_verifica_esito_note is distinct from old.protesti_verifica_esito_note
++     or new.protesti_verifica_inviata_at is distinct from old.protesti_verifica_inviata_at
++     or new.protesti_verificati_at is distinct from old.protesti_verificati_at then
++    raise exception 'VERIFICA_RISERVATA: lo stato di verifica lo imposta solo chi gestisce MatchAmI'
++      using errcode = 'P0001';
++  end if;
++
++  -- I protesti verificati dallo staff non si cambiano da soli (riscrivere lo stesso valore va bene)
++  if old.protesti_verifica_stato = 'verificato' and new.protestato is distinct from old.protestato then
++    raise exception 'PROTESTI_VERIFICATI: i protesti li ha verificati lo staff: per cambiarli scrivici'
++      using errcode = 'P0001';
++  end if;
++
++  if old.verificato
++     and (new.professione is distinct from old.professione
++          or new.reddito_mensile is distinct from old.reddito_mensile
++          or new.reddito_nucleo is distinct from old.reddito_nucleo) then
++    new.verificato := false;
++    new.verifica_stato := 'non_avviata';
++    new.verifica_esito_note := 'Hai modificato lavoro o reddito dopo la verifica: va rifatta.';
++    new.verifica_inviata_at := null;
++  end if;
++
++  return new;
++end;
++$$;
++
++-- ---- 4. i documenti si tolgono solo finché NON sono stati inviati alla verifica a cui servono ----
++-- il certificato dei protesti dipende dalla verifica dei protesti, la prova del reddito da quella del reddito,
++-- il documento d'identità serve a tutte e due: si toglie solo se nessuna è partita
++drop policy if exists "documenti inquilino: li toglie la persona prima dell'invio" on documenti_inquilino;
++create policy "documenti inquilino: li toglie la persona prima dell'invio" on documenti_inquilino for delete to authenticated
++  using (
++    tenant_id = auth.uid()
++    and exists (
++      select 1 from tenant_profiles t
++       where t.profile_id = auth.uid()
++         and case documenti_inquilino.tipo
++               when 'protesti' then t.protesti_verifica_stato = 'non_avviata'
++               when 'reddito' then t.verifica_stato = 'non_avviata'
++               else t.verifica_stato = 'non_avviata' and t.protesti_verifica_stato = 'non_avviata'
++             end
++    )
++  );
++
++drop policy if exists "documenti-verifica: l'inquilino toglie i propri prima dell'invio" on storage.objects;
++drop policy if exists "documenti-verifica: l'inquilino toglie i propri prima dell'invi" on storage.objects;
++create policy "documenti-verifica: l'inquilino toglie i propri prima dell'invio" on storage.objects for delete to authenticated
++  using (
++    bucket_id = 'documenti-verifica'
++    and (storage.foldername(name))[1] = auth.uid()::text
++    and storage.filename(name) like 'inquilino-%'
++    and exists (
++      select 1 from tenant_profiles t
++       where t.profile_id = auth.uid()
++         and case
++               when storage.filename(name) like 'inquilino-protesti-%' then t.protesti_verifica_stato = 'non_avviata'
++               when storage.filename(name) like 'inquilino-reddito-%' then t.verifica_stato = 'non_avviata'
++               else t.verifica_stato = 'non_avviata' and t.protesti_verifica_stato = 'non_avviata'
++             end
++    )
++  );
++
++-- ---- 5. l'inquilino chiede la verifica dei protesti ----
++create or replace function public.richiedi_verifica_protesti()
++returns void
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_t tenant_profiles;
++begin
++  if auth.uid() is null then
++    raise exception 'NON_AUTENTICATO' using errcode = 'P0001';
++  end if;
++
++  select * into v_t from tenant_profiles where profile_id = auth.uid();
++  if not found then
++    raise exception 'NON_INQUILINO' using errcode = 'P0001';
++  end if;
++
++  if v_t.protesti_verifica_stato = 'verificato' then
++    raise exception 'PROTESTI_GIA_VERIFICATI' using errcode = 'P0001';
++  end if;
++  if v_t.protesti_verifica_stato = 'in_verifica' then
++    raise exception 'PROTESTI_GIA_IN_VERIFICA' using errcode = 'P0001';
++  end if;
++
++  -- lo staff confronta ciò che hai dichiarato con il certificato: senza una risposta non c'è niente da confrontare
++  if v_t.protestato is null then
++    raise exception 'PROTESTI_NON_DICHIARATI' using errcode = 'P0001';
++  end if;
++
++  if not exists (select 1 from documenti_inquilino where tenant_id = auth.uid() and tipo = 'identita')
++     or not exists (select 1 from documenti_inquilino where tenant_id = auth.uid() and tipo = 'protesti') then
++    raise exception 'DOCUMENTI_PROTESTI_MANCANTI' using errcode = 'P0001';
++  end if;
++
++  update tenant_profiles
++     set protesti_verifica_stato = 'in_verifica',
++         protesti_verifica_inviata_at = now(),
++         protesti_verifica_esito_note = null
++   where profile_id = auth.uid();
++end;
++$$;
++
++-- ---- 6. lo staff decide ----
++-- p_esito: 'nessun_protesto' | 'protestato' | 'respingi' (con una nota)
++create or replace function public.esito_verifica_protesti(p_tenant uuid, p_esito text, p_note text default null)
++returns void
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_stato stato_verifica;
++begin
++  if not public.is_staff() then
++    raise exception 'NON_STAFF' using errcode = 'P0001';
++  end if;
++  if p_esito is null or p_esito not in ('nessun_protesto', 'protestato', 'respingi') then
++    raise exception 'ESITO_NON_VALIDO' using errcode = 'P0001';
++  end if;
++
++  select protesti_verifica_stato into v_stato from tenant_profiles where profile_id = p_tenant;
++  if not found then
++    raise exception 'INQUILINO_INESISTENTE' using errcode = 'P0001';
++  end if;
++  if v_stato <> 'in_verifica' then
++    raise exception 'PROTESTI_NON_IN_VERIFICA' using errcode = 'P0001';
++  end if;
++
++  if p_esito = 'respingi' then
++    if p_note is null or length(btrim(p_note)) < 3 then
++      raise exception 'PROTESTI_NOTA_OBBLIGATORIA' using errcode = 'P0001';
++    end if;
++    update tenant_profiles
++       set protesti_verifica_stato = 'non_avviata',
++           protesti_verifica_esito_note = left(btrim(p_note), 500)
++     where profile_id = p_tenant;
++  else
++    -- il risultato dello staff PREVALE su ciò che la persona aveva dichiarato
++    update tenant_profiles
++       set protestato = (p_esito = 'protestato'),
++           protesti_verifica_stato = 'verificato',
++           protesti_verificati_at = now(),
++           protesti_verifica_esito_note = null
++     where profile_id = p_tenant;
++  end if;
++end;
++$$;
++
++-- ---- 7. quello che serve allo staff (non legge i profili: ha solo queste due funzioni) ----
++create or replace function public.protesti_da_verificare()
++returns table(tenant_id uuid, nome text, cognome text, inviata_at timestamptz)
++language plpgsql
++security definer
++set search_path = public
++as $$
++begin
++  if not public.is_staff() then
++    raise exception 'NON_STAFF' using errcode = 'P0001';
++  end if;
++  return query
++    select t.profile_id, p.nome, p.cognome, t.protesti_verifica_inviata_at
++      from tenant_profiles t
++      join profiles p on p.id = t.profile_id
++     where t.protesti_verifica_stato = 'in_verifica'
++     order by t.protesti_verifica_inviata_at nulls last;
++end;
++$$;
++
++create or replace function public.dati_per_verifica_protesti(p_tenant uuid)
++returns table(nome text, cognome text, protestato boolean, protesti_verifica_stato text, inviata_at timestamptz)
++language plpgsql
++security definer
++set search_path = public
++as $$
++begin
++  if not public.is_staff() then
++    raise exception 'NON_STAFF' using errcode = 'P0001';
++  end if;
++  return query
++    select p.nome, p.cognome, t.protestato, t.protesti_verifica_stato::text, t.protesti_verifica_inviata_at
++      from tenant_profiles t
++      join profiles p on p.id = t.profile_id
++     where t.profile_id = p_tenant;
++end;
++$$;
++
++revoke all on function public.richiedi_verifica_protesti() from public, anon;
++revoke all on function public.esito_verifica_protesti(uuid, text, text) from public, anon;
++revoke all on function public.protesti_da_verificare() from public, anon;
++revoke all on function public.dati_per_verifica_protesti(uuid) from public, anon;
++grant execute on function public.richiedi_verifica_protesti() to authenticated;
++grant execute on function public.esito_verifica_protesti(uuid, text, text) to authenticated;
++grant execute on function public.protesti_da_verificare() to authenticated;
++grant execute on function public.dati_per_verifica_protesti(uuid) to authenticated;
++
++-- ---- 8. l'inquilino viene avvisato dell'esito ----
++alter table notifiche drop constraint if exists notifiche_tipo_check;
++alter table notifiche add constraint notifiche_tipo_check check (tipo in (
++  'candidatura_ricevuta', 'candidatura_accettata', 'candidatura_rifiutata', 'candidatura_ritirata',
++  'immobile_verificato', 'immobile_respinto', 'reddito_verificato', 'reddito_respinto',
++  'affitto_verificato', 'affitto_respinto', 'rapporto_confermato', 'rapporto_rifiutato',
++  'feedback_ricevuto', 'visita_prenotata', 'visita_annullata',
++  'richiesta_ricevuta', 'richiesta_accettata',
++  'candidatura_riaperta',
++  'affitto_da_confermare', 'affitto_confermato', 'affitto_non_confermato',
++  'protesti_verificati', 'protesti_respinti'
++));
++
++create or replace function public.notifica_protesti_esito()
++returns trigger
++language plpgsql
++security definer
++set search_path = public
++as $$
++begin
++  if old.protesti_verifica_stato = 'in_verifica' and new.protesti_verifica_stato = 'verificato' then
++    perform public.crea_notifica(new.profile_id, 'protesti_verificati',
++      jsonb_build_object('protestato', new.protestato), '/profilo');
++  elsif old.protesti_verifica_stato = 'in_verifica' and new.protesti_verifica_stato = 'non_avviata' then
++    perform public.crea_notifica(new.profile_id, 'protesti_respinti', '{}'::jsonb, '/profilo');
++  end if;
++  return new;
++end;
++$$;
++drop trigger if exists notifica_protesti_esito on tenant_profiles;
++create trigger notifica_protesti_esito after update of protesti_verifica_stato on tenant_profiles
++  for each row execute function public.notifica_protesti_esito();
++
++-- ---- 9. il proprietario vede SOLO se i protesti sono verificati (sì/no), mai i documenti ----
++create or replace view public.candidati_del_proprietario
++with (security_barrier = true) as
++select
++  c.id as candidatura_id,
++  c.listing_id,
++  c.tenant_id,
++  c.status as stato,
++  p.nome,
++  p.cognome,
++  case when c.status <> 'rifiutata' then t.professione end as professione,
++  case when c.status <> 'rifiutata' then t.reddito_mensile end as reddito_mensile,
++  case when c.status <> 'rifiutata' then t.reddito_nucleo end as reddito_nucleo,
++  case when c.status <> 'rifiutata' then t.garante end as garante,
++  case when c.status <> 'rifiutata' then t.fideiussione end as fideiussione,
++  case when c.status <> 'rifiutata' then t.protestato end as protestato,
++  case when c.status <> 'rifiutata' then t.verificato end as verificato,
++  case when c.status <> 'rifiutata' then t.presentazione end as presentazione,
++  case when c.status <> 'rifiutata' then t.avatar_url end as avatar_url,
++  case when c.status <> 'rifiutata' then (t.animali is not null) end as animali_compilato,
++  case when c.status <> 'rifiutata' then (t.nucleo is not null) end as nucleo_compilato,
++  case when c.status <> 'rifiutata' then (t.protesti_verifica_stato = 'verificato') end as protesti_verificati
++from candidature c
++join listings l on l.id = c.listing_id and l.owner_id = auth.uid()
++join profiles p on p.id = c.tenant_id
++left join tenant_profiles t on t.profile_id = c.tenant_id
++where c.status::text <> 'ritirata';
++
++revoke all on public.candidati_del_proprietario from public, anon;
++grant select on public.candidati_del_proprietario to authenticated;
+-- 
+2.43.0
+

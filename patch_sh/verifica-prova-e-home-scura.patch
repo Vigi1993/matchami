@@ -1,0 +1,823 @@
+From dc1b39704f5402ffc5e668cae2055f86c0951824 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 16 Oct 2026 13:24:43 +0000
+Subject: [PATCH] =?UTF-8?q?fix(verifica):=20un=20immobile=20=C3=A8=20verif?=
+ =?UTF-8?q?icato=20solo=20con=20la=20prova=20di=20propriet=C3=A0=20(migraz?=
+ =?UTF-8?q?ione=200037);=20Home=20del=20proprietario=20con=20lo=20stile=20?=
+ =?UTF-8?q?di=20quella=20dell'inquilino?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+DA APPLICARE DOPO documenti-immobile.patch.
+RICHIEDE LA MIGRAZIONE 0037 (supabase/migrations/0037_verificato_richiede_prova.sql), da eseguire DOPO la 0036 e PRIMA del push del codice.
+ATTENZIONE: la 0037 cambia lo stato delle case «verificate» a mano senza nessuna prova di proprietà: tornano «da verificare» e gli inquilini smettono di vederle finché non sono
+verificate davvero. Dice quante ne ha riallineate (messaggio 'Case verificate senza prova di proprietà, tornate «da verificare»: N').
+
+1) IL CONTROSENSO «VERIFICATO, DOCUMENTI 0». Nel flusso vero non può succedere (si chiede la verifica solo con la prova caricata e i documenti non si cancellano), ma il database non lo impediva:
+uno stato impostato a mano (prove, pannello SQL) dava una casa verificata senza nessuna prova, che gli inquilini vedono come controllata. Ora:
+  - le case già verificate senza prova di proprietà tornano 'da verificare' (data di verifica azzerata; non si perde altro). La prova deve essere della casa stessa: l'identità o la prova di
+    un'altra casa non contano;
+  - nuovo trigger garantisci_prova_proprieta: nessuno, nemmeno lo staff o il pannello SQL, può rendere 'verificata' una casa senza prova (errore PROVA_PROPRIETA_MANCANTE). Una casa non può
+    nascere già verificata (la prova si registra dopo che la casa esiste): nasce 'da verificare' e diventa 'verificata' dopo. Il resto non cambia (nascere, andare in verifica, essere respinta
+    e tornare da verificare; una casa GIÀ verificata si modifica e non si ricontrolla se si riscrive lo stesso stato);
+  - pagina dello staff: una casa in verifica senza prove non ha il pulsante 'Verifica' ma 'Non si può verificare: il proprietario non ha caricato nessuna prova di proprietà';
+    l'errore del database si legge in italiano;
+  - i tre file SQL di prova che creavano case già verificate ora seguono l'ordine giusto (casa, prova, verifica).
+  PER LE PROVE IN FRETTA: il nuovo file prova_verifica_immobile.sql (negli output, NON è una migrazione) crea un documento FINTO per la casa e poi la verifica, nell'ordine che il database pretende.
+  La vecchia scorciatoia 'metto verificato a mano' ora dà errore (provato sul database vero).
+  Prova su PostgreSQL 16 VERO in due tempi (scripts/db/verifica-prova-prima.sql e -dopo.sql): 5 case in tutti gli stati (verificata senza prova, con prova, con l'identità e la prova di un'altra casa,
+  da verificare, in verifica), la migrazione (dice che ne ha riallineate 2), 18 controlli (riallineamento, divieti anche per lo staff, ciò che deve continuare a funzionare), e la migrazione rieseguita
+  (0 riallineate, nessun errore). ALTERAZIONI sulla migrazione: 14, tutte prese (una non lo era: nessun controllo creava una casa normale dopo la migrazione, quindi una regola troppo aggressiva
+  non sarebbe stata notata: aggiunti due controlli).
+
+2) LA HOME DEL PROPRIETARIO CON LO STILE DI QUELLA DELL'INQUILINO. Schermata SCURA a tutto schermo (lo stesso fondo), il marchio MatchAmI in alto con lo STESSO markup, dimensione (22 px corsivo,
+'AmI' in oro) e posizione (18,18: misurato su entrambe), che resta FERMO in alto mentre si scorre. Sotto, un pannello scuro d'apertura (angoli da 18 come quello dell'inquilino, filetto sottile)
+con il saluto, 'La tua casa' e, se c'è da fare, l'invito con la pillola a bordo oro (come 'Modifica dati' dell'inquilino). Poi la casa in grande e le due tessere: pannelli scuri con i numeri e
+'Guarda ›' in oro; la frase d'attesa per la casa non pubblicata è lo stesso pannello. Caratteri da 15 px in su (marchio escluso), bersagli da 64 px, contorno oro da tastiera.
+Su schermo largo la colonna è centrata, larga al massimo 560 px. Non cambia nient'altro: contenuti, link e logica della Home sono quelli di prima.
+
+PROVATO in Chrome col dito (nessuna immagine allegata): colori e angoli misurati, marchio nello stesso punto di quello dell'inquilino, marchio fermo scorrendo, schermo largo (colonna al centro),
+due case, nessun invito senza candidature, casa non pubblicata. ALTERAZIONI sull'app: 19 (tutte prese; due non lo erano: lo scorrimento della schermata e il marchio fermo non erano controllati: aggiunto il test).
+
+DIFETTI MIEI TROVATI PROVANDO
+- il mio controllo 'nella Home niente parole difficili (match...)' ha trovato la parola 'Match' nel nome dell'app: il nome proprio ora è escluso dal controllo
+- il mio controllo V12 sul database era vuoto (t.ok(true)): lo rendo vero (tolgo il documento a una casa già verificata e controllo che riscrivere lo stesso stato non dia errore)
+- il vecchio server di prova si era spento e il caricatore dei dati falliva in silenzio: l'ho visto dall'errore
+Test: 1184 in tutto (6 nuovi; 1178 senza PostgreSQL collegato e sei saltati, 1184 con).
+---
+ scripts/db/affitto-contratto.sql              |   8 +-
+ scripts/db/riapri.sql                         |  11 +-
+ scripts/db/richieste.sql                      |  12 +-
+ scripts/db/verifica-prova-dopo.sql            |  68 ++++++++++
+ scripts/db/verifica-prova-prima.sql           |  24 ++++
+ scripts/test-db-richieste.mjs                 |  15 +++
+ scripts/test-home-proprietario.mjs            |  23 +++-
+ scripts/test-stile.mjs                        |  27 ++--
+ scripts/test-verifica-immobile.mjs            |  32 +++++
+ src/app/(app)/OwnerHomeClient.tsx             |  66 +++++----
+ src/app/globals.css                           | 127 +++++++++++++-----
+ src/app/staff/[id]/page.tsx                   |   6 +-
+ src/lib/verifica.ts                           |   1 +
+ .../0037_verificato_richiede_prova.sql        |  59 ++++++++
+ 14 files changed, 398 insertions(+), 81 deletions(-)
+ create mode 100644 scripts/db/verifica-prova-dopo.sql
+ create mode 100644 scripts/db/verifica-prova-prima.sql
+ create mode 100644 supabase/migrations/0037_verificato_richiede_prova.sql
+
+diff --git a/scripts/db/affitto-contratto.sql b/scripts/db/affitto-contratto.sql
+index a71f3ab..04f67d9 100644
+--- a/scripts/db/affitto-contratto.sql
++++ b/scripts/db/affitto-contratto.sql
+@@ -50,8 +50,12 @@ select t.utente('22222222-0000-0000-0000-000000000001', 'o1@x.it', 'proprietario
+ select t.utente('22222222-0000-0000-0000-000000000002', 'o2@x.it', 'proprietario', 'Luisa');
+ select t.utente('99999999-0000-0000-0000-000000000001', 's1@x.it', 'proprietario', 'Staff');
+ insert into staff (user_id) values ('99999999-0000-0000-0000-000000000001');
+-insert into listings (id, owner_id, titolo, zona, prezzo, pubblicato, verifica_stato) values
+- ('aaaaaaaa-0000-0000-0000-000000000001', '22222222-0000-0000-0000-000000000001', 'Bilocale luminoso', 'Isola, Milano', 1250, true, 'verificato');
++insert into listings (id, owner_id, titolo, zona, prezzo, pubblicato) values
++ ('aaaaaaaa-0000-0000-0000-000000000001', '22222222-0000-0000-0000-000000000001', 'Bilocale luminoso', 'Isola, Milano', 1250, true);
++-- una casa si verifica solo DOPO che c'è la prova di proprietà
++insert into documenti_verifica (owner_id, listing_id, tipo, percorso, nome_file) values
++ ('22222222-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001', 'proprieta', '22222222-0000-0000-0000-000000000001/proprieta-1.pdf', 'visura.pdf');
++update listings set verifica_stato = 'verificato' where id = 'aaaaaaaa-0000-0000-0000-000000000001';
+ 
+ -- candidature accettate: Anna, Carla e Dario su Bilocale
+ select t.come('11111111-0000-0000-0000-000000000001');
+diff --git a/scripts/db/riapri.sql b/scripts/db/riapri.sql
+index a154575..9b787b3 100644
+--- a/scripts/db/riapri.sql
++++ b/scripts/db/riapri.sql
+@@ -49,9 +49,14 @@ select t.utente('11111111-0000-0000-0000-000000000005', 't5@x.it', 'inquilino',
+ select t.utente('22222222-0000-0000-0000-000000000001', 'o1@x.it', 'proprietario', 'Mario');
+ select t.utente('22222222-0000-0000-0000-000000000002', 'o2@x.it', 'proprietario', 'Luisa');
+ update tenant_profiles set professione = 'Designer' where profile_id = '11111111-0000-0000-0000-000000000001';
+-insert into listings (id, owner_id, titolo, zona, prezzo, pubblicato, verifica_stato) values
+- ('aaaaaaaa-0000-0000-0000-000000000001', '22222222-0000-0000-0000-000000000001', 'Bilocale luminoso', 'Isola, Milano', 1250, true, 'verificato'),
+- ('aaaaaaaa-0000-0000-0000-000000000002', '22222222-0000-0000-0000-000000000002', 'Trilocale del sole', 'Navigli, Milano', 1500, true, 'verificato');
++insert into listings (id, owner_id, titolo, zona, prezzo, pubblicato) values
++ ('aaaaaaaa-0000-0000-0000-000000000001', '22222222-0000-0000-0000-000000000001', 'Bilocale luminoso', 'Isola, Milano', 1250, true),
++ ('aaaaaaaa-0000-0000-0000-000000000002', '22222222-0000-0000-0000-000000000002', 'Trilocale del sole', 'Navigli, Milano', 1500, true);
++-- una casa si verifica solo DOPO che c'è la prova di proprietà
++insert into documenti_verifica (owner_id, listing_id, tipo, percorso, nome_file) values
++ ('22222222-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001', 'proprieta', '22222222-0000-0000-0000-000000000001/proprieta-1.pdf', 'visura.pdf'),
++ ('22222222-0000-0000-0000-000000000002', 'aaaaaaaa-0000-0000-0000-000000000002', 'proprieta', '22222222-0000-0000-0000-000000000002/proprieta-2.pdf', 'visura.pdf');
++update listings set verifica_stato = 'verificato' where id in ('aaaaaaaa-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000002');
+ 
+ -- tre candidature a Bilocale: Anna, Bruno, Carla (si candidano da sole, con i loro permessi)
+ select t.come('11111111-0000-0000-0000-000000000001');
+diff --git a/scripts/db/richieste.sql b/scripts/db/richieste.sql
+index 9a14fee..08ee67c 100644
+--- a/scripts/db/richieste.sql
++++ b/scripts/db/richieste.sql
+@@ -53,10 +53,16 @@ select t.utente('22222222-0000-0000-0000-000000000001', 'o1@x.it', 'proprietario
+ select t.utente('22222222-0000-0000-0000-000000000002', 'o2@x.it', 'proprietario', 'Luisa');
+ 
+ insert into listings (id, owner_id, titolo, zona, prezzo, pubblicato, verifica_stato) values
+- ('aaaaaaaa-0000-0000-0000-000000000001', '22222222-0000-0000-0000-000000000001', 'Bilocale luminoso', 'Isola, Milano', 1250, true, 'verificato'),
+- ('aaaaaaaa-0000-0000-0000-000000000002', '22222222-0000-0000-0000-000000000002', 'Trilocale del sole', 'Navigli, Milano', 1500, true, 'verificato'),
+- ('aaaaaaaa-0000-0000-0000-000000000003', '22222222-0000-0000-0000-000000000001', 'Monolocale non pubblicato', 'Isola, Milano', 800, false, 'verificato'),
++ ('aaaaaaaa-0000-0000-0000-000000000001', '22222222-0000-0000-0000-000000000001', 'Bilocale luminoso', 'Isola, Milano', 1250, true, 'non_avviata'),
++ ('aaaaaaaa-0000-0000-0000-000000000002', '22222222-0000-0000-0000-000000000002', 'Trilocale del sole', 'Navigli, Milano', 1500, true, 'non_avviata'),
++ ('aaaaaaaa-0000-0000-0000-000000000003', '22222222-0000-0000-0000-000000000001', 'Monolocale non pubblicato', 'Isola, Milano', 800, false, 'non_avviata'),
+  ('aaaaaaaa-0000-0000-0000-000000000004', '22222222-0000-0000-0000-000000000001', 'Casa in verifica', 'Isola, Milano', 900, true, 'in_verifica');
++-- una casa si verifica solo DOPO che c'è la prova di proprietà
++insert into documenti_verifica (owner_id, listing_id, tipo, percorso, nome_file) values
++ ('22222222-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001', 'proprieta', '22222222-0000-0000-0000-000000000001/proprieta-1.pdf', 'visura.pdf'),
++ ('22222222-0000-0000-0000-000000000002', 'aaaaaaaa-0000-0000-0000-000000000002', 'proprieta', '22222222-0000-0000-0000-000000000002/proprieta-2.pdf', 'visura.pdf'),
++ ('22222222-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000003', 'proprieta', '22222222-0000-0000-0000-000000000001/proprieta-3.pdf', 'visura.pdf');
++update listings set verifica_stato = 'verificato' where id in ('aaaaaaaa-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000002', 'aaaaaaaa-0000-0000-0000-000000000003');
+ 
+ select t.ok((select count(*) from tenant_profiles where visibile_ai_proprietari is true) = 4, '01 chi si iscrive come inquilino è VISIBILE ai proprietari di partenza (tutti e quattro)');
+ select t.ok((select count(*) from tenant_profiles where visibile_dal is not null) = 4, '02 e c''è la data da cui lo è');
+diff --git a/scripts/db/verifica-prova-dopo.sql b/scripts/db/verifica-prova-dopo.sql
+new file mode 100644
+index 0000000..bf1e9d0
+--- /dev/null
++++ b/scripts/db/verifica-prova-dopo.sql
+@@ -0,0 +1,68 @@
++-- Dopo la 0037: le case verificate senza prova sono tornate «da verificare»; le altre non sono cambiate; da ora nessuno può verificare una casa senza prova.
++\set ON_ERROR_STOP on
++\set QUIET on
++create function t.ok(c boolean, msg text) returns void language plpgsql as $$
++begin
++  if c is not true then raise exception 'CONTROLLO FALLITO: %', msg; end if;
++  raise notice 'OK: %', msg;
++end $$;
++create function t.fallisce(sql text, codice text, msg text) returns void language plpgsql as $$
++declare e text;
++begin
++  begin execute sql; exception when others then e := sqlerrm; end;
++  if e is null then raise exception 'CONTROLLO FALLITO (nessun errore): %', msg; end if;
++  if position(codice in e) = 0 then raise exception 'CONTROLLO FALLITO (errore diverso: %): %', e, msg; end if;
++  raise notice 'OK: %', msg;
++end $$;
++create function t.come(utente uuid) returns void language plpgsql as $$
++begin
++  perform set_config('request.jwt.claim.sub', coalesce(utente::text, ''), false);
++  if utente is null then set role anon; else set role authenticated; end if;
++end $$;
++create function t.torna() returns void language plpgsql as $$
++begin reset role; perform set_config('request.jwt.claim.sub', '', false); end $$;
++grant usage on schema t to anon, authenticated;
++grant execute on all functions in schema t to anon, authenticated;
++
++-- ---- il riallineamento ----
++select t.ok((select verifica_stato::text from listings where id = 'bbbbbbbb-0000-0000-0000-00000000000a') = 'non_avviata' and (select verificato_at from listings where id = 'bbbbbbbb-0000-0000-0000-00000000000a') is null, 'V1 la casa verificata a mano SENZA nessuna prova è tornata «da verificare», senza data di verifica');
++select t.ok((select verifica_stato::text from listings where id = 'bbbbbbbb-0000-0000-0000-00000000000e') = 'non_avviata', 'V2 anche quella che aveva solo l''identità e la prova di un''ALTRA casa (la prova deve essere della casa stessa)');
++select t.ok((select verifica_stato::text from listings where id = 'bbbbbbbb-0000-0000-0000-00000000000b') = 'verificato' and (select verificato_at from listings where id = 'bbbbbbbb-0000-0000-0000-00000000000b') = '2026-09-02T10:00:00Z', 'V3 la casa verificata CON la sua prova non cambia, nemmeno la data di verifica');
++select t.ok((select verifica_stato::text from listings where id = 'bbbbbbbb-0000-0000-0000-00000000000c') = 'non_avviata' and (select verifica_stato::text from listings where id = 'bbbbbbbb-0000-0000-0000-00000000000d') = 'in_verifica', 'V4 le case da verificare e in verifica non cambiano');
++select t.ok((select count(*) from documenti_verifica) = 3, 'V5 nessun documento è stato toccato');
++
++-- ---- da ora in poi ----
++select t.fallisce($q$insert into listings (id, owner_id, titolo, zona, prezzo, verifica_stato) values ('bbbbbbbb-0000-0000-0000-0000000000f0', '66666666-0000-0000-0000-00000000000a', 'Nasce già verificata', 'Isola', 900, 'verificato')$q$, 'PROVA_PROPRIETA_MANCANTE', 'V6 una casa non può NASCERE già verificata (la prova può essere registrata solo dopo che la casa esiste)');
++select t.fallisce($q$update listings set verifica_stato = 'verificato' where id = 'bbbbbbbb-0000-0000-0000-00000000000c'$q$, 'PROVA_PROPRIETA_MANCANTE', 'V7 non si verifica una casa senza prova, nemmeno dal pannello SQL');
++select t.fallisce($q$update listings set verifica_stato = 'verificato' where id = 'bbbbbbbb-0000-0000-0000-00000000000e'$q$, 'PROVA_PROPRIETA_MANCANTE', 'V8 né una casa che ha solo l''identità e la prova di un''altra casa');
++select t.ok((select verifica_stato::text from listings where id = 'bbbbbbbb-0000-0000-0000-00000000000c') = 'non_avviata', 'V9 e la casa resta com''era');
++insert into documenti_verifica (owner_id, listing_id, tipo, percorso, nome_file) values ('66666666-0000-0000-0000-00000000000a', 'bbbbbbbb-0000-0000-0000-00000000000c', 'proprieta', '66666666-0000-0000-0000-00000000000a/proprieta-c.pdf', 'visura-c.pdf');
++update listings set verifica_stato = 'verificato', verificato_at = now() where id = 'bbbbbbbb-0000-0000-0000-00000000000c';
++select t.ok((select verifica_stato::text from listings where id = 'bbbbbbbb-0000-0000-0000-00000000000c') = 'verificato', 'V10 con la prova della casa caricata, la verifica è possibile');
++update listings set titolo = 'B con prova (rinominata)' where id = 'bbbbbbbb-0000-0000-0000-00000000000b';
++select t.ok((select titolo from listings where id = 'bbbbbbbb-0000-0000-0000-00000000000b') like 'B con prova (rin%', 'V11 una casa già verificata si modifica come prima');
++-- un caso vecchio: casa già verificata a cui (solo da SQL) si toglie la prova; riscrivere lo STESSO stato non deve dare errore (non si ricontrolla ciò che era già verificato)
++delete from documenti_verifica where listing_id = 'bbbbbbbb-0000-0000-0000-00000000000b';
++update listings set verifica_stato = 'verificato' where id = 'bbbbbbbb-0000-0000-0000-00000000000b';
++select t.ok((select verifica_stato::text from listings where id = 'bbbbbbbb-0000-0000-0000-00000000000b') = 'verificato', 'V12 una casa GIÀ verificata non si ricontrolla se si riscrive lo stesso stato (il controllo scatta solo quando si diventa verificati)');
++insert into documenti_verifica (owner_id, listing_id, tipo, percorso, nome_file) values ('66666666-0000-0000-0000-00000000000a', 'bbbbbbbb-0000-0000-0000-00000000000b', 'proprieta', '66666666-0000-0000-0000-00000000000a/proprieta-b2.pdf', 'visura-b2.pdf');
++
++-- ---- lo staff ----
++-- la casa D aveva una prova: la tolgo (solo da SQL: l'app non lo permette) per provare lo staff
++delete from documenti_verifica where listing_id = 'bbbbbbbb-0000-0000-0000-00000000000d';
++select t.come('66666666-0000-0000-0000-0000000000f1');
++select t.fallisce($q$select esito_verifica_immobile('bbbbbbbb-0000-0000-0000-00000000000d', true, null)$q$, 'PROVA_PROPRIETA_MANCANTE', 'V13 nemmeno lo staff può verificare una casa in verifica che non ha nessuna prova');
++select t.torna();
++select t.ok((select verifica_stato::text from listings where id = 'bbbbbbbb-0000-0000-0000-00000000000d') = 'in_verifica', 'V14 e la casa resta in verifica');
++insert into documenti_verifica (owner_id, listing_id, tipo, percorso, nome_file) values ('66666666-0000-0000-0000-00000000000b', 'bbbbbbbb-0000-0000-0000-00000000000d', 'proprieta', '66666666-0000-0000-0000-00000000000b/proprieta-d2.pdf', 'visura-d2.pdf');
++select t.come('66666666-0000-0000-0000-0000000000f1');
++select esito_verifica_immobile('bbbbbbbb-0000-0000-0000-00000000000d', true, null);
++select t.torna();
++select t.ok((select verifica_stato::text from listings where id = 'bbbbbbbb-0000-0000-0000-00000000000d') = 'verificato', 'V15 con la prova caricata lo staff può verificare');
++-- la regola riguarda solo il DIVENTARE verificata: tutto il resto funziona come prima
++insert into listings (id, owner_id, titolo, zona, prezzo) values ('bbbbbbbb-0000-0000-0000-0000000000f2', '66666666-0000-0000-0000-00000000000a', 'Nuova da verificare', 'Isola', 800);
++select t.ok((select verifica_stato::text from listings where id = 'bbbbbbbb-0000-0000-0000-0000000000f2') = 'non_avviata', 'V17 una casa nuova nasce «da verificare» senza nessun ostacolo');
++update listings set verifica_stato = 'in_verifica' where id = 'bbbbbbbb-0000-0000-0000-0000000000f2';
++update listings set verifica_stato = 'non_avviata' where id = 'bbbbbbbb-0000-0000-0000-0000000000f2';
++select t.ok((select verifica_stato::text from listings where id = 'bbbbbbbb-0000-0000-0000-0000000000f2') = 'non_avviata', 'V18 e può andare «in verifica» e tornare «da verificare» (come quando lo staff respinge)');
++select t.ok((select count(*) from pg_trigger where tgname = 'garantisci_prova_proprieta' and tgrelid = 'listings'::regclass) = 1, 'V16 la regola è un trigger sulla tabella delle case, uno solo');
+diff --git a/scripts/db/verifica-prova-prima.sql b/scripts/db/verifica-prova-prima.sql
+new file mode 100644
+index 0000000..2cdcc8b
+--- /dev/null
++++ b/scripts/db/verifica-prova-prima.sql
+@@ -0,0 +1,24 @@
++-- Dati PRIMA della 0037 (database con le migrazioni fino alla 0036): case in tutti gli stati, alcune verificate A MANO senza nessuna prova.
++\set ON_ERROR_STOP on
++\set QUIET on
++create schema t;
++insert into auth.users (id, email, raw_user_meta_data) values
++ ('66666666-0000-0000-0000-00000000000a', 'o@x.it', '{"ruolo":"proprietario","nome":"Mario","privacy_accettata":true}'),
++ ('66666666-0000-0000-0000-00000000000b', 'o2@x.it', '{"ruolo":"proprietario","nome":"Luisa","privacy_accettata":true}'),
++ ('66666666-0000-0000-0000-0000000000f1', 's@x.it', '{"ruolo":"proprietario","nome":"Staff","privacy_accettata":true}');
++insert into staff (user_id) values ('66666666-0000-0000-0000-0000000000f1');
++-- A: verificata a mano, nessuna prova | B: verificata con la sua prova | C: da verificare | D: in verifica, nessuna prova | E: verificata, con solo l'identità e la prova di un'ALTRA casa
++insert into listings (id, owner_id, titolo, zona, prezzo, pubblicato, verifica_stato, verificato_at) values
++ ('bbbbbbbb-0000-0000-0000-00000000000a', '66666666-0000-0000-0000-00000000000a', 'A senza prova', 'Isola', 1000, true, 'verificato', '2026-09-01T10:00:00Z'),
++ ('bbbbbbbb-0000-0000-0000-00000000000b', '66666666-0000-0000-0000-00000000000a', 'B con prova', 'Isola', 1100, true, 'verificato', '2026-09-02T10:00:00Z'),
++ ('bbbbbbbb-0000-0000-0000-00000000000c', '66666666-0000-0000-0000-00000000000a', 'C da verificare', 'Isola', 1200, true, 'non_avviata', null),
++ ('bbbbbbbb-0000-0000-0000-00000000000d', '66666666-0000-0000-0000-00000000000b', 'D in verifica', 'Isola', 1300, true, 'in_verifica', null),
++ ('bbbbbbbb-0000-0000-0000-00000000000e', '66666666-0000-0000-0000-00000000000b', 'E con la prova di un altra', 'Isola', 1400, true, 'verificato', '2026-09-03T10:00:00Z');
++insert into documenti_verifica (owner_id, listing_id, tipo, percorso, nome_file) values
++ ('66666666-0000-0000-0000-00000000000a', 'bbbbbbbb-0000-0000-0000-00000000000b', 'proprieta', '66666666-0000-0000-0000-00000000000a/proprieta-b.pdf', 'visura-b.pdf'),
++ ('66666666-0000-0000-0000-00000000000b', null, 'identita', '66666666-0000-0000-0000-00000000000b/identita.pdf', 'carta.pdf'),
++ ('66666666-0000-0000-0000-00000000000b', 'bbbbbbbb-0000-0000-0000-00000000000d', 'proprieta', '66666666-0000-0000-0000-00000000000b/proprieta-d.pdf', 'visura-d.pdf');
++do $$ begin
++  if (select count(*) from listings where verifica_stato = 'verificato') <> 3 then raise exception 'PRIMA: dovevano esserci 3 case verificate'; end if;
++  raise notice 'OK: prima della 0037 ci sono case verificate senza nessuna prova (A ed E)';
++end $$;
+diff --git a/scripts/test-db-richieste.mjs b/scripts/test-db-richieste.mjs
+index da751db..770313f 100644
+--- a/scripts/test-db-richieste.mjs
++++ b/scripts/test-db-richieste.mjs
+@@ -95,3 +95,18 @@ test("migrazione 0036 su PostgreSQL vero: si perdono solo i tre dati del proprie
+     r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m36)]); assert.equal(r.status, 0, "rieseguire la 0036 non deve dare errori: " + r.stderr.slice(0, 300));
+   } finally { fs.rmSync(nullo, { force: true }); esegui(["-d", "postgres", "-c", `drop database if exists ${db}`]); }
+ });
++
++test("migrazione 0037 su PostgreSQL vero: le case verificate senza prova di proprietà tornano «da verificare», le altre non cambiano, e da ora nessuno (nemmeno lo staff o il pannello SQL) verifica una casa senza prova; rieseguirla non dà errori", { skip: psqlCmd ? false : "imposta MATCHAMI_PSQL per eseguire le prove SQL su un PostgreSQL vero" }, () => {
++  const [bin, ...args] = psqlCmd.split(/\s+/); const db = "matchami_test_verifica_prova"; const esegui = (extra) => spawnSync(bin, [...args, "-X", "-q", ...extra], { encoding: "utf8" });
++  const migrazioni = fs.readdirSync(path.join(radice, "supabase", "migrations")).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort(); const m37 = migrazioni.find((f) => f.startsWith("0037_")); assert.ok(m37, "manca la migrazione 0037");
++  const nullo = path.join(os.tmpdir(), `matchami-verifica-prova-${process.pid}.txt`);
++  try {
++    let r = esegui(["-d", "postgres", "-c", `drop database if exists ${db}`, "-c", `create database ${db}`]); assert.equal(r.status, 0, r.stderr);
++    r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "scripts", "db", "stub-supabase.sql")]); assert.equal(r.status, 0, r.stderr);
++    for (const m of migrazioni.filter((f) => f < "0037")) { r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m)]); assert.equal(r.status, 0, `${m}: ${r.stderr.slice(0, 300)}`); }
++    r = esegui(["-d", db, "-o", nullo, "-f", path.join(radice, "scripts", "db", "verifica-prova-prima.sql")]); assert.equal(r.status, 0, "prima della 0037: " + r.stderr.slice(0, 300));
++    r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m37)]); assert.equal(r.status, 0, "la 0037 non si applica: " + r.stderr.slice(0, 300)); assert.match(r.stderr, /tornate «da verificare»: 2/, "dice quante case ha riallineato (A ed E)");
++    r = esegui(["-d", db, "-o", nullo, "-f", path.join(radice, "scripts", "db", "verifica-prova-dopo.sql")]); assert.ok(!/CONTROLLO FALLITO/.test(r.stderr), r.stderr.split("\n").filter((l) => /FALLITO/.test(l)).join("\n")); assert.equal(r.status, 0, r.stderr.slice(0, 400)); assert.equal((r.stderr.match(/NOTICE:\s+OK:/g) ?? []).length, 18);
++    r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m37)]); assert.equal(r.status, 0, "rieseguire la 0037 non deve dare errori: " + r.stderr.slice(0, 300)); assert.match(r.stderr, /tornate «da verificare»: 0/, "la seconda volta non c'è più niente da riallineare");
++  } finally { fs.rmSync(nullo, { force: true }); esegui(["-d", "postgres", "-c", `drop database if exists ${db}`]); }
++});
+diff --git a/scripts/test-home-proprietario.mjs b/scripts/test-home-proprietario.mjs
+index 3cbb9b6..9176240 100644
+--- a/scripts/test-home-proprietario.mjs
++++ b/scripts/test-home-proprietario.mjs
+@@ -185,9 +185,13 @@ test("nessuna casa: lo si dice con parole semplici e c'è un pulsante grande per
+   const h = pagina({ case_: [] }); const t = testoDi(h); assert.ok(t.includes("Non hai ancora nessuna casa") && t.includes("Aggiungi la tua casa") && t.includes("Le tue case")); assert.deepEqual(link(h), ["/immobili"]); assert.ok(!h.includes("<article"));
+ });
+ 
+-test("saluto e titolo: il titolo è «La tua casa» e il saluto sta nel sottotitolo grigio (come in tutte le altre pagine); senza nome solo il saluto; l'ora cambia il saluto", () => {
+-  const h = pagina(); assert.match(h, /<h1 class="screen-title">La tua casa<\/h1><p class="screen-sub">Buongiorno, Mario\.<\/p>/, "titolo e sottotitolo nell'ordine delle altre pagine"); assert.ok(!/casa-saluto/.test(h), "il saluto non sta più sopra il titolo");
+-  assert.ok(testoDi(pagina({ nome: null })).startsWith("La tua casa Buongiorno.")); assert.ok(testoDi(pagina({ ora: 15 })).startsWith("La tua casa Buon pomeriggio, Mario.")); assert.ok(testoDi(pagina({ ora: 21 })).startsWith("La tua casa Buonasera, Mario."));
++test("apertura: il marchio MatchAmI in alto (come nella Home dell'inquilino), poi il pannello con il saluto e il titolo «La tua casa»; senza nome solo il saluto; l'ora cambia il saluto", () => {
++  const h = pagina(); assert.match(h, /<div class="topbar casa-topbar"><div class="brand">Match<b>AmI<\/b><\/div><\/div>/, "il marchio, uguale a quello dell'inquilino");
++  assert.match(h, /<div class="casa-intro"><p class="casa-intro-saluto">Buongiorno, Mario\.<\/p><h1 class="casa-intro-titolo">La tua casa<\/h1>/);
++  // il marchio è scritto in due pezzi (Match + <b>AmI</b>, con AmI in oro): nel testo estratto dai tag restano separati da uno spazio, nel browser sono attaccati
++  const t = (o) => testoDi(pagina(o)).replace("Match AmI", "MatchAmI"); assert.ok(t({ nome: null }).startsWith("MatchAmI Buongiorno. La tua casa")); assert.ok(t({ ora: 15 }).startsWith("MatchAmI Buon pomeriggio, Mario. La tua casa")); assert.ok(t({ ora: 21 }).startsWith("MatchAmI Buonasera, Mario. La tua casa"));
++  // (React può mettere davanti il precaricamento della foto: non fa parte della schermata)
++  assert.ok(h.replace(/^(<link[^>]*>)+/, "").startsWith('<div class="screen-dark casa-schermo">'), "è una schermata scura come quella dell'inquilino"); assert.equal([...h.matchAll(/<h1/g)].length, 1, "un solo titolo di pagina");
+ });
+ 
+ // ============================================================ per chi non è pratico
+@@ -206,7 +210,7 @@ test("leggibilità: nessun carattere sotto i 15 px nella Home e nella sezione de
+ test("leggibilità: i bersagli da toccare sono larghi (pulsante delle candidature e frase d'attesa almeno 64 px, tessere almeno 180 px) e c'è un contorno quando si naviga da tastiera", () => {
+   const css = bloccoCss(); const alt = (c) => Number((css.match(new RegExp(`${c.replace(".", "\\.")} \\{[^}]*min-height:\\s*(\\d+)px`)) ?? [])[1]);
+   assert.ok(alt(".casa-invito") >= 64 && alt(".casa-attesa") >= 64 && alt(".tessera") >= 170, `${alt(".casa-invito")}, ${alt(".casa-attesa")}, ${alt(".tessera")}`);
+-  for (const c of [".tessera:focus-visible", ".casa-hero:focus-visible", ".casa-invito:focus-visible"]) assert.ok(css.includes(c), `manca il contorno per la tastiera: ${c}`); assert.match(css, /outline: 3px solid var\(--moss\)/);
++  for (const c of [".tessera:focus-visible", ".casa-hero:focus-visible", ".casa-invito:focus-visible"]) assert.ok(css.includes(c), `manca il contorno per la tastiera: ${c}`); assert.match(css, /outline: 3px solid var\(--gold\)/);
+   assert.match(css, /\.casa-tessere \{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/, "le due tessere devono avere sempre la stessa larghezza"); assert.match(css, /\.tessera \{[^}]*min-width: 0;/);
+   assert.match(css, /\.casa-hero \{[^}]*height: 260px;/); assert.match(css, /\.casa\.compatta \.casa-hero \{\s+height: 190px;/);
+ });
+@@ -215,8 +219,17 @@ test("leggibilità: il testo sulla foto sta sopra una sfumatura scura (leggibile
+   const css = bloccoCss(); assert.match(css, /\.casa-sfumatura \{[^}]*linear-gradient\(to top, rgba\(16, 21, 26, 0\.9\)/); assert.match(css, /\.casa-stato \{[^}]*background: rgba\(16, 21, 26, 0\.74\)/); assert.match(css, /\.casa-modifica \{[^}]*background: rgba\(247, 244, 236, 0\.96\)/);
+ });
+ 
++test("la schermata scorre (anche con due case o poco spazio) e il marchio resta fermo in alto mentre si scorre; la colonna è centrata e non più larga di 560 px", () => {
++  const css = bloccoCss();
++  assert.match(css, /\.casa-scroll \{\s+position: absolute;\s+inset: 0;\s+overflow-y: auto;\s+-webkit-overflow-scrolling: touch;/, "la schermata deve poter scorrere");
++  assert.match(css, /\.casa-topbar \{\s+position: sticky;\s+top: 0;\s+left: auto;\s+right: auto;\s+z-index: 5;\s+width: auto;\s+transform: none;/, "il marchio resta fermo in alto (e non eredita la posizione assoluta della barra dell'inquilino)");
++  assert.match(css, /\.casa-topbar \{[^}]*background: var\(--ink\);/, "sotto il marchio il contenuto non si vede passare"); assert.match(css, /\.casa-colonna \{\s+max-width: 560px;\s+margin: 0 auto;\s+\}/);
++  const h = pagina(); assert.ok(h.indexOf('class="casa-scroll"') < h.indexOf('class="topbar casa-topbar"'), "il marchio sta DENTRO la parte che scorre, così resta fermo con la sua posizione «sticky»");
++});
++
+ test("parole semplici: nella Home niente inglesismi né sigle (match, badge, database, dashboard, lead)", () => {
+-  const t = testoDi(pagina({ case_: [CASA, { ...CASA, id: "c2", pubblicato: false }] })) + " " + testoDi(pagina({ case_: [] })); for (const p of ["match", "badge", "dashboard", "lead", "feedback", "online", "click", "tap"]) assert.ok(!new RegExp(`\\b${p}\\b`, "i").test(t), `parola difficile: ${p}`);
++  // il nome dell'app (MatchAmI) è un nome proprio, non una parola difficile: si toglie prima di controllare
++  const senzaMarchio = (h) => h.replace(/<div class="brand">[\s\S]*?<\/div>/, ""); const t = testoDi(senzaMarchio(pagina({ case_: [CASA, { ...CASA, id: "c2", pubblicato: false }] }))) + " " + testoDi(senzaMarchio(pagina({ case_: [] }))); for (const p of ["match", "badge", "dashboard", "lead", "feedback", "online", "click", "tap"]) assert.ok(!new RegExp(`\\b${p}\\b`, "i").test(t), `parola difficile: ${p}`);
+ });
+ 
+ // ============================================================ i collegamenti nel codice e la sicurezza dei dati
+diff --git a/scripts/test-stile.mjs b/scripts/test-stile.mjs
+index a380349..9e2470d 100644
+--- a/scripts/test-stile.mjs
++++ b/scripts/test-stile.mjs
+@@ -41,22 +41,31 @@ test("ogni classe del CSS nuovo del proprietario è usata da qualche file (nient
+   const inutili = [...classi].filter((c) => !stati.test(c) && !new RegExp(`(?<![a-zA-Z0-9_-])${c.replace(/[-]/g, "\\-")}(?![a-zA-Z0-9_-])`).test(sorgenti)); assert.deepEqual(inutili, [], "classi mai usate: " + inutili.join(", "));
+ });
+ 
+-test("Home e Database hanno la FORMA delle altre pagine: stessi angoli (20 px), stessa ombra delle schede, nessun angolo più grande, nessun banner oro", () => {
++test("Home del proprietario: la FORMA della Home dell'inquilino (schermata scura, pannelli con gli stessi angoli del suo pannello, pulsanti a pillola con il bordo oro); Database e richieste: la forma delle schede delle altre pagine (20 px e la stessa ombra)", () => {
+   const ombraStandard = valore(blocco(vecchio, ".match-card"), "box-shadow"); assert.equal(ombraStandard, "0 8px 20px rgba(16, 21, 26, 0.06)");
+-  for (const sel of [".tessera", ".persona", ".richiesta"]) { assert.equal(valore(blocco(nuovo, sel), "border-radius"), "20px", `${sel}: angoli`); assert.equal(valore(blocco(nuovo, sel), "box-shadow"), ombraStandard, `${sel}: ombra diversa da quella delle altre schede`); }
+-  assert.equal(valore(blocco(nuovo, ".casa-hero"), "border-radius"), "20px"); assert.equal(valore(blocco(nuovo, ".conferma-affitto"), "border-radius"), "20px");
+-  const grandi = [...senzaCommenti(nuovo).matchAll(/border-radius:\s*(\d+)px/g)].map((m) => Number(m[1])).filter((n) => n > 20 && n < 900); assert.deepEqual(grandi, [], "angoli più grandi di quelli dell'app: " + grandi.join(", "));
+-  const invito = blocco(nuovo, ".casa-invito"); assert.match(invito, /background: var\(--moss\);/, "il pulsante principale è verde come «+ Nuovo annuncio»"); assert.ok(!/gold/.test(invito) && !/rgba\(201, 161, 90/.test(invito), "il banner oro non c'è più"); assert.equal(valore(invito, "border-radius"), "16px", "stessi angoli del pulsante principale dell'app (opp-cta)");
++  const angoloHome = valore(blocco(vecchio, ".home-intro"), "border-radius"); assert.equal(angoloHome, "18px", "il pannello della Home dell'inquilino");
++  for (const sel of [".casa-intro", ".tessera", ".casa-attesa", ".casa-hero"]) assert.equal(valore(blocco(nuovo, sel), "border-radius"), angoloHome, `${sel}: gli angoli del pannello della Home dell'inquilino`);
++  for (const sel of [".casa-intro", ".tessera", ".casa-attesa"]) { assert.equal(valore(blocco(nuovo, sel), "background"), "var(--ink-soft)", `${sel}: pannello scuro`); assert.equal(valore(blocco(nuovo, sel), "border"), "1px solid var(--line)", `${sel}: lo stesso filetto dei pannelli scuri`); assert.equal(valore(blocco(nuovo, sel), "color"), "var(--paper)", `${sel}: testo chiaro`); }
++  for (const sel of [".persona", ".richiesta"]) { assert.equal(valore(blocco(nuovo, sel), "border-radius"), "20px", `${sel}: angoli`); assert.equal(valore(blocco(nuovo, sel), "box-shadow"), ombraStandard, `${sel}: ombra diversa da quella delle altre schede`); }
++  assert.equal(valore(blocco(nuovo, ".conferma-affitto"), "border-radius"), "20px");
++  const pillolaHome = blocco(vecchio, ".home-intro .hi-modifica") ?? vecchio.match(/\.home-intro \.hi-modifica \{([^}]*)\}/)?.[1]; assert.ok(pillolaHome, "la pillola «Modifica ricerca» dell'inquilino");
++  const invito = blocco(nuovo, ".casa-invito b"); assert.equal(valore(invito, "border"), "1px solid var(--gold)", "bordo oro come le pillole dell'inquilino"); assert.equal(valore(invito, "color"), "var(--gold)"); assert.equal(valore(invito, "background"), "rgba(201, 161, 90, 0.16)", "lo stesso fondo oro leggero"); assert.equal(valore(invito, "border-radius"), "999px");
++  assert.equal(valore(blocco(nuovo, ".tessera-numero"), "color"), "var(--gold)"); assert.equal(valore(blocco(nuovo, ".tessera-vai"), "color"), "var(--gold)");
++  assert.ok(!/background: var\(--moss\)/.test(blocco(nuovo, ".casa-invito") ?? ""), "il banner verde non c'è più");
++  const fuori = [...senzaCommenti(nuovo.slice(0, nuovo.indexOf("/* Database: testi dei possibili match */"))).matchAll(/border-radius:\s*(\d+)px/g)].map((m) => Number(m[1])).filter((n) => n > 20 && n < 900); assert.deepEqual(fuori, [], "angoli più grandi di quelli dell'app nella Home: " + fuori.join(", "));
+ });
+ 
+-test("Home: titolo e sottotitolo come le altre pagine (screen-title + screen-sub), il saluto sta nel sottotitolo; Database: la casa è la scheda di «Immobili» e i gruppi hanno l'intestazione dei gruppi dell'inquilino", () => {
+-  const home = leggi("src", "app", "(app)", "OwnerHomeClient.tsx"); assert.match(home, /<h1 className="screen-title">\{case_\.length === 1 \? "La tua casa" : "Le tue case"\}<\/h1>\s+\{\/\*[^*]*\*\/\}\s+<p className="screen-sub">\{saluto\(nome, ora\)\}\.<\/p>/);
++test("Home: marchio e schermata scura come la Home dell'inquilino; Database: la casa è la scheda di «Immobili» e i gruppi hanno l'intestazione dei gruppi dell'inquilino", () => {
++  const home = leggi("src", "app", "(app)", "OwnerHomeClient.tsx"); const inq = leggi("src", "app", "(app)", "HomeClient.tsx");
++  assert.match(home, /<div className="screen-dark casa-schermo">\s+<div className="casa-scroll">\s+<div className="casa-colonna">\s+\{\/\*[^*]*\*\/\}\s+<div className="topbar casa-topbar">\s+<div className="brand">\s+Match<b>AmI<\/b>\s+<\/div>\s+<\/div>/);
++  for (const x of ['className="topbar', 'className="brand"', "Match<b>AmI</b>", "screen-dark"]) { assert.ok(home.includes(x), `la Home del proprietario non ha ${x}`); assert.ok(inq.includes(x), `la Home dell'inquilino non ha ${x}: le due Home non coincidono`); }
++  assert.match(home, /<p className="casa-intro-saluto">\{saluto\(nome, ora\)\}\.<\/p>\s+<h1 className="casa-intro-titolo">\{case_\.length === 1 \? "La tua casa" : "Le tue case"\}<\/h1>/);
+   const db = leggi("src", "app", "(app)", "database", "DatabaseClient.tsx"); assert.match(db, /<header className="match-card casa-intestazione">[\s\S]*?<div className="mc-body">\s+<div className="mc-zona">\{zona\}<\/div>\s+<div className="mc-title">\{g\.casa\.titolo\}<\/div>\s+<div className="mc-meta">/);
+   const s = leggi("src", "components", "SezioneApribile.tsx"); assert.match(s, /<section id=\{id\} className="gruppo-match sezione-db">\s+<button type="button" className="gruppo-testa"/); assert.match(s, /\{titolo\} — \{conteggio\}/); assert.match(s, /<IconChevronSu className=\{`gruppo-freccia \$\{stato \? "" : "chiuso"\}`\} \/>/);
+   const cand = leggi("src", "app", "(app)", "candidature", "CandidatureClient.tsx"); assert.match(cand, /className="gruppo-testa"/); assert.match(cand, /\{titolo\} — \{items\.length\}/, "l'intestazione dell'inquilino ha lo stesso formato");
+ });
+ 
+ test("le pagine del proprietario usano le classi dell'app per ciò che l'app ha già (titolo, scheda della casa, pulsante principale), senza ridefinirle", () => {
+-  for (const sel of [".screen-title", ".screen-sub", ".match-card", ".mc-zona", ".mc-title", ".mc-meta", ".opp-cta", ".gruppo-testa"]) assert.equal(blocco(nuovo, sel), null, `${sel} è ridefinita nel CSS nuovo: si deve riusare quella dell'app`);
+-  for (const f of componenti.slice(0, 2)) { const t = leggi(...f.split("/")); assert.ok(/className="[^"]*\b(screen-title|match-card)\b/.test(t), `${f} non usa le classi dell'app`); }
++  for (const sel of [".screen-title", ".screen-sub", ".match-card", ".mc-zona", ".mc-title", ".mc-meta", ".opp-cta", ".gruppo-testa", ".topbar", ".brand", ".screen-dark", ".home-intro"]) assert.equal(blocco(nuovo, sel), null, `${sel} è ridefinita nel CSS nuovo: si deve riusare quella dell'app`);
++  for (const f of componenti.slice(0, 2)) { const t = leggi(...f.split("/")); assert.ok(/className="[^"]*\b(screen-dark|match-card)\b/.test(t), `${f} non usa le classi dell'app`); }
+ });
+diff --git a/scripts/test-verifica-immobile.mjs b/scripts/test-verifica-immobile.mjs
+index 01293b4..c8f1dda 100644
+--- a/scripts/test-verifica-immobile.mjs
++++ b/scripts/test-verifica-immobile.mjs
+@@ -148,3 +148,35 @@ test("stile dei documenti: caratteri da 15 px in su, pulsanti alti almeno 48 px
+   const m = css.slice(css.indexOf("/* ---- I documenti già caricati per un immobile")); const misure = [...m.matchAll(/font-size:\s*(\d+)px/g)].map((x) => Number(x[1])); assert.ok(misure.length >= 4 && Math.min(...misure) >= 15, `caratteri: ${Math.min(...misure)} px`);
+   assert.match(m, /\.documento-bottone \{\s+flex: 1;\s+min-height: 48px;/); assert.match(m, /\.documento \{\s+padding: 12px 14px;\s+border-radius: 16px;\s+background: #fff;\s+box-shadow: 0 8px 20px rgba\(16, 21, 26, 0\.06\);/); assert.match(m, /\.documento-nome \{[^}]*overflow-wrap: anywhere;/); assert.match(m, /\.documento-azioni \{\s+display: flex;/);
+ });
++
++// ============================================================ «verificato» richiede la prova di proprietà
++const m37 = leggi("supabase", "migrations", "0037_verificato_richiede_prova.sql"); const sql37 = m37.replace(/--[^\n]*/g, "");
++
++test("migrazione 0037: riallinea le case verificate senza prova di proprietà (dice quante) e da ora impedisce di verificarne una senza prova, per tutti; non cancella niente; è rieseguibile", () => {
++  assert.match(sql37, /update listings l\s+set verifica_stato = 'non_avviata',\s+verificato_at = null,\s+verifica_inviata_at = null,\s+verifica_esito_note = null\s+where l\.verifica_stato = 'verificato'\s+and not exists \(\s+select 1 from documenti_verifica d\s+where d\.listing_id = l\.id and d\.tipo = 'proprieta'\s+\);/);
++  assert.match(sql37, /get diagnostics v_riallineati = row_count;\s+raise notice 'Case verificate senza prova di proprietà, tornate «da verificare»: %', v_riallineati;/);
++  assert.match(sql37, /if new\.verifica_stato <> 'verificato' then\s+return new;\s+end if;\s+if tg_op = 'UPDATE' and old\.verifica_stato = 'verificato' then\s+return new;\s+end if;\s+if not exists \(\s+select 1 from documenti_verifica d\s+where d\.listing_id = new\.id and d\.tipo = 'proprieta'\s+\) then\s+raise exception 'PROVA_PROPRIETA_MANCANTE:/);
++  assert.match(sql37, /drop trigger if exists garantisci_prova_proprieta on listings;\s+create trigger garantisci_prova_proprieta\s+before insert or update of verifica_stato on listings\s+for each row execute function public\.garantisci_prova_proprieta\(\);/);
++  assert.ok(!/delete from|drop table|drop column|truncate|cascade|documenti_verifica\s+set|update documenti_verifica/i.test(sql37), "la migrazione non deve toccare i documenti"); assert.match(m37, /Rieseguirla non dà errori\./); assert.match(m37, /ATTENZIONE: il punto 1 cambia lo stato delle case verificate a mano senza prova/);
++});
++
++test("pagina dello staff: una casa in verifica senza nessuna prova di proprietà non ha il pulsante «Verifica», ma il motivo; e l'errore del database si legge in italiano", () => {
++  const p = senzaCommenti(leggi("src", "app", "staff", "[id]", "page.tsx")); assert.match(p, /const haProva = docProprieta\.length > 0;/);
++  assert.match(p, /\{decidibile && !haProva \? \(\s+<div className="note-error">Non si può verificare: il proprietario non ha caricato nessuna prova di proprietà per questo immobile\.<\/div>\s+\) : decidibile \? \(\s+<EsitoForm id=\{id\} \/>/);
++  assert.match(vf.messaggioErroreVerifica("ERROR: PROVA_PROPRIETA_MANCANTE: x (P0001)"), /non ha nessuna prova di proprietà caricata: non si può verificare\.$/); assert.ok(!/PROVA_PROPRIETA/.test(vf.messaggioErroreVerifica("PROVA_PROPRIETA_MANCANTE: x")), "il codice non deve comparire");
++});
++
++test("i file SQL di prova creano le case nell'ordine giusto (prima la casa, poi la prova, poi la verifica): nessuna casa nasce già verificata", () => {
++  for (const f of ["affitto-contratto", "riapri", "richieste"]) {
++    const sql = leggi("scripts", "db", `${f}.sql`); const inserimenti = [...sql.matchAll(/insert into listings[^;]*;/g)].map((m) => m[0]); assert.ok(inserimenti.length >= 1, f);
++    for (const i of inserimenti) assert.ok(!/'verificato'/.test(i), `${f}: una casa nasce già verificata`);
++    assert.match(sql, /insert into documenti_verifica \(owner_id, listing_id, tipo, percorso, nome_file\) values[\s\S]*?'proprieta'/, `${f}: manca la prova`); assert.match(sql, /update listings set verifica_stato = 'verificato' where id/, `${f}: manca la verifica dopo la prova`);
++    assert.ok(sql.search(/insert into documenti_verifica/) < sql.search(/update listings set verifica_stato = 'verificato'/), `${f}: la verifica viene prima della prova`);
++  }
++});
++
++test("il DB test esegue anche le prove della nuova regola (18 controlli in due tempi) e non se ne perde nessuno", () => {
++  const dopo = leggi("scripts", "db", "verifica-prova-dopo.sql"); const controlli = [...dopo.matchAll(/select t\.(ok|fallisce)\(/g)].length; assert.ok(controlli >= 18, `controlli: ${controlli}`);
++  for (const tema of ["V1 la casa verificata a mano SENZA nessuna prova", "V2 anche quella che aveva solo l'identità", "V6 una casa non può NASCERE già verificata", "V7 non si verifica una casa senza prova, nemmeno dal pannello SQL", "V12 una casa GIÀ verificata non si ricontrolla", "V13 nemmeno lo staff", "V17 una casa nuova nasce", "V18 e può andare «in verifica»"]) assert.ok(dopo.replaceAll("''", "'").includes(tema), `manca «${tema}»`);
++  assert.match(leggi("scripts", "db", "verifica-prova-prima.sql"), /case verificate senza nessuna prova \(A ed E\)/);
++});
+diff --git a/src/app/(app)/OwnerHomeClient.tsx b/src/app/(app)/OwnerHomeClient.tsx
+index 2a3116f..68e7d7e 100644
+--- a/src/app/(app)/OwnerHomeClient.tsx
++++ b/src/app/(app)/OwnerHomeClient.tsx
+@@ -1,5 +1,4 @@
+ import Link from "next/link";
+-import { PageContainer } from "@/components/ui/PageContainer";
+ import { IconBusta, IconPalazzo, IconPersone } from "@/components/icons";
+ import {
+   DESTINAZIONI_HOME,
+@@ -14,8 +13,10 @@ import {
+ } from "@/lib/proprietario/home";
+ 
+ /**
+- * La Home del proprietario: la sua casa in grande (quasi tutti ne hanno una sola) e sotto due tessere grandi, «Possibili
+- * inquilini» e «Candidature». Parole semplici, caratteri grandi, un solo gesto per andare dove serve:
++ * La Home del proprietario, con la stessa impostazione della Home dell'inquilino: schermata scura a tutto schermo, il marchio MatchAmI in alto
++ * (resta fermo mentre si scorre), un pannello scuro d'apertura con il saluto e, se c'è qualcosa da fare, l'invito con il pulsante a pillola con il bordo oro.
++ * Poi la sua casa in grande (quasi tutti ne hanno una sola) e sotto due tessere grandi, «Possibili inquilini» e «Candidature».
++ * Parole semplici, caratteri grandi, un solo gesto per andare dove serve:
+  *  - toccare la casa porta a «Immobili»;
+  *  - toccare una tessera porta al «Database».
+  * Con più case, ognuna ha la sua scheda (più compatta).
+@@ -25,33 +26,44 @@ export function OwnerHomeClient({ case_, nome, ora }: { case_: CasaHome[]; nome:
+   const invito = inviteDaValutare(totaleDaValutare);
+ 
+   return (
+-    <PageContainer wide>
+-      <h1 className="screen-title">{case_.length === 1 ? "La tua casa" : "Le tue case"}</h1>
+-      {/* il saluto sta nel sottotitolo grigio, come in tutte le altre pagine */}
+-      <p className="screen-sub">{saluto(nome, ora)}.</p>
++    <div className="screen-dark casa-schermo">
++      <div className="casa-scroll">
++        <div className="casa-colonna">
++          {/* il marchio, lo stesso della Home dell'inquilino */}
++          <div className="topbar casa-topbar">
++            <div className="brand">
++              Match<b>AmI</b>
++            </div>
++          </div>
+ 
+-      {/* Se c'è qualcosa da fare lo si dice per primo, con un pulsante grande */}
+-      {invito && (
+-        <Link href={DESTINAZIONI_HOME.candidature} className="casa-invito">
+-          <span>{invito}</span>
+-          <b>Guarda ›</b>
+-        </Link>
+-      )}
++          {/* il pannello d'apertura: il saluto e, se c'è qualcosa da fare, lo si dice per primo con un pulsante grande */}
++          <div className="casa-intro">
++            <p className="casa-intro-saluto">{saluto(nome, ora)}.</p>
++            <h1 className="casa-intro-titolo">{case_.length === 1 ? "La tua casa" : "Le tue case"}</h1>
++            {invito && (
++              <Link href={DESTINAZIONI_HOME.candidature} className="casa-invito">
++                <span>{invito}</span>
++                <b>Guarda ›</b>
++              </Link>
++            )}
++          </div>
+ 
+-      {case_.length === 0 ? (
+-        <div className="empty-inline">
+-          <IconPalazzo className="icon-empty" />
+-          <h3>Non hai ancora nessuna casa</h3>
+-          <p>Per cominciare, aggiungi la tua casa.</p>
+-          <Link href={DESTINAZIONI_HOME.immobili} className="casa-invito" style={{ marginTop: 14 }}>
+-            <span>Aggiungi la tua casa</span>
+-            <b>Vai ›</b>
+-          </Link>
++          {case_.length === 0 ? (
++            <div className="empty-inline">
++              <IconPalazzo className="icon-empty" />
++              <h3>Non hai ancora nessuna casa</h3>
++              <p>Per cominciare, aggiungi la tua casa.</p>
++              <Link href={DESTINAZIONI_HOME.immobili} className="casa-invito" style={{ marginTop: 14 }}>
++                <span>Aggiungi la tua casa</span>
++                <b>Vai ›</b>
++              </Link>
++            </div>
++          ) : (
++            case_.map((c) => <Casa key={c.id} casa={c} compatta={case_.length > 1} />)
++          )}
+         </div>
+-      ) : (
+-        case_.map((c) => <Casa key={c.id} casa={c} compatta={case_.length > 1} />)
+-      )}
+-    </PageContainer>
++      </div>
++    </div>
+   );
+ }
+ 
+diff --git a/src/app/globals.css b/src/app/globals.css
+index b7490e6..06411b8 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -3857,19 +3857,66 @@ button.contratto-testa:focus-visible {
+ 
+ /* ============================================================
+    Home del proprietario: la casa in grande e due tessere grandi.
+-   Pensata per chi non è pratico: caratteri grandi (mai sotto 15px), bersagli larghi
+-   (almeno 64px), molto contrasto, una sola cosa da fare per volta.
++   Stessa impostazione della Home dell'inquilino: schermata scura a tutto schermo, il marchio in alto, un pannello scuro d'apertura, pulsanti a pillola con il bordo oro.
++   Pensata per chi non è pratico: caratteri grandi (mai sotto 15px), bersagli larghi (almeno 64px), molto contrasto, una sola cosa da fare per volta.
+    ============================================================ */
++/* la schermata scorre; il marchio resta fermo in alto */
++.casa-scroll {
++  position: absolute;
++  inset: 0;
++  overflow-y: auto;
++  -webkit-overflow-scrolling: touch;
++  padding: 0 10px 28px;
++}
++.casa-colonna {
++  max-width: 560px;
++  margin: 0 auto;
++}
++.casa-topbar {
++  position: sticky;
++  top: 0;
++  left: auto;
++  right: auto;
++  z-index: 5;
++  width: auto;
++  transform: none;
++  padding: 18px 8px 12px;
++  background: var(--ink);
++  pointer-events: auto;
++}
++/* il pannello d'apertura: come quello della Home dell'inquilino */
++.casa-intro {
++  margin: 0 0 14px;
++  padding: 14px 16px;
++  border-radius: 18px;
++  background: var(--ink-soft);
++  border: 1px solid var(--line);
++  color: var(--paper);
++}
++.casa-intro-saluto {
++  margin: 0;
++  font-size: 15px;
++  letter-spacing: 0.02em;
++  color: rgba(247, 244, 236, 0.7);
++}
++.casa-intro-titolo {
++  margin: 2px 0 0;
++  font-family: var(--font-display);
++  font-size: 26px;
++  font-weight: 700;
++  line-height: 1.15;
++  color: var(--paper);
++}
++/* l'invito a fare qualcosa: una riga con il pulsante a pillola con il bordo oro (come «Modifica dati» nella Home dell'inquilino) */
+ .casa-invito {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+   gap: 14px;
+   min-height: 64px;
+-  margin: 0 0 16px;
+-  padding: 12px 14px 12px 18px;
+-  border-radius: 16px;
+-  background: var(--moss);
++  margin: 12px 0 0;
++  padding: 12px 0 0;
++  border-top: 1px solid var(--line);
+   color: var(--paper);
+   font-size: 17px;
+   font-weight: 700;
+@@ -3881,14 +3928,16 @@ button.contratto-testa:focus-visible {
+   flex: none;
+   padding: 10px 16px;
+   border-radius: 999px;
+-  background: var(--paper);
+-  color: var(--ink);
++  background: rgba(201, 161, 90, 0.16);
++  border: 1px solid var(--gold);
++  color: var(--gold);
+   font-size: 16px;
+ }
+ .casa-invito:focus-visible,
+ .casa-attesa:focus-visible,
+-.casa-hero:focus-visible {
+-  outline: 3px solid var(--moss);
++.casa-hero:focus-visible,
++.tessera:focus-visible {
++  outline: 3px solid var(--gold);
+   outline-offset: 3px;
+ }
+ .casa {
+@@ -3899,11 +3948,11 @@ button.contratto-testa:focus-visible {
+   display: block;
+   height: 260px;
+   overflow: hidden;
+-  border-radius: 20px;
++  border-radius: 18px;
+   background: var(--ink-soft);
+   color: #fff;
+   text-decoration: none;
+-  box-shadow: 0 8px 20px rgba(16, 21, 26, 0.12);
++  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.35);
+   -webkit-tap-highlight-color: transparent;
+ }
+ .casa.compatta .casa-hero {
+@@ -4009,6 +4058,7 @@ button.contratto-testa:focus-visible {
+ .casa-tessere.una {
+   grid-template-columns: 1fr;
+ }
++/* le tessere: pannelli scuri come quello d'apertura, con i numeri e le azioni in oro */
+ .tessera {
+   display: flex;
+   flex-direction: column;
+@@ -4016,17 +4066,13 @@ button.contratto-testa:focus-visible {
+   min-width: 0;
+   min-height: 170px;
+   padding: 14px;
+-  border-radius: 20px;
+-  background: #fff;
+-  color: var(--ink);
++  border-radius: 18px;
++  background: var(--ink-soft);
++  border: 1px solid var(--line);
++  color: var(--paper);
+   text-decoration: none;
+-  box-shadow: 0 8px 20px rgba(16, 21, 26, 0.06);
+   -webkit-tap-highlight-color: transparent;
+ }
+-.tessera:focus-visible {
+-  outline: 3px solid var(--moss);
+-  outline-offset: 3px;
+-}
+ .tessera-etichetta {
+   display: flex;
+   align-items: flex-start;
+@@ -4036,14 +4082,14 @@ button.contratto-testa:focus-visible {
+   line-height: 1.2;
+   letter-spacing: 0.03em;
+   text-transform: uppercase;
+-  color: var(--body-soft);
++  color: rgba(247, 244, 236, 0.7);
+ }
+ .tessera-icona {
+   width: 22px;
+   height: 22px;
+   flex: none;
+   fill: none;
+-  stroke: var(--moss);
++  stroke: var(--gold);
+   stroke-width: 2;
+ }
+ .tessera-numero {
+@@ -4051,19 +4097,20 @@ button.contratto-testa:focus-visible {
+   font-size: 44px;
+   font-weight: 600;
+   line-height: 1;
+-  color: var(--moss);
++  color: var(--gold);
+ }
+ .tessera-frase {
+   font-size: 17px;
+   line-height: 1.3;
+-  color: var(--body-text);
++  color: var(--paper);
+ }
+ .tessera-badge {
+   align-self: flex-start;
+   padding: 5px 12px;
+   border-radius: 999px;
+-  background: rgba(201, 161, 90, 0.28);
+-  color: var(--gold-ink);
++  background: rgba(201, 161, 90, 0.16);
++  border: 1px solid var(--gold);
++  color: var(--gold);
+   font-size: 15px;
+   font-weight: 800;
+ }
+@@ -4071,7 +4118,7 @@ button.contratto-testa:focus-visible {
+   margin-top: auto;
+   font-size: 18px;
+   font-weight: 800;
+-  color: var(--moss);
++  color: var(--gold);
+ }
+ .casa-attesa {
+   display: flex;
+@@ -4081,18 +4128,36 @@ button.contratto-testa:focus-visible {
+   min-height: 64px;
+   margin-top: 12px;
+   padding: 12px 16px;
+-  border-radius: 16px;
+-  background: var(--paper-dim);
+-  color: var(--ink);
++  border-radius: 18px;
++  background: var(--ink-soft);
++  border: 1px solid var(--line);
++  color: var(--paper);
+   font-size: 17px;
+   line-height: 1.3;
+   text-decoration: none;
+ }
+ .casa-attesa b {
+   flex: none;
+-  color: var(--moss);
++  color: var(--gold);
+   font-size: 18px;
+ }
++/* quando non c'è ancora nessuna casa: lo stesso pannello scuro */
++.casa-schermo .empty-inline {
++  padding: 28px 16px;
++  border-radius: 18px;
++  background: var(--ink-soft);
++  border: 1px solid var(--line);
++  color: rgba(247, 244, 236, 0.75);
++}
++.casa-schermo .empty-inline h3 {
++  color: var(--paper);
++}
++.casa-schermo .empty-inline .icon-empty {
++  stroke: var(--gold);
++}
++.casa-schermo .empty-inline .casa-invito {
++  width: 100%;
++}
+ @media (min-width: 768px) {
+   .casa-hero {
+     height: 320px;
+diff --git a/src/app/staff/[id]/page.tsx b/src/app/staff/[id]/page.tsx
+index c9bbe62..06faa5f 100644
+--- a/src/app/staff/[id]/page.tsx
++++ b/src/app/staff/[id]/page.tsx
+@@ -55,6 +55,8 @@ export default async function StaffDettaglioPage({
+ 
+   const nome = [profilo?.nome, profilo?.cognome].filter(Boolean).join(" ") || "Senza nome";
+   const decidibile = immobile.verifica_stato === "in_verifica";
++  // una casa si verifica solo con una prova di proprietà: senza, non si offre nemmeno il pulsante (e il database lo rifiuterebbe)
++  const haProva = docProprieta.length > 0;
+ 
+   return (
+     <>
+@@ -96,7 +98,9 @@ export default async function StaffDettaglioPage({
+       </p>
+ 
+       <div style={{ marginTop: 26 }}>
+-        {decidibile ? (
++        {decidibile && !haProva ? (
++          <div className="note-error">Non si può verificare: il proprietario non ha caricato nessuna prova di proprietà per questo immobile.</div>
++        ) : decidibile ? (
+           <EsitoForm id={id} />
+         ) : (
+           <div className="note-box">
+diff --git a/src/lib/verifica.ts b/src/lib/verifica.ts
+index 66848dd..d3ad692 100644
+--- a/src/lib/verifica.ts
++++ b/src/lib/verifica.ts
+@@ -234,6 +234,7 @@ const MESSAGGI: Record<string, string> = {
+   NON_IN_VERIFICA: "Questo immobile non è in attesa di verifica.",
+   NOTA_OBBLIGATORIA: "Per respingere scrivi cosa non va: il proprietario la leggerà.",
+   IMMOBILE_INESISTENTE: "Immobile non trovato.",
++  PROVA_PROPRIETA_MANCANTE: "Questo immobile non ha nessuna prova di proprietà caricata: non si può verificare.",
+   // rapporti di locazione
+   RAPPORTO_INESISTENTE: "Affitto non trovato.",
+   MANCA_DOCUMENTO: "Questo affitto è nato da un contratto su MatchAmI e le parti non hanno ancora caricato la copia del contratto: non si può verificare.",
+diff --git a/supabase/migrations/0037_verificato_richiede_prova.sql b/supabase/migrations/0037_verificato_richiede_prova.sql
+new file mode 100644
+index 0000000..48fb355
+--- /dev/null
++++ b/supabase/migrations/0037_verificato_richiede_prova.sql
+@@ -0,0 +1,59 @@
++-- ============================================================
++-- Un immobile è «verificato» solo se ha almeno una prova di proprietà caricata.
++--
++-- Il flusso vero lo garantiva già (il proprietario chiede la verifica solo con la prova caricata, e i documenti non si possono cancellare), ma il database non lo
++-- impediva: uno stato impostato a mano (dati di prova, pannello SQL) poteva dare una casa «verificata» con zero documenti, che gli inquilini vedono come
++-- controllata senza che nessuno abbia mai visto una prova. Ora:
++--   1. le case già «verificate» ma senza nessuna prova di proprietà tornano «da verificare» (il proprietario carica la prova e chiede la verifica; non si perde nient'altro);
++--   2. da qui in poi nessuno, nemmeno lo staff o il pannello SQL, può mettere «verificato» a una casa senza una prova di proprietà: la casa deve ESISTERE prima, e la prova
++--      si registra dopo, quindi una casa nasce sempre «da verificare» e diventa «verificata» solo dopo.
++-- Rieseguirla non dà errori. ATTENZIONE: il punto 1 cambia lo stato delle case verificate a mano senza prova: gli inquilini smettono di vederle finché non sono verificate davvero.
++-- ============================================================
++
++-- ---- 1. riallinea ciò che esiste ----
++do $$
++declare
++  v_riallineati int;
++begin
++  update listings l
++     set verifica_stato = 'non_avviata',
++         verificato_at = null,
++         verifica_inviata_at = null,
++         verifica_esito_note = null
++   where l.verifica_stato = 'verificato'
++     and not exists (
++       select 1 from documenti_verifica d
++        where d.listing_id = l.id and d.tipo = 'proprieta'
++     );
++  get diagnostics v_riallineati = row_count;
++  raise notice 'Case verificate senza prova di proprietà, tornate «da verificare»: %', v_riallineati;
++end;
++$$;
++
++-- ---- 2. da ora in poi, la regola vale per tutti ----
++create or replace function public.garantisci_prova_proprieta()
++returns trigger
++language plpgsql
++as $$
++begin
++  if new.verifica_stato <> 'verificato' then
++    return new;
++  end if;
++  -- una casa già verificata che si modifica in altro non cambia stato: non si ricontrolla
++  if tg_op = 'UPDATE' and old.verifica_stato = 'verificato' then
++    return new;
++  end if;
++  if not exists (
++       select 1 from documenti_verifica d
++        where d.listing_id = new.id and d.tipo = 'proprieta'
++     ) then
++    raise exception 'PROVA_PROPRIETA_MANCANTE: l''immobile non ha nessuna prova di proprietà caricata' using errcode = 'P0001';
++  end if;
++  return new;
++end;
++$$;
++
++drop trigger if exists garantisci_prova_proprieta on listings;
++create trigger garantisci_prova_proprieta
++  before insert or update of verifica_stato on listings
++  for each row execute function public.garantisci_prova_proprieta();
+-- 
+2.43.0
+

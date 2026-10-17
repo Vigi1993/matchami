@@ -1,0 +1,179 @@
+From ce5703eb8584c0472e830521138f359bb67b0fd4 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 17 Oct 2026 08:44:21 +0000
+Subject: [PATCH] =?UTF-8?q?fix(iscrizione):=20la=20riga=20della=20privacy?=
+ =?UTF-8?q?=20va=20a=20capo=20allineata;=20via=20la=20scritta=20sotto=20?=
+ =?UTF-8?q?=C2=ABCrea=20il=20tuo=20account=C2=BB?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+DA APPLICARE DOPO iscrizione-senza-conferma-email-test.patch. Nessuna migrazione.
+
+1) LA RIGA DELLA PRIVACY. L'etichetta è un contenitore flessibile (quadratino a sinistra, testo a destra) ma il testo, il collegamento all'informativa e il resto erano pezzi SEPARATI direttamente
+al suo interno: ognuno diventava una colonna a sé e le righe del testo cominciavano a tre distanze diverse dal bordo (47, 78 e 179 px a 390 di larghezza: misurato). Ora dentro l'etichetta ci sono solo il
+quadratino e UN blocco di testo che va a capo allineato: tutte le righe cominciano alla stessa distanza (52 px) a 390, 360 e 320 px. Stesse parole e stesso collegamento di prima («Ho letto l'informativa sulla
+privacy (provvisoria) e accetto il trattamento dei dati necessario al funzionamento di MatchAmI.», che si apre in una nuova scheda); toccando il TESTO si spunta il quadratino. Il quadratino è di 18 px (era 13)
+e non si schiaccia. Il campo si chiama ancora «privacy».
+2) LA SCRITTA SOTTO IL PULSANTE. Tolta «Dopo la registrazione ti chiederemo se cerchi casa o hai un immobile da mettere in affitto.» (stava sotto tutte e tre le schede; il ruolo si sceglie già nel modulo).
+Resta la nota per chi cerca casa sulla visibilità del profilo, che è un'altra cosa.
+PROVATO in Chrome col dito (nessuna immagine allegata) a 390, 360 e 320 px: due soli pezzi nell'etichetta, righe allineate, testo intero, nessuno scorrimento laterale, scritta assente nelle tre schede, tocco sul testo,
+collegamento invariato. ALTERAZIONI: 13 difetti reintrodotti di proposito, tutti presi.
+DIFETTO MIO: la prima misura contava i frammenti di testo invece dell'inizio di ogni riga e dava un falso errore; l'ho corretta misurando le righe.
+Test: 1219 in tutto (5 nuovi; 1212 senza PostgreSQL collegato e sette saltati, 1219 con).
+---
+ package.json                |  2 +-
+ scripts/test-login-form.mjs | 54 +++++++++++++++++++++++++++++++++++++
+ src/app/globals.css         | 12 +++++++++
+ src/app/login/page.tsx      | 34 +++++++++++------------
+ 4 files changed, 84 insertions(+), 18 deletions(-)
+ create mode 100644 scripts/test-login-form.mjs
+
+diff --git a/package.json b/package.json
+index 2a158df..b3f3535 100644
+--- a/package.json
++++ b/package.json
+@@ -8,7 +8,7 @@
+     "start": "next start",
+     "lint": "eslint",
+     "pretest": "node scripts/controlla-dipendenze.mjs",
+-    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-affidabilita.mjs scripts/test-profilo-gestione.mjs scripts/test-avvisi-profilo.mjs scripts/test-raccomandato.mjs scripts/test-home-proprietario.mjs scripts/test-richieste.mjs scripts/test-database-proprietario.mjs scripts/test-affitto-contratto.mjs scripts/test-profilo-proprietario.mjs scripts/test-stile.mjs scripts/test-verifica-immobile.mjs scripts/test-protesti.mjs scripts/test-iscrizione-prova.mjs scripts/test-db-richieste.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-dati-immobile.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-affidabilita.mjs scripts/test-profilo-gestione.mjs scripts/test-avvisi-profilo.mjs scripts/test-raccomandato.mjs scripts/test-home-proprietario.mjs scripts/test-richieste.mjs scripts/test-database-proprietario.mjs scripts/test-affitto-contratto.mjs scripts/test-profilo-proprietario.mjs scripts/test-stile.mjs scripts/test-verifica-immobile.mjs scripts/test-protesti.mjs scripts/test-iscrizione-prova.mjs scripts/test-login-form.mjs scripts/test-db-richieste.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-dati-immobile.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-login-form.mjs b/scripts/test-login-form.mjs
+new file mode 100644
+index 0000000..83c97b0
+--- /dev/null
++++ b/scripts/test-login-form.mjs
+@@ -0,0 +1,54 @@
++/**
++ * Test del modulo di iscrizione: la riga della privacy e la scritta sotto il pulsante.
++ *  - la riga della privacy è un contenitore flessibile: il testo, il collegamento e il resto erano pezzi SEPARATI dentro di esso, e ognuno si disponeva come una colonna
++ *    a sé (le righe cominciavano a tre distanze diverse); ora c'è il quadratino e UN solo blocco di testo;
++ *  - sotto «Crea il tuo account» non c'è più «Dopo la registrazione ti chiederemo se cerchi casa o hai un immobile…» (il ruolo si sceglie già nel modulo).
++ * Si lancia con:   npm test
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { radice } from "./carica-ts.mjs";
++
++const leggi = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8").replace(/\r\n/g, "\n");
++const pagina = leggi("src", "app", "login", "page.tsx"); const css = leggi("src", "app", "globals.css");
++const etichetta = pagina.slice(pagina.indexOf('<label className="login-consent mt-1">'), pagina.indexOf("</label>", pagina.indexOf('<label className="login-consent mt-1">')) + "</label>".length);
++
++test("la riga della privacy ha DUE soli pezzi dentro l'etichetta: il quadratino e un blocco di testo (niente testo o collegamenti sciolti nel contenitore flessibile)", () => {
++  assert.ok(etichetta.length > 100, "etichetta non trovata");
++  // tolto il blocco di testo e i commenti, nell'etichetta resta solo il quadratino
++  const resto = etichetta.replace(/<span className="login-consent-testo">[\s\S]*<\/span>/, "<SPAN/>").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
++  const interno = resto.replace(/^<label[^>]*>/, "").replace(/<\/label>$/, "").replace(/\s+/g, " ").trim();
++  assert.equal(interno, '<input type="checkbox" name="privacy" className="login-consent-box" /> <SPAN/>', "dentro l'etichetta deve esserci solo il quadratino e il blocco di testo: " + interno);
++  assert.equal([...etichetta.matchAll(/<span/g)].length, 1, "un solo blocco di testo");
++});
++
++test("il blocco di testo ha le parole e il collegamento di prima: «Ho letto l'informativa sulla privacy (provvisoria) e accetto il trattamento dei dati necessario al funzionamento di MatchAmI.»", () => {
++  // gli a capo e gli spazi del codice non contano (in JSX si ripuliscono): si confrontano i tag, gli attributi e le parole senza spazi...
++  const blocco = etichetta.slice(etichetta.indexOf("<span"), etichetta.indexOf("</span>") + 7); const senzaSpazi = (x) => x.replace(/\s+/g, "");
++  assert.equal(senzaSpazi(blocco), senzaSpazi('<span className="login-consent-testo">Ho letto l&apos;<a href="/informativa" target="_blank" rel="noopener noreferrer" className="underline">informativa sulla privacy{INFORMATIVA.provvisoria ? " (provvisoria)" : ""}</a>{" "}e accetto il trattamento dei dati necessario al funzionamento di MatchAmI.</span>'));
++  // ...e le frasi intere, con gli spazi, come le legge la persona
++  for (const frase of ["Ho letto l&apos;", "informativa sulla privacy", "e accetto il trattamento dei dati necessario al funzionamento di", "MatchAmI."]) assert.ok(blocco.includes(frase), `manca la frase: ${frase}`);
++  assert.match(etichetta, /<input type="checkbox" name="privacy" className="login-consent-box" \/>/, "il campo si chiama ancora «privacy»: l'iscrizione lo legge così");
++  assert.match(leggi("src", "app", "login", "actions.ts"), /formData\.get\("privacy"\) === "on"/);
++});
++
++test("stile: il quadratino non si restringe (18 px) e il blocco di testo occupa il resto e può andare a capo (flex 1, min-width 0); il contenitore resta quello di prima", () => {
++  assert.match(css, /\.login-consent-box \{\s+flex: none;\s+width: 18px;\s+height: 18px;\s+margin: 1px 0 0;\s+\}/);
++  assert.match(css, /\.login-consent-testo \{\s+flex: 1;\s+min-width: 0;\s+\}/);
++  assert.match(css, /\.login-consent \{\s+display: flex;\s+align-items: flex-start;\s+gap: 8px;/, "il contenitore flessibile non è cambiato");
++});
++
++test("sotto «Crea il tuo account» NON c'è più «Dopo la registrazione ti chiederemo…»: né in nessuna scheda della pagina di accesso", () => {
++  assert.ok(!/Dopo la registrazione|ti chiederemo se cerchi casa|da mettere in affitto/.test(pagina), "la scritta c'è ancora");
++  assert.match(pagina, /\{signupPending \? "Creazione account\.\.\." : "Crea il tuo account"\}\s+<\/button>\s+<\/form>/, "il pulsante chiude il modulo");
++  assert.match(pagina, /<\/form>\s+\)\}\s+<\/div>\s+<\/main>/, "dopo i moduli non c'è nessun paragrafo: la pagina finisce lì");
++  // lo stile «login-fine» resta: lo usano altre pagine (accettazione dell'informativa, risposta a un rapporto) e il recupero della password
++  assert.ok(leggi("src", "app", "informativa", "accetta", "AccettaForm.tsx").includes("login-fine")); assert.match(css, /\.login-fine \{/);
++});
++
++test("la nota di visibilità per chi cerca casa resta sotto la riga della privacy (è un'altra cosa: non è la scritta tolta)", () => {
++  assert.match(pagina, /\{ruolo === "inquilino" && \(\s+<p className="login-consent" style=\{\{ margin: "0 0 2px 0" \}\}>\s+Il tuo profilo sarà visibile ai proprietari con una casa adatta alla tua ricerca/);
++  assert.ok(pagina.indexOf("</label>") < pagina.indexOf('Il tuo profilo sarà visibile'), "la nota sta dopo la riga della privacy");
++});
+diff --git a/src/app/globals.css b/src/app/globals.css
+index bd52b44..a22e93f 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -4900,3 +4900,15 @@ button.contratto-testa:focus-visible {
+   line-height: 1.3;
+   text-align: center;
+ }
++
++/* ---- La riga della privacy nell'iscrizione: il quadratino a sinistra e UN solo blocco di testo che va a capo allineato ---- */
++.login-consent-box {
++  flex: none;
++  width: 18px;
++  height: 18px;
++  margin: 1px 0 0;
++}
++.login-consent-testo {
++  flex: 1;
++  min-width: 0;
++}
+diff --git a/src/app/login/page.tsx b/src/app/login/page.tsx
+index 3b02277..3cf65e5 100644
+--- a/src/app/login/page.tsx
++++ b/src/app/login/page.tsx
+@@ -120,19 +120,23 @@ function LoginForm() {
+             />
+ 
+             <label className="login-consent mt-1">
+-              <input type="checkbox" name="privacy" className="mt-0.5" />
+-              Ho letto l&apos;
+-              <a
+-                href="/informativa"
+-                target="_blank"
+-                rel="noopener noreferrer"
+-                className="underline"
+-              >
+-                informativa sulla privacy
+-                {INFORMATIVA.provvisoria ? " (provvisoria)" : ""}
+-              </a>{" "}
+-              e accetto il trattamento dei dati necessario al funzionamento di
+-              MatchAmI.
++              <input type="checkbox" name="privacy" className="login-consent-box" />
++              {/* tutto il testo in UN solo blocco accanto al quadratino: se i pezzi (testo, collegamento, testo) stanno direttamente nel contenitore
++                  flessibile ognuno diventa una colonna a sé e il testo si spezza male */}
++              <span className="login-consent-testo">
++                Ho letto l&apos;
++                <a
++                  href="/informativa"
++                  target="_blank"
++                  rel="noopener noreferrer"
++                  className="underline"
++                >
++                  informativa sulla privacy
++                  {INFORMATIVA.provvisoria ? " (provvisoria)" : ""}
++                </a>{" "}
++                e accetto il trattamento dei dati necessario al funzionamento di
++                MatchAmI.
++              </span>
+             </label>
+             {ruolo === "inquilino" && (
+               <p className="login-consent" style={{ margin: "0 0 2px 0" }}>
+@@ -230,10 +234,6 @@ function LoginForm() {
+           </form>
+         )}
+ 
+-        <p className="login-fine">
+-          Dopo la registrazione ti chiederemo se cerchi casa o hai un immobile
+-          da mettere in affitto.
+-        </p>
+       </div>
+     </main>
+   );
+-- 
+2.43.0
+

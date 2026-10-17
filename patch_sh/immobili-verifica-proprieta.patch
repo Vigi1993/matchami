@@ -1,0 +1,896 @@
+From 902cafa92b495de8b58c38ab67c5893a335f1cdc Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 16 Oct 2026 11:43:24 +0000
+Subject: [PATCH] =?UTF-8?q?fix(immobili):=20la=20scheda=20non=20sovrappone?=
+ =?UTF-8?q?=20pi=C3=B9=20le=20scritte;=20la=20prova=20di=20propriet=C3=A0?=
+ =?UTF-8?q?=20si=20carica=20dalla=20scheda=20dell'immobile?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+DA APPLICARE DOPO stile-home-database.patch. Nessuna migrazione (le funzioni e le tabelle della verifica esistono già).
+
+1) SCRITTE SOVRAPPOSTE NELLA LISTA IMMOBILI. Con una casa senza candidature il riquadro a destra diceva 'Nessuna candidatura' (155 px): schiacciava la colonna del nome a 69 px
+a 390 di larghezza, 39 a 360, ZERO a 320, e il titolo usciva dalla scheda finendo sotto il riquadro. Riprodotto in Chrome con una casa dal nome lungo e misurato prima e dopo.
+Ora il riquadro è SEMPRE 'numero + etichetta piccola' ('0 candidature', '3 candidature', '— non pubblicato'); in più, per tutte le schede dell'app (anche contratti e match): il riquadro
+non supera 92 px, i testi (zona, titolo, prezzo) vanno a capo anche con una parola lunghissima, e sotto i 360 px di larghezza la foto è di 58 px. Dopo: colonna del nome 135 / 105 / 81 px
+a 390 / 360 / 320, nessun titolo esce dalla sua colonna, nessun titolo finisce sotto il riquadro, nessuno scorrimento laterale.
+
+2) LA PROVA DI PROPRIETÀ NELLA SCHEDA DELL'IMMOBILE. Il caricamento della visura o dell'atto (e il documento d'identità, e la richiesta di verifica) c'era solo nella Home di chi non ha
+ancora NESSUN immobile verificato: con una casa già verificata la Home mostra altro, quindi non c'era più modo di verificare una seconda casa né di rifare una verifica respinta; la scheda
+diceva 'Puoi seguire la verifica dalla Home'. Ora in cima alla scheda di ogni immobile c'è 'Prova di proprietà' con lo stato (Da verificare / In verifica / Da correggere / Verificato),
+il motivo dell'eventuale rifiuto, quante prove sono già caricate, 'Carica visura o atto' ('Aggiungine un'altra' se ce n'è già una), il documento d'identità se manca, cosa manca per inviare
+(prova, identità, dati obbligatori dell'annuncio: 'li compili qui sotto, ricordati di salvare') e 'Invia per la verifica' (spento finché manca qualcosa). Per una casa in verifica o verificata
+si vede solo lo stato. Caratteri da 15 px, pulsanti alti, angoli come le altre schede. Si dice che i documenti li vede solo il team di MatchAmI, mai gli inquilini.
+Il file va nell'archivio di verifica, nella cartella di chi lo carica (le regole di accesso sono quelle di sempre); poi si registra come 'proprietà' di quella casa; poi si ricarica la pagina.
+La scheda tiene l'IDENTIFICATIVO della casa e non una copia: dopo un caricamento mostra i numeri aggiornati.
+La Home di verifica ora RIUSA lo stesso componente e lo stesso codice (VerificaImmobile + useVerificaDocumenti): la registrazione dei documenti esiste in un posto solo (un test lo richiede).
+
+3) IL TEST CHE FALLIVA SUL TUO COMPUTER. 'i dati di prova usano solo tag ammessi' leggeva supabase/migrations/seed_demo_data.sql, un file facoltativo che nel repository c'è dal 4 settembre ma sul tuo computer no: ora se il file non c'è il test viene
+SALTATO con un messaggio chiaro (provato con il file presente e con il file tolto), invece di fallire.
+
+PROVATO. In Chrome col dito (nessuna immagine allegata): la scheda di ogni tipo di casa (da verificare completa, in verifica, respinta con motivo, verificata, senza dati obbligatori); caricamento
+della prova (file nell'archivio di verifica nella cartella del proprietario, registrazione di tipo 'proprieta' per quella casa, scheda che resta aperta); invio della verifica (una chiamata,
+casa giusta); errore del database in italiano; manca il documento d'identità (compare il caricamento, invio spento, caricamento senza casa); la Home di verifica funziona ancora con il componente
+condiviso. ALTERAZIONI: 30 difetti reintrodotti di proposito, tutti presi.
+
+DIFETTI MIEI TROVATI PROVANDO
+- il test sull'aggiornamento della pagina dopo un caricamento controllava che esistesse UN aggiornamento ma ce ne sono due: togliere quello dopo il caricamento passava; ora li controlla uno per uno
+- un'alterazione che avevo scritto era debole (aggiungeva solo una funzione inutilizzata): l'ho rifatta realistica (la scheda che tiene una copia vecchia) ed è stata presa
+- il blocco '@media' per i telefoni stretti, messo troppo in alto nel CSS, rompeva un test sul mazzo dell'inquilino che legge il CSS fino al primo @media: spostato in fondo, e un test lo richiede
+- i miei script di prova aspettavano l'etichetta 'Da fare' mentre quella vera è 'Da verificare' (comportamento giusto, attesa sbagliata)
+Test: 1170 in tutto (12 nuovi; 1165 senza PostgreSQL collegato e cinque saltati, 1170 con).
+---
+ package.json                              |   2 +-
+ scripts/test-rapporti.mjs                 |   6 +-
+ scripts/test-verifica-immobile.mjs        |  99 ++++++++++++
+ src/app/(app)/VerificaHome.tsx            | 167 ++-----------------
+ src/app/(app)/immobili/ImmobiliClient.tsx |  33 ++--
+ src/app/(app)/immobili/page.tsx           |  13 +-
+ src/app/globals.css                       |  82 ++++++++++
+ src/components/VerificaImmobile.tsx       | 185 ++++++++++++++++++++++
+ src/lib/types.ts                          |   2 +
+ src/lib/verifica.ts                       |  35 ++++
+ 10 files changed, 452 insertions(+), 172 deletions(-)
+ create mode 100644 scripts/test-verifica-immobile.mjs
+ create mode 100644 src/components/VerificaImmobile.tsx
+
+diff --git a/package.json b/package.json
+index 630b5ff..ed38ab7 100644
+--- a/package.json
++++ b/package.json
+@@ -8,7 +8,7 @@
+     "start": "next start",
+     "lint": "eslint",
+     "pretest": "node scripts/controlla-dipendenze.mjs",
+-    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-affidabilita.mjs scripts/test-profilo-gestione.mjs scripts/test-avvisi-profilo.mjs scripts/test-raccomandato.mjs scripts/test-home-proprietario.mjs scripts/test-richieste.mjs scripts/test-database-proprietario.mjs scripts/test-affitto-contratto.mjs scripts/test-profilo-proprietario.mjs scripts/test-stile.mjs scripts/test-db-richieste.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-dati-immobile.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-affidabilita.mjs scripts/test-profilo-gestione.mjs scripts/test-avvisi-profilo.mjs scripts/test-raccomandato.mjs scripts/test-home-proprietario.mjs scripts/test-richieste.mjs scripts/test-database-proprietario.mjs scripts/test-affitto-contratto.mjs scripts/test-profilo-proprietario.mjs scripts/test-stile.mjs scripts/test-verifica-immobile.mjs scripts/test-db-richieste.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-dati-immobile.mjs scripts/test-candidati.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-rapporti.mjs b/scripts/test-rapporti.mjs
+index 4d4ce9e..fd5cfa1 100644
+--- a/scripts/test-rapporti.mjs
++++ b/scripts/test-rapporti.mjs
+@@ -157,9 +157,11 @@ test("i TAG dell'app e del database sono la stessa lista", () => {
+   assert.deepEqual([...db].sort(), [...app].sort(), "le due liste divergono");
+ });
+ 
+-test("i dati di prova usano solo tag ammessi (altrimenti il vincolo li rifiuterebbe)", () => {
++// il file dei dati dimostrativi è facoltativo: se in questa copia del progetto non c'è, il controllo si salta (non è un errore)
++const FILE_SEED = path.join(radice, "supabase", "migrations", "seed_demo_data.sql");
++test("i dati di prova usano solo tag ammessi (altrimenti il vincolo li rifiuterebbe)", { skip: fs.existsSync(FILE_SEED) ? false : "il file dei dati dimostrativi (seed_demo_data.sql) non c'è in questa copia del progetto" }, () => {
+   const app = stringhe(tra(fs.readFileSync(path.join(radice, "src", "lib", "constants.ts"), "utf8"), "TAG_RECENSIONE = [", "] as const"));
+-  const seed = fs.readFileSync(path.join(radice, "supabase", "migrations", "seed_demo_data.sql"), "utf8");
++  const seed = fs.readFileSync(FILE_SEED, "utf8");
+   const usati = stringhe(tra(seed, "insert into recensioni", ";")).filter((x) => !/^\s*$/.test(x) && !/^(tenant_id|autore_id|voto|tag)$/.test(x));
+   const tag = usati.filter((x) => x.length > 8);
+   assert.ok(tag.length >= 1, "non ho trovato tag nel seed");
+diff --git a/scripts/test-verifica-immobile.mjs b/scripts/test-verifica-immobile.mjs
+new file mode 100644
+index 0000000..e96fa7e
+--- /dev/null
++++ b/scripts/test-verifica-immobile.mjs
+@@ -0,0 +1,99 @@
++/**
++ * Test della prova di proprietà nella SCHEDA DELL'IMMOBILE e della scheda dell'immobile nella lista.
++ *  - il proprietario carica la visura o l'atto e chiede la verifica dalla scheda di ogni immobile (prima si poteva solo dalla Home di chi non ha ancora
++ *    immobili verificati: con una casa già verificata non c'era più modo di verificarne un'altra, né di rifare una verifica respinta);
++ *  - la scritta lunga nel riquadro a destra non schiaccia più il nome dell'immobile.
++ * Si lancia con:   npm test
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import path from "node:path";
++import fs from "node:fs";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const vf = caricaTs(path.join(radice, "src", "lib", "verifica.ts"));
++const leggi = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8").replace(/\r\n/g, "\n");
++const senzaCommenti = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
++const comp = senzaCommenti(leggi("src", "components", "VerificaImmobile.tsx"));
++const client = leggi("src", "app", "(app)", "immobili", "ImmobiliClient.tsx");
++const css = leggi("src", "app", "globals.css");
++
++const casa = (o = {}) => ({ id: "a1", titolo: "Bilocale", zona: "Isola, Milano", verifica_stato: "non_avviata", verifica_esito_note: null, nProprieta: 0, classe_energetica: "C", luogo_id: "q1", bagni: 1, piano: 2, riscaldamento: "autonomo", tipo_contratto: "libero_4_4", disponibile_dal: "2026-12-01", ...o });
++
++// ============================================================ la logica
++test("dalla scheda di un immobile ai dati della verifica: tutti i campi, i vuoti diventano null, le prove di proprietà partono da zero", () => {
++  const v = vf.immobileVerificaDa(casa({ nProprieta: 2, verifica_esito_note: "il nome non coincide" }));
++  assert.deepEqual(v, { id: "a1", titolo: "Bilocale", zona: "Isola, Milano", stato: "non_avviata", note: "il nome non coincide", nProprieta: 2, dati: { classe_energetica: "C", luogo_id: "q1", bagni: 1, piano: 2, riscaldamento: "autonomo", tipo_contratto: "libero_4_4", disponibile_dal: "2026-12-01" } });
++  const vuota = vf.immobileVerificaDa({ id: "a2", titolo: "X", zona: "Y", verifica_stato: "non_avviata", verifica_esito_note: null }); assert.equal(vuota.nProprieta, 0); assert.deepEqual(Object.values(vuota.dati), [null, null, null, null, null, null, null]);
++  assert.equal(vf.immobileVerificaDa(casa({ verifica_esito_note: undefined })).note, null);
++});
++
++test("cosa manca per chiedere la verifica: l'identità, la prova di proprietà e i dati obbligatori dell'annuncio; con tutto si può inviare, e solo se la verifica non è già partita", () => {
++  const completa = vf.immobileVerificaDa(casa({ nProprieta: 1 })); assert.deepEqual(vf.cosaManca(true, completa), []); assert.equal(vf.puoInviare(true, completa), true);
++  assert.equal(vf.puoInviare(false, completa), false, "senza documento d'identità"); assert.match(vf.cosaManca(false, completa)[0], /documento d'identità/);
++  assert.match(vf.cosaManca(true, vf.immobileVerificaDa(casa({ nProprieta: 0 })))[0], /prova di proprietà/);
++  const senzaDati = vf.immobileVerificaDa(casa({ nProprieta: 1, classe_energetica: null, bagni: null })); assert.equal(vf.cosaManca(true, senzaDati).length, 2); assert.equal(vf.puoInviare(true, senzaDati), false);
++  for (const stato of ["in_verifica", "verificato"]) assert.equal(vf.puoInviare(true, vf.immobileVerificaDa(casa({ nProprieta: 1, verifica_stato: stato }))), false, stato);
++});
++
++// ============================================================ il componente
++test("il componente: il file va nell'archivio di verifica, nella cartella di chi lo carica; poi si registra; poi si ricarica la pagina; la verifica si chiede con la funzione del database", () => {
++  assert.match(comp, /const percorso = percorsoDocumento\(\{ userId: user\.id, tipo, listingId, estensione, id: crypto\.randomUUID\(\) \}\);/);
++  assert.match(comp, /supabase\.storage\.from\("documenti-verifica"\)\.upload\(percorso, file, \{ contentType: file\.type, upsert: false \}\)/);
++  assert.match(comp, /supabase\.from\("documenti_verifica"\)\.insert\(\{\s+owner_id: user\.id,\s+listing_id: listingId,\s+tipo,\s+percorso,\s+nome_file: file\.name\.slice\(0, 200\),\s+\}\)/);
++  assert.ok(comp.indexOf('.upload(percorso') < comp.indexOf('.from("documenti_verifica").insert'), "prima il file, poi la registrazione");
++  assert.match(comp, /nome_file: file\.name\.slice\(0, 200\),\s+\}\);\s+if \(eRiga\) \{[^}]*\}\s+router\.refresh\(\);/, "dopo la registrazione la pagina si aggiorna"); assert.match(comp, /rpc\("richiedi_verifica_immobile", \{ p_listing: listingId \}\);\s+if \(error\) \{[^}]*\}\s+router\.refresh\(\);/, "dopo l'invio la pagina si aggiorna"); assert.equal([...comp.matchAll(/router\.refresh\(\);/g)].length, 2);
++  assert.match(comp, /createClient\(\)\.rpc\("richiedi_verifica_immobile", \{ p_listing: listingId \}\)/); assert.ok(!/from\("listings"\)\s*\.(update|insert)/.test(comp), "la verifica non si imposta a mano");
++  assert.match(comp, /const problema = validaFileDocumento\(file\);/); assert.match(comp, /Il file deve essere un PDF, una foto JPG o una foto PNG\./);
++});
++
++test("il componente: le azioni compaiono solo se la verifica non è partita; il documento d'identità solo se serve; l'invio è spento finché manca qualcosa", () => {
++  assert.match(comp, /\{immobile\.stato === "non_avviata" && \(\s+<>/, "caricamento e invio solo se non avviata"); assert.equal([...comp.matchAll(/immobile\.stato === "non_avviata"/g)].length, 2, "il motivo del rifiuto e le azioni");
++  assert.match(comp, /\{conIdentita && !haIdentita && \(/); assert.match(comp, /disabled=\{!puoInviare\(haIdentita, immobile\) \|\| inCorso !== null\}/); assert.match(comp, /\{manca\.length > 0 && <p className="field-note">Per inviare manca: \{manca\.join\(" e "\)\}\.<\/p>\}/);
++  assert.match(comp, /Li vede solo il team di MatchAmI: mai gli inquilini\./, "dice a chi sono visibili i documenti"); assert.match(comp, /\{errore && \(\s+<p className="note-error" role="alert"/); assert.match(comp, /Motivo del rifiuto: \{immobile\.note\}/);
++});
++
++test("la Home di verifica riusa lo STESSO componente e lo stesso codice di caricamento: la registrazione dei documenti esiste in un posto solo", () => {
++  const home = senzaCommenti(leggi("src", "app", "(app)", "VerificaHome.tsx")); assert.match(home, /import \{ VerificaImmobile, useVerificaDocumenti \} from "@\/components\/VerificaImmobile";/); assert.match(home, /<VerificaImmobile immobile=\{im\} haIdentita=\{haIdentita\} \/>/);
++  assert.ok(!/documenti_verifica|storage|rpc\(/.test(home), "la Home non deve più avere una sua copia del caricamento");
++  const dove = []; const visita = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) visita(f); else if (/\.(ts|tsx)$/.test(e.name) && /from\("documenti_verifica"\)\.insert/.test(fs.readFileSync(f, "utf8"))) dove.push(path.relative(radice, f).replaceAll("\\", "/")); } }; visita(path.join(radice, "src")); assert.deepEqual(dove, ["src/components/VerificaImmobile.tsx"]);
++});
++
++// ============================================================ la scheda dell'immobile
++test("scheda dell'immobile: la prova di proprietà sta IN CIMA, con il documento d'identità se manca; la scheda si aggiorna dopo un caricamento (si tiene l'identificativo, non una copia)", () => {
++  assert.match(client, /<>\s+\{\/\*[^*]*\*\/\}\s+<VerificaImmobile key=\{selezionato\.id\} immobile=\{immobileVerificaDa\(selezionato\)\} haIdentita=\{haIdentita\} conIdentita \/>\s+<IndirizzoImmobile key=\{selezionato\.id\}/);
++  assert.match(client, /const \[selezionatoId, setSelezionatoId\] = useState<string \| null>\(null\);\s+const selezionato = immobili\.find\(\(i\) => i\.id === selezionatoId\) \?\? null;/); assert.ok(!/setSelezionato\(/.test(client), "resta una selezione per copia");
++  assert.match(client, /haIdentita = false,/); assert.match(client, /import \{ descriviStato, immobileVerificaDa \} from "@\/lib\/verifica";/);
++});
++
++test("scheda dell'immobile: non rimanda più alla Home (con una casa già verificata la Home non mostra la verifica)", () => {
++  assert.ok(!/Puoi seguire la verifica\s+dalla Home/.test(client), "la frase che rimanda alla Home c'è ancora"); assert.match(client, /Per farlo verificare carica\s+la prova di proprietà qui sopra, in questa scheda\./);
++});
++
++test("pagina Immobili: legge i documenti di verifica del proprietario (solo i suoi) e dice a ogni casa quante prove ha e se c'è il documento d'identità", () => {
++  const p = senzaCommenti(leggi("src", "app", "(app)", "immobili", "page.tsx")); assert.match(p, /supabase\.from\("documenti_verifica"\)\.select\("tipo, listing_id"\)\.eq\("owner_id", user!\.id\)/);
++  assert.match(p, /const haIdentita = \(documenti \?\? \[\]\)\.some\(\(d\) => d\.tipo === "identita"\);/); assert.match(p, /if \(d\.tipo === "proprieta" && d\.listing_id\) proprietaPerImmobile\.set\(/); assert.match(p, /nProprieta: proprietaPerImmobile\.get\(l\.id as string\) \?\? 0,/); assert.match(p, /<ImmobiliClient immobili=\{immobili\} haIdentita=\{haIdentita\}/);
++});
++
++// ============================================================ le scritte che si sovrapponevano
++test("lista immobili: il riquadro a destra è SEMPRE «numero + etichetta piccola», mai una scritta lunga (con «Nessuna candidatura» schiacciava il nome fino a farlo uscire dalla scheda)", () => {
++  assert.ok(!/Nessuna candidatura|>Non pubblicato</.test(client.replace(/\{\/\*[\s\S]*?\*\/\}/g, "")), "è tornata una scritta lunga nel riquadro");
++  assert.match(client, /\{im\.nCandidature > 0 \|\| im\.pubblicato \? \(\s+<>\s+\{im\.nCandidature\}\s+<span>candidatur\{im\.nCandidature === 1 \? "a" : "e"\}<\/span>\s+<\/>\s+\) : \(\s+<>\s+—<span>non pubblicato<\/span>\s+<\/>\s+\)\}/);
++});
++
++test("stile della scheda: il riquadro non supera 92 px, i testi vanno a capo anche con una parola lunghissima, e sui telefoni stretti la foto è più piccola; lo stesso per le schede dei contratti", () => {
++  assert.match(css, /\.match-card \.mc-pct,\s+\.contratto-testa \.mc-pct \{\s+max-width: 92px;\s+overflow-wrap: anywhere;\s+\}/);
++  assert.match(css, /\.match-card \.mc-zona,\s+\.match-card \.mc-title,\s+\.match-card \.mc-meta,\s+\.contratto-testa \.mc-zona,\s+\.contratto-testa \.mc-title,\s+\.contratto-testa \.mc-meta \{\s+overflow-wrap: anywhere;\s+\}/);
++  assert.match(css, /@media \(max-width: 359px\) \{\s+\.match-card img,\s+\.match-card \.mc-avatar \{\s+width: 58px;\s+height: 58px;/);
++  // nessun @media prima delle regole di base dell'app (un test sul mazzo dell'inquilino legge il CSS fino al primo @media)
++  assert.ok(css.indexOf("@media (max-width: 359px)") > css.indexOf(".swipe-hint {"), "il blocco per i telefoni stretti deve stare dopo le regole di base");
++});
++
++test("stile della prova di proprietà: caratteri da 15 px in su, pulsanti alti, angoli come le altre schede; nella Home di verifica niente scatola dentro la scatola", () => {
++  const m = css.slice(css.indexOf("/* ---- La prova di proprietà nella scheda dell'immobile")); const misure = [...m.matchAll(/font-size:\s*(\d+)px/g)].map((x) => Number(x[1])); assert.ok(misure.length >= 7 && Math.min(...misure) >= 15, `caratteri: ${Math.min(...misure)} px`);
++  assert.match(m, /\.verifica-immobile \.opp-cta \{\s+min-height: 52px;\s+font-size: 17px;/); assert.match(m, /\.verifica-immobile \.selettore-file \{[^}]*min-height: 44px;/); assert.match(m, /\.verifica-immobile \{\s+margin: 0 0 16px;\s+padding: 14px;\s+border-radius: 16px;/); assert.match(m, /\.verifica-card-colonna \.verifica-immobile \{\s+margin: 8px 0 0;\s+padding: 0;\s+background: none;/);
++});
++
++test("il controllo dei dati dimostrativi si salta (non fallisce) se il file facoltativo non c'è in questa copia del progetto", () => {
++  const t = leggi("scripts", "test-rapporti.mjs"); assert.match(t, /const FILE_SEED = path\.join\(radice, "supabase", "migrations", "seed_demo_data\.sql"\);/); assert.match(t, /\{ skip: fs\.existsSync\(FILE_SEED\) \? false : "il file dei dati dimostrativi \(seed_demo_data\.sql\) non c'è in questa copia del progetto" \}/); assert.match(t, /fs\.readFileSync\(FILE_SEED, "utf8"\)/);
++});
+diff --git a/src/app/(app)/VerificaHome.tsx b/src/app/(app)/VerificaHome.tsx
+index 63ccf4a..aab7224 100644
+--- a/src/app/(app)/VerificaHome.tsx
++++ b/src/app/(app)/VerificaHome.tsx
+@@ -1,29 +1,11 @@
+ "use client";
+ 
+ import { SelettoreFile } from "@/components/SelettoreFile";
+-import { useState } from "react";
+ import Link from "next/link";
+-import { useRouter } from "next/navigation";
+-import { createClient } from "@/lib/supabase/client";
+ import { PageContainer } from "@/components/ui/PageContainer";
+-import {
+-  cosaManca,
+-  descriviStato,
+-  estensioneDa,
+-  messaggioErroreVerifica,
+-  percorsoDocumento,
+-  puoInviare,
+-  validaFileDocumento,
+-} from "@/lib/verifica";
++import { VerificaImmobile, useVerificaDocumenti } from "@/components/VerificaImmobile";
+ import type { ImmobileVerifica } from "@/lib/verifica";
+ 
+-const BADGE = {
+-  ok: "is-match",
+-  attesa: "is-wait",
+-  da_fare: "is-off",
+-  respinto: "is-alert",
+-} as const;
+-
+ /**
+  * La Home di un proprietario che non ha ancora un immobile verificato.
+  *
+@@ -31,6 +13,7 @@ const BADGE = {
+  * caricare la prova di proprietà di un immobile, inviarlo alla verifica. Il
+  * resto dell'app resta raggiungibile dalla barra in basso, ma senza un
+  * immobile verificato non c'è nulla da pubblicare né nessuno che si candidi.
++ * La prova di proprietà e l'invio di ogni immobile sono gli stessi della scheda dell'immobile (VerificaImmobile).
+  */
+ export function VerificaHome({
+   haIdentita,
+@@ -39,90 +22,8 @@ export function VerificaHome({
+   haIdentita: boolean;
+   immobili: ImmobileVerifica[];
+ }) {
+-  const router = useRouter();
+-  const [errore, setErrore] = useState<string | null>(null);
+-  const [inCorso, setInCorso] = useState<string | null>(null);
+-
+-  async function carica(
+-    tipo: "identita" | "proprieta",
+-    listingId: string | null,
+-    file: File | undefined,
+-    chiave: string
+-  ) {
+-    if (!file) return;
+-    setErrore(null);
+-
+-    const problema = validaFileDocumento(file);
+-    if (problema) {
+-      setErrore(problema);
+-      return;
+-    }
+-    const estensione = estensioneDa(file.type);
+-    if (!estensione) {
+-      setErrore("Il file deve essere un PDF, una foto JPG o una foto PNG.");
+-      return;
+-    }
+-
+-    setInCorso(chiave);
+-    try {
+-      const supabase = createClient();
+-      const {
+-        data: { user },
+-      } = await supabase.auth.getUser();
+-      if (!user) {
+-        setErrore(messaggioErroreVerifica("NON_AUTENTICATO"));
+-        return;
+-      }
+-
+-      const percorso = percorsoDocumento({
+-        userId: user.id,
+-        tipo,
+-        listingId,
+-        estensione,
+-        id: crypto.randomUUID(),
+-      });
+-
+-      const { error: eFile } = await supabase.storage
+-        .from("documenti-verifica")
+-        .upload(percorso, file, { contentType: file.type, upsert: false });
+-      if (eFile) {
+-        setErrore("Non sono riuscito a caricare il file. Riprova.");
+-        return;
+-      }
+-
+-      const { error: eRiga } = await supabase.from("documenti_verifica").insert({
+-        owner_id: user.id,
+-        listing_id: listingId,
+-        tipo,
+-        percorso,
+-        nome_file: file.name.slice(0, 200),
+-      });
+-      if (eRiga) {
+-        setErrore("Il file è stato caricato ma non registrato. Riprova.");
+-        return;
+-      }
+-      router.refresh();
+-    } finally {
+-      setInCorso(null);
+-    }
+-  }
+-
+-  async function invia(listingId: string) {
+-    setErrore(null);
+-    setInCorso(`invia-${listingId}`);
+-    try {
+-      const { error } = await createClient().rpc("richiedi_verifica_immobile", {
+-        p_listing: listingId,
+-      });
+-      if (error) {
+-        setErrore(messaggioErroreVerifica(error.message));
+-        return;
+-      }
+-      router.refresh();
+-    } finally {
+-      setInCorso(null);
+-    }
+-  }
++  // qui serve solo il documento d'identità: la prova di proprietà di ogni immobile la gestisce il suo componente
++  const { errore, inCorso, carica } = useVerificaDocumenti();
+ 
+   return (
+     <PageContainer wide>
+@@ -181,59 +82,17 @@ export function VerificaHome({
+           </>
+         ) : (
+           <div className="immobili-verifica">
+-            {immobili.map((im) => {
+-              const d = descriviStato(im.stato, im.note);
+-              const manca = cosaManca(haIdentita, im);
+-
+-              return (
+-                <div key={im.id} className="verifica-card">
+-                  <div className="verifica-card-testa">
+-                    <div>
+-                      <b>{im.titolo}</b>
+-                      <small>{im.zona}</small>
+-                    </div>
+-                    <span className={`mc-pct ${BADGE[d.tono]}`}>{d.etichetta}</span>
++            {immobili.map((im) => (
++              <div key={im.id} className="verifica-card verifica-card-colonna">
++                <div className="verifica-card-testa">
++                  <div>
++                    <b>{im.titolo}</b>
++                    <small>{im.zona}</small>
+                   </div>
+-
+-                  {im.stato === "non_avviata" && im.note && (
+-                    <div className="note-stop">Motivo del rifiuto: {im.note}</div>
+-                  )}
+-                  <p className="field-note" style={{ margin: "8px 0 10px 0" }}>
+-                    {d.testo}
+-                  </p>
+-
+-                  {im.stato === "non_avviata" && (
+-                    <>
+-                      <div className="riga-doc">
+-                        <span>
+-                          Prove di proprietà caricate: <b>{im.nProprieta}</b>
+-                        </span>
+-                        <SelettoreFile
+-                          etichetta={im.nProprieta > 0 ? "Aggiungine un'altra" : "Carica visura o atto"}
+-                          aria={`Carica la prova di proprietà di ${im.titolo}`}
+-                          occupato={inCorso === `proprieta-${im.id}`}
+-                          onFile={(f) => carica("proprieta", im.id, f, `proprieta-${im.id}`)}
+-                        />
+-                      </div>
+-
+-                      {manca.length > 0 && (
+-                        <p className="field-note">Per inviare manca: {manca.join(" e ")}.</p>
+-                      )}
+-
+-                      <button
+-                        type="button"
+-                        className="opp-cta"
+-                        style={{ marginTop: 10 }}
+-                        disabled={!puoInviare(haIdentita, im) || inCorso !== null}
+-                        onClick={() => invia(im.id)}
+-                      >
+-                        {inCorso === `invia-${im.id}` ? "Invio..." : "Invia per la verifica"}
+-                      </button>
+-                    </>
+-                  )}
+                 </div>
+-              );
+-            })}
++                <VerificaImmobile immobile={im} haIdentita={haIdentita} />
++              </div>
++            ))}
+ 
+             <Link href="/immobili" className="redo-link" style={{ marginTop: 6 }}>
+               Aggiungi un altro immobile
+diff --git a/src/app/(app)/immobili/ImmobiliClient.tsx b/src/app/(app)/immobili/ImmobiliClient.tsx
+index 5627ecb..b523ffc 100644
+--- a/src/app/(app)/immobili/ImmobiliClient.tsx
++++ b/src/app/(app)/immobili/ImmobiliClient.tsx
+@@ -13,7 +13,8 @@ import { ATTR_VOCAB, RISCALDAMENTI, TIPI_CONTRATTO } from "@/lib/constants";
+ import type { ImmobileDettaglio } from "@/lib/types";
+ import type { CriterioRichiesto } from "@/lib/match";
+ import { CriteriCandidati } from "@/components/CriteriCandidati";
+-import { descriviStato } from "@/lib/verifica";
++import { descriviStato, immobileVerificaDa } from "@/lib/verifica";
++import { VerificaImmobile } from "@/components/VerificaImmobile";
+ import { PageContainer } from "@/components/ui/PageContainer";
+ import { Chip } from "@/components/ui/Chip";
+ import { CLASSI_ENERGETICHE } from "@/lib/annunci/energia";
+@@ -41,12 +42,15 @@ import {
+ 
+ export function ImmobiliClient({
+   immobili,
++  haIdentita = false,
+   visite = [],
+   indirizzi = {},
+   quotazioni = {},
+   luoghi = [],
+ }: {
+   immobili: ImmobileDettaglio[];
++  /** ha già caricato il documento d'identità (serve per chiedere la verifica di un immobile) */
++  haIdentita?: boolean;
+   /** i luoghi dove si può mettere un immobile (provincia → città → quartiere) */
+   luoghi?: Luogo[];
+   /** i posti liberi e le prenotazioni di tutti i miei immobili */
+@@ -57,9 +61,9 @@ export function ImmobiliClient({
+   quotazioni?: Record<string, RisultatoQuotazione>;
+ }) {
+   const [nuovoAperto, setNuovoAperto] = useState(false);
+-  const [selezionato, setSelezionato] = useState<ImmobileDettaglio | null>(
+-    null
+-  );
++  // si tiene l'identificativo, non la casa: dopo un caricamento la pagina si aggiorna e la scheda deve mostrare i dati nuovi
++  const [selezionatoId, setSelezionatoId] = useState<string | null>(null);
++  const selezionato = immobili.find((i) => i.id === selezionatoId) ?? null;
+ 
+   return (
+     <PageContainer wide>
+@@ -92,7 +96,7 @@ export function ImmobiliClient({
+           {immobili.map((im) => (
+             <button
+               key={im.id}
+-              onClick={() => setSelezionato(im)}
++              onClick={() => setSelezionatoId(im.id)}
+               className="match-card"
+             >
+               {im.foto[0] ? (
+@@ -117,15 +121,16 @@ export function ImmobiliClient({
+                   im.nCandidature > 0 ? "is-match" : "is-off"
+                 }`}
+               >
+-                {im.nCandidature > 0 ? (
++                {/* sempre «numero + etichetta piccola»: una scritta lunga schiacciava il nome dell'immobile */}
++                {im.nCandidature > 0 || im.pubblicato ? (
+                   <>
+                     {im.nCandidature}
+                     <span>candidatur{im.nCandidature === 1 ? "a" : "e"}</span>
+                   </>
+-                ) : im.pubblicato ? (
+-                  "Nessuna candidatura"
+                 ) : (
+-                  "Non pubblicato"
++                  <>
++                    —<span>non pubblicato</span>
++                  </>
+                 )}
+               </div>
+             </button>
+@@ -148,11 +153,13 @@ export function ImmobiliClient({
+ 
+       <Sheet
+         open={selezionato !== null}
+-        onClose={() => setSelezionato(null)}
++        onClose={() => setSelezionatoId(null)}
+         title={selezionato?.titolo ?? "Immobile"}
+       >
+         {selezionato && (
+           <>
++            {/* la prova di proprietà: carica la visura o l'atto e chiedi la verifica, senza passare dalla Home */}
++            <VerificaImmobile key={selezionato.id} immobile={immobileVerificaDa(selezionato)} haIdentita={haIdentita} conIdentita />
+             <IndirizzoImmobile key={selezionato.id} immobileId={selezionato.id} salvato={indirizzi[selezionato.id] ?? null} />
+             <VisiteImmobile immobileId={selezionato.id} visite={visite} />
+             <ImmobileForm
+@@ -160,7 +167,7 @@ export function ImmobiliClient({
+               immobile={selezionato}
+               quotazioni={quotazioni}
+               luoghi={luoghi}
+-              onSaved={() => setSelezionato(null)}
++              onSaved={() => setSelezionatoId(null)}
+             />
+           </>
+         )}
+@@ -567,8 +574,8 @@ function ImmobileForm({
+         {immobile?.verifica_stato !== "verificato" && (
+           <p className="field-note">
+             Gli inquilini vedono un annuncio solo dopo che l&apos;immobile è
+-            stato verificato, anche se è pubblicato. Puoi seguire la verifica
+-            dalla Home.
++            stato verificato, anche se è pubblicato. Per farlo verificare carica
++            la prova di proprietà qui sopra, in questa scheda.
+           </p>
+         )}
+       </Field>
+diff --git a/src/app/(app)/immobili/page.tsx b/src/app/(app)/immobili/page.tsx
+index 56d8a4d..38d68e9 100644
+--- a/src/app/(app)/immobili/page.tsx
++++ b/src/app/(app)/immobili/page.tsx
+@@ -16,7 +16,7 @@ export default async function ImmobiliPage() {
+     data: { user },
+   } = await supabase.auth.getUser();
+ 
+-  const [{ data: listings }, { data: candidature }, { data: visite }, { data: indirizziRighe }, { data: luoghiRighe }] = await Promise.all([
++  const [{ data: listings }, { data: candidature }, { data: visite }, { data: indirizziRighe }, { data: luoghiRighe }, { data: documenti }] = await Promise.all([
+     supabase
+       .from("listings")
+       .select(
+@@ -34,8 +34,16 @@ export default async function ImmobiliPage() {
+     supabase.rpc("indirizzi_dei_miei_immobili"),
+     // i luoghi dove si può mettere un immobile (provincia → città → quartiere)
+     supabase.from("luoghi").select("id, livello, nome, sigla, parent_id"),
++    // i documenti di verifica che ho già caricato: servono per dire cosa manca a ogni immobile
++    supabase.from("documenti_verifica").select("tipo, listing_id").eq("owner_id", user!.id),
+   ]);
+ 
++  const haIdentita = (documenti ?? []).some((d) => d.tipo === "identita");
++  const proprietaPerImmobile = new Map<string, number>();
++  for (const d of documenti ?? []) {
++    if (d.tipo === "proprieta" && d.listing_id) proprietaPerImmobile.set(d.listing_id as string, (proprietaPerImmobile.get(d.listing_id as string) ?? 0) + 1);
++  }
++
+   const indirizzi: Record<string, IndirizzoConVista> = {};
+   for (const r of indirizziRighe ?? []) indirizzi[r.listing_id as string] = conVista(r);
+ 
+@@ -74,7 +82,8 @@ export default async function ImmobiliPage() {
+       .map((f) => f.url),
+     criteri: criteriDaRighe(l.listing_criteri as RigaCriterioDb[] | null),
+     nCandidature: nCandidaturePerListing.get(l.id) ?? 0,
++    nProprieta: proprietaPerImmobile.get(l.id as string) ?? 0,
+   }));
+ 
+-  return <ImmobiliClient immobili={immobili} visite={(visite ?? []) as VisitaProprietario[]} indirizzi={indirizzi} quotazioni={quotazioni} luoghi={(luoghiRighe ?? []) as Luogo[]} />;
++  return <ImmobiliClient immobili={immobili} haIdentita={haIdentita} visite={(visite ?? []) as VisitaProprietario[]} indirizzi={indirizzi} quotazioni={quotazioni} luoghi={(luoghiRighe ?? []) as Luogo[]} />;
+ }
+diff --git a/src/app/globals.css b/src/app/globals.css
+index f5982a6..2c5b453 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -459,6 +459,21 @@ input[type="range"]::-moz-range-thumb {
+   text-transform: uppercase;
+   letter-spacing: 0.04em;
+ }
++/* il riquadro a destra non può mai diventare più largo di così: con una scritta lunga schiacciava il nome della casa fino a farlo uscire dalla scheda e finire sotto il riquadro */
++.match-card .mc-pct,
++.contratto-testa .mc-pct {
++  max-width: 92px;
++  overflow-wrap: anywhere;
++}
++/* e i testi della scheda vanno a capo anche con una parola lunghissima, invece di uscire dalla loro colonna */
++.match-card .mc-zona,
++.match-card .mc-title,
++.match-card .mc-meta,
++.contratto-testa .mc-zona,
++.contratto-testa .mc-title,
++.contratto-testa .mc-meta {
++  overflow-wrap: anywhere;
++}
+ /* varianti di stato del badge, come nel prototipo */
+ .mc-pct.is-match {
+   background: rgba(62, 107, 87, 0.14);
+@@ -4621,3 +4636,70 @@ button.contratto-testa:focus-visible {
+   min-height: 52px;
+   font-size: 17px;
+ }
++
++/* ---- La prova di proprietà nella scheda dell'immobile (e nella Home di chi non ha ancora immobili verificati) ---- */
++.verifica-immobile {
++  margin: 0 0 16px;
++  padding: 14px;
++  border-radius: 16px;
++  background: var(--paper);
++}
++.verifica-immobile-testa {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 10px;
++}
++.verifica-immobile-titolo {
++  font-family: var(--font-display);
++  font-size: 19px;
++  font-weight: 700;
++  color: var(--ink);
++}
++.verifica-immobile .mc-pct {
++  flex: none;
++  padding: 5px 12px;
++  border-radius: 999px;
++  font-size: 15px;
++  font-weight: 700;
++  white-space: nowrap;
++}
++.verifica-immobile .field-note {
++  margin: 8px 0 0;
++  font-size: 15px;
++  line-height: 1.45;
++  color: var(--body-text);
++}
++.verifica-immobile .riga-doc {
++  margin-top: 12px;
++  font-size: 15px;
++}
++.verifica-immobile .note-stop {
++  margin: 10px 0 0;
++  font-size: 15px;
++}
++.verifica-immobile .selettore-file {
++  display: inline-flex;
++  align-items: center;
++  min-height: 44px;
++  font-size: 15px;
++}
++.verifica-immobile .opp-cta {
++  min-height: 52px;
++  font-size: 17px;
++}
++/* nella Home di verifica la scheda della casa è già il contenitore: niente scatola dentro la scatola */
++.verifica-card-colonna .verifica-immobile {
++  margin: 8px 0 0;
++  padding: 0;
++  background: none;
++}
++
++/* sui telefoni stretti la foto è più piccola, per lasciare spazio al nome */
++@media (max-width: 359px) {
++  .match-card img,
++  .match-card .mc-avatar {
++    width: 58px;
++    height: 58px;
++  }
++}
+diff --git a/src/components/VerificaImmobile.tsx b/src/components/VerificaImmobile.tsx
+new file mode 100644
+index 0000000..717b1d2
+--- /dev/null
++++ b/src/components/VerificaImmobile.tsx
+@@ -0,0 +1,185 @@
++"use client";
++
++import { useState } from "react";
++import { useRouter } from "next/navigation";
++import { createClient } from "@/lib/supabase/client";
++import { SelettoreFile } from "@/components/SelettoreFile";
++import { datiMancanti } from "@/lib/annunci/obbligatori";
++import {
++  cosaManca,
++  descriviStato,
++  estensioneDa,
++  messaggioErroreVerifica,
++  percorsoDocumento,
++  puoInviare,
++  validaFileDocumento,
++} from "@/lib/verifica";
++import type { ImmobileVerifica } from "@/lib/verifica";
++
++export const BADGE_VERIFICA = {
++  ok: "is-match",
++  attesa: "is-wait",
++  da_fare: "is-off",
++  respinto: "is-alert",
++} as const;
++
++/**
++ * Caricare un documento di verifica e chiedere la verifica di un immobile: lo stesso codice per la Home di chi non ha ancora un immobile verificato
++ * e per la scheda di ogni immobile. Il file va nell'archivio di verifica, nella cartella di chi lo carica; poi si registra; poi, quando c'è tutto,
++ * si chiede la verifica (le regole vere le controlla il database).
++ */
++export function useVerificaDocumenti() {
++  const router = useRouter();
++  const [errore, setErrore] = useState<string | null>(null);
++  const [inCorso, setInCorso] = useState<string | null>(null);
++
++  async function carica(tipo: "identita" | "proprieta", listingId: string | null, file: File | undefined, chiave: string) {
++    if (!file) return;
++    setErrore(null);
++
++    const problema = validaFileDocumento(file);
++    if (problema) {
++      setErrore(problema);
++      return;
++    }
++    const estensione = estensioneDa(file.type);
++    if (!estensione) {
++      setErrore("Il file deve essere un PDF, una foto JPG o una foto PNG.");
++      return;
++    }
++
++    setInCorso(chiave);
++    try {
++      const supabase = createClient();
++      const {
++        data: { user },
++      } = await supabase.auth.getUser();
++      if (!user) {
++        setErrore(messaggioErroreVerifica("NON_AUTENTICATO"));
++        return;
++      }
++
++      const percorso = percorsoDocumento({ userId: user.id, tipo, listingId, estensione, id: crypto.randomUUID() });
++
++      const { error: eFile } = await supabase.storage.from("documenti-verifica").upload(percorso, file, { contentType: file.type, upsert: false });
++      if (eFile) {
++        setErrore("Non sono riuscito a caricare il file. Riprova.");
++        return;
++      }
++
++      const { error: eRiga } = await supabase.from("documenti_verifica").insert({
++        owner_id: user.id,
++        listing_id: listingId,
++        tipo,
++        percorso,
++        nome_file: file.name.slice(0, 200),
++      });
++      if (eRiga) {
++        setErrore("Il file è stato caricato ma non registrato. Riprova.");
++        return;
++      }
++      router.refresh();
++    } finally {
++      setInCorso(null);
++    }
++  }
++
++  async function invia(listingId: string) {
++    setErrore(null);
++    setInCorso(`invia-${listingId}`);
++    try {
++      const { error } = await createClient().rpc("richiedi_verifica_immobile", { p_listing: listingId });
++      if (error) {
++        setErrore(messaggioErroreVerifica(error.message));
++        return;
++      }
++      router.refresh();
++    } finally {
++      setInCorso(null);
++    }
++  }
++
++  return { errore, setErrore, inCorso, carica, invia };
++}
++
++/**
++ * La verifica di UN immobile: com'è messa, cosa manca, e il modo di caricare la prova di proprietà (visura catastale o atto) e di chiedere la verifica.
++ * Sta nella scheda dell'immobile; la Home di chi non ha ancora immobili verificati usa lo stesso componente.
++ * `conIdentita`: mostra anche il caricamento del documento d'identità, se manca (la Home lo chiede in un passo a parte).
++ */
++export function VerificaImmobile({
++  immobile,
++  haIdentita,
++  conIdentita = false,
++}: {
++  immobile: ImmobileVerifica;
++  haIdentita: boolean;
++  conIdentita?: boolean;
++}) {
++  const { errore, inCorso, carica, invia } = useVerificaDocumenti();
++  const d = descriviStato(immobile.stato, immobile.note);
++  const manca = cosaManca(haIdentita, immobile);
++  const daCompilare = datiMancanti(immobile.dati).length > 0;
++
++  return (
++    <section className="verifica-immobile" aria-label="Prova di proprietà dell'immobile">
++      <div className="verifica-immobile-testa">
++        <div className="verifica-immobile-titolo">Prova di proprietà</div>
++        <span className={`mc-pct ${BADGE_VERIFICA[d.tono]}`}>{d.etichetta}</span>
++      </div>
++
++      {immobile.stato === "non_avviata" && immobile.note && <div className="note-stop">Motivo del rifiuto: {immobile.note}</div>}
++      <p className="field-note">{d.testo}</p>
++
++      {immobile.stato === "non_avviata" && (
++        <>
++          <p className="field-note">
++            Per far verificare la casa carica la visura catastale o l&apos;atto di proprietà, in PDF o foto. Li vede solo il team di MatchAmI: mai gli inquilini.
++          </p>
++          <div className="riga-doc">
++            <span>
++              Prove caricate: <b>{immobile.nProprieta}</b>
++            </span>
++            <SelettoreFile
++              etichetta={immobile.nProprieta > 0 ? "Aggiungine un'altra" : "Carica visura o atto"}
++              aria={`Carica la prova di proprietà di ${immobile.titolo}`}
++              occupato={inCorso === `proprieta-${immobile.id}`}
++              onFile={(f) => carica("proprieta", immobile.id, f, `proprieta-${immobile.id}`)}
++            />
++          </div>
++
++          {conIdentita && !haIdentita && (
++            <div className="riga-doc">
++              <span>Il tuo documento d&apos;identità: serve per controllare che il nome coincida.</span>
++              <SelettoreFile
++                etichetta="Carica il documento"
++                aria="Carica il documento d'identità"
++                occupato={inCorso === "identita"}
++                onFile={(f) => carica("identita", null, f, "identita")}
++              />
++            </div>
++          )}
++
++          {manca.length > 0 && <p className="field-note">Per inviare manca: {manca.join(" e ")}.</p>}
++          {daCompilare && <p className="field-note">I dati dell&apos;annuncio li compili qui sotto: ricordati di salvare.</p>}
++
++          <button
++            type="button"
++            className="opp-cta"
++            style={{ marginTop: 10 }}
++            disabled={!puoInviare(haIdentita, immobile) || inCorso !== null}
++            onClick={() => invia(immobile.id)}
++          >
++            {inCorso === `invia-${immobile.id}` ? "Invio..." : "Invia per la verifica"}
++          </button>
++        </>
++      )}
++
++      {errore && (
++        <p className="note-error" role="alert" style={{ marginTop: 10 }}>
++          {errore}
++        </p>
++      )}
++    </section>
++  );
++}
+diff --git a/src/lib/types.ts b/src/lib/types.ts
+index 5319346..d90746e 100644
+--- a/src/lib/types.ts
++++ b/src/lib/types.ts
+@@ -70,6 +70,8 @@ export type ImmobileDettaglio = {
+   /** cosa chiede il proprietario ai candidati, con peso e obbligatorietà */
+   criteri: import("@/lib/match").CriterioRichiesto[];
+   nCandidature: number;
++  /** quante prove di proprietà (visura, atto) ha già caricato per questo immobile */
++  nProprieta?: number;
+ };
+ 
+ export type CandidaturaSenzaContratto = {
+diff --git a/src/lib/verifica.ts b/src/lib/verifica.ts
+index 6b138c9..887d106 100644
+--- a/src/lib/verifica.ts
++++ b/src/lib/verifica.ts
+@@ -72,6 +72,41 @@ export function puoInviare(haIdentita: boolean, immobile: ImmobileVerifica): boo
+   return immobile.stato === "non_avviata" && cosaManca(haIdentita, immobile).length === 0;
+ }
+ 
++/** I dati della verifica di un immobile, ricavati dalla sua scheda (gli stessi che la Home ricava dalla lista). */
++export function immobileVerificaDa(im: {
++  id: string;
++  titolo: string;
++  zona: string;
++  verifica_stato: StatoImmobile;
++  verifica_esito_note: string | null;
++  nProprieta?: number;
++  classe_energetica?: string | null;
++  luogo_id?: string | null;
++  bagni?: number | null;
++  piano?: number | null;
++  riscaldamento?: string | null;
++  tipo_contratto?: string | null;
++  disponibile_dal?: string | null;
++}): ImmobileVerifica {
++  return {
++    id: im.id,
++    titolo: im.titolo,
++    zona: im.zona,
++    stato: im.verifica_stato,
++    note: im.verifica_esito_note ?? null,
++    nProprieta: im.nProprieta ?? 0,
++    dati: {
++      classe_energetica: im.classe_energetica ?? null,
++      luogo_id: im.luogo_id ?? null,
++      bagni: im.bagni ?? null,
++      piano: im.piano ?? null,
++      riscaldamento: im.riscaldamento ?? null,
++      tipo_contratto: im.tipo_contratto ?? null,
++      disponibile_dal: im.disponibile_dal ?? null,
++    },
++  };
++}
++
+ /** Il proprietario è verificato se ha almeno un immobile verificato. */
+ export function proprietarioVerificato(immobili: ImmobileVerifica[]): boolean {
+   return immobili.some((i) => i.stato === "verificato");
+-- 
+2.43.0
+
