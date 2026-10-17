@@ -52,3 +52,21 @@ test("la nota di visibilità per chi cerca casa resta sotto la riga della privac
   assert.match(pagina, /\{ruolo === "inquilino" && \(\s+<p className="login-consent" style=\{\{ margin: "0 0 2px 0" \}\}>\s+Il tuo profilo sarà visibile ai proprietari con una casa adatta alla tua ricerca/);
   assert.ok(pagina.indexOf("</label>") < pagina.indexOf('Il tuo profilo sarà visibile'), "la nota sta dopo la riga della privacy");
 });
+
+// ============================================================ la conferma della password
+const azioniLogin = leggi("src", "app", "login", "actions.ts").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+const fSignup = azioniLogin.slice(azioniLogin.indexOf("export async function signup"), azioniLogin.indexOf("async function iscrizioneSenzaConferma"));
+
+test("iscrizione: si chiede di RIPETERE la password (campo «password_conferma», obbligatorio, subito sotto la password), così chi la scrive male non resta fuori dal suo account", () => {
+  assert.match(pagina, /name="password"\s+type="password"\s+placeholder="Password \(min\. 8 caratteri\)"\s+autoComplete="new-password"\s+required\s+\/>\s+<Input\s+name="password_conferma"\s+type="password"\s+placeholder="Ripeti la password"\s+autoComplete="new-password"\s+required\s+\/>/);
+  assert.ok(pagina.indexOf('name="password_conferma"') < pagina.indexOf('name="privacy"'), "la conferma sta prima della casella della privacy");
+  assert.equal([...pagina.matchAll(/name="password_conferma"/g)].length, 1, "solo nel modulo di iscrizione (non nell'accesso)");
+});
+
+test("iscrizione: la differenza tra le due password si controlla SUL SERVER, dopo la lunghezza e PRIMA di creare l'account (anche con l'interruttore di prova)", () => {
+  assert.match(fSignup, /const passwordConferma = String\(formData\.get\("password_conferma"\) \|\| ""\);/);
+  assert.match(fSignup, /if \(password\.length < 8\) \{\s+return \{ error: "La password deve avere almeno 8 caratteri\." \};\s+\}\s+if \(password !== passwordConferma\) \{\s+return \{ error: "Le due password non coincidono: riscrivile\." \};\s+\}/);
+  const iConferma = fSignup.indexOf("password !== passwordConferma"), iFlag = fSignup.indexOf("if (confermaEmailSaltata())"), iSignUp = fSignup.indexOf("supabase.auth.signUp(");
+  assert.ok(iConferma > 0 && iConferma < iFlag && iFlag < iSignUp, "ordine: confronto, interruttore di prova, signUp"); assert.ok(!/passwordConferma/.test(azioniLogin.slice(azioniLogin.indexOf("export async function login"))), "l'accesso non c'entra");
+  assert.ok(!/passwordConferma/.test(azioniLogin.slice(azioniLogin.indexOf("async function iscrizioneSenzaConferma"), azioniLogin.indexOf("export async function login"))), "la password di conferma non viaggia oltre il controllo");
+});

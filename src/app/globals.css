@@ -4912,3 +4912,199 @@ button.contratto-testa:focus-visible {
   flex: 1;
   min-width: 0;
 }
+
+/* ============================================================
+   Il percorso di benvenuto (dopo l'iscrizione): una scheda alla volta, con la barra dei passi.
+   Schermata intera che scorre da sola (il corpo della pagina è scuro e fermo). Caratteri da 15 px in su, pulsanti alti.
+   ============================================================ */
+.benvenuto {
+  position: fixed;
+  inset: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  background: var(--paper);
+  color: var(--ink);
+  padding: 0 16px calc(28px + env(safe-area-inset-bottom));
+}
+.benvenuto > * {
+  max-width: 560px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.benvenuto-testa {
+  padding: 22px 4px 4px;
+}
+.benvenuto-marchio {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 700;
+  font-size: 28px;
+  color: var(--ink);
+}
+.benvenuto-marchio b {
+  color: var(--gold);
+  font-style: normal;
+}
+.benvenuto-saluto {
+  margin: 10px 0 0;
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.benvenuto-intro {
+  margin: 2px 0 0;
+  font-size: 16px;
+  line-height: 1.45;
+  color: var(--body-soft);
+}
+.benvenuto-progresso {
+  margin: 16px auto 14px;
+}
+.benvenuto-barra {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(16, 21, 26, 0.1);
+  overflow: hidden;
+}
+.benvenuto-barra i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--moss);
+  transition: width 0.25s ease;
+}
+.benvenuto-passi {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+}
+.benvenuto-conteggio {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--body-soft);
+}
+.benvenuto-puntini {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.benvenuto-puntini li {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: rgba(16, 21, 26, 0.18);
+}
+.benvenuto-puntini li.fatto {
+  background: var(--moss-light);
+}
+.benvenuto-puntini li.attivo {
+  background: var(--moss);
+  box-shadow: 0 0 0 3px rgba(62, 107, 87, 0.25);
+}
+.benvenuto-scheda {
+  padding: 18px 16px 20px;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(16, 21, 26, 0.06);
+}
+.benvenuto-titolo {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--ink);
+}
+.benvenuto-descrizione {
+  margin: 8px 0 0;
+  font-size: 16px;
+  line-height: 1.45;
+  color: var(--body-text);
+}
+.benvenuto-tipo {
+  display: inline-block;
+  margin: 10px 0 14px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(16, 21, 26, 0.06);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--body-soft);
+}
+.benvenuto-tipo.obbligatoria {
+  background: rgba(201, 161, 90, 0.18);
+  color: var(--gold-ink);
+}
+.benvenuto-contenuto {
+  margin-top: 4px;
+}
+.benvenuto-contenuto .field-note,
+.benvenuto-contenuto .sheet-sub {
+  font-size: 15px;
+}
+.benvenuto-contenuto .opp-cta {
+  min-height: 52px;
+  font-size: 17px;
+}
+.benvenuto-fatto {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(62, 107, 87, 0.12);
+  font-size: 16px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+.benvenuto-sezione + .benvenuto-sezione {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(16, 21, 26, 0.1);
+}
+.benvenuto-sottotitolo {
+  margin: 0 0 10px;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.benvenuto-azioni {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+}
+.benvenuto-azioni .opp-cta,
+.benvenuto-azioni .richieste-secondario,
+.benvenuto-azioni form {
+  min-height: 52px;
+  font-size: 17px;
+}
+.benvenuto-azioni .opp-cta {
+  flex: 1;
+  margin: 0;
+}
+.benvenuto-azioni form {
+  flex: 1;
+  display: flex;
+}
+.benvenuto-azioni form .opp-cta {
+  width: 100%;
+}
+.benvenuto-azioni .richieste-secondario {
+  flex: none;
+  padding: 0 20px;
+}
+.benvenuto > .note-error {
+  margin-top: 12px;
+}
+.benvenuto-esci {
+  margin-top: 18px;
+  text-align: center;
+}
+.carica-identita .field-note {
+  margin: 0 0 10px;
+}

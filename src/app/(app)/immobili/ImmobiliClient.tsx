@@ -176,18 +176,22 @@ export function ImmobiliClient({
   );
 }
 
-function ImmobileForm({
+/** Il modulo dell'immobile (nuovo annuncio o modifica). Lo usa anche il percorso di benvenuto per la prima casa. */
+export function ImmobileForm({
   action,
   immobile,
   quotazioni,
   luoghi,
   onSaved,
+  etichettaSalva = "Salva",
 }: {
   action: (prevState: SaveState, formData: FormData) => Promise<SaveState>;
   immobile?: ImmobileDettaglio;
   quotazioni: Record<string, RisultatoQuotazione>;
   luoghi: Luogo[];
   onSaved: () => void;
+  /** il testo del pulsante di salvataggio (di partenza «Salva») */
+  etichettaSalva?: string;
 }) {
   const [state, formAction, pending] = useActionState(action, null);
   const [pendingDelete, startDeleteTransition] = useTransition();
@@ -589,7 +593,7 @@ function ImmobileForm({
         disabled={pending}
         className="opp-cta"
       >
-        {pending ? "Salvataggio..." : "Salva"}
+        {pending ? "Salvataggio..." : etichettaSalva}
       </button>
 
       {immobile && (

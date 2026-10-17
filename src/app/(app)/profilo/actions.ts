@@ -44,8 +44,13 @@ export async function updateDatiPersonali(
   // stringa vuota = nessuna foto, così l'inquilino può anche rimuoverla
   const avatar_url = String(formData.get("avatar_url") || "").trim() || null;
 
+  // Le schede del benvenuto prima di quella dei protesti salvano senza la risposta (ancora non c'è): non è un errore.
+  const parziale = formData.get("parziale") === "1";
+  // La scheda «Chi sei» del benvenuto chiede il lavoro: senza non si va avanti.
+  if (formData.get("richiede_lavoro") === "1" && !professione) return { error: "Scegli la tua situazione lavorativa." };
+
   // La risposta sui protesti è obbligatoria: senza, varrebbe come «sì» e toglierebbe punti senza che la persona lo sappia.
-  if (protestato === null) return { error: MESSAGGIO_PROTESTI_OBBLIGATORI };
+  if (protestato === null && !parziale) return { error: MESSAGGIO_PROTESTI_OBBLIGATORI };
 
   const { error } = await supabase
     .from("tenant_profiles")

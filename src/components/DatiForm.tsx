@@ -18,14 +18,26 @@ import { AvatarUpload } from "@/components/AvatarUpload";
  * affidabilità: le note sotto ogni domanda lo dicono. Le domande che il punteggio usa hanno un'ancora (`dati-protesti`,
  * `dati-garante`) a cui il riepilogo in alto può far scorrere.
  */
+export type SezioneDati = "tutto" | "persona" | "reddito" | "garanzie";
+
 export function DatiForm({
   tenant,
   onSalvata,
+  sezione = "tutto",
+  etichettaSalva,
 }: {
   tenant: TenantProfile;
   /** chiamata quando un salvataggio finisce bene (la Home la usa per chiudere la scheda e dirlo) */
   onSalvata?: () => void;
+  /**
+   * Quale parte del modulo mostrare. Il percorso di benvenuto lo usa una scheda alla volta: le domande non mostrate restano nel modulo come
+   * campi nascosti con i loro valori di oggi, quindi salvare una scheda non cancella le altre. «tutto» è il modulo completo, com'è sempre stato.
+   */
+  sezione?: SezioneDati;
+  /** il testo del pulsante di salvataggio (di partenza «Salva») */
+  etichettaSalva?: string;
 }) {
+  const mostra = (s: Exclude<SezioneDati, "tutto">) => sezione === "tutto" || sezione === s;
   const [state, formAction, pending] = useActionState<SaveState, FormData>(
     updateDatiPersonali,
     null
@@ -68,11 +80,18 @@ export function DatiForm({
 
   return (
     <>
-      <p className="sheet-sub">
-        Queste informazioni aiutano i proprietari a valutare la tua
-        candidatura.
-      </p>
+      {sezione === "tutto" && (
+        <p className="sheet-sub">
+          Queste informazioni aiutano i proprietari a valutare la tua
+          candidatura.
+        </p>
+      )}
       <form action={formAction}>
+        {/* Schede del benvenuto prima di quella dei protesti: la risposta ancora non c'è e non è un errore. La scheda «persona» chiede il lavoro. */}
+        {(sezione === "persona" || sezione === "reddito") && <input type="hidden" name="parziale" value="1" />}
+        {sezione === "persona" && <input type="hidden" name="richiede_lavoro" value="1" />}
+        {/* la presentazione è l'unica risposta che non sta in un campo nascosto: se non si mostra, si riscrive uguale per non cancellarla */}
+        {!mostra("persona") && <input type="hidden" name="presentazione" value={presentazione} />}
         <input type="hidden" name="professione" value={professione} />
         <input type="hidden" name="reddito_mensile" value={reddito} />
         <input type="hidden" name="reddito_nucleo" value={redditoNucleo} />
@@ -89,10 +108,13 @@ export function DatiForm({
         <input type="hidden" name="animali" value={String(animali)} />
         <input type="hidden" name="avatar_url" value={avatarUrl ?? ""} />
 
+        {mostra("persona") && (
         <Field label="La tua foto">
           <AvatarUpload value={avatarUrl} onChange={setAvatarUrl} />
         </Field>
+        )}
 
+        {mostra("persona") && (
         <Field label="Situazione lavorativa">
           <div className="chip-row">
             {LAVORO_VOCAB.map((v) => (
@@ -105,7 +127,9 @@ export function DatiForm({
             ))}
           </div>
         </Field>
+        )}
 
+        {mostra("reddito") && (
         <Field label={`Reddito netto mensile · €${reddito.toLocaleString("it-IT")}`}>
           <input
             type="range"
@@ -122,7 +146,10 @@ export function DatiForm({
             </p>
           )}
         </Field>
+        )}
 
+        {mostra("garanzie") && (
+        <>
         <div id="dati-garante" className="ancora-dati" />
         <Field label="Hai un garante disponibile?">
           <div className="chip-row">
@@ -133,7 +160,11 @@ export function DatiForm({
             Garante o fideiussione valgono +{PUNTI_AFFIDABILITA.garanzia} nel punteggio (basta una delle due). Lo dichiari tu: nessuno lo controlla.
           </p>
         </Field>
+        </>
+        )}
 
+        {mostra("garanzie") && (
+        <>
         <div id="dati-protesti" className="ancora-dati" />
         <Field label="Hai protesti o segnalazioni in centrale rischi? · obbligatorio">
           {rispostaBloccata(statoProtesti) ? (
@@ -151,29 +182,40 @@ export function DatiForm({
             Va indicato. Rispondere «No» vale +{PUNTI_AFFIDABILITA.protesti} nel punteggio; «Sì», o non rispondere, toglie {PUNTI_AFFIDABILITA.protesti}. {notaDomandaProtesti(statoProtesti)}
           </p>
         </Field>
+        </>
+        )}
 
+        {mostra("garanzie") && (
         <Field label="Disponibile a firmare una fideiussione?">
           <div className="chip-row">
             <Chip label="Sì" active={fideiussione === true} onClick={() => setFideiussione(true)} />
             <Chip label="No" active={fideiussione === false} onClick={() => setFideiussione(false)} />
           </div>
         </Field>
+        )}
 
+        {mostra("reddito") && (
         <Field label="Nucleo familiare">
           <div className="chip-row">
             <Chip label="Single" active={nucleo === "single"} onClick={() => setNucleo("single")} />
             <Chip label="Coppia" active={nucleo === "coppia"} onClick={() => setNucleo("coppia")} />
           </div>
         </Field>
+        )}
 
+        {mostra("reddito") && (
         <Field label="Figli a carico">
           <Stepper value={figli} onChange={setFigli} min={0} max={8} />
         </Field>
+        )}
 
+        {mostra("reddito") && (
         <Field label="Persone con reddito nel nucleo familiare">
           <Stepper value={redditiNucleo} onChange={setRedditiNucleo} min={1} max={6} />
         </Field>
+        )}
 
+        {mostra("reddito") && (
         <Field
           label={
             redditoNucleo > 0
@@ -206,14 +248,18 @@ export function DatiForm({
             </button>
           )}
         </Field>
+        )}
 
+        {mostra("reddito") && (
         <Field label="Animali domestici?">
           <div className="chip-row">
             <Chip label="Sì" active={animali === true} onClick={() => setAnimali(true)} />
             <Chip label="No" active={animali === false} onClick={() => setAnimali(false)} />
           </div>
         </Field>
+        )}
 
+        {mostra("persona") && (
         <Field label="Presentati ai proprietari">
           <textarea
             name="presentazione"
@@ -224,10 +270,12 @@ export function DatiForm({
             className="ob-textarea"
           />
         </Field>
+        )}
 
         {state?.error && <p className="note-error">{state.error}</p>}
-        {state?.ok && <p className="note-saved">Salvato — puoi chiudere.</p>}
-        <SaveButton pending={pending} />
+        {state?.ok && sezione === "tutto" && <p className="note-saved">Salvato — puoi chiudere.</p>}
+        <SaveButton pending={pending} etichetta={etichettaSalva} disabled={sezione === "persona" && professione === ""} />
+        {sezione === "persona" && professione === "" && <p className="field-note">Scegli la tua situazione lavorativa per continuare.</p>}
       </form>
     </>
   );

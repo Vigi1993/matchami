@@ -24,6 +24,7 @@ export async function signup(
 ): Promise<AuthState> {
   const email = String(formData.get("email") || "");
   const password = String(formData.get("password") || "");
+  const passwordConferma = String(formData.get("password_conferma") || "");
   const nome = String(formData.get("nome") || "");
   const cognome = String(formData.get("cognome") || "");
   const ruolo = String(formData.get("ruolo") || "inquilino");
@@ -35,6 +36,10 @@ export async function signup(
   }
   if (password.length < 8) {
     return { error: "La password deve avere almeno 8 caratteri." };
+  }
+  // Scritta male una volta sola, la persona resterebbe fuori dal suo account: si chiede due volte e si controlla qui, sul server
+  if (password !== passwordConferma) {
+    return { error: "Le due password non coincidono: riscrivile." };
   }
 
   const supabase = await createClient();

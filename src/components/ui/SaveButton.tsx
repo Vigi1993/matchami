@@ -1,4 +1,4 @@
-export function SaveButton({ pending, disabled = false }: { pending: boolean; disabled?: boolean }) {
+export function SaveButton({ pending, disabled = false, etichetta = "Salva" }: { pending: boolean; disabled?: boolean; etichetta?: string }) {
   return (
     <button
       type="submit"
@@ -6,7 +6,7 @@ export function SaveButton({ pending, disabled = false }: { pending: boolean; di
       className="opp-cta"
       style={{ marginTop: 6 }}
     >
-      {pending ? "Salvataggio..." : "Salva"}
+      {pending ? "Salvataggio..." : etichetta}
     </button>
   );
 }

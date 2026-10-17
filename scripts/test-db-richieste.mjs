@@ -125,3 +125,20 @@ test("migrazione 0038 su PostgreSQL vero: la verifica dei protesti da parte dell
     r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", "0038_verifica_protesti.sql")]); assert.equal(r.status, 0, "rieseguire la 0038 non deve dare errori: " + r.stderr.slice(0, 300));
   } finally { fs.rmSync(nullo, { force: true }); esegui(["-d", "postgres", "-c", `drop database if exists ${db}`]); }
 });
+
+test("migrazione 0039 su PostgreSQL vero: chi era già iscritto è «completato», i nuovi no; il segno non si scrive a mano; si completa solo con i dati essenziali (inquilino: lavoro, protesti, budget; proprietario: un immobile); rieseguirla non rifà il segno a chi si è iscritto dopo", { skip: psqlCmd ? false : "imposta MATCHAMI_PSQL per eseguire le prove SQL su un PostgreSQL vero" }, () => {
+  const [bin, ...args] = psqlCmd.split(/\s+/); const db = "matchami_test_benvenuto"; const esegui = (extra) => spawnSync(bin, [...args, "-X", "-q", ...extra], { encoding: "utf8" });
+  const migrazioni = fs.readdirSync(path.join(radice, "supabase", "migrations")).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort(); const m39 = migrazioni.find((f) => f.startsWith("0039_")); assert.ok(m39, "manca la migrazione 0039");
+  const nullo = path.join(os.tmpdir(), `matchami-benvenuto-${process.pid}.txt`);
+  try {
+    let r = esegui(["-d", "postgres", "-c", `drop database if exists ${db}`, "-c", `create database ${db}`]); assert.equal(r.status, 0, r.stderr);
+    r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "scripts", "db", "stub-supabase.sql")]); assert.equal(r.status, 0, r.stderr);
+    for (const m of migrazioni.filter((f) => f < "0039")) { r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m)]); assert.equal(r.status, 0, `${m}: ${r.stderr.slice(0, 300)}`); }
+    r = esegui(["-d", db, "-o", nullo, "-f", path.join(radice, "scripts", "db", "benvenuto-prima.sql")]); assert.equal(r.status, 0, "prima della 0039: " + r.stderr.slice(0, 300));
+    r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m39)]); assert.equal(r.status, 0, "la 0039 non si applica: " + r.stderr.slice(0, 300));
+    r = esegui(["-d", db, "-o", nullo, "-f", path.join(radice, "scripts", "db", "benvenuto-dopo.sql")]); assert.ok(!/CONTROLLO FALLITO/.test(r.stderr), r.stderr.split("\n").filter((l) => /FALLITO/.test(l)).join("\n")); assert.equal(r.status, 0, r.stderr.slice(0, 400)); assert.equal((r.stderr.match(/NOTICE:\s+OK:/g) ?? []).length, 20);
+    // rieseguita: il nuovo iscritto (B19) NON diventa «completato»
+    r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m39)]); assert.equal(r.status, 0, "rieseguire la 0039 non deve dare errori: " + r.stderr.slice(0, 300));
+    r = esegui(["-d", db, "-At", "-c", "select onboarding_completato from profiles where id = 'bbbb0000-0000-0000-0000-000000000009'"]); assert.equal(r.stdout.trim(), "f", "rieseguire la migrazione non deve segnare «completato» chi si è iscritto dopo");
+  } finally { fs.rmSync(nullo, { force: true }); esegui(["-d", "postgres", "-c", `drop database if exists ${db}`]); }
+});

@@ -20,6 +20,12 @@ export default async function AppLayout({
     redirect("/informativa/accetta");
   }
 
+  // Chi si è appena iscritto passa dal percorso di benvenuto (i dati che servono) prima di entrare. Se il segno non si legge, si entra: meglio che restare bloccati.
+  const { data: benvenuto } = await supabase.from("profiles").select("onboarding_completato").eq("id", user!.id).single();
+  if (benvenuto && benvenuto.onboarding_completato === false) {
+    redirect("/benvenuto");
+  }
+
   const { data: profile } = await supabase
     .from("profiles")
     .select("ruolo, nome")

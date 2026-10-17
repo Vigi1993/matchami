@@ -116,6 +116,14 @@ function LoginForm() {
               name="password"
               type="password"
               placeholder="Password (min. 8 caratteri)"
+              autoComplete="new-password"
+              required
+            />
+            <Input
+              name="password_conferma"
+              type="password"
+              placeholder="Ripeti la password"
+              autoComplete="new-password"
               required
             />
 
