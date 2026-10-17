@@ -120,19 +120,23 @@ function LoginForm() {
             />
 
             <label className="login-consent mt-1">
-              <input type="checkbox" name="privacy" className="mt-0.5" />
-              Ho letto l&apos;
-              <a
-                href="/informativa"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline"
-              >
-                informativa sulla privacy
-                {INFORMATIVA.provvisoria ? " (provvisoria)" : ""}
-              </a>{" "}
-              e accetto il trattamento dei dati necessario al funzionamento di
-              MatchAmI.
+              <input type="checkbox" name="privacy" className="login-consent-box" />
+              {/* tutto il testo in UN solo blocco accanto al quadratino: se i pezzi (testo, collegamento, testo) stanno direttamente nel contenitore
+                  flessibile ognuno diventa una colonna a sé e il testo si spezza male */}
+              <span className="login-consent-testo">
+                Ho letto l&apos;
+                <a
+                  href="/informativa"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline"
+                >
+                  informativa sulla privacy
+                  {INFORMATIVA.provvisoria ? " (provvisoria)" : ""}
+                </a>{" "}
+                e accetto il trattamento dei dati necessario al funzionamento di
+                MatchAmI.
+              </span>
             </label>
             {ruolo === "inquilino" && (
               <p className="login-consent" style={{ margin: "0 0 2px 0" }}>
@@ -230,10 +234,6 @@ function LoginForm() {
           </form>
         )}
 
-        <p className="login-fine">
-          Dopo la registrazione ti chiederemo se cerchi casa o hai un immobile
-          da mettere in affitto.
-        </p>
       </div>
     </main>
   );

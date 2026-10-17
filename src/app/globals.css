@@ -4900,3 +4900,15 @@ button.contratto-testa:focus-visible {
   line-height: 1.3;
   text-align: center;
 }
+
+/* ---- La riga della privacy nell'iscrizione: il quadratino a sinistra e UN solo blocco di testo che va a capo allineato ---- */
+.login-consent-box {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 1px 0 0;
+}
+.login-consent-testo {
+  flex: 1;
+  min-width: 0;
+}
