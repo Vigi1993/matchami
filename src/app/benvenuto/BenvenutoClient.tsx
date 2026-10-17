@@ -9,6 +9,7 @@ import { ImmobileForm } from "@/app/(app)/immobili/ImmobiliClient";
 import { DatiForm, type SezioneDati } from "@/components/DatiForm";
 import { RicercaSheet } from "@/components/RicercaSheet";
 import { CaricaIdentita } from "@/components/CaricaIdentita";
+import { IntroBenvenuto } from "@/components/IntroBenvenuto";
 import { VerificaImmobile } from "@/components/VerificaImmobile";
 import {
   TESTI_BENVENUTO,
@@ -105,9 +106,11 @@ export function BenvenutoClient(p: BenvenutoProps) {
           {passo.titolo}
         </h1>
         <p className="benvenuto-descrizione">{passo.descrizione}</p>
-        <p className={`benvenuto-tipo ${passo.obbligatorio ? "obbligatoria" : ""}`.trim()}>
-          {passo.obbligatorio ? TESTI_BENVENUTO.obbligatorio : TESTI_BENVENUTO.facoltativo}
-        </p>
+        {passo.id !== "intro" && (
+          <p className={`benvenuto-tipo ${passo.obbligatorio ? "obbligatoria" : ""}`.trim()}>
+            {passo.obbligatorio ? TESTI_BENVENUTO.obbligatorio : TESTI_BENVENUTO.facoltativo}
+          </p>
+        )}
 
         <div className="benvenuto-contenuto">
           {p.ruolo === "inquilino" ? <ContenutoInquilino p={p} passo={passo} avanti={avanti} /> : <ContenutoProprietario p={p} passo={passo} router={router} />}
@@ -122,7 +125,7 @@ export function BenvenutoClient(p: BenvenutoProps) {
         )}
         {!ultimo ? (
           <button type="button" className="opp-cta" disabled={!puoAndareAvanti(passo)} onClick={avanti}>
-            {passo.completo || passo.obbligatorio ? TESTI_BENVENUTO.avanti : TESTI_BENVENUTO.saltaPerOra}
+            {passo.azione ?? (passo.completo || passo.obbligatorio ? TESTI_BENVENUTO.avanti : TESTI_BENVENUTO.saltaPerOra)}
           </button>
         ) : (
           <form action={azioneFine}>
@@ -150,6 +153,8 @@ export function BenvenutoClient(p: BenvenutoProps) {
 function ContenutoInquilino({ p, passo, avanti }: { p: Extract<BenvenutoProps, { ruolo: "inquilino" }>; passo: Passo; avanti: () => void }) {
   const router = useRouter();
   const [ricercaAperta, setRicercaAperta] = useState(false);
+
+  if (passo.id === "intro") return <IntroBenvenuto ruolo="inquilino" />;
 
   if (passo.id === "persona" || passo.id === "reddito" || passo.id === "garanzie") {
     // una scheda del modulo dei dati: salvando si passa alla successiva
@@ -199,6 +204,8 @@ function ContenutoInquilino({ p, passo, avanti }: { p: Extract<BenvenutoProps, {
 }
 
 function ContenutoProprietario({ p, passo, router }: { p: Extract<BenvenutoProps, { ruolo: "proprietario" }>; passo: Passo; router: ReturnType<typeof useRouter> }) {
+  if (passo.id === "intro") return <IntroBenvenuto ruolo="proprietario" />;
+
   if (passo.id === "identita") {
     return <CaricaIdentita nomiCaricati={p.nomiIdentita} />;
   }

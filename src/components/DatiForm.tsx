@@ -11,6 +11,8 @@ import { Field } from "@/components/ui/Field";
 import { Stepper } from "@/components/ui/Stepper";
 import { SaveButton } from "@/components/ui/SaveButton";
 import { AvatarUpload } from "@/components/AvatarUpload";
+import { CampoImporto } from "@/components/CampoImporto";
+import { NOTE_DOCUMENTI } from "@/lib/benvenuto-testi";
 
 /**
  * Il modulo dei dati personali: lavoro, reddito, garante, protesti, nucleo e presentazione. Sta dentro la scheda
@@ -131,15 +133,7 @@ export function DatiForm({
 
         {mostra("reddito") && (
         <Field label={`Reddito netto mensile · €${reddito.toLocaleString("it-IT")}`}>
-          <input
-            type="range"
-            min={0}
-            max={8000}
-            step={50}
-            value={reddito}
-            onChange={(e) => setReddito(Number(e.target.value))}
-            className="w-full"
-          />
+          <CampoImporto valore={reddito} onChange={setReddito} massimoBarra={8000} nome="Reddito netto mensile" />
           {tenant.verificato && (
             <p className="field-note">
               Il tuo reddito è verificato: se cambi lavoro o reddito (anche quello del nucleo) la verifica decade e va rifatta.
@@ -147,6 +141,7 @@ export function DatiForm({
           )}
         </Field>
         )}
+        {sezione === "reddito" && <p className="nota-documenti" role="note">{NOTE_DOCUMENTI.reddito}</p>}
 
         {mostra("garanzie") && (
         <>
@@ -184,6 +179,7 @@ export function DatiForm({
         </Field>
         </>
         )}
+        {sezione === "garanzie" && <p className="nota-documenti" role="note">{NOTE_DOCUMENTI.protesti}</p>}
 
         {mostra("garanzie") && (
         <Field label="Disponibile a firmare una fideiussione?">
@@ -223,15 +219,7 @@ export function DatiForm({
               : "Reddito netto mensile di tutto il nucleo · non indicato"
           }
         >
-          <input
-            type="range"
-            min={0}
-            max={15000}
-            step={50}
-            value={redditoNucleo}
-            onChange={(e) => setRedditoNucleo(Number(e.target.value))}
-            className="w-full"
-          />
+          <CampoImporto valore={redditoNucleo} onChange={setRedditoNucleo} massimoBarra={15000} nome="Reddito netto mensile di tutto il nucleo" />
           <p className="field-note">
             La somma dei redditi di tutte le persone che vivono nella casa. I
             proprietari lo usano per capire quanto pesa l&apos;affitto sul

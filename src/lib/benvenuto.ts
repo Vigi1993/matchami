@@ -9,8 +9,8 @@
 
 export type Ruolo = "inquilino" | "proprietario";
 
-export type PassoInquilino = "persona" | "reddito" | "garanzie" | "ricerca" | "documenti";
-export type PassoProprietario = "identita" | "casa" | "prova";
+export type PassoInquilino = "intro" | "persona" | "reddito" | "garanzie" | "ricerca" | "documenti";
+export type PassoProprietario = "intro" | "identita" | "casa" | "prova";
 export type PassoId = PassoInquilino | PassoProprietario;
 
 export type Passo = {
@@ -22,6 +22,8 @@ export type Passo = {
   obbligatorio: boolean;
   /** i dati di questa scheda ci sono già */
   completo: boolean;
+  /** il testo del pulsante per andare avanti, se non è il solito «Avanti» / «Lo faccio dopo» */
+  azione?: string;
 };
 
 /** Ciò che serve sapere dell'inquilino per decidere a che punto è. */
@@ -48,6 +50,15 @@ const positivo = (v: number | null | undefined): boolean => typeof v === "number
 
 export function passiInquilino(d: DatiBenvenutoInquilino): Passo[] {
   return [
+    {
+      id: "intro",
+      titolo: "Come funziona",
+      descrizione: "Cosa vuol dire match e affidabilità, e perché conta caricare i documenti. Si legge in un minuto.",
+      obbligatorio: false,
+      // chi ha già cominciato a compilare non rivede la spiegazione ogni volta che rientra
+      completo: pieno(d.professione),
+      azione: "Ho capito, cominciamo",
+    },
     {
       id: "persona",
       titolo: "Chi sei",
@@ -88,6 +99,14 @@ export function passiInquilino(d: DatiBenvenutoInquilino): Passo[] {
 
 export function passiProprietario(d: DatiBenvenutoProprietario): Passo[] {
   return [
+    {
+      id: "intro",
+      titolo: "Come funziona",
+      descrizione: "Cosa vuol dire match e affidabilità, e perché conta verificare la tua casa. Si legge in un minuto.",
+      obbligatorio: false,
+      completo: d.nImmobili > 0 || d.haIdentita,
+      azione: "Ho capito, cominciamo",
+    },
     {
       id: "identita",
       titolo: "I tuoi documenti",
