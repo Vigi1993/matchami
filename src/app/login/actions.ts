@@ -5,6 +5,8 @@ import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { percorsoInterno } from "@/lib/percorso";
 import { PERCORSO_RESET } from "@/lib/recupero";
+import { clienteAmministratore } from "@/lib/supabase/admin";
+import { confermaEmailSaltata, messaggioErroreIscrizioneProva } from "@/lib/test-iscrizione";
 
 async function origine(): Promise<string | null> {
   const h = await headers();
@@ -37,6 +39,11 @@ export async function signup(
 
   const supabase = await createClient();
 
+  // ---- TEMPORANEO PER I TEST (lib/test-iscrizione.ts): con SALTA_CONFERMA_EMAIL=1 l'account nasce già confermato e si entra subito ----
+  if (confermaEmailSaltata()) {
+    return iscrizioneSenzaConferma(supabase, { email, password, nome, cognome, ruolo, next });
+  }
+
   const base = await origine();
 
   const { error } = await supabase.auth.signUp({
@@ -61,6 +68,37 @@ export async function signup(
   }
 
   redirect("/auth/check-email");
+}
+
+/**
+ * TEMPORANEO PER I TEST. Crea l'account già confermato con la chiave di servizio (non dipende dall'impostazione «Confirm email» di Supabase),
+ * poi fa entrare la persona e la porta dove stava andando. Il profilo nasce come sempre dal database, dai dati dell'iscrizione.
+ */
+async function iscrizioneSenzaConferma(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  dati: { email: string; password: string; nome: string; cognome: string; ruolo: string; next: string }
+): Promise<AuthState> {
+  console.warn("ATTENZIONE: iscrizione SENZA conferma dell'email (SALTA_CONFERMA_EMAIL=1). Solo per i test: togliere la variabile prima di aprire l'app al pubblico.");
+  const admin = clienteAmministratore();
+  if (!admin) {
+    return { error: "L'iscrizione di prova richiede la chiave di servizio (SUPABASE_SECRET_KEY) su questo ambiente." };
+  }
+
+  const { error } = await admin.auth.admin.createUser({
+    email: dati.email,
+    password: dati.password,
+    email_confirm: true,
+    user_metadata: { nome: dati.nome, cognome: dati.cognome, ruolo: dati.ruolo, privacy_accettata: true },
+  });
+  if (error) {
+    return { error: messaggioErroreIscrizioneProva(error.message) };
+  }
+
+  const { error: erroreAccesso } = await supabase.auth.signInWithPassword({ email: dati.email, password: dati.password });
+  if (erroreAccesso) {
+    return { error: "L'account è stato creato ma l'accesso non è riuscito: vai su «Accedi»." };
+  }
+  redirect(dati.next);
 }
 
 export async function login(
