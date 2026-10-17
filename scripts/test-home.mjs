@@ -73,7 +73,7 @@ test("Home: la ricerca si cambia da qui (nessun collegamento al Profilo), la sch
 });
 
 test("Home: nel pannello dell'affidabilità c'è UN solo pulsante, «Modifica dati»; l'anello non è un pulsante e «Come si calcola» non c'è più", () => {
-  const h = leggi("src", "app", "(app)", "HomeClient.tsx"); const pannello = h.slice(h.indexOf('<div className="hi-punteggio"'), h.indexOf('<div className="hi-ricerca">'));
+  const h = leggi("src", "app", "(app)", "HomeClient.tsx"); const pannello = h.slice(h.indexOf('<div className="hi-punteggio"'), h.indexOf('<div className="home-area">'));
   assert.match(pannello, /<div className="hi-punteggio" role="group" aria-label=\{`Affidabilità \$\{affidabilita\.punteggio\} su 100, \$\{affidabilita\.label\}`\}>/);
   assert.match(pannello, /<button type="button" className="hi-azione" onClick=\{\(\) => setSchedaDati\(true\)\}>\s+Modifica dati\s+<\/button>/); assert.equal([...pannello.matchAll(/<button/g)].length, 1, "ci deve essere un solo pulsante");
   assert.ok(!/Come si calcola/.test(h), "resta il vecchio pulsante «Come si calcola»"); assert.ok(!/schedaPunteggio|SchedaAffidabilita|DatiPersonaliSheet/.test(h), "restano pezzi delle schede vecchie");
@@ -82,7 +82,7 @@ test("Home: nel pannello dell'affidabilità c'è UN solo pulsante, «Modifica da
 
 test("Home: «Modifica dati» apre la scheda unica qui (punteggio, dati, verifica), montata solo se aperta; salvando si chiude e lo dice; niente più rimandi al Profilo", () => {
   const h = leggi("src", "app", "(app)", "HomeClient.tsx"); assert.match(h, /import \{ DatiSheet \} from "@\/components\/DatiSheet"/);
-  assert.match(h, /\{schedaDati && \(\s+<DatiSheet\s+open\s+onClose=\{\(\) => setSchedaDati\(false\)\}\s+tenant=\{tenant\}\s+affidabilita=\{affidabilita\}\s+recensioni=\{recensioni\}\s+raccomandazione=\{raccomandazione\}\s+verificaPanel=\{verificaPanel\}\s+onSalvata=\{\(\) => \{\s+setSchedaDati\(false\);\s+setAvviso\(\{ errore: false, testo: "Dati aggiornati\." \}\);/);
+  assert.match(h, /\{schedaDati && \(\s+<DatiSheet\s+open\s+onClose=\{\(\) => setSchedaDati\(false\)\}\s+tenant=\{tenant\}\s+affidabilita=\{affidabilita\}\s+recensioni=\{recensioni\}\s+raccomandazione=\{raccomandazione\}\s+verificaPanel=\{verificaPanel\}\s+protestiPanel=\{protestiPanel\}\s+onSalvata=\{\(\) => \{\s+setSchedaDati\(false\);\s+setAvviso\(\{ errore: false, testo: "Dati aggiornati\." \}\);/);
   assert.ok(!/useRouter|router\.push/.test(h), "la Home rimanda ancora altrove"); assert.ok(!/href="\/profilo"/.test(h));
   const pg = leggi("src", "app", "(app)", "page.tsx"); assert.match(pg, /from\("documenti_inquilino"\)\.select\("id, tipo, percorso, nome_file"\)\.eq\("tenant_id", userId\)/); assert.match(pg, /<VerificaRedditoPanel\s+stato=\{tenantProfile\.verifica_stato\}/);
 });
@@ -91,7 +91,7 @@ test("Profilo: una sola riga e una sola scheda per punteggio, dati e verifica (l
   const p = leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx"); assert.match(p, /import \{ RicercaSheet \} from "@\/components\/RicercaSheet"/); assert.match(p, /import \{ DatiSheet \} from "@\/components\/DatiSheet"/);
   assert.ok(!/function RicercaSheet/.test(p) && !/function DatiPersonaliSheet/.test(p) && !/function SaveButton/.test(p), "il Profilo ha ancora una copia di una scheda");
   assert.equal([...p.matchAll(/onClick=\{\(\) => setSheetAperta\("(dati|affidabilita|verifica)"\)\}/g)].length, 1, "ci deve essere una riga sola per punteggio, dati e verifica"); assert.match(p, /onClick=\{\(\) => setSheetAperta\("dati"\)\}/);
-  assert.match(p, /<DatiSheet[\s\S]*?recensioni=\{recensioni\}\s+raccomandazione=\{raccomandazione\}\s+verificaPanel=\{verificaPanel\}\s+scorriA=\{sheetAperta === "verifica" \? "verifica" : null\}/); assert.ok(!/SchedaAffidabilita|rigaProfilo|hasRecensioni|\.checks/.test(p), "il Profilo usa ancora pezzi vecchi");
+  assert.match(p, /<DatiSheet[\s\S]*?recensioni=\{recensioni\}\s+raccomandazione=\{raccomandazione\}\s+verificaPanel=\{verificaPanel\}\s+protestiPanel=\{protestiPanel\}\s+scorriA=\{sheetAperta === "verifica" \? "verifica" : null\}/); assert.ok(!/SchedaAffidabilita|rigaProfilo|hasRecensioni|\.checks/.test(p), "il Profilo usa ancora pezzi vecchi");
   const pg = leggi("src", "app", "(app)", "profilo", "page.tsx"); assert.match(pg, /sezioneProfilo\(\(await searchParams\)\.apri\)/); assert.match(pg, /searchParams: Promise<\{ apri\?: string \| string\[\] \}>/); assert.match(pg, /recensioni=\{riepilogo\}/);
 });
 
@@ -112,4 +112,26 @@ test("CSS: il suggerimento sta sopra i pulsanti e la card sopra il suggerimento 
   const css = leggi("src", "app", "globals.css"); const base = css.slice(0, css.indexOf("@media")); const px = (re) => Number(base.match(re)[1]);
   const pulsanti = px(/\.actions \{[^}]*?bottom: (\d+)px/); const suggerimento = px(/\.swipe-hint \{[^}]*?bottom: (\d+)px/); const card = px(/\.card-info \{[^}]*?bottom: (\d+)px/);
   assert.ok(suggerimento >= pulsanti + 64 + 8, `il suggerimento (${suggerimento}px) tocca i pulsanti (${pulsanti}px + 64)`); assert.ok(card >= suggerimento + 16, `la card (${card}px) tocca il suggerimento (${suggerimento}px)`);
+});
+
+// ============================================================ la ricerca sta SOTTO le foto
+test("Home dell'inquilino: «quante case rispondono alla ricerca» e «Modifica/Imposta la ricerca» stanno SOTTO le foto (non più nel pannello in alto): il pannello ha solo affidabilità e badge, poi l'area delle foto con i pulsanti, poi la barra della ricerca", () => {
+  const h = leggi("src", "app", "(app)", "HomeClient.tsx");
+  const iPannello = h.indexOf('<div className="home-intro">'), iArea = h.indexOf('<div className="home-area">'), iDeck = h.indexOf('<div className="deck">'), iAzioni = h.indexOf('<div className="actions">'), iBarra = h.indexOf('<div className="home-ricerca">'), iRicerca = h.indexOf('<div className="hi-ricerca">');
+  assert.ok(iPannello > 0 && iPannello < iArea && iArea < iDeck && iDeck < iAzioni && iAzioni < iBarra && iBarra < iRicerca, "ordine: pannello, area delle foto (mazzo e pulsanti), barra della ricerca");
+  const pannello = h.slice(iPannello, iArea); assert.ok(!/hi-ricerca|hi-modifica|hi-riassunto|Modifica ricerca|Imposta la ricerca|testoCase/.test(pannello), "la ricerca non deve restare nel pannello in alto");
+  const barra = h.slice(iBarra, h.indexOf("La scheda unica «I tuoi dati»")); for (const x of ["<b>{testoCase.principale}</b>", "{testoCase.secondario && <span>{testoCase.secondario}</span>}", "hi-nascoste", '{mostraMatch ? "Modifica ricerca" : "Imposta la ricerca"}', "setSchedaRicerca(true)", 'className="hi-riassunto"']) assert.ok(barra.includes(x), `manca nella barra: ${x}`);
+  const area = h.slice(iArea, iBarra); assert.ok(area.includes('className="deck"') && area.includes('className="actions"'), "il mazzo e i pulsanti stanno nell'area delle foto, sopra la barra"); assert.ok(!/hi-ricerca/.test(area), "la barra della ricerca non sta dentro l'area delle foto");
+  assert.match(h, /<div className=\{`screen-dark home-inq \$\{raccomandazione\.raccomandato \? "con-badge" : ""\}`\}>/);
+});
+
+test("Home dell'inquilino, stile: l'area delle foto riempie lo spazio sopra la barra e le posizioni di mazzo e pulsanti sono RELATIVE a lei; la barra è alta quanto il suo contenuto, sopra il resto, con lo stesso aspetto che aveva nel pannello; il mazzo comincia subito sotto il pannello (non lascia un buco)", () => {
+  const css = leggi("src", "app", "globals.css");
+  assert.match(css, /\.home-inq \{\s+display: flex;\s+flex-direction: column;\s+\}/); assert.match(css, /\.home-area \{\s+position: relative;\s+flex: 1 1 0;\s+min-height: 0;\s+\}/);
+  assert.match(css, /\.home-ricerca \{\s+position: relative;\s+z-index: 60;\s+flex: none;\s+padding: 10px 14px 12px;\s+background: var\(--ink\);\s+border-top: 1px solid var\(--line\);\s+\}/); assert.match(css, /\.home-ricerca \.hi-ricerca \{\s+padding-top: 0;\s+border-top: none;\s+\}/);
+  for (const sel of [".hi-ricerca", ".hi-ricerca-testo", ".hi-ricerca-testo b", ".hi-ricerca-testo span", ".hi-riassunto", ".hi-modifica", ".hi-modifica:focus-visible", ".hi-ricerca-testo .hi-nascoste"]) assert.ok(css.includes(`.home-ricerca ${sel},\n.home-intro ${sel} {`), `la barra non ha lo stile di ${sel}`);
+  assert.match(css, /\.deck \{\s+position: absolute;\s+inset: 0;\s+top: 164px;/); assert.match(css, /\.screen-dark\.con-badge \.deck \{\s+top: 198px;/);
+  const desk = css.indexOf("@media (min-width: 768px) {\n  .home-ricerca {"); assert.ok(desk > 0, "la barra a schermo largo"); assert.match(css.slice(desk, desk + 200), /\.home-ricerca \{\s+align-self: center;\s+width: 460px;/);
+  // il mazzo deve cominciare tra 8 e 24 px sotto il pannello più alto (118 px con il badge, 82 senza)
+  const sopra = (top, pannelloFine) => top - pannelloFine; assert.ok(sopra(164, 64 + 82) >= 8 && sopra(164, 64 + 82) <= 24 && sopra(198, 64 + 118) >= 8 && sopra(198, 64 + 118) <= 24, "il mazzo è troppo lontano o troppo vicino al pannello");
 });

@@ -1,5 +1,6 @@
 import { riepilogoRecensioni, statoRaccomandazione } from "@/lib/recensioni";
 import { VerificaRedditoPanel } from "@/components/VerificaRedditoPanel";
+import { VerificaProtestiPanel } from "@/components/VerificaProtestiPanel";
 import type { DocumentoInquilino } from "@/lib/verifica-inquilino";
 import { createClient } from "@/lib/supabase/server";
 import { ProfiloClient } from "./ProfiloClient";
@@ -94,6 +95,14 @@ export default async function ProfiloPage({ searchParams }: { searchParams: Prom
             professione: (tenant as TenantProfile).professione,
             reddito_mensile: (tenant as TenantProfile).reddito_mensile,
           }}
+          documenti={(documentiRows ?? []) as DocumentoInquilino[]}
+        />
+      }
+      protestiPanel={
+        <VerificaProtestiPanel
+          stato={(tenant as TenantProfile).protesti_verifica_stato ?? "non_avviata"}
+          nota={(tenant as TenantProfile).protesti_verifica_esito_note ?? null}
+          protestato={(tenant as TenantProfile).protestato}
           documenti={(documentiRows ?? []) as DocumentoInquilino[]}
         />
       }

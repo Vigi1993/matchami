@@ -41,7 +41,7 @@ test("la notifica dell'inquilino e quella del proprietario passano dalla stessa 
 
 test("informativa: non elenca più tipo di proprietario, numero di immobili e obiettivo (non si raccolgono più); nuova versione, la precedente resta equivalente (si chiedono meno dati: nessuno deve riaccettare)", () => {
   const t = JSON.stringify(inf.INFORMATIVA); assert.ok(!/tipo di proprietario|numero di immobili|obiettivo/.test(t), "l'informativa nomina ancora quei dati"); assert.ok(t.includes("Se sei proprietario: gli annunci con titolo, descrizione, zona, prezzo, caratteristiche, classe energetica e foto;"));
-  const n = Number(inf.INFORMATIVA.versione.match(/-(\d+)$/)[1]); assert.ok(n >= 21, inf.INFORMATIVA.versione); assert.ok(inf.INFORMATIVA.equivalenti.includes("2026-10-provvisoria-20"), "la 20 deve restare equivalente");
+  const n = Number(inf.INFORMATIVA.versione.match(/-(\d+)$/)[1]); assert.ok(n >= 21, inf.INFORMATIVA.versione); for (let v = 22; v < n; v++) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} deve restare equivalente`);
 });
 
 test("migrazione 0036: toglie ESATTAMENTE le tre colonne e il loro tipo (niente altro), è rieseguibile e dice che è irreversibile", () => {

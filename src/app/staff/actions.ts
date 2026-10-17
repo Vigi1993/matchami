@@ -103,3 +103,31 @@ export async function decidiInquilino(
   revalidatePath("/staff");
   redirect("/staff");
 }
+
+/**
+ * Lo staff dà l'esito sui protesti di un inquilino: «nessun_protesto», «protestato» oppure «respingi» (con una nota). Il risultato dello staff PREVALE su ciò che la
+ * persona aveva dichiarato. I permessi stanno qui, nel layout e nella funzione del database (NON_STAFF per chiunque non lo sia).
+ */
+export async function decidiProtesti(_prev: EsitoState, formData: FormData): Promise<EsitoState> {
+  const supabase = await richiediStaff();
+
+  const id = String(formData.get("id") || "");
+  const esito = String(formData.get("esito") || "");
+  const nota = String(formData.get("nota") || "").trim();
+
+  if (!èUuid(id)) return { error: "Inquilino non valido." };
+  if (esito !== "nessun_protesto" && esito !== "protestato" && esito !== "respingi") return { error: "Scelta non valida." };
+  if (esito === "respingi" && nota.length < 3) {
+    return { error: messaggioErroreVerifica("PROTESTI_NOTA_OBBLIGATORIA") };
+  }
+
+  const { error } = await supabase.rpc("esito_verifica_protesti", {
+    p_tenant: id,
+    p_esito: esito,
+    p_note: esito === "respingi" ? nota : null,
+  });
+  if (error) return { error: messaggioErroreVerifica(error.message) };
+
+  revalidatePath("/staff");
+  redirect("/staff");
+}

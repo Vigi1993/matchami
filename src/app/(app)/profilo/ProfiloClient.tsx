@@ -35,6 +35,7 @@ type Props = {
   preferiti?: number;
   /** il pannello per verificare il reddito con i documenti, costruito dal server */
   verificaPanel: React.ReactNode;
+  protestiPanel: React.ReactNode;
   nome: string | null;
   cognome: string | null;
   email: string | null;
@@ -61,6 +62,7 @@ export function ProfiloClient({
   email,
   tenant,
   verificaPanel,
+  protestiPanel,
   ricerca,
   luoghi,
   recensioni,
@@ -85,6 +87,7 @@ export function ProfiloClient({
     protestato: tenant.protestato,
     garante: tenant.garante,
     fideiussione: tenant.fideiussione,
+    protestiVerificati: tenant.protesti_verifica_stato === "verificato",
   });
 
   const completezza = computeProfileCompleteness({
@@ -200,6 +203,7 @@ export function ProfiloClient({
         recensioni={recensioni}
         raccomandazione={raccomandazione}
         verificaPanel={verificaPanel}
+        protestiPanel={protestiPanel}
         scorriA={sheetAperta === "verifica" ? "verifica" : null}
       />
 

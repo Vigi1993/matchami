@@ -58,6 +58,8 @@ export function SchedaPersona({
       <div className="persona-etichette">
         {dati.raccomandato && <BadgeRaccomandato />}
         {dati.redditoVerificato && <span className="persona-chip">Reddito verificato</span>}
+        {dati.protestiVerificati === "nessuno" && <span className="persona-chip">Nessun protesto · verificato</span>}
+        {dati.protestiVerificati === "si" && <span className="persona-chip persona-chip-attenzione">Ha protesti · verificato</span>}
         {dati.recensioni && dati.recensioni.numero > 0 && (
           <span className="persona-chip">
             <span aria-hidden="true">{stelleTesto(dati.recensioni.media)}</span> {testoRecensioni(dati.recensioni)}

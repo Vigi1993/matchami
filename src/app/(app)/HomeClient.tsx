@@ -49,6 +49,7 @@ export function HomeClient({
   raccomandazione,
   tenant,
   verificaPanel,
+  protestiPanel,
   listings,
   esclusi,
   mostraMatch,
@@ -66,6 +67,7 @@ export function HomeClient({
   tenant: TenantProfile;
   /** il pannello per verificare il reddito con i documenti, costruito dal server */
   verificaPanel: React.ReactNode;
+  protestiPanel: React.ReactNode;
   /** la ricerca impostata: budget, taglio, zone e caratteristiche */
   ricerca: ProfiloRicerca;
   /** i luoghi che si possono cercare (provincia, città, quartiere) */
@@ -293,7 +295,7 @@ export function HomeClient({
   const fotoSuccessivaUrl = foto[fotoIdx + 1]?.url;
 
   return (
-    <div className={`screen-dark ${raccomandazione.raccomandato ? "con-badge" : ""}`}>
+    <div className={`screen-dark home-inq ${raccomandazione.raccomandato ? "con-badge" : ""}`}>
       {/* ---- Barra in alto: il marchio. Niente contatore: il pannello dice già quante case sono in linea ---- */}
       <div className="topbar">
         <div className="brand">
@@ -326,19 +328,10 @@ export function HomeClient({
             <BadgeRaccomandato />
           </div>
         )}
-        <div className="hi-ricerca">
-          <div className="hi-ricerca-testo">
-            <b>{testoCase.principale}</b>
-            {testoCase.secondario && <span>{testoCase.secondario}</span>}
-            {testoNascoste(nascostiPerNecessarie) && <span className="hi-nascoste">{testoNascoste(nascostiPerNecessarie)}</span>}
-          </div>
-          <button type="button" className="hi-modifica" onClick={() => setSchedaRicerca(true)}>
-            {mostraMatch ? "Modifica ricerca" : "Imposta la ricerca"}
-          </button>
-        </div>
-        {mostraMatch && riassuntoRicerca.length > 0 && <div className="hi-riassunto">{riassuntoRicerca.join(" · ")}</div>}
       </div>
 
+      {/* l'area delle foto: il mazzo e i pulsanti; finisce dove comincia la barra della ricerca */}
+      <div className="home-area">
       <div className="deck">
         {/* ---- Nessun annuncio ---- */}
         {mazzo.length === 0 && (
@@ -569,6 +562,23 @@ export function HomeClient({
         </div>
       )}
 
+      </div>
+
+      {/* ---- Sotto le foto: quante case rispondono alla ricerca, e il modo di cambiarla ---- */}
+      <div className="home-ricerca">
+        <div className="hi-ricerca">
+          <div className="hi-ricerca-testo">
+            <b>{testoCase.principale}</b>
+            {testoCase.secondario && <span>{testoCase.secondario}</span>}
+            {testoNascoste(nascostiPerNecessarie) && <span className="hi-nascoste">{testoNascoste(nascostiPerNecessarie)}</span>}
+          </div>
+          <button type="button" className="hi-modifica" onClick={() => setSchedaRicerca(true)}>
+            {mostraMatch ? "Modifica ricerca" : "Imposta la ricerca"}
+          </button>
+        </div>
+        {mostraMatch && riassuntoRicerca.length > 0 && <div className="hi-riassunto">{riassuntoRicerca.join(" · ")}</div>}
+      </div>
+
       {/* La scheda unica «I tuoi dati»: punteggio, dati da modificare, verifica del reddito. Come la ricerca, è montata solo
           quando è aperta: ogni apertura parte dai dati di adesso. */}
       {schedaDati && (
@@ -580,6 +590,7 @@ export function HomeClient({
           recensioni={recensioni}
           raccomandazione={raccomandazione}
           verificaPanel={verificaPanel}
+          protestiPanel={protestiPanel}
           onSalvata={() => {
             setSchedaDati(false);
             setAvviso({ errore: false, testo: "Dati aggiornati." });

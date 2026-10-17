@@ -2,7 +2,7 @@
  * Il punteggio di affidabilità: da 0 a 100, tre voci. I protesti TOLGONO punti.
  *
  *  - REDDITO VERIFICATO       +50  lo controlla lo staff sui documenti
- *  - NESSUN PROTESTO          +30  lo dichiara la persona (non si verifica)
+ *  - NESSUN PROTESTO          +30  lo dichiara la persona; lo staff lo può VERIFICARE sul certificato dei protesti (il risultato prevale)
  *    protesti, o NON INDICATO  −30  «non indicato» vale come «sì»: va risposto
  *  - GARANTE o FIDEIUSSIONE   +20  lo dichiara la persona (non si verifica)
  *
@@ -17,6 +17,8 @@ export type AffidabilitaInput = {
   protestato: boolean | null;
   garante: boolean | null;
   fideiussione: boolean | null;
+  /** lo staff ha verificato i protesti sul certificato: `protestato` è allora il risultato dello staff */
+  protestiVerificati?: boolean;
 };
 
 /** `protesti` è il peso della voce: +30 se non ne hai, −30 se ne hai o non hai risposto. */
@@ -113,9 +115,9 @@ export function computeAffidabilita(p: AffidabilitaInput): AffidabilitaResult {
   // «sì» e «non indicato» valgono lo stesso: tolgono i punti. Solo il «non indicato» si può ancora correggere.
   const voceProtesti: VoceAffidabilita =
     p.protestato === false
-      ? { id: "protesti", etichetta: "Nessun protesto", punti: protesti, massimo: protesti, presa: true, origine: "dichiarato", potenziale: 0, suggerimento: null, sezione: null, nota: "Nessuno lo controlla: vale quanto hai dichiarato." }
+      ? { id: "protesti", etichetta: "Nessun protesto", punti: protesti, massimo: protesti, presa: true, origine: p.protestiVerificati ? "verificato" : "dichiarato", potenziale: 0, suggerimento: null, sezione: null, nota: p.protestiVerificati ? "Controllato dallo staff sul tuo certificato dei protesti." : "Non ancora verificato: vale quanto hai dichiarato. Puoi far controllare il certificato dei protesti dallo staff." }
       : p.protestato === true
-        ? { id: "protesti", etichetta: "Protesti dichiarati", punti: -protesti, massimo: protesti, presa: false, origine: "dichiarato", potenziale: 0, suggerimento: null, sezione: null, nota: `Hai dichiarato dei protesti o segnalazioni: tolgono ${protesti} punti.` }
+        ? { id: "protesti", etichetta: p.protestiVerificati ? "Protesti verificati" : "Protesti dichiarati", punti: -protesti, massimo: protesti, presa: false, origine: p.protestiVerificati ? "verificato" : "dichiarato", potenziale: 0, suggerimento: null, sezione: null, nota: p.protestiVerificati ? `Lo staff ha controllato il tuo certificato: risultano dei protesti. Tolgono ${protesti} punti.` : `Hai dichiarato dei protesti o segnalazioni: tolgono ${protesti} punti.` }
         : { id: "protesti", etichetta: "Protesti non indicati", punti: -protesti, massimo: protesti, presa: false, origine: "dichiarato", potenziale: 2 * protesti, suggerimento: "Indica i protesti nei tuoi dati", sezione: "dati", nota: `Non indicati: valgono come se ci fossero e tolgono ${protesti} punti.` };
 
   const haGaranzia = p.garante === true || p.fideiussione === true;

@@ -177,7 +177,7 @@ export async function possibiliPerCasaDelProprietario(
         admin.from("profiles").select("id, nome, cognome").in("id", blocco),
         admin
           .from("tenant_profiles")
-          .select("profile_id, visibile_ai_proprietari, professione, reddito_mensile, reddito_nucleo, garante, fideiussione, protestato, animali, nucleo, presentazione, verificato, avatar_url")
+          .select("profile_id, visibile_ai_proprietari, professione, reddito_mensile, reddito_nucleo, garante, fideiussione, protestato, protesti_verifica_stato, animali, nucleo, presentazione, verificato, avatar_url")
           .in("profile_id", blocco),
         admin.from("recensioni").select("tenant_id, voto, autore_id, created_at").in("tenant_id", blocco),
       ]);
@@ -210,6 +210,7 @@ export async function possibiliPerCasaDelProprietario(
           presentazione: (det.presentazione as string | null) ?? null,
           verificato: det.verificato === true,
           protestato: (det.protestato as boolean | null) ?? null,
+          protestiVerificati: det.protesti_verifica_stato === "verificato",
           garante: (det.garante as boolean | null) ?? null,
           fideiussione: (det.fideiussione as boolean | null) ?? null,
           reddito_mensile: (det.reddito_mensile as number | null) ?? null,

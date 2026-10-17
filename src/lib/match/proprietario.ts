@@ -93,8 +93,8 @@ export const CATALOGO_CRITERI: Record<ChiaveCriterio, DefinizioneCriterio> = {
 
   nessunProtesto: {
     nome: "Nessun protesto",
-    descrizione: "Il candidato dichiara di non avere protesti.",
-    etichetta: () => "Nessun protesto dichiarato",
+    descrizione: "Il candidato non ha protesti: lo dichiara, e se lo staff ha controllato il certificato vale il risultato dello staff.",
+    etichetta: () => "Nessun protesto",
     valuta: (c) => {
       if (c.protestato === null) return { stato: "non_indicato" };
       return { stato: c.protestato ? "no" : "ok" };

@@ -33,6 +33,8 @@ export const TIPI_NOTIFICA = [
   "affitto_da_confermare",
   "affitto_confermato",
   "affitto_non_confermato",
+  "protesti_verificati",
+  "protesti_respinti",
 ] as const;
 
 export type TipoNotifica = (typeof TIPI_NOTIFICA)[number];
@@ -103,6 +105,21 @@ export function descriviNotifica(
       return {
         titolo: "Verifica del reddito non riuscita",
         testo: "Leggi la nota nel Profilo, correggi i documenti e invia di nuovo.",
+      };
+    case "protesti_verificati":
+      return dati?.protestato === true
+        ? {
+            titolo: "Protesti verificati",
+            testo: "Lo staff ha controllato il tuo certificato: risultano dei protesti. Lo vedi nel tuo punteggio e i proprietari lo vedono come dato verificato.",
+          }
+        : {
+            titolo: "Protesti verificati",
+            testo: "Lo staff ha controllato il tuo certificato: non risultano protesti. I proprietari ora vedono «Protesti verificati» accanto al tuo nome.",
+          };
+    case "protesti_respinti":
+      return {
+        titolo: "Verifica dei protesti non riuscita",
+        testo: "Leggi la nota nei tuoi dati, correggi i documenti e invia di nuovo.",
       };
     case "affitto_verificato":
       return {

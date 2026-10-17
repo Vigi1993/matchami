@@ -19,12 +19,13 @@ const sql0022 = fs.readFileSync(path.join(radice, "supabase", "migrations", "002
 const sql0032 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0032_richieste_proprietari.sql"), "utf8");
 const sql0034 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0034_riapri_candidatura.sql"), "utf8");
 const sql0035 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0035_affitto_da_contratto.sql"), "utf8");
+const sql0038 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0038_verifica_protesti.sql"), "utf8");
 
 /** I tipi che il vincolo sulla tabella ammette. */
 function tipiDelDatabase() {
   // l'ultima definizione del vincolo, in ordine di migrazione
-  const tutte = [...(sql + "\n" + sql0020 + "\n" + sql0022 + "\n" + sql0032 + "\n" + sql0034 + "\n" + sql0035).matchAll(/check \(tipo in \(([\s\S]*?)\)\)/g)];
-  assert.ok(tutte.length >= 6, "dovrei trovare il vincolo della 0019, quello della 0020, quello della 0022, quello della 0032, quello della 0034 e quello della 0035");
+  const tutte = [...(sql + "\n" + sql0020 + "\n" + sql0022 + "\n" + sql0032 + "\n" + sql0034 + "\n" + sql0035 + "\n" + sql0038).matchAll(/check \(tipo in \(([\s\S]*?)\)\)/g)];
+  assert.ok(tutte.length >= 7, "dovrei trovare il vincolo della 0019, quello della 0020, quello della 0022, quello della 0032, quello della 0034, quello della 0035 e quello della 0038");
   return [...tutte[tutte.length - 1][1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
 }
 
@@ -45,7 +46,10 @@ const trigger =
   sql0034.slice(sql0034.indexOf("create or replace function public.riapri_candidatura")) +
   "\n" +
   // la 0035: il trigger sul contratto e le due funzioni dell'affitto da contratto creano le notifiche «da confermare», «confermato», «non confermato»
-  sql0035.slice(sql0035.indexOf("create or replace function public.avvisa_affitto_da_contratto"));
+  sql0035.slice(sql0035.indexOf("create or replace function public.avvisa_affitto_da_contratto")) +
+  "\n" +
+  // la 0038: il trigger sull'esito dei protesti crea le notifiche «protesti verificati» e «protesti respinti»
+  sql0038.slice(sql0038.indexOf("create or replace function public.notifica_protesti_esito"));
 
 // ------------------------------------------------------------
 // I tipi

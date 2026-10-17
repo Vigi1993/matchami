@@ -24,6 +24,8 @@ export type InquilinoDisponibile = {
   presentazione: string | null;
   verificato: boolean;
   protestato: boolean | null;
+  /** lo staff ha verificato i protesti */
+  protestiVerificati?: boolean;
   garante: boolean | null;
   fideiussione: boolean | null;
   reddito_mensile: number | null;
@@ -50,6 +52,8 @@ export type SchedaInquilino = {
   raccomandato: boolean;
   recensioni: RiepilogoRecensioni;
   redditoVerificato: boolean;
+  /** come stanno i protesti SE li ha verificati lo staff: «nessuno» o «si»; altrimenti `null` (non si mostra il dichiarato) */
+  protestiVerificati: "nessuno" | "si" | null;
   /** quanto combacia con i criteri del proprietario, da 0 a 99; `null` se non ne ha chiesto nessuno */
   compatibilita: number | null;
 };
@@ -114,6 +118,7 @@ export function schedeInquilini(input: {
         nucleo_compilato: d.nucleoCompilato === true,
         presentazione: d.presentazione,
         verificato: d.verificato === true,
+        protestiVerificati: d.protestiVerificati === true,
       },
       recensioni: riepilogo,
       raccomandato,
@@ -121,7 +126,7 @@ export function schedeInquilini(input: {
     // chi non rispetta un criterio OBBLIGATORIO del proprietario non si propone
     if (valutazione.match.bloccato) continue;
 
-    const aff = computeAffidabilita({ verificato: d.verificato === true, protestato: d.protestato, garante: d.garante, fideiussione: d.fideiussione });
+    const aff = computeAffidabilita({ verificato: d.verificato === true, protestato: d.protestato, garante: d.garante, fideiussione: d.fideiussione, protestiVerificati: d.protestiVerificati === true });
     voci.push({
       scheda: {
         tenantId: d.tenantId,
@@ -134,6 +139,7 @@ export function schedeInquilini(input: {
         raccomandato,
         recensioni: riepilogo,
         redditoVerificato: d.verificato === true,
+        protestiVerificati: d.protestiVerificati === true && d.protestato !== null ? (d.protestato ? "si" : "nessuno") : null,
         compatibilita: valutazione.match.punteggio,
       },
       match: { bloccato: false, punteggio: valutazione.match.punteggio },

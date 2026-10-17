@@ -1,5 +1,6 @@
 "use client";
 
+import { TESTI_VERIFICA_PROTESTI } from "@/lib/protesti";
 import { useEffect, useRef, useState } from "react";
 import { Sheet } from "@/components/Sheet";
 import { DatiForm } from "@/components/DatiForm";
@@ -24,6 +25,7 @@ export function DatiSheet({
   recensioni,
   raccomandazione,
   verificaPanel,
+  protestiPanel,
   onSalvata,
   scorriA = null,
 }: {
@@ -35,6 +37,8 @@ export function DatiSheet({
   raccomandazione: StatoRaccomandazione;
   /** il pannello per verificare il reddito con i documenti, costruito dal server */
   verificaPanel: React.ReactNode;
+  /** la verifica dei protesti: carica il certificato e lo controlla lo staff */
+  protestiPanel: React.ReactNode;
   /** chiamata quando i dati vengono salvati (la Home chiude la scheda e lo dice) */
   onSalvata?: () => void;
   /** all'apertura scorre a questa parte (da un collegamento che porta alla verifica del reddito) */
@@ -106,6 +110,13 @@ export function DatiSheet({
             punteggio di affidabilità sale.
           </p>
           {verificaPanel}
+
+          <div id="dati-verifica-protesti" className="ancora-dati" />
+          <div className="pref-label" style={{ marginTop: 22 }}>
+            <span>{TESTI_VERIFICA_PROTESTI.titolo}</span>
+          </div>
+          <p className="sheet-sub">{TESTI_VERIFICA_PROTESTI.introduzione}</p>
+          {protestiPanel}
         </div>
       </div>
     </Sheet>

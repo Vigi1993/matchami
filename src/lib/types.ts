@@ -22,6 +22,9 @@ export type TenantProfile = {
   /** perché la verifica non è riuscita, o è decaduta; lo scrive solo lo staff */
   verifica_esito_note: string | null;
   verifica_inviata_at: string | null;
+  /** la verifica dei protesti da parte dello staff (migrazione 0038): se «verificato», `protestato` è il valore dello staff */
+  protesti_verifica_stato?: "non_avviata" | "in_verifica" | "verificato";
+  protesti_verifica_esito_note?: string | null;
   budget_max: number | null;
   locali_min: number | null;
   mq_min: number | null;
@@ -123,6 +126,10 @@ export type CandidaturaRicevuta = {
     reddito_mensile: number | null;
     reddito_nucleo: number | null;
     verificato: boolean;
+    /** lo staff ha verificato i protesti */
+    protesti_verificati?: boolean;
+    /** la risposta sui protesti (se verificati, quella dello staff) */
+    protestato?: boolean | null;
     presentazione: string | null;
     avatar_url: string | null;
   } | null;

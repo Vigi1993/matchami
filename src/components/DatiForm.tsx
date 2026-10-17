@@ -1,5 +1,6 @@
 "use client";
 
+import { notaDomandaProtesti, rispostaBloccata } from "@/lib/protesti";
 import { useActionState, useEffect, useRef, useState } from "react";
 import { LAVORO_VOCAB } from "@/lib/constants";
 import { PUNTI_AFFIDABILITA } from "@/lib/affidabilita";
@@ -50,6 +51,7 @@ export function DatiForm({
   const [protestato, setProtestato] = useState<boolean | null>(
     tenant.protestato
   );
+  const statoProtesti = tenant.protesti_verifica_stato ?? "non_avviata";
   const [fideiussione, setFideiussione] = useState<boolean | null>(
     tenant.fideiussione
   );
@@ -134,12 +136,19 @@ export function DatiForm({
 
         <div id="dati-protesti" className="ancora-dati" />
         <Field label="Hai protesti o segnalazioni in centrale rischi? · obbligatorio">
-          <div className="chip-row">
-            <Chip label="No" active={protestato === false} onClick={() => setProtestato(false)} />
-            <Chip label="Sì" active={protestato === true} onClick={() => setProtestato(true)} />
-          </div>
+          {rispostaBloccata(statoProtesti) ? (
+            // verificato dallo staff: non si cambia da soli (il valore resta nel modulo, nascosto, e viene riscritto uguale)
+            <p className="risposta-verificata" role="status">
+              <b>{protestato ? "Sì, risultano protesti" : "No, nessun protesto"}</b> · verificato dallo staff
+            </p>
+          ) : (
+            <div className="chip-row">
+              <Chip label="No" active={protestato === false} onClick={() => setProtestato(false)} />
+              <Chip label="Sì" active={protestato === true} onClick={() => setProtestato(true)} />
+            </div>
+          )}
           <p className="field-note">
-            Va indicato. Rispondere «No» vale +{PUNTI_AFFIDABILITA.protesti} nel punteggio; «Sì», o non rispondere, toglie {PUNTI_AFFIDABILITA.protesti}. Lo dichiari tu: nessuno lo controlla.
+            Va indicato. Rispondere «No» vale +{PUNTI_AFFIDABILITA.protesti} nel punteggio; «Sì», o non rispondere, toglie {PUNTI_AFFIDABILITA.protesti}. {notaDomandaProtesti(statoProtesti)}
           </p>
         </Field>
 

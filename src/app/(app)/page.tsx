@@ -14,6 +14,7 @@ import type { ProfiloRicerca } from "@/lib/match";
 import type { TenantProfile, ListingConMatch } from "@/lib/types";
 import { idsNascosti } from "@/lib/scelte";
 import { VerificaRedditoPanel } from "@/components/VerificaRedditoPanel";
+import { VerificaProtestiPanel } from "@/components/VerificaProtestiPanel";
 import type { DocumentoInquilino } from "@/lib/verifica-inquilino";
 
 export default async function Home() {
@@ -74,6 +75,7 @@ async function TenantHome({ userId }: { userId: string }) {
     protestato: tenantProfile.protestato,
     garante: tenantProfile.garante,
     fideiussione: tenantProfile.fideiussione,
+    protestiVerificati: tenantProfile.protesti_verifica_stato === "verificato",
   });
 
   // ---- Tutti gli annunci pubblicati che l'inquilino non ha già scelto ----
@@ -145,6 +147,14 @@ async function TenantHome({ userId }: { userId: string }) {
           stato={tenantProfile.verifica_stato}
           nota={tenantProfile.verifica_esito_note}
           dati={{ professione: tenantProfile.professione, reddito_mensile: tenantProfile.reddito_mensile }}
+          documenti={(documentiRows ?? []) as DocumentoInquilino[]}
+        />
+      }
+      protestiPanel={
+        <VerificaProtestiPanel
+          stato={tenantProfile.protesti_verifica_stato ?? "non_avviata"}
+          nota={tenantProfile.protesti_verifica_esito_note ?? null}
+          protestato={tenantProfile.protestato}
           documenti={(documentiRows ?? []) as DocumentoInquilino[]}
         />
       }

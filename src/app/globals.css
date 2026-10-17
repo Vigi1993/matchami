@@ -989,6 +989,7 @@ input[type="range"]::-moz-range-thumb {
   padding: 4px 0 7px;
 }
 .home-intro .hi-azione:focus-visible,
+.home-ricerca .hi-modifica:focus-visible,
 .home-intro .hi-modifica:focus-visible {
   outline: 2px solid var(--gold);
   outline-offset: 3px;
@@ -1057,6 +1058,7 @@ input[type="range"]::-moz-range-thumb {
   -webkit-tap-highlight-color: transparent;
 }
 /* le case della ricerca, e il pulsante per cambiarla */
+.home-ricerca .hi-ricerca,
 .home-intro .hi-ricerca {
   display: flex;
   align-items: center;
@@ -1065,20 +1067,24 @@ input[type="range"]::-moz-range-thumb {
   padding-top: 8px;
   border-top: 1px solid var(--line);
 }
+.home-ricerca .hi-ricerca-testo,
 .home-intro .hi-ricerca-testo {
   display: flex;
   flex-direction: column;
   min-width: 0;
   line-height: 1.3;
 }
+.home-ricerca .hi-ricerca-testo b,
 .home-intro .hi-ricerca-testo b {
   font-size: 13px;
   color: var(--paper);
 }
+.home-ricerca .hi-ricerca-testo span,
 .home-intro .hi-ricerca-testo span {
   font-size: 11px;
   color: rgba(247, 244, 236, 0.75);
 }
+.home-ricerca .hi-riassunto,
 .home-intro .hi-riassunto {
   margin-top: 6px;
   font-size: 10.5px;
@@ -1087,6 +1093,7 @@ input[type="range"]::-moz-range-thumb {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.home-ricerca .hi-modifica,
 .home-intro .hi-modifica {
   -webkit-appearance: none;
   appearance: none;
@@ -1212,7 +1219,7 @@ input[type="range"]::-moz-range-thumb {
 .deck {
   position: absolute;
   inset: 0;
-  top: 232px;
+  top: 164px;
 }
 .card {
   position: absolute;
@@ -2008,7 +2015,7 @@ input[type="range"]::-moz-range-thumb {
      Resta una pila di card da sfogliare (il trascinamento funziona
      anche col mouse), ma diventa un pannello centrato. */
   .deck {
-    inset: 232px auto 130px 50%;
+    inset: 170px auto 130px 50%;
     width: 460px;
     transform: translateX(-50%);
   }
@@ -3445,6 +3452,7 @@ mark.segnaposto {
   font-size: 14px;
   color: var(--ink);
 }
+.home-ricerca .hi-ricerca-testo .hi-nascoste,
 .home-intro .hi-ricerca-testo .hi-nascoste {
   color: var(--gold);
 }
@@ -3804,11 +3812,11 @@ button.contratto-testa:focus-visible {
   padding: 0 0 8px;
 }
 .screen-dark.con-badge .deck {
-  top: 266px;
+  top: 198px;
 }
 @media (min-width: 768px) {
   .screen-dark.con-badge .deck {
-    inset: 266px auto 130px 50%;
+    inset: 204px auto 130px 50%;
   }
 }
 /* il blocco del badge nella scheda dei dati */
@@ -4829,4 +4837,50 @@ button.contratto-testa:focus-visible {
 .documento-bottone:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+/* ---- Home dell'inquilino: la ricerca sta SOTTO le foto, non più nel pannello in alto ---- */
+.home-inq {
+  display: flex;
+  flex-direction: column;
+}
+/* l'area delle foto riempie lo spazio sopra la barra; le posizioni del mazzo e dei pulsanti sono relative a lei */
+.home-area {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+}
+.home-ricerca {
+  position: relative;
+  z-index: 60;
+  flex: none;
+  padding: 10px 14px 12px;
+  background: var(--ink);
+  border-top: 1px solid var(--line);
+}
+.home-ricerca .hi-ricerca {
+  padding-top: 0;
+  border-top: none;
+}
+@media (min-width: 768px) {
+  .home-ricerca {
+    align-self: center;
+    width: 460px;
+    box-sizing: border-box;
+  }
+}
+
+/* ---- La risposta sui protesti dopo la verifica dello staff ---- */
+.risposta-verificata {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(62, 107, 87, 0.12);
+  font-size: 16px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+.persona-chip-attenzione {
+  background: rgba(176, 90, 62, 0.14);
+  color: var(--clay);
 }

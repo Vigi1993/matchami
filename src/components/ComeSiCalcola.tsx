@@ -39,7 +39,7 @@ export function ComeSiCalcola() {
             </b>
           </div>
           <small>
-            Lo dichiari tu e nessuno lo controlla. «Nessun protesto» dà {PUNTI_AFFIDABILITA.protesti} punti; se dichiari dei protesti, o non rispondi, ne toglie{" "}
+            Lo dichiari tu, e lo può verificare il nostro staff sul certificato dei protesti: il risultato dello staff vale più di ciò che hai dichiarato e non si cambia più da soli. «Nessun protesto» dà {PUNTI_AFFIDABILITA.protesti} punti; se dichiari dei protesti, o non rispondi, ne toglie{" "}
             {PUNTI_AFFIDABILITA.protesti}: «non indicato» vale come «sì». La domanda è obbligatoria.
           </small>
         </li>

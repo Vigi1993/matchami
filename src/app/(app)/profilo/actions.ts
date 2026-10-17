@@ -66,7 +66,7 @@ export async function updateDatiPersonali(
     })
     .eq("profile_id", user.id);
 
-  if (error) return { error: error.message };
+  if (error) return { error: messaggioErroreVerifica(error.message) };
 
   revalidatePath("/profilo");
   revalidatePath("/"); // la Home ricalcola il punteggio di affidabilità

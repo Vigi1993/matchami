@@ -7,8 +7,9 @@
  */
 
 export type StatoVerificaInquilino = "non_avviata" | "in_verifica" | "verificato";
-export type TipoDocumentoInquilino = "identita" | "reddito";
+export type TipoDocumentoInquilino = "identita" | "reddito" | "protesti";
 
+/** I documenti della verifica del REDDITO. Il certificato dei protesti è della verifica dei protesti (lib/protesti.ts). */
 export const TIPI_DOCUMENTO_INQUILINO: readonly TipoDocumentoInquilino[] = ["identita", "reddito"];
 
 /** Quanti documenti al massimo: è anche il limite del database (migrazione 0018). */
@@ -17,11 +18,13 @@ export const LIMITE_DOCUMENTI = 12;
 export const ETICHETTE_DOCUMENTO: Record<TipoDocumentoInquilino, string> = {
   identita: "Documento d'identità",
   reddito: "Prova del reddito",
+  protesti: "Certificato dei protesti",
 };
 
 export const AIUTO_DOCUMENTO: Record<TipoDocumentoInquilino, string> = {
   identita: "Carta d'identità, patente o passaporto, fronte e retro. Serve a far coincidere il nome.",
   reddito: "Una busta paga recente, la CU o la dichiarazione dei redditi.",
+  protesti: "Il certificato o la visura dei protesti intestati a te, recente.",
 };
 
 export type DocumentoInquilino = {

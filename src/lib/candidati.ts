@@ -33,11 +33,13 @@ export type RigaVistaCandidato = {
   avatar_url: string | null;
   animali_compilato: boolean | null;
   nucleo_compilato: boolean | null;
+  /** lo staff ha verificato i protesti sul certificato: `protestato` è il risultato dello staff */
+  protesti_verificati: boolean | null;
 };
 
 /** Le colonne da chiedere alla vista, in un posto solo. */
 export const COLONNE_VISTA_CANDIDATI =
-  "candidatura_id, nome, cognome, professione, reddito_mensile, reddito_nucleo, garante, fideiussione, protestato, verificato, presentazione, avatar_url, animali_compilato, nucleo_compilato";
+  "candidatura_id, nome, cognome, professione, reddito_mensile, reddito_nucleo, garante, fideiussione, protestato, verificato, presentazione, avatar_url, animali_compilato, nucleo_compilato, protesti_verificati";
 
 /** Dalla riga della vista al profilo che legge il calcolo del match. */
 export function profiloDaVista(v: Partial<RigaVistaCandidato> | null | undefined): ProfiloCandidato {
@@ -52,6 +54,7 @@ export function profiloDaVista(v: Partial<RigaVistaCandidato> | null | undefined
     nucleo_compilato: v?.nucleo_compilato === true,
     presentazione: v?.presentazione ?? null,
     verificato: v?.verificato === true,
+    protestiVerificati: v?.protesti_verificati === true,
   };
 }
 
@@ -108,6 +111,8 @@ export function assemblaCandidature(input: {
         reddito_mensile: v?.reddito_mensile ?? null,
         reddito_nucleo: v?.reddito_nucleo ?? null,
         verificato: v?.verificato === true,
+        protesti_verificati: v?.protesti_verificati === true,
+        protestato: v?.protestato ?? null,
         presentazione: v?.presentazione ?? null,
         avatar_url: v?.avatar_url ?? null,
       },

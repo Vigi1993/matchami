@@ -504,17 +504,18 @@ test("equivalenti: ben formate, senza doppioni, e diverse dalla versione in vigo
   for (const v of eq) assert.ok(regola.test(v) && v.length <= 60, `versione non valida: ${v}`);
 });
 
-// La versione 20 ha reso il profilo di chi cerca casa VISIBILE ai proprietari di partenza (anche per chi era già iscritto): è un
-// cambiamento di trattamento, quindi chi aveva accettato una versione precedente deve riaccettare. Da lì in poi vale la regola di
-// sempre: le versioni provvisorie successive sono equivalenti tra loro.
-const PRIMA_VERSIONE_EQUIVALENTE = 20;
+// La versione 20 ha reso il profilo di chi cerca casa VISIBILE ai proprietari di partenza (anche per chi era già iscritto); la 22 ha
+// introdotto la verifica dei PROTESTI da parte dello staff (un nuovo documento, il certificato dei protesti, che lo staff esamina; il
+// proprietario vede se i protesti sono verificati e con quale risultato). Sono cambiamenti di trattamento, quindi chi aveva accettato una
+// versione precedente deve riaccettare. Da lì in poi vale la regola di sempre: le versioni provvisorie successive sono equivalenti tra loro.
+const PRIMA_VERSIONE_EQUIVALENTE = 22;
 
-test("equivalenti: se il testo è PROVVISORIO, chi ha accettato una versione provvisoria precedente non viene fermato (dalla versione 20 in poi: la 20 rinnova l'accettazione di tutti)", () => {
-  // La versione è «<prefisso>-N»: devono esserci tutte le precedenti da 20 a N-1 (e NESSUNA sotto la 20). Se si cambia la
+test("equivalenti: se il testo è PROVVISORIO, chi ha accettato una versione provvisoria precedente non viene fermato (dalla versione 22 in poi: la 22 rinnova l'accettazione di tutti)", () => {
+  // La versione è «<prefisso>-N»: devono esserci tutte le precedenti da 22 a N-1 (e NESSUNA sotto la 22). Se si cambia la
   // versione senza aggiungere la vecchia all'elenco, chi l'aveva accettata verrebbe fermato di nuovo.
   const m = INFORMATIVA.versione.match(/^(.*-provvisoria)-(\d+)$/);
   assert.ok(m, `la versione provvisoria non ha la forma «…-provvisoria-N»: ${INFORMATIVA.versione}`);
-  assert.ok(Number(m[2]) >= PRIMA_VERSIONE_EQUIVALENTE, "la versione deve essere almeno la 20");
+  assert.ok(Number(m[2]) >= PRIMA_VERSIONE_EQUIVALENTE, "la versione deve essere almeno la 22");
   const attese = Array.from({ length: Number(m[2]) - PRIMA_VERSIONE_EQUIVALENTE }, (_, i) => `${m[1]}-${PRIMA_VERSIONE_EQUIVALENTE + i}`);
   assert.deepEqual([...INFORMATIVA.equivalenti].sort(), attese.sort(), "mancano versioni precedenti tra le equivalenti (o ce ne sono di non previste)");
 });
@@ -531,7 +532,7 @@ test("equivalenti: la guardia sa riconoscere un testo definitivo con equivalenti
   assert.ok(!finto.provvisoria && finto.equivalenti.length > 0, "il caso che la guardia deve fermare");
 });
 
-test("la versione 20 NON ha come equivalenti quelle precedenti: chi era già iscritto e aveva accettato la 19 (o prima) deve riaccettare, perché il suo profilo diventa visibile ai proprietari", () => {
-  for (let v = 1; v < PRIMA_VERSIONE_EQUIVALENTE; v++) assert.ok(!INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} non deve essere equivalente: cambia chi vede il profilo`);
+test("la versione 22 NON ha come equivalenti quelle precedenti: chi aveva accettato la 21 (o prima) deve riaccettare, perché lo staff esamina un nuovo documento (il certificato dei protesti) e il proprietario vede se i protesti sono verificati", () => {
+  for (let v = 1; v < PRIMA_VERSIONE_EQUIVALENTE; v++) assert.ok(!INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} non deve essere equivalente: cambiano i dati trattati`);
   assert.ok(!INFORMATIVA.equivalenti.includes(INFORMATIVA.versione));
 });

@@ -147,10 +147,10 @@ test("spiegazione: dice come si ottiene, come si perde, per quanto tempo e cosa 
 const home = () => leggi("src", "app", "(app)", "HomeClient.tsx");
 
 test("Home: il badge sta nel pannello dell'affidabilità, solo per chi lo ha, e il mazzo scende solo in quel caso (stessa soglia dello schermo largo del mazzo)", () => {
-  const h = home(); assert.match(h, /<div className=\{`screen-dark \$\{raccomandazione\.raccomandato \? "con-badge" : ""\}`\}>/); assert.match(h, /\{raccomandazione\.raccomandato && \(\s+<div className="hi-badge">\s+<BadgeRaccomandato \/>\s+<\/div>\s+\)\}/);
-  assert.ok(h.indexOf('className="hi-punteggio"') < h.indexOf('className="hi-badge"') && h.indexOf('className="hi-badge"') < h.indexOf('className="hi-ricerca"'), "il badge sta sotto l'affidabilità e sopra la ricerca"); assert.match(h, /raccomandazione=\{raccomandazione\}\s+verificaPanel=\{verificaPanel\}/);
-  const css = leggi("src", "app", "globals.css"); assert.match(css, /\.screen-dark\.con-badge \.deck \{\s+top: 266px;/); const i = css.indexOf("@media (min-width: 768px) {\n  .screen-dark.con-badge .deck"); assert.ok(i > 0, "a schermo largo il mazzo deve scendere con la stessa soglia delle altre regole del mazzo"); assert.match(css.slice(i, i + 200), /inset: 266px auto 130px 50%;/);
-  assert.match(css, /\.deck \{\s+position: absolute;\s+inset: 0;\s+top: 232px;/, "senza badge il mazzo resta dov'era");
+  const h = home(); assert.match(h, /<div className=\{`screen-dark home-inq \$\{raccomandazione\.raccomandato \? "con-badge" : ""\}`\}>/); assert.match(h, /\{raccomandazione\.raccomandato && \(\s+<div className="hi-badge">\s+<BadgeRaccomandato \/>\s+<\/div>\s+\)\}/);
+  assert.ok(h.indexOf('className="hi-punteggio"') < h.indexOf('className="hi-badge"') && h.indexOf('className="hi-badge"') < h.indexOf('className="deck"') && h.indexOf('className="deck"') < h.indexOf('className="hi-ricerca"'), "il badge sta sotto l'affidabilità, poi le foto, e la ricerca sta SOTTO le foto"); assert.match(h, /raccomandazione=\{raccomandazione\}\s+verificaPanel=\{verificaPanel\}/);
+  const css = leggi("src", "app", "globals.css"); assert.match(css, /\.screen-dark\.con-badge \.deck \{\s+top: 198px;/); const i = css.indexOf("@media (min-width: 768px) {\n  .screen-dark.con-badge .deck"); assert.ok(i > 0, "a schermo largo il mazzo deve scendere con la stessa soglia delle altre regole del mazzo"); assert.match(css.slice(i, i + 200), /inset: 204px auto 130px 50%;/);
+  assert.match(css, /\.deck \{\s+position: absolute;\s+inset: 0;\s+top: 164px;/, "senza badge il mazzo comincia subito sotto il pannello più basso");
 });
 
 test("pagine: leggono chi ha scritto le recensioni e quando (servono per il badge), e passano il badge a Home e Profilo", () => {
@@ -171,7 +171,7 @@ test("il badge non tocca il punteggio né la percentuale: affidabilita.ts non lo
 
 test("informativa: dice del badge (chi lo vede, filtro, ordine, nessun effetto sul punteggio), con una nuova versione; chi aveva la precedente non deve riaccettare (testo ancora provvisorio)", () => {
   const testo = JSON.stringify(inf.INFORMATIVA); assert.ok(testo.includes("Il badge «Inquilino raccomandato» lo ottieni in automatico con almeno due recensioni positive (da 4 stelle in su) scritte da due proprietari diversi")); assert.ok(testo.includes("possono cercare solo gli inquilini raccomandati")); assert.ok(testo.includes("Non cambia il punteggio di affidabilità")); assert.ok(testo.includes("resta sempre del proprietario"));
-  const vN = Number(inf.INFORMATIVA.versione.match(/^2026-10-provvisoria-(\d+)$/)?.[1]); assert.ok(vN >= 20, "versione: " + inf.INFORMATIVA.versione); for (let v = 20; v < vN; v++) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} deve restare equivalente`); assert.ok(inf.INFORMATIVA.equivalenti.every((e) => Number(e.split("-").pop()) >= 20), "le versioni prima della 20 non sono equivalenti: cambia chi vede il profilo"); assert.ok(!inf.INFORMATIVA.equivalenti.includes(inf.INFORMATIVA.versione));
+  const vN = Number(inf.INFORMATIVA.versione.match(/^2026-10-provvisoria-(\d+)$/)?.[1]); assert.ok(vN >= 22, "versione: " + inf.INFORMATIVA.versione); for (let v = 22; v < vN; v++) assert.ok(inf.INFORMATIVA.equivalenti.includes(`2026-10-provvisoria-${v}`), `la ${v} deve restare equivalente`); assert.ok(inf.INFORMATIVA.equivalenti.every((e) => Number(e.split("-").pop()) >= 20), "le versioni prima della 20 non sono equivalenti: cambia chi vede il profilo"); assert.ok(!inf.INFORMATIVA.equivalenti.includes(inf.INFORMATIVA.versione));
 });
 
 test("il simbolo del badge esiste, è sul reticolo 24x24 e la spunta non è riempita", () => {

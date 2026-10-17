@@ -62,6 +62,10 @@ export default async function StaffPage() {
 
   // Gli inquilini che hanno inviato i documenti del reddito. Lo staff non
   // legge i profili: la funzione del database gli dà solo nome e data.
+  // Gli inquilini che hanno chiesto la verifica dei protesti (stessa regola: lo staff non legge i profili)
+  const { data: protestiData } = await supabase.rpc("protesti_da_verificare");
+  const protesti = (protestiData ?? []) as { tenant_id: string; nome: string | null; cognome: string | null; inviata_at: string | null }[];
+
   const { data: inquiliniData } = await supabase.rpc("inquilini_da_verificare");
   const inquilini = (inquiliniData ?? []) as {
     tenant_id: string;
@@ -141,6 +145,29 @@ export default async function StaffPage() {
           const nome = [q.nome, q.cognome].filter(Boolean).join(" ") || "Senza nome";
           return (
             <Link key={q.tenant_id} href={`/staff/inquilini/${q.tenant_id}`} className="match-card">
+              <div className="mc-avatar">{nome.slice(0, 2).toUpperCase()}</div>
+              <div className="mc-body">
+                <div className="mc-zona">Inquilino</div>
+                <div className="mc-title">{nome}</div>
+                <div className="mc-meta">inviato {quandoFa(q.inviata_at)}</div>
+              </div>
+              <div className="mc-pct is-wait">Da controllare</div>
+            </Link>
+          );
+        })}
+      </div>
+
+      <h1 className="screen-title" style={{ marginTop: 36 }}>
+        Protesti da verificare
+      </h1>
+      <p className="screen-sub">
+        {protesti.length === 0 ? "Nessun inquilino in attesa." : `${protesti.length} in attesa, i più vecchi per primi.`}
+      </p>
+      <div className="staff-lista">
+        {protesti.map((q) => {
+          const nome = [q.nome, q.cognome].filter(Boolean).join(" ") || "Senza nome";
+          return (
+            <Link key={q.tenant_id} href={`/staff/protesti/${q.tenant_id}`} className="match-card">
               <div className="mc-avatar">{nome.slice(0, 2).toUpperCase()}</div>
               <div className="mc-body">
                 <div className="mc-zona">Inquilino</div>

@@ -115,7 +115,7 @@ test("schede: l'ordine è compatibilità, poi il badge «raccomandato», poi l'a
 
 test("COSA VEDE IL PROPRIETARIO: solo nome e iniziale, lavoro, foto, estratto, affidabilità, badge, recensioni, reddito verificato sì/no, compatibilità; NIENTE reddito, contatti, cognome intero, identificativi interni oltre a quello per scrivere", () => {
   const p = persona("a", { nome: "Anna", cognome: "Verdi", reddito_mensile: 4321, reddito_nucleo: 8765, protestato: true, garante: true, avatarUrl: "https://x/f.jpg", presentazione: "x ".repeat(200), verificato: true });
-  const [s] = schede([p]); assert.deepEqual(Object.keys(s).sort(), ["affidabilita", "avatarUrl", "compatibilita", "etichettaAffidabilita", "nome", "presentazione", "professione", "raccomandato", "recensioni", "redditoVerificato", "tenantId"]);
+  const [s] = schede([p]); assert.deepEqual(Object.keys(s).sort(), ["affidabilita", "avatarUrl", "compatibilita", "etichettaAffidabilita", "nome", "presentazione", "professione", "protestiVerificati", "raccomandato", "recensioni", "redditoVerificato", "tenantId"]);
   const json = JSON.stringify(s); for (const vietato of ["4321", "8765", "Verdi", "reddito_mensile", "reddito_nucleo", "email", "telefono", "protestato", "cognome"]) assert.ok(!json.includes(vietato), `una scheda contiene «${vietato}»`); assert.equal(s.nome, "Anna V."); assert.equal(s.redditoVerificato, true); assert.ok(s.presentazione.length <= 161);
 });
 

@@ -197,7 +197,7 @@ export function estensioneDa(tipo: string): string | null {
  */
 export function percorsoDocumento(input: {
   userId: string;
-  tipo: "identita" | "proprieta" | "contratto" | "inquilino-identita" | "inquilino-reddito";
+  tipo: "identita" | "proprieta" | "contratto" | "inquilino-identita" | "inquilino-reddito" | "inquilino-protesti";
   listingId: string | null;
   estensione: string;
   id: string;
@@ -212,7 +212,7 @@ export function percorsoDocumento(input: {
   const base =
     input.tipo === "identita" || input.tipo === "contratto"
       ? input.tipo
-      : input.tipo === "inquilino-identita" || input.tipo === "inquilino-reddito"
+      : input.tipo === "inquilino-identita" || input.tipo === "inquilino-reddito" || input.tipo === "inquilino-protesti"
         ? input.tipo
         : `proprieta-${pulito(input.listingId ?? "")}`;
   return `${pulito(input.userId)}/${base}-${pulito(input.id)}.${pulito(input.estensione)}`;
@@ -271,6 +271,14 @@ const MESSAGGI: Record<string, string> = {
     "Prima completa il tuo profilo: indica il lavoro e il reddito mensile, così possiamo confrontarli con i documenti.",
   INQUILINO_NON_IN_VERIFICA: "Questa persona non ha una verifica in attesa.",
   INQUILINO_NOTA_OBBLIGATORIA: "Per respingere scrivi cosa non va: la persona la leggerà.",
+  // la verifica dei protesti
+  PROTESTI_GIA_VERIFICATI: "I tuoi protesti risultano già verificati.",
+  PROTESTI_GIA_IN_VERIFICA: "La tua richiesta sui protesti è già in verifica.",
+  PROTESTI_NON_DICHIARATI: "Prima rispondi alla domanda sui protesti, in «I tuoi dati».",
+  DOCUMENTI_PROTESTI_MANCANTI: "Per chiedere la verifica servono il documento d'identità e il certificato dei protesti.",
+  PROTESTI_VERIFICATI: "I protesti li ha verificati lo staff: per cambiarli scrivici.",
+  PROTESTI_NON_IN_VERIFICA: "Questa persona non ha una verifica dei protesti in attesa.",
+  PROTESTI_NOTA_OBBLIGATORIA: "Per respingere scrivi cosa non va: la persona la leggerà.",
   INQUILINO_INESISTENTE: "Inquilino non trovato.",
   // decisioni sulle candidature
   CANDIDATURA_NON_TUA: "Questa candidatura non risulta tua.",

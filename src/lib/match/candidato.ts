@@ -26,6 +26,8 @@ export type ProfiloCandidato = {
   nucleo_compilato: boolean;
   presentazione: string | null;
   verificato: boolean;
+  /** lo staff ha verificato i protesti: `protestato` è allora il suo risultato */
+  protestiVerificati?: boolean;
 };
 
 /**
@@ -104,6 +106,7 @@ export function valutaCandidato(input: {
     protestato: profilo.protestato,
     garante: profilo.garante,
     fideiussione: profilo.fideiussione,
+    protestiVerificati: profilo.protestiVerificati === true,
   }).punteggio;
 
   return {

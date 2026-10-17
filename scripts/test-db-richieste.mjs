@@ -110,3 +110,18 @@ test("migrazione 0037 su PostgreSQL vero: le case verificate senza prova di prop
     r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m37)]); assert.equal(r.status, 0, "rieseguire la 0037 non deve dare errori: " + r.stderr.slice(0, 300)); assert.match(r.stderr, /tornate «da verificare»: 0/, "la seconda volta non c'è più niente da riallineare");
   } finally { fs.rmSync(nullo, { force: true }); esegui(["-d", "postgres", "-c", `drop database if exists ${db}`]); }
 });
+
+test("migrazione 0038 su PostgreSQL vero: la verifica dei protesti da parte dello staff (richiesta, esito, il risultato dello staff prevale, i protesti verificati non si cambiano da soli, documenti, notifiche, cosa vede il proprietario) (55 controlli)", { skip: psqlCmd ? false : "imposta MATCHAMI_PSQL per eseguire le prove SQL su un PostgreSQL vero" }, () => {
+  const [bin, ...args] = psqlCmd.split(/\s+/); const db = "matchami_test_protesti"; const esegui = (extra) => spawnSync(bin, [...args, "-X", "-q", ...extra], { encoding: "utf8" });
+  const migrazioni = fs.readdirSync(path.join(radice, "supabase", "migrations")).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort(); assert.ok(migrazioni.includes("0038_verifica_protesti.sql"), "manca la migrazione 0038");
+  const nullo = path.join(os.tmpdir(), `matchami-protesti-${process.pid}.txt`);
+  try {
+    let r = esegui(["-d", "postgres", "-c", `drop database if exists ${db}`, "-c", `create database ${db}`]); assert.equal(r.status, 0, r.stderr);
+    r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "scripts", "db", "stub-supabase.sql")]); assert.equal(r.status, 0, r.stderr);
+    for (const m of migrazioni) { r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m)]); assert.equal(r.status, 0, `la migrazione ${m} non si applica: ${r.stderr.slice(0, 300)}`); }
+    r = esegui(["-d", db, "-o", nullo, "-f", path.join(radice, "scripts", "db", "protesti.sql")]); assert.ok(!/CONTROLLO FALLITO/.test(r.stderr), r.stderr.split("\n").filter((l) => /FALLITO|ERROR/.test(l)).slice(0, 4).join("\n")); assert.equal(r.status, 0, r.stderr.slice(0, 500));
+    const riusciti = (r.stderr.match(/NOTICE:\s+OK:/g) ?? []).length; assert.equal(riusciti, 55, `controlli riusciti: ${riusciti}`);
+    // la migrazione si può rieseguire senza errori
+    r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", "0038_verifica_protesti.sql")]); assert.equal(r.status, 0, "rieseguire la 0038 non deve dare errori: " + r.stderr.slice(0, 300));
+  } finally { fs.rmSync(nullo, { force: true }); esegui(["-d", "postgres", "-c", `drop database if exists ${db}`]); }
+});

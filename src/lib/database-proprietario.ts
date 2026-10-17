@@ -108,6 +108,8 @@ export type DatiScheda = {
   raccomandato: boolean;
   recensioni: RiepilogoRecensioni | null;
   redditoVerificato: boolean;
+  /** come stanno i protesti SE li ha verificati lo staff; altrimenti `null` (il dichiarato non si mostra come un fatto) */
+  protestiVerificati: "nessuno" | "si" | null;
   /** un estratto della presentazione, mai più di 160 caratteri */
   presentazione: string | null;
   /** manca qualche dato: il match è provvisorio */
@@ -130,6 +132,7 @@ export function datiSchedaCandidato(c: CandidaturaRicevuta): DatiScheda {
     raccomandato: v?.raccomandato === true,
     recensioni: v?.recensioni ?? null,
     redditoVerificato: c.tenant_profiles?.verificato === true,
+    protestiVerificati: c.tenant_profiles?.protesti_verificati === true && typeof c.tenant_profiles?.protestato === "boolean" ? (c.tenant_profiles.protestato ? "si" : "nessuno") : null,
     presentazione: estratto(c.tenant_profiles?.presentazione),
     incompleto: v?.match.incompleto === true,
   };
@@ -145,6 +148,7 @@ export function datiSchedaPossibile(s: SchedaInquilino): DatiScheda {
     raccomandato: s.raccomandato,
     recensioni: s.recensioni,
     redditoVerificato: s.redditoVerificato,
+    protestiVerificati: s.protestiVerificati,
     presentazione: s.presentazione,
     incompleto: false,
   };
