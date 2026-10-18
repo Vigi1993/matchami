@@ -70,6 +70,8 @@ export function BenvenutoClient(p: BenvenutoProps) {
 
   return (
     <div className="benvenuto">
+      {/* due gruppi: da computer il fianco (passi) sta a sinistra e il corpo (scheda) a destra; sul telefono i contenitori non esistono per il disegno (display: contents) */}
+      <div className="benvenuto-fianco">
       <header className="benvenuto-testa">
         <div className="benvenuto-marchio">
           Match<b>AmI</b>
@@ -100,7 +102,9 @@ export function BenvenutoClient(p: BenvenutoProps) {
           </ol>
         </div>
       </div>
+      </div>
 
+      <div className="benvenuto-corpo">
       <section className="benvenuto-scheda" aria-labelledby="benvenuto-titolo">
         <h1 id="benvenuto-titolo" className="benvenuto-titolo">
           {passo.titolo}
@@ -140,6 +144,7 @@ export function BenvenutoClient(p: BenvenutoProps) {
           {stato.error}
         </p>
       )}
+      </div>
 
       <form action={logout} className="benvenuto-esci">
         <button type="submit" className="redo-link">

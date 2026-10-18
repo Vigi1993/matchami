@@ -2093,14 +2093,6 @@ input[type="range"]::-moz-range-thumb {
 }
 
 /* Schermi molto larghi: il contenuto smette di allargarsi */
-@media (min-width: 1280px) {
-  .screen-wrap {
-    padding: 52px 64px 72px 64px;
-  }
-  .screen-inner {
-    max-width: 1040px;
-  }
-}
 
 /* ============================================================
    CAROSELLO FOTO E SCHEDA IMMOBILE
@@ -4926,7 +4918,13 @@ button.contratto-testa:focus-visible {
   color: var(--ink);
   padding: 0 16px calc(28px + env(safe-area-inset-bottom));
 }
-.benvenuto > * {
+.benvenuto-fianco,
+.benvenuto-corpo {
+  display: contents;
+}
+.benvenuto > *,
+.benvenuto-fianco > *,
+.benvenuto-corpo > * {
   max-width: 560px;
   margin-left: auto;
   margin-right: auto;
@@ -5098,7 +5096,8 @@ button.contratto-testa:focus-visible {
   flex: none;
   padding: 0 20px;
 }
-.benvenuto > .note-error {
+.benvenuto > .note-error,
+.benvenuto-corpo > .note-error {
   margin-top: 12px;
 }
 .benvenuto-esci {
@@ -5226,4 +5225,257 @@ button.contratto-testa:focus-visible {
 .intro-fasce li span {
   font-size: 15px;
   color: var(--body-soft);
+}
+
+/* ============================================================
+   VERSIONE PER COMPUTER (da 1024 px in su)
+   Questo è l'ULTIMO blocco del foglio e ridisegna la composizione delle pagine SOLO da 1024 px in su, perché sembrino un'applicazione web e non il
+   telefono allargato. Sotto i 1024 px (telefoni e tablet in verticale) niente di ciò che segue si applica: lì l'app è identica a prima.
+   Livelli: 1024 (portatile piccolo: colonne più ariose), 1280 (composizioni a più colonne), 1440 e 1760 (colonna più larga, tre colonne).
+   Un test controlla che ogni regola stia dentro un livello da 1024 px in su e che i livelli restino coerenti.
+   ============================================================ */
+@media (min-width: 1024px) {
+  /* ---- il guscio: più respiro, colonne più larghe e titoli staccati ---- */
+  .screen-wrap {
+    padding: 44px 48px 64px;
+  }
+  .screen-inner {
+    max-width: 980px;
+  }
+  .screen-title + .match-schede {
+    margin-top: 14px;
+  }
+  /* i pulsanti a tutta larghezza diventano pulsanti di una larghezza ragionevole (non nei moduli a comparsa, né dove stanno in fila) */
+  .screen-inner .opp-cta:not(.sheet *):not(.persona-azioni *):not(.benvenuto *),
+  .screen-inner .btn-danger-outline:not(.sheet *):not(.persona-azioni *):not(.benvenuto *) {
+    width: min(100%, 440px);
+  }
+  .conferma-affitto-azioni > * {
+    width: min(100%, 440px);
+  }
+
+  /* ---- Home del proprietario: colonna più larga; il marchio c'è già nella colonna di sinistra ---- */
+  .casa-colonna {
+    max-width: 1120px;
+  }
+  .casa-scroll {
+    padding: 36px 40px 40px;
+  }
+  .casa-topbar {
+    display: none;
+  }
+
+  /* ---- Benvenuto: i passi a sinistra con i nomi, la scheda a destra ---- */
+  .benvenuto {
+    display: grid;
+    grid-template-columns: 270px minmax(0, 740px);
+    column-gap: 44px;
+    justify-content: center;
+    align-content: start;
+    padding: 36px 40px 40px;
+  }
+  .benvenuto-fianco {
+    display: block;
+    grid-column: 1;
+    grid-row: 1;
+    position: sticky;
+    top: 0;
+    align-self: start;
+  }
+  .benvenuto-corpo {
+    display: block;
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+  .benvenuto > *,
+  .benvenuto-fianco > *,
+  .benvenuto-corpo > * {
+    max-width: none;
+    margin-left: 0;
+    margin-right: 0;
+  }
+  .benvenuto-testa {
+    padding: 0;
+  }
+  .benvenuto-progresso {
+    margin: 8px 0 0;
+  }
+  .benvenuto-scheda {
+    padding: 26px 28px 28px;
+  }
+  .benvenuto-titolo {
+    font-size: 30px;
+  }
+  .benvenuto-esci {
+    grid-column: 1;
+    grid-row: 2;
+    align-self: end;
+    text-align: left;
+    margin-top: 0;
+  }
+  .benvenuto-passi {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
+    margin-top: 12px;
+  }
+  .benvenuto-puntini {
+    flex-direction: column;
+    gap: 6px;
+  }
+  .benvenuto-puntini li {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: auto;
+    height: auto;
+    padding: 9px 12px;
+    border-radius: 12px;
+    background: transparent;
+    box-shadow: none;
+    color: var(--body-soft);
+    font-size: 15px;
+  }
+  .benvenuto-puntini li::before {
+    content: "";
+    flex: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: rgba(16, 21, 26, 0.18);
+  }
+  .benvenuto-puntini li.fatto::before {
+    background: var(--moss-light);
+  }
+  .benvenuto-puntini li.attivo {
+    background: rgba(62, 107, 87, 0.12);
+    color: var(--ink);
+    font-weight: 700;
+  }
+  .benvenuto-puntini li.attivo::before {
+    background: var(--moss);
+    box-shadow: 0 0 0 3px rgba(62, 107, 87, 0.25);
+  }
+  .benvenuto-puntini .solo-lettori {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    clip: auto;
+    clip-path: none;
+    overflow: visible;
+    white-space: normal;
+  }
+}
+
+@media (min-width: 1280px) {
+  /* da 1280 px c'è spazio per le composizioni a più colonne; tra 1024 e 1279 restano la colonna singola e la griglia del tablet */
+
+  /* ---- Home dell'inquilino: le case a sinistra, grandi; a destra il pannello con affidabilità e ricerca ---- */
+  .screen-dark.home-inq {
+    display: grid;
+    grid-template-columns: minmax(440px, 620px) 380px;
+    grid-template-rows: 1fr auto auto 1fr;
+    column-gap: 44px;
+    justify-content: center;
+    padding: 36px 32px 28px;
+  }
+  /* il marchio c'è già nella colonna di sinistra */
+  .screen-dark.home-inq .topbar {
+    display: none;
+  }
+  .screen-dark.home-inq .home-area {
+    grid-column: 1;
+    grid-row: 1 / span 4;
+    min-height: 560px;
+  }
+  .screen-dark.home-inq .deck,
+  .screen-dark.home-inq.con-badge .deck {
+    inset: 0 0 104px 0;
+    width: auto;
+    transform: none;
+  }
+  .screen-dark.home-inq .home-intro {
+    position: static;
+    grid-column: 2;
+    grid-row: 2;
+    width: auto;
+    transform: none;
+    margin: 0;
+  }
+  .screen-dark.home-inq .home-ricerca {
+    grid-column: 2;
+    grid-row: 3;
+    align-self: start;
+    width: auto;
+    margin-top: 16px;
+    padding: 16px 18px 18px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--ink-soft);
+  }
+  .screen-dark.home-inq .home-ricerca .hi-ricerca {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  /* ---- Home del proprietario: le case si affiancano; una casa sola ha la foto a sinistra e le tessere a destra ---- */
+  .casa-colonna {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 28px;
+    align-items: start;
+  }
+  .casa-colonna > .casa-topbar,
+  .casa-colonna > .casa-intro,
+  .casa-colonna > .empty-inline {
+    grid-column: 1 / -1;
+  }
+  .casa-colonna > .casa:only-of-type {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+    gap: 24px;
+    align-items: stretch;
+  }
+  .casa-colonna > .casa:only-of-type .casa-hero {
+    height: auto;
+    min-height: 360px;
+  }
+  .casa-colonna > .casa:only-of-type .casa-tessere {
+    margin-top: 0;
+    grid-template-columns: 1fr;
+    align-content: stretch;
+  }
+  .casa-colonna > .casa:only-of-type > :not(.casa-hero):not(.casa-tessere) {
+    grid-column: 1 / -1;
+  }
+
+  /* ---- Database: le persone in due colonne, i pulsanti affiancati ---- */
+  .schede-lista {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+    align-items: start;
+  }
+  .persona-azioni {
+    flex-direction: row;
+  }
+  .persona-azioni > * {
+    flex: 1 1 0;
+  }
+}
+
+@media (min-width: 1440px) {
+  .screen-inner {
+    max-width: 1120px;
+  }
+}
+
+@media (min-width: 1760px) {
+  .screen-inner {
+    max-width: 1320px;
+  }
+  .schede-lista {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }

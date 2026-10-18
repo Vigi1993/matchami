@@ -157,7 +157,7 @@ test("modulo dei dati: le schede prima dei protesti salvano senza la risposta (c
 test("stile del benvenuto: schermata intera che scorre da sola, caratteri da 15 px in su, pulsanti alti 52 px, scheda come le altre (angoli 20, ombra standard)", () => {
   const css = leggi("src", "app", "globals.css"); const m = css.slice(css.indexOf("Il percorso di benvenuto (dopo l'iscrizione)")); const misure = [...m.matchAll(/font-size:\s*(\d+)px/g)].map((x) => Number(x[1])); assert.ok(misure.length >= 10 && Math.min(...misure) >= 15, `caratteri: ${Math.min(...misure)} px`);
   assert.match(m, /\.benvenuto \{\s+position: fixed;\s+inset: 0;\s+overflow-y: auto;/); assert.match(m, /\.benvenuto-azioni \.opp-cta,\s+\.benvenuto-azioni \.richieste-secondario,\s+\.benvenuto-azioni form \{\s+min-height: 52px;\s+font-size: 17px;/);
-  assert.match(m, /\.benvenuto-scheda \{\s+padding: 18px 16px 20px;\s+border-radius: 20px;\s+background: #fff;\s+box-shadow: 0 8px 20px rgba\(16, 21, 26, 0\.06\);/); assert.match(m, /\.benvenuto > \* \{\s+max-width: 560px;/);
+  assert.match(m, /\.benvenuto-scheda \{\s+padding: 18px 16px 20px;\s+border-radius: 20px;\s+background: #fff;\s+box-shadow: 0 8px 20px rgba\(16, 21, 26, 0\.06\);/); assert.match(m, /\.benvenuto > \*,\s+\.benvenuto-fianco > \*,\s+\.benvenuto-corpo > \* \{\s+max-width: 560px;/); assert.match(m, /\.benvenuto-fianco,\s+\.benvenuto-corpo \{\s+display: contents;/);
 });
 
 // ============================================================ la migrazione
