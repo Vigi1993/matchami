@@ -2092,13 +2092,10 @@ input[type="range"]::-moz-range-thumb {
   }
 }
 
-/* Schermi molto larghi: il contenuto smette di allargarsi */
-
+/* Segmenti in cima alla card, uno per foto. */
 /* ============================================================
    CAROSELLO FOTO E SCHEDA IMMOBILE
    ============================================================ */
-
-/* Segmenti in cima alla card, uno per foto. */
 .photo-dots {
   position: absolute;
   top: 10px;
@@ -2266,11 +2263,10 @@ input[type="range"]::-moz-range-thumb {
   border-radius: 999px;
 }
 
+/* Riga sopra la zona, sulla card. */
 /* ============================================================
    MATCH: percentuale sulla card, separatore, spiegazione nella scheda
    ============================================================ */
-
-/* Riga sopra la zona, sulla card. */
 .match-row {
   display: flex;
   align-items: center;
@@ -3041,14 +3037,7 @@ mark.segnaposto {
    Database inquilini: ricerca e filtri
    ============================================================ */
 
-.ricerca-barra {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin: 4px 0 6px;
-}
-.ricerca-input,
-.ricerca-select {
+.ricerca-input {
   width: 100%;
   padding: 11px 14px;
   font-size: 14px;
@@ -3058,18 +3047,8 @@ mark.segnaposto {
   border-radius: 12px;
   outline: none;
 }
-.ricerca-input:focus,
-.ricerca-select:focus {
+.ricerca-input:focus {
   border-color: var(--ink);
-}
-.ricerca-riepilogo {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 18px;
-  font-size: 12px;
-  color: var(--muted);
 }
 
 /* ============================================================
@@ -3855,12 +3834,12 @@ button.contratto-testa:focus-visible {
   color: var(--clay);
 }
 
+/* la schermata scorre; il marchio resta fermo in alto */
 /* ============================================================
    Home del proprietario: la casa in grande e due tessere grandi.
    Stessa impostazione della Home dell'inquilino: schermata scura a tutto schermo, il marchio in alto, un pannello scuro d'apertura, pulsanti a pillola con il bordo oro.
    Pensata per chi non è pratico: caratteri grandi (mai sotto 15px), bersagli larghi (almeno 64px), molto contrasto, una sola cosa da fare per volta.
    ============================================================ */
-/* la schermata scorre; il marchio resta fermo in alto */
 .casa-scroll {
   position: absolute;
   inset: 0;
@@ -4321,172 +4300,8 @@ button.contratto-testa:focus-visible {
   color: var(--body-soft);
 }
 
-/* ---- Database: le case, le schede delle persone e le richieste ---- */
-.gruppo-casa {
-  margin: 0 0 26px;
-}
-/* l'intestazione della casa è la scheda di «Immobili» (match-card): qui solo si toglie ciò che la fa sembrare un pulsante */
-.casa-intestazione {
-  cursor: default;
-}
-
-/* i gruppi (candidature spontanee, possibili match, già valutati) usano l'intestazione dei gruppi dell'inquilino; qui solo il carattere, più grande */
-.sezione-db {
-  scroll-margin-top: 16px;
-}
-.sezione-db .gruppo-testa {
-  padding: 12px 2px 8px;
-  color: var(--ink);
-  font-size: 15px;
-}
-.sezione-corpo {
-  padding: 2px 0 8px;
-}
-.sezione-vuota {
-  margin: 6px 2px 0;
-  font-size: 16px;
-  line-height: 1.45;
-  color: var(--body-text);
-}
-.sotto-titolo {
-  margin: 14px 0 8px;
-  font-size: 15px;
-  font-weight: 800;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--body-soft);
-}
-.schede-lista {
-  display: grid;
-  gap: 12px;
-  margin: 8px 0 0;
-  padding: 0;
-  list-style: none;
-}
-.risultato-casa {
-  margin: 0 0 6px;
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--body-soft);
-}
-
 /* la scheda di una persona: in alto affidabilità e match, sotto foto e informazioni, in fondo i pulsanti */
-.persona {
-  padding: 14px;
-  border-radius: 20px;
-  background: #fff;
-  box-shadow: 0 8px 20px rgba(16, 21, 26, 0.06);
-}
-.persona-stato {
-  display: inline-block;
-  margin: 0 0 10px;
-  padding: 5px 12px;
-  border-radius: 999px;
-  font-size: 15px;
-  font-weight: 800;
-}
-.persona-stato.is-ok {
-  background: rgba(62, 107, 87, 0.16);
-  color: var(--moss);
-}
-.persona-stato.is-no {
-  background: rgba(201, 105, 78, 0.16);
-  color: var(--clay);
-}
-.persona-stato.is-neutro {
-  background: rgba(16, 21, 26, 0.08);
-  color: var(--body-soft);
-}
-.persona-cifre {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-.cifra {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 10px 8px;
-  border-radius: 16px;
-  background: rgba(16, 21, 26, 0.06);
-  text-align: center;
-}
-.cifra-numero {
-  font-family: var(--font-display);
-  font-size: 36px;
-  font-weight: 600;
-  line-height: 1;
-  color: var(--ink);
-}
-.cifra-nome {
-  margin-top: 4px;
-  font-size: 15px;
-  font-weight: 800;
-  line-height: 1.2;
-  color: var(--body-soft);
-}
-.cifra-match.is-match {
-  background: rgba(62, 107, 87, 0.16);
-}
-.cifra-match.is-match .cifra-numero {
-  color: var(--moss);
-}
-.cifra-match.is-wait {
-  background: rgba(201, 161, 90, 0.22);
-}
-.cifra-match.is-wait .cifra-numero {
-  color: var(--gold-ink);
-}
-.cifra-match.is-off,
-.cifra-match.is-alert {
-  background: rgba(201, 105, 78, 0.16);
-}
-.cifra-match.is-off .cifra-numero,
-.cifra-match.is-alert .cifra-numero {
-  color: var(--clay);
-}
-.persona-testa {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 14px;
-}
-.persona-foto {
-  flex: none;
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  object-fit: cover;
-}
-.persona-iniziale {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, var(--moss), var(--moss-light));
-  color: #fff;
-  font-family: var(--font-display);
-  font-size: 28px;
-  font-weight: 600;
-}
-.persona-chi {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  font-size: 17px;
-  color: var(--body-text);
-}
-.persona-chi b {
-  font-family: var(--font-display);
-  font-size: 22px;
-  color: var(--ink);
-}
-.persona-etichette {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 10px 0 4px;
-}
+
 .persona-chip {
   padding: 4px 10px;
   border-radius: 999px;
@@ -4494,73 +4309,6 @@ button.contratto-testa:focus-visible {
   font-size: 15px;
   font-weight: 600;
   color: var(--body-text);
-}
-.persona-etichette .badge-raccomandato {
-  padding: 5px 12px 5px 9px;
-  font-size: 15px;
-}
-.persona-etichette .badge-raccomandato-icona {
-  width: 18px;
-  height: 18px;
-}
-.persona-avviso {
-  margin: 8px 0 0;
-  padding: 8px 12px;
-  border-radius: 12px;
-  background: rgba(201, 105, 78, 0.14);
-  font-size: 15px;
-  line-height: 1.35;
-  color: var(--ink);
-}
-.persona-presentazione {
-  margin: 8px 0 4px;
-  font-size: 16px;
-  line-height: 1.4;
-  color: var(--body-text);
-}
-.persona-azioni {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 12px;
-}
-.persona-primario {
-  width: 100%;
-  min-height: 56px;
-  margin: 0;
-  font-size: 18px;
-}
-.persona-secondario {
-  width: 100%;
-  min-height: 52px;
-  font-size: 17px;
-}
-.persona-dettagli {
-  display: block;
-  width: 100%;
-  margin-top: 8px;
-  padding: 12px 4px;
-  border: 0;
-  background: transparent;
-  color: var(--moss);
-  font-size: 16px;
-  font-weight: 700;
-  text-align: center;
-  cursor: pointer;
-}
-
-/* la ricerca sta in fondo */
-.ricerca-fondo {
-  margin-top: 36px;
-  padding-top: 18px;
-  border-top: 2px solid rgba(16, 21, 26, 0.1);
-}
-.ricerca-fondo-titolo {
-  margin: 0 0 8px;
-  font-family: var(--font-display);
-  font-size: 24px;
-  font-weight: 600;
-  color: var(--ink);
 }
 
 /* la conferma e le richieste mandate */
@@ -4605,24 +4353,6 @@ button.contratto-testa:focus-visible {
   font-weight: 800;
   color: var(--moss);
   text-decoration: underline;
-}
-
-/* la ricerca in fondo: stessi caratteri leggibili del resto della pagina */
-.ricerca-fondo .chip {
-  min-height: 44px;
-  padding: 8px 16px;
-  font-size: 15px;
-}
-.ricerca-fondo .ricerca-input,
-.ricerca-fondo .ricerca-select {
-  min-height: 52px;
-  font-size: 17px;
-}
-.ricerca-fondo .ricerca-riepilogo {
-  font-size: 15px;
-}
-.ricerca-fondo .redo-link {
-  font-size: 16px;
 }
 
 /* ---- L'affitto che nasce dal contratto ---- */
@@ -5227,6 +4957,866 @@ button.contratto-testa:focus-visible {
   color: var(--body-soft);
 }
 
+/* ---- Database: l'elenco per immobile e il dettaglio della persona ---- */
+/* ============================================================
+   DATABASE INQUILINI — un elenco di persone diviso per immobile + il dettaglio della persona
+   Ricerca, ordinamento (affidabilità, match, recensioni; dal più alto o dal più basso), schede, immobili in box che si aprono e si chiudono.
+   I TRE CRITERI hanno tre colori, ovunque compaiano: affidabilità VERDE, match ORO, recensioni TERRACOTTA. Sul telefono il dettaglio si apre a
+   tutto schermo (sotto i 1280 px); da 1280 px in su sta accanto all'elenco (lo dice il blocco per computer, in fondo).
+   ============================================================ */
+.db-pagina {
+  --db-aff: var(--moss);
+  --db-aff-bg: rgba(62, 107, 87, 0.13);
+  --db-aff-tx: #2f5443;
+  --db-mat: var(--gold);
+  --db-mat-bg: rgba(201, 161, 90, 0.22);
+  --db-mat-tx: #7a5a1c;
+  --db-rec: var(--clay);
+  --db-rec-bg: rgba(201, 105, 78, 0.14);
+  --db-rec-tx: #a4472f;
+  margin-top: 6px;
+}
+.db-crit-affidabilita,
+.db-numerino-affidabilita,
+.db-tessera-affidabilita {
+  --c: var(--db-aff);
+  --bg: var(--db-aff-bg);
+  --tx: var(--db-aff-tx);
+}
+.db-crit-match,
+.db-numerino-match,
+.db-tessera-match {
+  --c: var(--db-mat);
+  --bg: var(--db-mat-bg);
+  --tx: var(--db-mat-tx);
+}
+.db-crit-recensioni,
+.db-numerino-recensioni,
+.db-tessera-recensioni {
+  --c: var(--db-rec);
+  --bg: var(--db-rec-bg);
+  --tx: var(--db-rec-tx);
+}
+
+.db-elenco {
+  display: flex;
+  flex-direction: column;
+}
+/* da computer la colonna ha un'altezza massima e solo la lista scorre: tutto il resto deve restare intero */
+.db-elenco > :not(.db-lista) {
+  flex-shrink: 0;
+}
+
+/* ---- ricerca ---- */
+.db-cerca {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 52px;
+  padding: 0 16px;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 8px 20px rgba(16, 21, 26, 0.06);
+}
+.db-cerca:focus-within {
+  box-shadow: 0 0 0 2px var(--moss);
+}
+.db-cerca-icona {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.db-cerca-campo {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: none;
+  font-family: var(--font-sans);
+  font-size: 16px;
+  color: var(--ink);
+}
+.db-cerca-campo::placeholder {
+  color: var(--muted);
+}
+
+/* ---- ordinamento: tre criteri con tre colori, e il verso ---- */
+.db-ordine {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+}
+.db-crit {
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: inset 0 0 0 1.5px rgba(16, 21, 26, 0.14);
+  color: var(--body-text);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.db-crit i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--c);
+}
+.db-crit.on {
+  background: var(--bg);
+  box-shadow: inset 0 0 0 2px var(--c);
+  color: var(--tx);
+}
+.db-ordine-riga {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 6px;
+}
+.db-verso {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 14px;
+  background: var(--ink);
+  cursor: pointer;
+}
+.db-verso-freccia {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: var(--paper);
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.2s ease;
+}
+.db-verso-freccia.giu {
+  transform: rotate(180deg);
+}
+.db-ordine-nota {
+  flex: 1;
+  margin: 0 2px;
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+/* ---- le schede in alto ---- */
+.db-schede {
+  display: flex;
+  gap: 6px;
+  margin: 8px -4px 0;
+  padding: 2px 4px 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.db-schede::-webkit-scrollbar {
+  display: none;
+}
+.db-scheda {
+  flex: none;
+  min-height: 44px;
+  padding: 0 13px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(16, 21, 26, 0.06);
+  color: var(--body-soft);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.db-scheda.on {
+  background: var(--ink);
+  color: var(--paper);
+}
+.db-scheda-n {
+  font-weight: 700;
+  opacity: 0.75;
+}
+
+/* ---- strumenti: quanti immobili, filtri, apri/chiudi tutti ---- */
+.db-strumenti {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 2px;
+  font-size: 15px;
+  color: var(--muted);
+}
+.db-strumenti-n {
+  margin-right: auto;
+  font-weight: 600;
+}
+.db-link {
+  min-height: 44px;
+  padding: 0 2px;
+  border: none;
+  background: none;
+  color: var(--moss);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.db-link:hover {
+  text-decoration: underline;
+}
+.db-filtri {
+  display: grid;
+  gap: 10px;
+  margin-top: 4px;
+  padding: 14px;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 8px 20px rgba(16, 21, 26, 0.06);
+}
+.db-filtri .chip {
+  min-height: 44px;
+  padding: 8px 16px;
+  font-size: 15px;
+}
+.db-filtri-riepilogo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 18px;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+/* ---- l'immobile: un box di sfondo che dice quale casa è, con le sue persone dentro ---- */
+.db-box {
+  scroll-margin-top: 16px;
+  margin-top: 14px;
+  padding: 8px;
+  border-radius: 22px;
+  background: rgba(62, 107, 87, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(62, 107, 87, 0.22);
+}
+.db-box-testa {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 64px;
+  padding: 6px 8px 8px;
+  border: none;
+  border-radius: 14px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.db-box-testa:hover {
+  background: rgba(62, 107, 87, 0.07);
+}
+.db-foto {
+  width: 52px;
+  height: 52px;
+  flex: none;
+  border-radius: 13px;
+  object-fit: cover;
+}
+.db-foto-piccola {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+}
+.db-foto-vuota {
+  display: grid;
+  place-items: center;
+  background: var(--moss);
+  color: var(--paper);
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+.db-box-chi {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+}
+.db-zona {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+  color: var(--moss);
+}
+.db-titolo {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.db-prezzo,
+.db-riepilogo {
+  font-size: 15px;
+  color: var(--body-soft);
+}
+.db-riepilogo {
+  display: none;
+  font-weight: 600;
+}
+.db-miniature {
+  display: none;
+  align-items: center;
+}
+.db-mini {
+  display: block;
+  width: 30px;
+  height: 30px;
+  margin-left: -7px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px #e6ede9;
+}
+.db-mini.sel {
+  box-shadow: 0 0 0 2px var(--moss);
+}
+.db-mini .db-avatar {
+  width: 30px;
+  height: 30px;
+  font-size: 15px;
+}
+.db-mini-altre {
+  display: grid;
+  place-items: center;
+  background: #ffffff;
+  color: var(--body-soft);
+  font-size: 15px;
+  font-weight: 800;
+}
+.db-conta {
+  display: grid;
+  place-items: center;
+  min-width: 28px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--moss);
+  color: var(--paper);
+  font-size: 15px;
+  font-weight: 800;
+}
+.db-freccia {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  fill: none;
+  stroke: var(--moss);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.28s ease;
+}
+/* chiuso: la freccia punta in giù («apri»), si vedono il riepilogo e le miniature, non il prezzo né il numero */
+.db-box.chiuso .db-freccia {
+  transform: rotate(180deg);
+}
+.db-box.chiuso .db-prezzo,
+.db-box.chiuso .db-conta {
+  display: none;
+}
+.db-box.chiuso .db-riepilogo {
+  display: block;
+}
+@media (min-width: 480px) {
+  .db-box.chiuso .db-miniature {
+    display: flex;
+  }
+}
+/* il contenuto si apre e si chiude scorrendo; chiuso è anche tolto dalla tastiera (`inert` nel codice) */
+.db-box-corpo {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.28s ease;
+}
+.db-box-interno {
+  min-height: 0;
+  overflow: hidden;
+}
+.db-box.chiuso .db-box-corpo {
+  grid-template-rows: 0fr;
+  visibility: hidden;
+  transition:
+    grid-template-rows 0.28s ease,
+    visibility 0s 0.28s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .db-box-corpo,
+  .db-box.chiuso .db-box-corpo,
+  .db-freccia {
+    transition: none;
+  }
+}
+.db-righe {
+  margin: 0;
+  padding: 3px;
+  list-style: none;
+  border-radius: 16px;
+  background: #ffffff;
+}
+.db-vuoto {
+  margin: 0;
+  padding: 18px 12px;
+  border-radius: 16px;
+  background: #ffffff;
+  text-align: center;
+  font-size: 15px;
+  color: var(--muted);
+}
+.db-info-possibili {
+  padding: 10px 6px 2px;
+}
+
+/* ---- una persona nell'elenco: foto, nome con il numerino del criterio scelto, lavoro, stato ---- */
+.db-riga {
+  position: relative;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+  width: 100%;
+  min-height: 64px;
+  padding: 10px 10px;
+  border: none;
+  border-radius: 13px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.db-riga:hover {
+  background: rgba(16, 21, 26, 0.035);
+}
+.db-riga.on {
+  background: rgba(62, 107, 87, 0.11);
+}
+.db-riga.on::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 12px;
+  bottom: 12px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--moss);
+}
+.db-avatar {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.db-avatar-iniziale {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #4d7b66, var(--moss));
+  color: #ffffff;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+}
+.db-avatar-grande {
+  width: 76px;
+  height: 76px;
+  font-size: 30px;
+}
+.db-riga-chi {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+.db-riga-nome {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+}
+/* il numerino: il valore del criterio con cui si ordina, nel colore di quel criterio */
+.db-numerino {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--tx);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 800;
+}
+.db-numerino.vuoto {
+  background: rgba(16, 21, 26, 0.06);
+  color: var(--muted);
+}
+.db-riga-lavoro {
+  font-size: 15px;
+  color: var(--muted);
+}
+.db-stato {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.db-stato b {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.db-stato-da_valutare {
+  color: var(--body-text);
+}
+.db-stato-match {
+  color: var(--moss);
+}
+.db-stato-scartato {
+  color: var(--clay);
+}
+/* sul telefono stretto lo stato va sotto il lavoro, per lasciare spazio al nome */
+@media (max-width: 479px) {
+  .db-riga {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+  .db-stato {
+    grid-column: 2;
+  }
+}
+
+/* ---- il dettaglio della persona ---- */
+.db-chiudi {
+  display: none;
+}
+.db-chiudi:focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 2px;
+  border-radius: 12px;
+}
+.db-immobile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px 8px 8px;
+  border-radius: 14px;
+  background: rgba(62, 107, 87, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(62, 107, 87, 0.22);
+}
+.db-immobile-chi {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+}
+.db-immobile-etichetta {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+  color: var(--moss);
+}
+.db-immobile-titolo {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.db-stato-pillola {
+  flex: none;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(16, 21, 26, 0.12);
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--body-text);
+}
+.db-persona {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 18px;
+}
+.db-persona-chi {
+  min-width: 0;
+}
+.db-persona-nome {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+.db-persona-lavoro {
+  margin: 2px 0 8px;
+  font-size: 16px;
+  color: var(--muted);
+}
+.db-etichette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.db-etichette .badge-raccomandato {
+  font-size: 15px;
+}
+.db-etichette .badge-raccomandato-icona {
+  width: 16px;
+  height: 16px;
+}
+/* i tre numeri, ognuno con il suo colore; quello con cui si ordina ha il bordo e l'etichetta */
+.db-tessere {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 26px 0 20px;
+}
+.db-tessera {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 6px 12px;
+  border-radius: 16px;
+  background: var(--bg);
+  text-align: center;
+}
+.db-tessera.sel {
+  box-shadow: inset 0 0 0 2px var(--c);
+}
+.db-tag {
+  position: absolute;
+  top: -13px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--c);
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.db-tessera-match .db-tag {
+  color: var(--ink);
+}
+.db-corona {
+  --p: 0;
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: conic-gradient(var(--c) calc(var(--p) * 1%), rgba(255, 255, 255, 0.78) 0);
+}
+.db-corona b {
+  display: grid;
+  place-items: center;
+  width: calc(100% - 10px);
+  height: calc(100% - 10px);
+  border-radius: 50%;
+  background: #ffffff;
+  color: var(--tx);
+  font-family: var(--font-display);
+  font-size: 21px;
+  font-weight: 700;
+}
+.db-tessera-testo {
+  display: flex;
+  flex-direction: column;
+}
+.db-tessera-nome {
+  color: var(--tx);
+  font-size: 15px;
+  font-weight: 800;
+}
+.db-tessera-sub {
+  font-size: 15px;
+  line-height: 1.25;
+  color: var(--body-soft);
+}
+.db-colonne {
+  display: grid;
+  gap: 22px;
+}
+.db-sezione {
+  margin: 0 0 4px;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.db-voce {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  margin-top: 12px;
+}
+.db-esito {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border-radius: 50%;
+  font-size: 15px;
+  font-weight: 800;
+}
+.db-esito svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.db-esito-si {
+  background: rgba(62, 107, 87, 0.16);
+  color: var(--moss);
+}
+.db-esito-no {
+  background: rgba(201, 105, 78, 0.16);
+  color: var(--clay);
+}
+.db-esito-nd {
+  background: rgba(16, 21, 26, 0.07);
+  color: var(--muted);
+}
+.db-voce-testo {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+.db-voce-testo b {
+  font-size: 15px;
+  font-weight: 800;
+}
+.db-voce-testo small {
+  font-size: 15px;
+  line-height: 1.35;
+  color: var(--body-soft);
+}
+.db-voce-testo .tag-obbl {
+  margin-left: 8px;
+}
+.db-nota {
+  margin: 10px 0 0;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.db-dichiarati,
+.db-presentazione {
+  margin-top: 20px;
+}
+.db-presentazione p {
+  margin: 4px 0 0;
+  max-width: 62ch;
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--body-text);
+}
+.db-azioni {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(16, 21, 26, 0.08);
+}
+.db-azioni .opp-cta {
+  flex: 1 1 200px;
+  width: auto;
+  min-height: 56px;
+  margin: 0;
+  font-size: 18px;
+}
+.db-azioni .richieste-secondario {
+  flex: 1 1 150px;
+  min-height: 52px;
+  font-size: 17px;
+}
+.db-dettaglio-vuoto {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* ---- sotto i 1280 px il dettaglio è una schermata a tutto schermo che si apre toccando una persona ---- */
+@media (max-width: 1279px) {
+  .db-dettaglio,
+  .db-dettaglio-vuoto {
+    display: none;
+  }
+  .db-dettaglio.modale {
+    position: fixed;
+    inset: 0;
+    /* sopra la barra di navigazione (80), sotto le schede di conferma (85) */
+    z-index: 82;
+    display: block;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    background: var(--paper);
+    padding: calc(env(safe-area-inset-top, 0px) + 10px) max(18px, calc((100vw - 720px) / 2)) calc(env(safe-area-inset-bottom, 0px) + 32px);
+  }
+  .db-dettaglio.modale .db-chiudi {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 48px;
+    margin: 0 0 6px -6px;
+    padding: 0 8px 0 2px;
+    border: none;
+    background: none;
+    color: var(--moss);
+    font-family: var(--font-sans);
+    font-size: 16px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+  .db-chiudi-icona {
+    width: 22px;
+    height: 22px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+}
+
 /* ============================================================
    VERSIONE PER COMPUTER (da 1024 px in su)
    Questo è l'ULTIMO blocco del foglio e ridisegna la composizione delle pagine SOLO da 1024 px in su, perché sembrino un'applicazione web e non il
@@ -5246,8 +5836,8 @@ button.contratto-testa:focus-visible {
     margin-top: 14px;
   }
   /* i pulsanti a tutta larghezza diventano pulsanti di una larghezza ragionevole (non nei moduli a comparsa, né dove stanno in fila) */
-  .screen-inner .opp-cta:not(.sheet *):not(.persona-azioni *):not(.benvenuto *),
-  .screen-inner .btn-danger-outline:not(.sheet *):not(.persona-azioni *):not(.benvenuto *) {
+  .screen-inner .opp-cta:not(.sheet *):not(.db-azioni *):not(.benvenuto *),
+  .screen-inner .btn-danger-outline:not(.sheet *):not(.db-azioni *):not(.benvenuto *) {
     width: min(100%, 440px);
   }
   .conferma-affitto-azioni > * {
@@ -5451,17 +6041,66 @@ button.contratto-testa:focus-visible {
     grid-column: 1 / -1;
   }
 
-  /* ---- Database: le persone in due colonne, i pulsanti affiancati ---- */
-  .schede-lista {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 18px;
+  /* ---- Database: l'elenco degli immobili a sinistra, il dettaglio della persona scelta a destra ---- */
+  .db-pagina {
+    display: grid;
+    grid-template-columns: 420px minmax(0, 1fr);
+    gap: 20px;
     align-items: start;
   }
-  .persona-azioni {
-    flex-direction: row;
+  .db-elenco {
+    position: sticky;
+    top: 0;
+    max-height: calc(100vh - 150px);
+    min-height: 420px;
+    padding: 12px 12px 8px;
+    border-radius: 20px;
+    background: #ffffff;
+    box-shadow: 0 8px 20px rgba(16, 21, 26, 0.06);
   }
-  .persona-azioni > * {
-    flex: 1 1 0;
+  .db-cerca {
+    background: var(--paper);
+    box-shadow: none;
+  }
+  .db-cerca:focus-within {
+    box-shadow: 0 0 0 2px var(--moss);
+  }
+  .db-lista {
+    flex: 1;
+    min-height: 0;
+    margin: 0 -4px;
+    padding: 0 4px 6px;
+    overflow-y: auto;
+  }
+  .db-dettaglio {
+    position: sticky;
+    top: 0;
+    display: block;
+    max-height: calc(100vh - 150px);
+    min-height: 420px;
+    padding: 22px 26px 24px;
+    overflow-y: auto;
+    border-radius: 20px;
+    background: #ffffff;
+    box-shadow: 0 8px 20px rgba(16, 21, 26, 0.06);
+  }
+  .db-dettaglio-vuoto {
+    display: block;
+    padding: 48px 20px;
+    border-radius: 20px;
+    background: #ffffff;
+    text-align: center;
+  }
+  .db-colonne {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+    gap: 30px;
+  }
+  .db-azioni .opp-cta {
+    flex: 0 0 auto;
+    min-width: 180px;
+  }
+  .db-azioni .richieste-secondario {
+    flex: 0 0 auto;
   }
 }
 
@@ -5475,7 +6114,7 @@ button.contratto-testa:focus-visible {
   .screen-inner {
     max-width: 1320px;
   }
-  .schede-lista {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  .db-pagina {
+    grid-template-columns: 460px minmax(0, 1fr);
   }
 }

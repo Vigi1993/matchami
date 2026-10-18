@@ -63,9 +63,9 @@ test("computer: le composizioni a più colonne partono da 1280 px (a 1024 px non
   const livello = (n) => livelli.find((l) => larghezza(l) === n)?.corpo ?? "";
   const l1024 = livello(1024), l1280 = livello(1280);
   assert.match(l1280, /\.screen-dark\.home-inq \{\s+display: grid;/, "la Home a due colonne sta nel livello 1280");
-  assert.match(l1280, /\.schede-lista \{\s+grid-template-columns: repeat\(2,/, "le liste a due colonne stanno nel livello 1280");
+  assert.match(l1280, /\.db-pagina \{\s+display: grid;\s+grid-template-columns: 420px minmax\(0, 1fr\);/, "elenco e dettaglio affiancati stanno nel livello 1280");
   assert.match(l1280, /\.casa-colonna \{\s+display: grid;/, "le case affiancate stanno nel livello 1280");
-  for (const spia of ["display: grid;\n    grid-template-columns: minmax(440px", "grid-template-columns: repeat(2, minmax(0, 1fr));\n    gap: 18px"]) assert.ok(!l1024.includes(spia), "composizione a più colonne nel livello 1024: " + spia.slice(0, 40));
+  for (const spia of ["display: grid;\n    grid-template-columns: minmax(440px", "grid-template-columns: 420px minmax(0, 1fr);\n    gap: 20px"]) assert.ok(!l1024.includes(spia), "composizione a più colonne nel livello 1024: " + spia.slice(0, 40));
 });
 
 test("computer: la Home a due colonne sta davvero nello spazio a 1280 px (barra laterale 248 + riempimenti + colonne + intervallo)", () => {
@@ -87,7 +87,7 @@ test("computer: il benvenuto ha i due contenitori nel codice e sul telefono non 
 
 test("computer: i pulsanti a tutta larghezza si limitano, ma non nei moduli a comparsa, in fila o nel benvenuto", () => {
   const l = livelli.find((x) => larghezza(x) === 1024).corpo;
-  assert.match(l, /\.screen-inner \.opp-cta:not\(\.sheet \*\):not\(\.persona-azioni \*\):not\(\.benvenuto \*\)/);
+  assert.match(l, /\.screen-inner \.opp-cta:not\(\.sheet \*\):not\(\.db-azioni \*\):not\(\.benvenuto \*\)/);
   assert.match(l, /width: min\(100%, 440px\);/);
 });
 

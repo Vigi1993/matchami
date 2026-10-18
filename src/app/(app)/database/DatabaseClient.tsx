@@ -1,37 +1,47 @@
 "use client";
 
-import { Fragment, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Sheet } from "@/components/Sheet";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { Chip } from "@/components/ui/Chip";
 import { IconPersone } from "@/components/icons";
-import { BadgeRaccomandato } from "@/components/BadgeRaccomandato";
-import { PossibiliMatch } from "@/components/PossibiliMatch";
-import { RicercaCandidati } from "@/components/RicercaCandidati";
-import { SchedaPersona } from "@/components/SchedaPersona";
-import { SezioneApribile } from "@/components/SezioneApribile";
-import { stelleTesto, testoRecensioni } from "@/lib/recensioni";
+import { DettaglioPersona } from "@/components/database/DettaglioPersona";
+import { ElencoDatabase } from "@/components/database/ElencoDatabase";
 import { MOTIVI_RIFIUTO } from "@/lib/motivi-rifiuto";
 import type { ChiaveMotivoRifiuto } from "@/lib/motivi-rifiuto";
 import { azioniPerStato } from "@/lib/decisioni";
-import { conteggiGruppo, datiSchedaCandidato, raggruppaPerAnnuncio, type CasaDatabase, type GruppoAnnuncio } from "@/lib/database-proprietario";
-import { testoPrezzo } from "@/lib/proprietario/home";
+import { conteggiGruppo, datiSchedaCandidato, raggruppaPerAnnuncio, type CasaDatabase } from "@/lib/database-proprietario";
+import {
+  FILTRI_ELENCO_VUOTI,
+  ORDINE_INIZIALE,
+  conteggiSchede,
+  costruisciBox,
+  vociDaGruppi,
+  vociFiltrate,
+  vocePerDettaglio,
+  type FiltriElenco,
+  type Ordine,
+} from "@/lib/database-elenco";
+import { MESSAGGIO_RICHIESTA_MAX } from "@/lib/richieste";
+import { normalizzaRicerca } from "@/lib/ricerca-candidati";
 import type { PossibiliPerCasa } from "@/lib/proprietario/possibili-server";
+import type { SchedaInquilino } from "@/lib/proprietario/possibili-inquilini";
 import type { CandidaturaRicevuta } from "@/lib/types";
-import { FILTRI_VUOTI, TESTO_NESSUN_RISULTATO, filtraCandidature, filtriValidi, haPunteggi, numeroFiltriAttivi, opzioniAnnunci, type Filtri } from "@/lib/ricerca-candidati";
-import { riapriCandidatura, valutaCandidatura } from "./actions";
-
-const SIMBOLO = { ok: "✓", no: "–", non_indicato: "?" } as const;
+import { faiMatch, riapriCandidatura, valutaCandidatura } from "./actions";
 
 type Stato = "in_attesa" | "accettata" | "rifiutata";
 type Dialogo = { tipo: "match" | "scarta" | "annulla_match"; c: CandidaturaRicevuta };
 
+/** Sotto questa larghezza il dettaglio di una persona si apre a tutto schermo; da qui in su sta accanto all'elenco (lo dice lo stile). */
+const QUERY_DETTAGLIO_A_TUTTO_SCHERMO = "(max-width: 1279px)";
+
 /**
- * Il Database inquilini: diviso per CASA. Dentro ogni casa tre sezioni: le candidature spontanee (chi si è candidato da solo),
- * i possibili match (chi cerca una casa come la tua ma non si è candidato) e i già valutati (match e scartati). Ogni persona ha
- * la sua scheda con i pulsanti giusti: «Fai match» e «Scarta» per chi aspetta, «Apri chat» e «Annulla match» per chi è un match,
- * «Annulla scarto» per chi è stato scartato. In fondo la ricerca.
+ * Il Database inquilini: UN elenco di persone diviso per IMMOBILE (ogni immobile è un box che si apre e si chiude), con la ricerca, l'ordinamento
+ * per affidabilità, match o recensioni (dal più alto o dal più basso) e il dettaglio della persona scelta. Per chi si è candidato: «Fai match» e
+ * «Scarta» se aspetta, «Apri chat» e «Annulla match» se è un match, «Annulla scarto» se è stato scartato. Per chi non si è candidato ma cerca una
+ * casa come la tua: «Fai match» manda una richiesta (con due parole facoltative).
  */
 export function DatabaseClient({
   candidature,
@@ -44,7 +54,7 @@ export function DatabaseClient({
   /** per ogni casa che gli inquilini vedono: quanti cercano una casa come quella, chi si può contattare, le richieste mandate */
   possibili?: PossibiliPerCasa[];
 }) {
-  const [selezionata, setSelezionata] = useState<CandidaturaRicevuta | null>(null);
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [errore, setErrore] = useState<string | null>(null);
   const [dialogo, setDialogo] = useState<Dialogo | null>(null);
@@ -52,11 +62,65 @@ export function DatabaseClient({
   // Lo stato che il proprietario ha appena dato (finché la pagina si ricarica con i dati nuovi)
   const [aggiornate, setAggiornate] = useState<Record<string, Stato>>({});
   const [avviso, setAvviso] = useState<{ testo: string; chat?: string } | null>(null);
-  // La ricerca e i filtri restano in questa pagina: non si salvano né si inviano.
-  const [filtriScelti, setFiltriScelti] = useState<Filtri>(FILTRI_VUOTI);
+  // Ciò che si cerca, si ordina e si apre resta in questa pagina: non si salva né si invia.
+  const [ordine, setOrdine] = useState<Ordine>({ ...ORDINE_INIZIALE });
+  const [filtri, setFiltri] = useState<FiltriElenco>({ ...FILTRI_ELENCO_VUOTI });
+  const [chiusi, setChiusi] = useState<Record<string, boolean>>({});
+  const [scelta, setScelta] = useState<string | null>(null);
+  const [aTuttoSchermo, setATuttoSchermo] = useState(false);
+  const [richiesta, setRichiesta] = useState<{ casa: PossibiliPerCasa; s: SchedaInquilino } | null>(null);
+  const [messaggio, setMessaggio] = useState("");
+  const chiudiRif = useRef<HTMLButtonElement>(null);
+  const eraATuttoSchermo = useRef(false);
 
   const stato = (c: CandidaturaRicevuta): string => aggiornate[c.id] ?? c.status;
 
+  // ---- le persone, per immobile, nell'ordine scelto ----
+  const gruppi = raggruppaPerAnnuncio({ case_, candidature, possibili, stato });
+  const voci = vociDaGruppi(gruppi);
+  const casePer = new Map(gruppi.map((g) => [g.casa.id, g.casa] as const));
+  const conteggi = conteggiSchede(vociFiltrate(voci, filtri, casePer));
+  const box = costruisciBox({ gruppi, voci, filtri, ordine });
+  const persone = box.reduce((s, b) => s + b.voci.length, 0);
+  const corrente = vocePerDettaglio(box, scelta);
+  const totaleDaValutare = gruppi.reduce((s, g) => s + g.spontanei.length, 0);
+  const totalePossibili = gruppi.reduce((s, g) => s + conteggiGruppo(g).possibili, 0);
+  const primoConPossibili = gruppi.find((g) => g.possibili !== null)?.casa.id ?? null;
+  const conPunteggi = voci.some((v) => v.scheda.match.tipo === "pct");
+
+  // ---- il dettaglio a tutto schermo (telefono): il fuoco va sul pulsante per tornare, e poi torna sulla persona; Esc lo chiude ----
+  useEffect(() => {
+    if (aTuttoSchermo) {
+      eraATuttoSchermo.current = true;
+      chiudiRif.current?.focus();
+    } else if (eraATuttoSchermo.current) {
+      eraATuttoSchermo.current = false;
+      document.querySelector<HTMLElement>(`[data-chiave="${CSS.escape(scelta ?? "")}"]`)?.focus();
+    }
+  }, [aTuttoSchermo, scelta]);
+  useEffect(() => {
+    if (!aTuttoSchermo) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && dialogo === null && richiesta === null) setATuttoSchermo(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [aTuttoSchermo, dialogo, richiesta]);
+
+  function seleziona(chiave: string) {
+    setScelta(chiave);
+    // solo quando serve: da computer il dettaglio c'è già accanto all'elenco
+    if (window.matchMedia(QUERY_DETTAGLIO_A_TUTTO_SCHERMO).matches) setATuttoSchermo(true);
+  }
+  function cambiaFiltri(f: FiltriElenco) {
+    // chi comincia a cercare vuole vedere i risultati: si aprono gli immobili che erano chiusi
+    if (normalizzaRicerca(f.testo) !== "" && normalizzaRicerca(f.testo) !== normalizzaRicerca(filtri.testo)) setChiusi({});
+    setFiltri(f);
+  }
+  const commuta = (casaId: string) => setChiusi((prev) => ({ ...prev, [casaId]: !prev[casaId] }));
+  const tutti = (chiudi: boolean) => setChiusi(Object.fromEntries(gruppi.map((g) => [g.casa.id, chiudi])));
+
+  // ---- le decisioni (le stesse di sempre) ----
   function chiudiDialogo() {
     setDialogo(null);
     setErrore(null);
@@ -65,13 +129,12 @@ export function DatabaseClient({
   function apriDialogo(tipo: Dialogo["tipo"], c: CandidaturaRicevuta) {
     setErrore(null);
     setMotivo(null);
-    setSelezionata(null);
     setDialogo({ tipo, c });
   }
-
   function dopo(c: CandidaturaRicevuta, nuovo: Stato, testo: string, chat?: string) {
     setAggiornate((prev) => ({ ...prev, [c.id]: nuovo }));
     setAvviso({ testo, chat });
+    setATuttoSchermo(false);
   }
 
   function conferma() {
@@ -103,16 +166,25 @@ export function DatabaseClient({
     });
   }
 
-  // ---- i gruppi, per casa ----
-  const gruppi = raggruppaPerAnnuncio({ case_, candidature, possibili, stato });
-  const totaleDaValutare = gruppi.reduce((s, g) => s + g.spontanei.length, 0);
-  const totalePossibili = gruppi.reduce((s, g) => s + conteggiGruppo(g).possibili, 0);
-  const primoConPossibili = gruppi.find((g) => g.possibili !== null)?.casa.id ?? null;
-
-  // ---- ricerca: sta in fondo, e mostra i suoi risultati sotto la barra ----
-  const filtri = filtriValidi(filtriScelti, candidature);
-  const visibili = filtraCandidature(candidature, filtri, stato);
-  const cercando = numeroFiltriAttivi(filtri) > 0;
+  // ---- le richieste a chi non si è candidato ----
+  function chiudiRichiesta() {
+    setRichiesta(null);
+    setMessaggio("");
+    setErrore(null);
+  }
+  function inviaRichiesta() {
+    if (!richiesta) return;
+    const { casa, s } = richiesta;
+    setErrore(null);
+    startTransition(async () => {
+      const r = await faiMatch(casa.id, s.tenantId, messaggio);
+      if (!r.ok) return setErrore(r.error);
+      setAvviso({ testo: `Richiesta inviata a ${s.nome}` });
+      chiudiRichiesta();
+      setATuttoSchermo(false);
+      router.refresh();
+    });
+  }
 
   /** I pulsanti di una candidatura, secondo il suo stato */
   function azioni(c: CandidaturaRicevuta) {
@@ -120,27 +192,27 @@ export function DatabaseClient({
     return (
       <>
         {a.faiMatch && (
-          <button type="button" className="opp-cta persona-primario" disabled={pending} onClick={() => apriDialogo("match", c)}>
+          <button type="button" className="opp-cta" disabled={pending} onClick={() => apriDialogo("match", c)}>
             Fai match
           </button>
         )}
         {a.apriChat && (
-          <Link href={`/chat/${c.id}`} className="opp-cta persona-primario block text-center">
+          <Link href={`/chat/${c.id}`} className="opp-cta block text-center">
             Apri chat
           </Link>
         )}
         {a.scarta && (
-          <button type="button" className="richieste-secondario persona-secondario" disabled={pending} onClick={() => apriDialogo("scarta", c)}>
+          <button type="button" className="richieste-secondario" disabled={pending} onClick={() => apriDialogo("scarta", c)}>
             Scarta
           </button>
         )}
         {a.annullaMatch && (
-          <button type="button" className="richieste-secondario persona-secondario" disabled={pending} onClick={() => apriDialogo("annulla_match", c)}>
+          <button type="button" className="richieste-secondario" disabled={pending} onClick={() => apriDialogo("annulla_match", c)}>
             Annulla match
           </button>
         )}
         {a.annullaScarto && (
-          <button type="button" className="richieste-secondario persona-secondario" disabled={pending} onClick={() => annullaScarto(c)}>
+          <button type="button" className="richieste-secondario" disabled={pending} onClick={() => annullaScarto(c)}>
             Annulla scarto
           </button>
         )}
@@ -148,95 +220,22 @@ export function DatabaseClient({
     );
   }
 
-  function scheda(c: CandidaturaRicevuta) {
-    const s = stato(c);
-    const etichetta = s === "accettata" ? { testo: "Match fatto", tono: "ok" as const } : s === "rifiutata" ? { testo: "Scartato", tono: "no" as const } : s === "ritirata" ? { testo: "Ha ritirato la candidatura", tono: "neutro" as const } : null;
-    return (
-      <SchedaPersona dati={datiSchedaCandidato(c)} stato={etichetta} onApri={() => setSelezionata(c)}>
-        {azioni(c)}
-      </SchedaPersona>
-    );
-  }
-
-  function casa(g: GruppoAnnuncio) {
-    const n = conteggiGruppo(g);
-    const zona = g.casa.zona.replace(", Milano", "");
-    return (
-      <article className="gruppo-casa" aria-label={`Casa: ${g.casa.titolo}`}>
-        {/* la stessa scheda della pagina Immobili: foto, zona, titolo, prezzo */}
-        <header className="match-card casa-intestazione">
-          {g.casa.foto ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={g.casa.foto} alt="" />
-          ) : (
-            <div className="mc-avatar">{g.casa.titolo.slice(0, 2).toUpperCase()}</div>
-          )}
-          <div className="mc-body">
-            <div className="mc-zona">{zona}</div>
-            <div className="mc-title">{g.casa.titolo}</div>
-            <div className="mc-meta">{g.casa.prezzo ? testoPrezzo(g.casa.prezzo) : "—"}</div>
-          </div>
-        </header>
-
-        <SezioneApribile titolo="Candidature spontanee" conteggio={n.daValutare} vuoto="Nessuno si è ancora candidato a questa casa.">
-          {g.spontanei.length > 0 && (
-            <ul className="schede-lista">
-              {g.spontanei.map((c) => (
-                <li key={c.id}>
-                  {scheda(c)}
-                </li>
-              ))}
-            </ul>
-          )}
-        </SezioneApribile>
-
-        {g.possibili !== null && (
-          <SezioneApribile id={g.casa.id === primoConPossibili ? "possibili" : undefined} titolo="Possibili match" conteggio={n.possibili}>
-            <PossibiliMatch casa={g.possibili} />
-          </SezioneApribile>
-        )}
-
-        <SezioneApribile titolo="Già valutati" conteggio={n.valutati} aperta={n.daValutare === 0 && n.possibili === 0} vuoto="Quando fai un match o scarti qualcuno, lo trovi qui.">
-          {g.match.length > 0 && (
-            <>
-              <h3 className="sotto-titolo">Match</h3>
-              <ul className="schede-lista">
-                {g.match.map((c) => (
-                  <li key={c.id}>
-                    {scheda(c)}
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-          {g.scartati.length > 0 && (
-            <>
-              <h3 className="sotto-titolo">Scartati</h3>
-              <ul className="schede-lista">
-                {g.scartati.map((c) => (
-                  <li key={c.id}>
-                    {scheda(c)}
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-          {g.ritirati.length > 0 && (
-            <>
-              <h3 className="sotto-titolo">Hanno ritirato la candidatura</h3>
-              <ul className="schede-lista">
-                {g.ritirati.map((c) => (
-                  <li key={c.id}>
-                    {scheda(c)}
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-        </SezioneApribile>
-      </article>
-    );
-  }
+  const casaCorrente = corrente ? casePer.get(corrente.casaId) : undefined;
+  const azioniCorrente = !corrente ? null : corrente.candidatura ? (
+    azioni(corrente.candidatura)
+  ) : corrente.possibile ? (
+    <button
+      type="button"
+      className="opp-cta"
+      disabled={pending}
+      onClick={() => {
+        const casa = possibili.find((p) => p.id === corrente.casaId);
+        if (casa && corrente.possibile) setRichiesta({ casa, s: corrente.possibile });
+      }}
+    >
+      Fai match
+    </button>
+  ) : null;
 
   return (
     <PageContainer wide>
@@ -258,142 +257,46 @@ export function DatabaseClient({
         </div>
       )}
 
-      {gruppi.length === 0 && (
+      {gruppi.length === 0 ? (
         <div className="empty-inline">
           <IconPersone className="icon-empty" />
           <h3>Ancora nessuna casa da mostrare</h3>
           <p>Appena una tua casa sarà pubblicata, qui vedrai chi si candida e chi potrebbe fare al caso tuo.</p>
         </div>
-      )}
-
-      {gruppi.map((g) => (
-        <Fragment key={g.casa.id}>{casa(g)}</Fragment>
-      ))}
-
-      {/* ---- la ricerca sta in fondo ---- */}
-      {candidature.length > 0 && (
-        <section className="ricerca-fondo" aria-label="Cerca tra i candidati">
-          <h2 className="ricerca-fondo-titolo">Cerca tra i candidati</h2>
-          <RicercaCandidati
+      ) : (
+        <div className="db-pagina">
+          <ElencoDatabase
+            box={box}
+            ordine={ordine}
+            onOrdine={setOrdine}
             filtri={filtri}
-            onCambia={setFiltriScelti}
-            annunci={opzioniAnnunci(candidature)}
-            conPunteggi={haPunteggi(candidature)}
-            visibili={visibili.length}
-            totale={candidature.length}
+            onFiltri={cambiaFiltri}
+            conteggi={conteggi}
+            conPunteggi={conPunteggi}
+            selezionata={corrente?.chiave ?? null}
+            onSeleziona={seleziona}
+            chiusi={chiusi}
+            onCommuta={commuta}
+            onTutti={tutti}
+            idPossibili={primoConPossibili}
+            persone={persone}
+            totalePersone={voci.length}
           />
-          {cercando && visibili.length === 0 && (
-            <div className="empty-inline">
-              <IconPersone className="icon-empty" />
-              <h3>{TESTO_NESSUN_RISULTATO}</h3>
-              <button type="button" className="redo-link" onClick={() => setFiltriScelti(FILTRI_VUOTI)}>
-                Azzera filtri
-              </button>
-            </div>
+          {corrente && casaCorrente ? (
+            <DettaglioPersona
+              voce={corrente}
+              casa={casaCorrente}
+              criterio={ordine.criterio}
+              azioni={azioniCorrente}
+              modale={aTuttoSchermo}
+              onChiudi={() => setATuttoSchermo(false)}
+              chiudiRif={chiudiRif}
+            />
+          ) : (
+            <p className="db-dettaglio-vuoto">Nessuna persona da mostrare: cambia la ricerca o i filtri.</p>
           )}
-          {cercando && visibili.length > 0 && (
-            <ul className="schede-lista" aria-label="Risultati della ricerca">
-              {visibili.map((c) => (
-                <li key={c.id}>
-                  <p className="risultato-casa">{c.listings?.titolo ?? "Annuncio"}</p>
-                  {scheda(c)}
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+        </div>
       )}
-
-      {/* ---- la scheda completa ---- */}
-      <Sheet open={selezionata !== null} onClose={() => setSelezionata(null)} title={selezionata ? `${selezionata.nome ?? "Inquilino"} ${selezionata.cognome ?? ""}` : "Candidatura"}>
-        {selezionata && (
-          <>
-            {selezionata.tenant_profiles?.avatar_url && (
-              <div className="flex justify-center mb-4">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={selezionata.tenant_profiles.avatar_url}
-                  alt={`Foto di ${selezionata.nome ?? "inquilino"}`}
-                  className="w-24 h-24 rounded-full object-cover"
-                />
-              </div>
-            )}
-
-            <p className="sheet-sub">
-              Candidatura per <b>{selezionata.listings?.titolo}</b>
-            </p>
-
-            {selezionata.valutazione && (
-              <PercheMatchProprietario valutazione={selezionata.valutazione} />
-            )}
-
-            <DettaglioRow
-              label="Situazione lavorativa"
-              value={selezionata.tenant_profiles?.professione ?? "—"}
-            />
-            <DettaglioRow
-              label="Reddito dichiarato"
-              value={
-                selezionata.tenant_profiles?.reddito_mensile
-                  ? `€${selezionata.tenant_profiles.reddito_mensile.toLocaleString("it-IT")}/mese`
-                  : "—"
-              }
-            />
-            <DettaglioRow
-              label="Reddito del nucleo"
-              value={
-                selezionata.tenant_profiles?.reddito_nucleo
-                  ? `€${selezionata.tenant_profiles.reddito_nucleo.toLocaleString("it-IT")}/mese`
-                  : "Non indicato"
-              }
-            />
-            <DettaglioRow
-              label="Reddito verificato"
-              value={selezionata.tenant_profiles?.verificato ? "Sì" : "No"}
-            />
-            {selezionata.valutazione && (
-              <DettaglioRow
-                label="Affidabilità"
-                value={`${selezionata.valutazione.affidabilita}/100`}
-              />
-            )}
-            {/* il badge: due recensioni positive da due proprietari diversi (le valutazioni vecchie non lo hanno) */}
-            {selezionata.valutazione?.raccomandato === true && (
-              <div className="feat-row">
-                <span className="k">Inquilino raccomandato</span>
-                <span className="v">
-                  <BadgeRaccomandato compatto />
-                </span>
-              </div>
-            )}
-            {/* le recensioni stanno a parte dal punteggio; le valutazioni vecchie non le hanno */}
-            {selezionata.valutazione?.recensioni && (
-              <DettaglioRow
-                label="Recensioni"
-                value={
-                  selezionata.valutazione.recensioni.numero > 0
-                    ? `${stelleTesto(selezionata.valutazione.recensioni.media)} ${testoRecensioni(selezionata.valutazione.recensioni)}`
-                    : testoRecensioni(selezionata.valutazione.recensioni)
-                }
-              />
-            )}
-            {selezionata.tenant_profiles?.presentazione && (
-              <div style={{ marginTop: 18 }}>
-                <div className="pref-label">
-                  <span>Presentazione</span>
-                </div>
-                <p className="note-box" style={{ marginTop: 0, fontStyle: "italic" }}>
-                  &quot;{selezionata.tenant_profiles.presentazione}&quot;
-                </p>
-              </div>
-            )}
-
-            <div className="persona-azioni" style={{ marginTop: 18 }}>
-              {azioni(selezionata)}
-            </div>
-          </>
-        )}
-      </Sheet>
 
       {/* ---- le conferme: fai match, scarta, annulla match ---- */}
       <Sheet
@@ -457,85 +360,45 @@ export function DatabaseClient({
           </>
         )}
       </Sheet>
+
+      {/* ---- la richiesta a chi non si è candidato: prima una conferma, con due parole facoltative ---- */}
+      <Sheet open={richiesta !== null} onClose={chiudiRichiesta} title={richiesta ? `Fai match con ${richiesta.s.nome}?` : "Fai match"}>
+        {richiesta && (
+          <>
+            <p className="possibili-testo" style={{ marginTop: 0 }}>
+              Le arriverà una richiesta per <b>{richiesta.casa.titolo}</b>. Se accetta, potete scrivervi in chat. Se non risponde o dice di no, non succede niente.
+            </p>
+            <label className="field-label" htmlFor="messaggio-richiesta">
+              Vuoi aggiungere due parole? (facoltativo)
+            </label>
+            <textarea
+              id="messaggio-richiesta"
+              className="ob-textarea"
+              rows={3}
+              maxLength={MESSAGGIO_RICHIESTA_MAX}
+              value={messaggio}
+              onChange={(e) => setMessaggio(e.target.value)}
+              placeholder="Per esempio: la casa è libera da dicembre, può venire a vederla quando vuole."
+            />
+            <small className="field-note">
+              {messaggio.length}/{MESSAGGIO_RICHIESTA_MAX}
+            </small>
+            {errore && (
+              <p className="note-error" role="alert">
+                {errore}
+              </p>
+            )}
+            <div className="possibili-conferma">
+              <button type="button" className="opp-cta" disabled={pending} onClick={inviaRichiesta}>
+                {pending ? "Invio…" : "Sì, invia la richiesta"}
+              </button>
+              <button type="button" className="richieste-secondario" disabled={pending} onClick={chiudiRichiesta}>
+                No, torna indietro
+              </button>
+            </div>
+          </>
+        )}
+      </Sheet>
     </PageContainer>
-  );
-}
-
-// ------------------------------------------------------------
-
-/**
- * "Perché vedi questo numero", dal lato del proprietario: i criteri che ha
- * chiesto, quali il candidato soddisfa, e se qualcuno obbligatorio manca.
- */
-export function PercheMatchProprietario({
-  valutazione,
-}: {
-  valutazione: NonNullable<CandidaturaRicevuta["valutazione"]>;
-}) {
-  const { match, congelata } = valutazione;
-
-  if (match.punteggio === null) {
-    return (
-      <div className="note-box" style={{ marginTop: 0, marginBottom: 18 }}>
-        Per questo annuncio non hai chiesto nessun criterio, quindi non c&apos;è
-        una percentuale. Puoi aggiungerli da Immobili.
-      </div>
-    );
-  }
-
-  return (
-    <div className="match-box">
-      <div className="match-box-top">
-        <div className="match-box-pct">{match.punteggio}%</div>
-        <div>
-          <div className="match-box-label">{match.etichetta}</div>
-          <div className="match-box-sub">
-            {congelata
-              ? "Fotografia al momento della tua decisione"
-              : "Sui criteri che hai chiesto, con i dati attuali"}
-          </div>
-        </div>
-      </div>
-
-      {match.bloccato && (
-        <div className="note-stop">
-          Non soddisfa un criterio obbligatorio: {match.mancanti.join(", ")}.
-        </div>
-      )}
-
-      <div className="perche-lista">
-        {match.criteri.map((c) => (
-          <div key={c.chiave} className={`perche-row ${c.stato}`}>
-            <span className="perche-simbolo">{SIMBOLO[c.stato]}</span>
-            <span className="perche-testo">
-              {c.etichetta}
-              {c.obbligatorio && <em className="tag-obbl">obbligatorio</em>}
-              {c.dettaglio && <small>{c.dettaglio}</small>}
-              {c.stato === "non_indicato" && <small>Non indicato dal candidato</small>}
-            </span>
-          </div>
-        ))}
-      </div>
-
-      {match.incompleto && !congelata && (
-        <p className="field-note" style={{ marginTop: 8 }}>
-          Il candidato non ha indicato alcuni dati: se li compila, la
-          percentuale può salire.
-        </p>
-      )}
-      <p className="field-note" style={{ marginTop: 8 }}>
-        È una compatibilità sui dati dichiarati dal candidato, non una
-        valutazione della persona né una previsione.
-      </p>
-    </div>
-  );
-}
-
-function DettaglioRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="feat-row">
-      <span className="k">{label}</span>
-      <span className="v">{value}</span>
-    </div>
   );
 }

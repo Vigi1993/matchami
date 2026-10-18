@@ -121,17 +121,22 @@ test("colore della percentuale: da 70 verde, da 50 oro, sotto rosso (estremi esa
 // ============================================================ la pagina
 const cl = senzaCommenti(leggi("src", "app", "(app)", "database", "DatabaseClient.tsx"));
 
-test("PAGINA: ogni casa ha tre sezioni nell'ordine candidature spontanee, possibili match, già valutati (match e scartati); la ricerca viene DOPO le case", () => {
+test("PAGINA: un elenco per immobile con ricerca, ordine e schede in alto e il dettaglio della persona accanto; senza case dice perché", () => {
   const i = (x) => { const k = cl.indexOf(x); assert.ok(k > 0, `manca «${x}»`); return k; };
-  assert.ok(i('titolo="Candidature spontanee"') < i('titolo="Possibili match"') && i('titolo="Possibili match"') < i('titolo="Già valutati"')); assert.ok(i('<h3 className="sotto-titolo">Match</h3>') < i('<h3 className="sotto-titolo">Scartati</h3>'));
-  assert.ok(i("{gruppi.map") < i('aria-label="Cerca tra i candidati"') && i('aria-label="Cerca tra i candidati"') < i("<RicercaCandidati"), "la ricerca sta in fondo"); assert.ok(i('<h2 className="ricerca-fondo-titolo">Cerca tra i candidati</h2>') > i("{gruppi.map"));
-  assert.match(cl, /titolo="Già valutati" conteggio=\{n\.valutati\} aperta=\{n\.daValutare === 0 && n\.possibili === 0\}/, "«Già valutati» parte chiusa se c'è altro da fare"); assert.match(cl, /\{cercando && visibili\.length > 0 && \(/, "i risultati si mostrano solo cercando");
+  assert.ok(i("<ElencoDatabase") < i("<DettaglioPersona"), "l'elenco viene prima del dettaglio"); assert.ok(i("{gruppi.length === 0 ? (") < i('<div className="db-pagina">'), "senza case c'è il messaggio, non l'elenco");
+  assert.ok(i("Ancora nessuna casa da mostrare") < i("<ElencoDatabase")); assert.match(cl, /const box = costruisciBox\(\{ gruppi, voci, filtri, ordine \}\);/, "i box vengono dalla logica pura");
+  assert.match(cl, /useState<Ordine>\(\{ \.\.\.ORDINE_INIZIALE \}\)/, "si parte dal match, dal più alto"); assert.match(cl, /criterio=\{ordine\.criterio\}/, "il dettaglio segna il criterio con cui si ordina");
+  const e = senzaCommenti(leggi("src", "components", "database", "ElencoDatabase.tsx")); const j = (x) => { const k = e.indexOf(x); assert.ok(k > 0, `manca «${x}»`); return k; };
+  assert.ok(j('role="search"') < j('aria-label="Ordina per"') && j('aria-label="Ordina per"') < j('aria-label="Mostra"') && j('aria-label="Mostra"') < j('className="db-strumenti"') && j('className="db-strumenti"') < j('className="db-lista"'), "ricerca, ordine, schede, strumenti, immobili");
+  assert.match(e, /CRITERI_ORDINE\.map\(\(c\) => \{/, "i tre criteri vengono dalla logica"); assert.match(e, /onClick=\{\(\) => onOrdine\(scegliCriterio\(ordine, c\)\)\}/, "toccare un criterio: lo sceglie o ne inverte il verso"); assert.match(e, /onClick=\{\(\) => onOrdine\(invertiVerso\(ordine\)\)\}/, "il pulsante del verso lo inverte");
+  assert.match(e, /aria-pressed=\{acceso\}/, "il criterio scelto si legge anche senza colori"); assert.match(e, /Il numero accanto al nome è questo valore\./); assert.match(e, /SCHEDE_ELENCO\.map\(\(s\) => \(/);
+  assert.match(cl, /\$\{totaleDaValutare\} candidatur\$\{totaleDaValutare === 1 \? "a" : "e"\} da valutare/, "il titolo conta le candidature da valutare");
 });
 
 test("PAGINA: i pulsanti di ogni scheda vengono dalla tabella delle azioni (Fai match, Apri chat, Scarta, Annulla match, Annulla scarto) e ciascuno fa la cosa giusta", () => {
-  const a = cl.slice(cl.indexOf("function azioni("), cl.indexOf("function scheda("));
+  const a = cl.slice(cl.indexOf("function azioni("), cl.indexOf("const casaCorrente"));
   assert.match(a, /const a = azioniPerStato\(stato\(c\)\);/); for (const [flag, testo] of [["faiMatch", "Fai match"], ["scarta", "Scarta"], ["annullaMatch", "Annulla match"], ["annullaScarto", "Annulla scarto"]]) assert.match(a, new RegExp(`\\{a\\.${flag} && \\([\\s\\S]*?${testo}\\s+</button>`), `${flag} → «${testo}»`);
-  assert.match(a, /\{a\.apriChat && \(\s+<Link href=\{`\/chat\/\$\{c\.id\}`\} className="opp-cta persona-primario block text-center">\s+Apri chat/);
+  assert.match(a, /\{a\.apriChat && \(\s+<Link href=\{`\/chat\/\$\{c\.id\}`\} className="opp-cta block text-center">\s+Apri chat/);
   assert.match(a, /apriDialogo\("match", c\)/); assert.match(a, /apriDialogo\("scarta", c\)/); assert.match(a, /apriDialogo\("annulla_match", c\)/); assert.match(a, /onClick=\{\(\) => annullaScarto\(c\)\}/, "annullare uno scarto è un tocco solo (non c'è niente da proteggere)");
 });
 
@@ -153,15 +158,22 @@ test("PAGINA: dopo ogni azione lo stato si aggiorna subito (match → accettata,
   assert.ok(cl.indexOf("chiudiDialogo();\n    });") > cl.indexOf("setErrore(r.error)"), "la conferma si chiude solo se è andata bene");
 });
 
-test("scheda della persona: in alto affidabilità e match, poi foto e informazioni, poi i pulsanti; la scheda completa si apre da un pulsante", () => {
-  const s = senzaCommenti(leggi("src", "components", "SchedaPersona.tsx")); const i = (x) => { const k = s.indexOf(x); assert.ok(k > 0, x); return k; };
-  assert.ok(i('className="persona-cifre"') < i('className="persona-testa"') && i('className="persona-testa"') < i('className="persona-etichette"') && i('className="persona-etichette"') < i('className="persona-presentazione"') && i('className="persona-presentazione"') < i('className="persona-azioni"') && i('className="persona-azioni"') < i("Vedi la scheda completa ›"));
-  for (const x of ["Affidabilità", "Match", "Manca un requisito", "Match (nessun criterio)", "Non soddisfa:"]) assert.ok(s.includes(x), `manca «${x}»`); assert.match(s, /\{onApri && \(\s+<button type="button" className="persona-dettagli" onClick=\{onApri\}>/);
-  for (const vietato of ["reddito_mensile", "reddito_nucleo", "email", "telefono", "protestato"]) assert.ok(!s.includes(vietato), `la scheda usa «${vietato}»`);
+test("dettaglio della persona: per quale immobile, chi è, i tre numeri, cosa ha verificato lo staff e i criteri scelti, ciò che ha dichiarato, la presentazione, i pulsanti; si chiude con un pulsante", () => {
+  const s = senzaCommenti(leggi("src", "components", "database", "DettaglioPersona.tsx")); const i = (x) => { const k = s.indexOf(x); assert.ok(k > 0, x); return k; };
+  const ordine = ['className="db-immobile"', 'className="db-persona"', 'className="db-tessere"', 'className="db-colonne"', 'className="db-dichiarati"', 'className="db-presentazione"', 'className="db-azioni"'].map(i);
+  assert.deepEqual(ordine, [...ordine].sort((x, y) => x - y), "l'ordine delle parti"); assert.ok(i('className="db-chiudi"') < i('className="db-immobile"'), "il pulsante per tornare all'elenco è in cima");
+  for (const x of ["Candidato per", "Possibile match per", "Verificato dallo staff", "Criteri che hai scelto per questa casa", "Non soddisfa:", "Non soddisfa un criterio obbligatorio", "Dichiarato dalla persona", "Presentazione", "Torna all&apos;elenco", "Ordinato"]) assert.ok(s.includes(x), `manca «${x}»`);
+  assert.match(s, /CRITERI_ORDINE\.map\(\(k\) => \{/, "i tre riquadri vengono dai tre criteri"); assert.match(s, /className=\{`db-tessera \$\{CLASSE_TESSERA\[k\]\} \$\{scelto \? "sel" : ""\}`\}/, "ognuno ha la sua classe (e quindi il suo colore); quello scelto è segnato");
+  for (const vietato of ["email", "telefono", "protestato"]) assert.ok(!s.includes(vietato), `il dettaglio usa «${vietato}»`);
+  assert.ok(s.indexOf("reddito_mensile") > i('className="db-dichiarati"') && s.indexOf("reddito_nucleo") > i('className="db-dichiarati"'), "i redditi dichiarati compaiono solo dove ci sono i dati dichiarati (chi si è candidato), mai per i possibili");
+  assert.match(s, /\{c\?\.tenant_profiles && \(\s+<div className="db-dichiarati">/, "senza candidatura non ci sono i dati dichiarati"); assert.match(s, /role=\{modale \? "dialog" : undefined\}/); assert.match(s, /aria-modal=\{modale \? true : undefined\}/, "è una finestra solo quando è a tutto schermo");
 });
 
-test("sezione apribile: bottone con titolo e numero, aria-expanded, il contenuto resta nella pagina da chiuso (nascosto, non smontato)", () => {
-  const s = senzaCommenti(leggi("src", "components", "SezioneApribile.tsx")); assert.match(s, /aria-expanded=\{stato\}/); assert.match(s, /aria-controls=\{corpo\}/); assert.match(s, /<div id=\{corpo\} className="sezione-corpo" hidden=\{!stato\}>/); assert.ok(!/stato &&\s*\(/.test(s), "il contenuto non deve smontarsi"); assert.match(s, /\{conteggio === 0 && vuoto \? <p className="sezione-vuota">\{vuoto\}<\/p> : null\}/);
+test("box dell'immobile: l'intestazione è un pulsante con aria-expanded e aria-controls; chiuso il contenuto resta nella pagina ma non si raggiunge (inert), non si smonta", () => {
+  const s = senzaCommenti(leggi("src", "components", "database", "ElencoDatabase.tsx")); assert.match(s, /<button type="button" className="db-box-testa" aria-expanded=\{!chiuso\} aria-controls=\{corpo\} onClick=\{\(\) => onCommuta\(casa\.id\)\}>/);
+  assert.match(s, /<div id=\{corpo\} className="db-box-corpo" inert=\{chiuso\}>/); assert.ok(!/chiuso &&\s*\(/.test(s) && !/!chiuso &&/.test(s), "il contenuto non deve smontarsi: serve a farlo scorrere");
+  assert.match(s, /b\.totale === 0 \? "Nessuno si è ancora candidato a questa casa\." : "Nessuna persona corrisponde\."/); assert.match(s, /\{aperti \? "Comprimi tutti" : "Espandi tutti"\}/, "il comando apre o chiude tutto secondo cosa c'è");
+  assert.match(s, /onClick=\{\(\) => onTutti\(aperti\)\}/); assert.match(s, /id=\{b\.gruppo\.casa\.id === idPossibili \? "possibili" : undefined\}/, "l'immobile a cui porta la tessera della Home");
 });
 
 // ============================================================ l'azione e la migrazione
@@ -185,10 +197,11 @@ test("il DB test esegue anche le prove dell'annullamento (44 controlli) e non se
   for (const tema of ["A04 un altro proprietario non può annullare", "A11 con un contratto il match non si annulla", "A13 con una visita CONFERMATA", "A20 ma la chat è chiusa", "A24 dopo lo scarto il proprietario non vede più i dati", "A28 e la nuova valutazione è quella NUOVA", "A30 il proprietario non può riportare una candidatura", "A35 col segnale alzato", "A43 finita una riapertura il segnale è spento"]) assert.ok(sql.replaceAll("''", "'").includes(tema), `manca il controllo «${tema}»`);
 });
 
-test("la ricerca in fondo ha caratteri leggibili (pulsanti da 15 px, campo da 17 px) e bersagli larghi", () => {
-  const css = leggi("src", "app", "globals.css"); const m = css.slice(css.indexOf("/* la ricerca in fondo"));
-  assert.match(m, /\.ricerca-fondo \.chip \{\s+min-height: 44px;\s+padding: 8px 16px;\s+font-size: 15px;/); assert.match(m, /\.ricerca-fondo \.ricerca-input,\s+\.ricerca-fondo \.ricerca-select \{\s+min-height: 52px;\s+font-size: 17px;/);
-  const misure = [...m.matchAll(/font-size:\s*(\d+)px/g)].map((x) => Number(x[1])); assert.ok(Math.min(...misure) >= 15, `caratteri: ${Math.min(...misure)} px`);
+test("ricerca e filtri: pulsanti da 15 px alti 44, campo da 16 px alto 52 (sopra i 16 px il telefono non ingrandisce la pagina), nessun carattere sotto i 15 px", () => {
+  const css = leggi("src", "app", "globals.css"); const m = css.slice(css.indexOf("/* ---- Database: l'elenco per immobile e il dettaglio della persona ---- */"), css.indexOf("VERSIONE PER COMPUTER"));
+  assert.match(m, /\.db-filtri \.chip \{\s+min-height: 44px;\s+padding: 8px 16px;\s+font-size: 15px;/); assert.match(m, /\.db-cerca \{[^}]*height: 52px;/); assert.match(m, /\.db-cerca-campo \{[^}]*font-size: 16px;/);
+  for (const c of [".db-crit", ".db-scheda", ".db-link", ".db-verso"]) assert.match(m, new RegExp(`\\${c} \\{[^}]*(min-)?height: 44px`), `${c}: bersaglio da almeno 44 px`);
+  const misure = [...m.matchAll(/font-size:\s*(\d+(?:\.\d+)?)px/g)].map((x) => Number(x[1])); assert.ok(misure.length >= 30, "pochi caratteri: " + misure.length); assert.ok(Math.min(...misure) >= 15, `caratteri: ${Math.min(...misure)} px`);
 });
 
 test("i messaggi con il nome abbreviato («Anna V.») non hanno mai due punti di fila: dopo il nome non c'è un punto", () => {

@@ -158,10 +158,12 @@ test("pagine: leggono chi ha scritto le recensioni e quando (servono per il badg
   for (const f of [["app", "(app)", "page.tsx"], ["app", "(app)", "profilo", "page.tsx"]]) assert.match(leggi("src", ...f), /const raccomandazione = statoRaccomandazione\(recensioni \?\? \[\]\);/); assert.match(leggi("src", "app", "(app)", "database", "actions.ts"), /raccomandato: statoRaccomandazione\(recensioniGrezze\)\.raccomandato/);
 });
 
-test("proprietario: il badge compare sulla scheda e nel dettaglio solo se c'è, entra nell'ordine, e il filtro è nella ricerca", () => {
-  const d = leggi("src", "app", "(app)", "database", "DatabaseClient.tsx"); // la scheda in lista è SchedaPersona (badge intero, 15 px); il dettaglio ha la riga con il badge compatto; l'ordine lo usa dopo la percentuale
-  assert.match(leggi("src", "components", "SchedaPersona.tsx"), /\{dati\.raccomandato && <BadgeRaccomandato \/>\}/); assert.match(leggi("src", "lib", "database-proprietario.ts"), /raccomandato: v\?\.raccomandato === true,/); assert.match(d, /selezionata\.valutazione\?\.raccomandato === true && \(\s+<div className="feat-row">/); assert.match(leggi("src", "lib", "database-proprietario.ts"), /raccomandato: c\.valutazione!\.raccomandato === true,/);
-  assert.match(leggi("src", "components", "RicercaCandidati.tsx"), /<Interruttore acceso=\{filtri\.soloRaccomandati\} onClick=\{\(\) => imposta\(\{ soloRaccomandati: !filtri\.soloRaccomandati \}\)\}>\s+Inquilini raccomandati/);
+test("proprietario: il badge compare nel dettaglio solo se c'è (intero, 15 px), entra nello spareggio dell'ordine, e il filtro è tra i filtri", () => {
+  const det = leggi("src", "components", "database", "DettaglioPersona.tsx"); // il badge intero sta tra le etichette della persona; l'ordine lo usa per decidere a parità di valore
+  assert.match(det, /\{s\.raccomandato && <BadgeRaccomandato \/>\}/); assert.match(leggi("src", "lib", "database-proprietario.ts"), /raccomandato: v\?\.raccomandato === true,/); assert.match(leggi("src", "lib", "database-proprietario.ts"), /raccomandato: c\.valutazione!\.raccomandato === true,/);
+  assert.match(leggi("src", "lib", "database-elenco.ts"), /if \(a\.raccomandato !== b\.raccomandato\) return a\.raccomandato \? -1 : 1;/, "a parità di valore passa avanti il raccomandato");
+  assert.match(leggi("src", "components", "database", "FiltriDatabase.tsx"), /<Interruttore acceso=\{filtri\.soloRaccomandati\} onClick=\{\(\) => imposta\(\{ soloRaccomandati: !filtri\.soloRaccomandati \}\)\}>\s+Inquilini raccomandati/);
+  assert.match(leggi("src", "app", "globals.css"), /\.db-etichette \.badge-raccomandato \{[^}]*font-size: 15px;/, "nel dettaglio il badge non è piccolo");
 });
 
 test("il badge non tocca il punteggio né la percentuale: affidabilita.ts non lo conosce, e il confronto lo usa solo dopo la percentuale", () => {
