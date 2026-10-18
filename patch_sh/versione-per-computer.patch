@@ -1,0 +1,483 @@
+From b26ebcb47580209212000661d3f07e8cce02462f Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 18 Oct 2026 14:56:04 +0000
+Subject: [PATCH] feat(desktop): versione per computer da 1024 px (Home a due
+ colonne, colonne per Database e case, benvenuto con i passi a lato); telefono
+ e tablet invariati
+
+---
+ package.json                          |   2 +-
+ scripts/test-benvenuto.mjs            |   2 +-
+ scripts/test-desktop.mjs              | 100 ++++++++++
+ src/app/benvenuto/BenvenutoClient.tsx |   5 +
+ src/app/globals.css                   | 272 +++++++++++++++++++++++++-
+ 5 files changed, 369 insertions(+), 12 deletions(-)
+ create mode 100644 scripts/test-desktop.mjs
+
+diff --git a/package.json b/package.json
+index b6e97a9..44b0534 100644
+--- a/package.json
++++ b/package.json
+@@ -8,7 +8,7 @@
+     "start": "next start",
+     "lint": "eslint",
+     "pretest": "node scripts/controlla-dipendenze.mjs",
+-    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-affidabilita.mjs scripts/test-profilo-gestione.mjs scripts/test-avvisi-profilo.mjs scripts/test-raccomandato.mjs scripts/test-home-proprietario.mjs scripts/test-richieste.mjs scripts/test-database-proprietario.mjs scripts/test-affitto-contratto.mjs scripts/test-profilo-proprietario.mjs scripts/test-stile.mjs scripts/test-verifica-immobile.mjs scripts/test-protesti.mjs scripts/test-iscrizione-prova.mjs scripts/test-login-form.mjs scripts/test-benvenuto.mjs scripts/test-db-richieste.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-dati-immobile.mjs scripts/test-candidati.mjs"
++    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-affidabilita.mjs scripts/test-profilo-gestione.mjs scripts/test-avvisi-profilo.mjs scripts/test-raccomandato.mjs scripts/test-home-proprietario.mjs scripts/test-richieste.mjs scripts/test-database-proprietario.mjs scripts/test-affitto-contratto.mjs scripts/test-profilo-proprietario.mjs scripts/test-stile.mjs scripts/test-verifica-immobile.mjs scripts/test-protesti.mjs scripts/test-iscrizione-prova.mjs scripts/test-login-form.mjs scripts/test-benvenuto.mjs scripts/test-db-richieste.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-dati-immobile.mjs scripts/test-candidati.mjs scripts/test-desktop.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-benvenuto.mjs b/scripts/test-benvenuto.mjs
+index d5bec7a..ebc45f7 100644
+--- a/scripts/test-benvenuto.mjs
++++ b/scripts/test-benvenuto.mjs
+@@ -157,7 +157,7 @@ test("modulo dei dati: le schede prima dei protesti salvano senza la risposta (c
+ test("stile del benvenuto: schermata intera che scorre da sola, caratteri da 15 px in su, pulsanti alti 52 px, scheda come le altre (angoli 20, ombra standard)", () => {
+   const css = leggi("src", "app", "globals.css"); const m = css.slice(css.indexOf("Il percorso di benvenuto (dopo l'iscrizione)")); const misure = [...m.matchAll(/font-size:\s*(\d+)px/g)].map((x) => Number(x[1])); assert.ok(misure.length >= 10 && Math.min(...misure) >= 15, `caratteri: ${Math.min(...misure)} px`);
+   assert.match(m, /\.benvenuto \{\s+position: fixed;\s+inset: 0;\s+overflow-y: auto;/); assert.match(m, /\.benvenuto-azioni \.opp-cta,\s+\.benvenuto-azioni \.richieste-secondario,\s+\.benvenuto-azioni form \{\s+min-height: 52px;\s+font-size: 17px;/);
+-  assert.match(m, /\.benvenuto-scheda \{\s+padding: 18px 16px 20px;\s+border-radius: 20px;\s+background: #fff;\s+box-shadow: 0 8px 20px rgba\(16, 21, 26, 0\.06\);/); assert.match(m, /\.benvenuto > \* \{\s+max-width: 560px;/);
++  assert.match(m, /\.benvenuto-scheda \{\s+padding: 18px 16px 20px;\s+border-radius: 20px;\s+background: #fff;\s+box-shadow: 0 8px 20px rgba\(16, 21, 26, 0\.06\);/); assert.match(m, /\.benvenuto > \*,\s+\.benvenuto-fianco > \*,\s+\.benvenuto-corpo > \* \{\s+max-width: 560px;/); assert.match(m, /\.benvenuto-fianco,\s+\.benvenuto-corpo \{\s+display: contents;/);
+ });
+ 
+ // ============================================================ la migrazione
+diff --git a/scripts/test-desktop.mjs b/scripts/test-desktop.mjs
+new file mode 100644
+index 0000000..34b71c4
+--- /dev/null
++++ b/scripts/test-desktop.mjs
+@@ -0,0 +1,100 @@
++/**
++ * Test della VERSIONE PER COMPUTER (da 1024 px in su).
++ * Il vincolo: la versione per telefono (e per tablet in verticale) NON cambia. Per questo tutto ciò che riguarda il computer sta in un solo blocco,
++ * l'ULTIMO del foglio di stile, fatto solo di livelli «@media (min-width: …px)» da 1024 px in su. Questi test lo tengono così:
++ *  - nessuna regola fuori da un livello, nessun livello sotto i 1024 px, nessun «!important»;
++ *  - le composizioni a più colonne (Home a due colonne, liste a due colonne, case affiancate) partono da 1280 px, dove stanno nello spazio
++ *    (a 1024 px uscirebbero dallo schermo: è già successo);
++ *  - i due contenitori del benvenuto sono invisibili sul telefono (display: contents);
++ *  - ogni classe usata dal blocco esiste davvero (nel codice o nel foglio prima del blocco).
++ * Il confronto delle schermate prima/dopo a 390, 430, 768 e 1000 px si fa a mano nel browser. Si lancia con:   npm test
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import fs from "node:fs";
++import path from "node:path";
++import { radice } from "./carica-ts.mjs";
++
++const css = fs.readFileSync(path.join(radice, "src", "app", "globals.css"), "utf8");
++const MARCA = "VERSIONE PER COMPUTER (da 1024 px in su)";
++const inizio = css.lastIndexOf("/* ====", css.indexOf(MARCA));
++const prima = css.slice(0, inizio);
++const blocco = css.slice(inizio);
++
++/** Divide il blocco in elementi di primo livello: commenti, livelli «@media» e regole nude. */
++function primoLivello(testo) {
++  const out = []; let i = 0;
++  while (i < testo.length) {
++    if (/\s/.test(testo[i])) { i++; continue; }
++    if (testo.startsWith("/*", i)) { const f = testo.indexOf("*/", i) + 2; out.push({ tipo: "commento", testo: testo.slice(i, f) }); i = f; continue; }
++    const aperta = testo.indexOf("{", i); if (aperta < 0) break;
++    let prof = 1, j = aperta + 1;
++    while (j < testo.length && prof > 0) { if (testo[j] === "{") prof++; else if (testo[j] === "}") prof--; j++; }
++    const intestazione = testo.slice(i, aperta).trim();
++    out.push({ tipo: intestazione.startsWith("@media") ? "livello" : "regola", intestazione, corpo: testo.slice(aperta + 1, j - 1) }); i = j;
++  }
++  return out;
++}
++const elementi = primoLivello(blocco); const livelli = elementi.filter((e) => e.tipo === "livello"); const larghezza = (e) => Number(/min-width:\s*(\d+)px/.exec(e.intestazione)?.[1]);
++
++test("computer: il blocco c'è, è l'ultimo del foglio ed è fatto SOLO di livelli da 1024 px in su (niente fuori dai livelli)", () => {
++  assert.ok(inizio > 0 && blocco.includes(MARCA), "il blocco per computer manca");
++  assert.equal(elementi.filter((e) => e.tipo === "regola").length, 0, "regole fuori da un livello: si applicherebbero anche al telefono");
++  assert.ok(livelli.length >= 3, "ci aspettiamo almeno i livelli 1024, 1280 e 1440");
++  for (const l of livelli) assert.match(l.intestazione, /^@media \(min-width: \d+px\)$/, "solo livelli «min-width»: " + l.intestazione);
++  for (const l of livelli) assert.ok(larghezza(l) >= 1024, "nessun livello sotto i 1024 px: " + l.intestazione);
++});
++
++test("computer: i livelli sono in ordine crescente e senza ripetizioni (1024, 1280, 1440, 1760)", () => {
++  const w = livelli.map(larghezza);
++  assert.deepEqual(w, [...new Set(w)].sort((a, b) => a - b), "ordine e ripetizioni");
++  assert.deepEqual(w, [1024, 1280, 1440, 1760]);
++});
++
++test("computer: nessun «!important» (non si vince una regola con la forza)", () => {
++  assert.ok(!/!important/.test(blocco));
++});
++
++test("computer: la parte del foglio PRIMA del blocco non contiene nessun livello da 1024 px in su (il telefono non ne risente)", () => {
++  assert.ok(!/@media \(min-width: (1024|1[1-9]\d\d|[2-9]\d\d\d)px\)/.test(prima), "livelli da computer fuori dal blocco");
++});
++
++test("computer: le composizioni a più colonne partono da 1280 px (a 1024 px non stanno nello spazio: la Home usciva dallo schermo)", () => {
++  const livello = (n) => livelli.find((l) => larghezza(l) === n)?.corpo ?? "";
++  const l1024 = livello(1024), l1280 = livello(1280);
++  assert.match(l1280, /\.screen-dark\.home-inq \{\s+display: grid;/, "la Home a due colonne sta nel livello 1280");
++  assert.match(l1280, /\.schede-lista \{\s+grid-template-columns: repeat\(2,/, "le liste a due colonne stanno nel livello 1280");
++  assert.match(l1280, /\.casa-colonna \{\s+display: grid;/, "le case affiancate stanno nel livello 1280");
++  for (const spia of ["display: grid;\n    grid-template-columns: minmax(440px", "grid-template-columns: repeat(2, minmax(0, 1fr));\n    gap: 18px"]) assert.ok(!l1024.includes(spia), "composizione a più colonne nel livello 1024: " + spia.slice(0, 40));
++});
++
++test("computer: la Home a due colonne sta davvero nello spazio a 1280 px (barra laterale 248 + riempimenti + colonne + intervallo)", () => {
++  const l = livelli.find((x) => larghezza(x) === 1280).corpo;
++  const g = /grid-template-columns: minmax\((\d+)px, (\d+)px\) (\d+)px;/.exec(l); const gap = Number(/\.screen-dark\.home-inq \{[^}]*column-gap: (\d+)px/.exec(l)?.[1]); const pad = Number(/\.screen-dark\.home-inq \{[^}]*padding: \d+px (\d+)px/.exec(l)?.[1]);
++  assert.ok(g && gap && pad, "le misure della Home si leggono");
++  const minimo = 248 + 2 * pad + Number(g[1]) + Number(g[3]) + gap;
++  assert.ok(minimo <= 1280, `larghezza minima necessaria ${minimo}px > 1280px: la Home uscirebbe dallo schermo`);
++});
++
++test("computer: il benvenuto ha i due contenitori nel codice e sul telefono non esistono per il disegno (display: contents)", () => {
++  const jsx = fs.readFileSync(path.join(radice, "src", "app", "benvenuto", "BenvenutoClient.tsx"), "utf8");
++  assert.match(jsx, /className="benvenuto-fianco"/); assert.match(jsx, /className="benvenuto-corpo"/);
++  assert.match(prima, /\.benvenuto-fianco,\s+\.benvenuto-corpo \{\s+display: contents;/, "sul telefono i contenitori devono essere invisibili");
++  assert.match(prima, /\.benvenuto > \*,\s+\.benvenuto-fianco > \*,\s+\.benvenuto-corpo > \* \{\s+max-width: 560px;/, "i figli dei contenitori ereditano la colonna stretta");
++  const fianco = jsx.indexOf('className="benvenuto-fianco"'), corpo = jsx.indexOf('className="benvenuto-corpo"'), esci = jsx.indexOf('className="benvenuto-esci"');
++  assert.ok(fianco < corpo && corpo < esci, "ordine nel codice: fianco, corpo, «Esci» (l'ordine di lettura non cambia)");
++});
++
++test("computer: i pulsanti a tutta larghezza si limitano, ma non nei moduli a comparsa, in fila o nel benvenuto", () => {
++  const l = livelli.find((x) => larghezza(x) === 1024).corpo;
++  assert.match(l, /\.screen-inner \.opp-cta:not\(\.sheet \*\):not\(\.persona-azioni \*\):not\(\.benvenuto \*\)/);
++  assert.match(l, /width: min\(100%, 440px\);/);
++});
++
++test("computer: ogni classe usata dal blocco esiste (nel codice dell'app o nel foglio prima del blocco)", () => {
++  const sorgenti = []; const vai = (d) => { for (const f of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, f.name); if (f.isDirectory()) vai(p); else if (/\.tsx?$/.test(f.name)) sorgenti.push(fs.readFileSync(p, "utf8")); } };
++  vai(path.join(radice, "src")); const codice = sorgenti.join("\n");
++  const usate = new Set([...blocco.matchAll(/\.([a-z][\w-]*)/g)].map((m) => m[1]).filter((c) => !/^\d/.test(c)));
++  const orfane = [...usate].filter((c) => !new RegExp(`(?<![\\w-])${c.replace(/[-]/g, "\\-")}(?![\\w-])`).test(codice) && !new RegExp(`\\.${c}(?![\\w-])`).test(prima));
++  assert.deepEqual(orfane, [], "classi senza definizione né uso: " + orfane.join(", "));
++});
+diff --git a/src/app/benvenuto/BenvenutoClient.tsx b/src/app/benvenuto/BenvenutoClient.tsx
+index 2bf3b25..3310ed4 100644
+--- a/src/app/benvenuto/BenvenutoClient.tsx
++++ b/src/app/benvenuto/BenvenutoClient.tsx
+@@ -70,6 +70,8 @@ export function BenvenutoClient(p: BenvenutoProps) {
+ 
+   return (
+     <div className="benvenuto">
++      {/* due gruppi: da computer il fianco (passi) sta a sinistra e il corpo (scheda) a destra; sul telefono i contenitori non esistono per il disegno (display: contents) */}
++      <div className="benvenuto-fianco">
+       <header className="benvenuto-testa">
+         <div className="benvenuto-marchio">
+           Match<b>AmI</b>
+@@ -100,7 +102,9 @@ export function BenvenutoClient(p: BenvenutoProps) {
+           </ol>
+         </div>
+       </div>
++      </div>
+ 
++      <div className="benvenuto-corpo">
+       <section className="benvenuto-scheda" aria-labelledby="benvenuto-titolo">
+         <h1 id="benvenuto-titolo" className="benvenuto-titolo">
+           {passo.titolo}
+@@ -140,6 +144,7 @@ export function BenvenutoClient(p: BenvenutoProps) {
+           {stato.error}
+         </p>
+       )}
++      </div>
+ 
+       <form action={logout} className="benvenuto-esci">
+         <button type="submit" className="redo-link">
+diff --git a/src/app/globals.css b/src/app/globals.css
+index 31b557e..272aa20 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -2093,14 +2093,6 @@ input[type="range"]::-moz-range-thumb {
+ }
+ 
+ /* Schermi molto larghi: il contenuto smette di allargarsi */
+-@media (min-width: 1280px) {
+-  .screen-wrap {
+-    padding: 52px 64px 72px 64px;
+-  }
+-  .screen-inner {
+-    max-width: 1040px;
+-  }
+-}
+ 
+ /* ============================================================
+    CAROSELLO FOTO E SCHEDA IMMOBILE
+@@ -4926,7 +4918,13 @@ button.contratto-testa:focus-visible {
+   color: var(--ink);
+   padding: 0 16px calc(28px + env(safe-area-inset-bottom));
+ }
+-.benvenuto > * {
++.benvenuto-fianco,
++.benvenuto-corpo {
++  display: contents;
++}
++.benvenuto > *,
++.benvenuto-fianco > *,
++.benvenuto-corpo > * {
+   max-width: 560px;
+   margin-left: auto;
+   margin-right: auto;
+@@ -5098,7 +5096,8 @@ button.contratto-testa:focus-visible {
+   flex: none;
+   padding: 0 20px;
+ }
+-.benvenuto > .note-error {
++.benvenuto > .note-error,
++.benvenuto-corpo > .note-error {
+   margin-top: 12px;
+ }
+ .benvenuto-esci {
+@@ -5227,3 +5226,256 @@ button.contratto-testa:focus-visible {
+   font-size: 15px;
+   color: var(--body-soft);
+ }
++
++/* ============================================================
++   VERSIONE PER COMPUTER (da 1024 px in su)
++   Questo è l'ULTIMO blocco del foglio e ridisegna la composizione delle pagine SOLO da 1024 px in su, perché sembrino un'applicazione web e non il
++   telefono allargato. Sotto i 1024 px (telefoni e tablet in verticale) niente di ciò che segue si applica: lì l'app è identica a prima.
++   Livelli: 1024 (portatile piccolo: colonne più ariose), 1280 (composizioni a più colonne), 1440 e 1760 (colonna più larga, tre colonne).
++   Un test controlla che ogni regola stia dentro un livello da 1024 px in su e che i livelli restino coerenti.
++   ============================================================ */
++@media (min-width: 1024px) {
++  /* ---- il guscio: più respiro, colonne più larghe e titoli staccati ---- */
++  .screen-wrap {
++    padding: 44px 48px 64px;
++  }
++  .screen-inner {
++    max-width: 980px;
++  }
++  .screen-title + .match-schede {
++    margin-top: 14px;
++  }
++  /* i pulsanti a tutta larghezza diventano pulsanti di una larghezza ragionevole (non nei moduli a comparsa, né dove stanno in fila) */
++  .screen-inner .opp-cta:not(.sheet *):not(.persona-azioni *):not(.benvenuto *),
++  .screen-inner .btn-danger-outline:not(.sheet *):not(.persona-azioni *):not(.benvenuto *) {
++    width: min(100%, 440px);
++  }
++  .conferma-affitto-azioni > * {
++    width: min(100%, 440px);
++  }
++
++  /* ---- Home del proprietario: colonna più larga; il marchio c'è già nella colonna di sinistra ---- */
++  .casa-colonna {
++    max-width: 1120px;
++  }
++  .casa-scroll {
++    padding: 36px 40px 40px;
++  }
++  .casa-topbar {
++    display: none;
++  }
++
++  /* ---- Benvenuto: i passi a sinistra con i nomi, la scheda a destra ---- */
++  .benvenuto {
++    display: grid;
++    grid-template-columns: 270px minmax(0, 740px);
++    column-gap: 44px;
++    justify-content: center;
++    align-content: start;
++    padding: 36px 40px 40px;
++  }
++  .benvenuto-fianco {
++    display: block;
++    grid-column: 1;
++    grid-row: 1;
++    position: sticky;
++    top: 0;
++    align-self: start;
++  }
++  .benvenuto-corpo {
++    display: block;
++    grid-column: 2;
++    grid-row: 1 / span 2;
++  }
++  .benvenuto > *,
++  .benvenuto-fianco > *,
++  .benvenuto-corpo > * {
++    max-width: none;
++    margin-left: 0;
++    margin-right: 0;
++  }
++  .benvenuto-testa {
++    padding: 0;
++  }
++  .benvenuto-progresso {
++    margin: 8px 0 0;
++  }
++  .benvenuto-scheda {
++    padding: 26px 28px 28px;
++  }
++  .benvenuto-titolo {
++    font-size: 30px;
++  }
++  .benvenuto-esci {
++    grid-column: 1;
++    grid-row: 2;
++    align-self: end;
++    text-align: left;
++    margin-top: 0;
++  }
++  .benvenuto-passi {
++    flex-direction: column;
++    align-items: stretch;
++    gap: 14px;
++    margin-top: 12px;
++  }
++  .benvenuto-puntini {
++    flex-direction: column;
++    gap: 6px;
++  }
++  .benvenuto-puntini li {
++    display: flex;
++    align-items: center;
++    gap: 12px;
++    width: auto;
++    height: auto;
++    padding: 9px 12px;
++    border-radius: 12px;
++    background: transparent;
++    box-shadow: none;
++    color: var(--body-soft);
++    font-size: 15px;
++  }
++  .benvenuto-puntini li::before {
++    content: "";
++    flex: none;
++    width: 12px;
++    height: 12px;
++    border-radius: 50%;
++    background: rgba(16, 21, 26, 0.18);
++  }
++  .benvenuto-puntini li.fatto::before {
++    background: var(--moss-light);
++  }
++  .benvenuto-puntini li.attivo {
++    background: rgba(62, 107, 87, 0.12);
++    color: var(--ink);
++    font-weight: 700;
++  }
++  .benvenuto-puntini li.attivo::before {
++    background: var(--moss);
++    box-shadow: 0 0 0 3px rgba(62, 107, 87, 0.25);
++  }
++  .benvenuto-puntini .solo-lettori {
++    position: static;
++    width: auto;
++    height: auto;
++    margin: 0;
++    clip: auto;
++    clip-path: none;
++    overflow: visible;
++    white-space: normal;
++  }
++}
++
++@media (min-width: 1280px) {
++  /* da 1280 px c'è spazio per le composizioni a più colonne; tra 1024 e 1279 restano la colonna singola e la griglia del tablet */
++
++  /* ---- Home dell'inquilino: le case a sinistra, grandi; a destra il pannello con affidabilità e ricerca ---- */
++  .screen-dark.home-inq {
++    display: grid;
++    grid-template-columns: minmax(440px, 620px) 380px;
++    grid-template-rows: 1fr auto auto 1fr;
++    column-gap: 44px;
++    justify-content: center;
++    padding: 36px 32px 28px;
++  }
++  /* il marchio c'è già nella colonna di sinistra */
++  .screen-dark.home-inq .topbar {
++    display: none;
++  }
++  .screen-dark.home-inq .home-area {
++    grid-column: 1;
++    grid-row: 1 / span 4;
++    min-height: 560px;
++  }
++  .screen-dark.home-inq .deck,
++  .screen-dark.home-inq.con-badge .deck {
++    inset: 0 0 104px 0;
++    width: auto;
++    transform: none;
++  }
++  .screen-dark.home-inq .home-intro {
++    position: static;
++    grid-column: 2;
++    grid-row: 2;
++    width: auto;
++    transform: none;
++    margin: 0;
++  }
++  .screen-dark.home-inq .home-ricerca {
++    grid-column: 2;
++    grid-row: 3;
++    align-self: start;
++    width: auto;
++    margin-top: 16px;
++    padding: 16px 18px 18px;
++    border: 1px solid var(--line);
++    border-radius: 18px;
++    background: var(--ink-soft);
++  }
++  .screen-dark.home-inq .home-ricerca .hi-ricerca {
++    flex-wrap: wrap;
++    gap: 12px;
++  }
++
++  /* ---- Home del proprietario: le case si affiancano; una casa sola ha la foto a sinistra e le tessere a destra ---- */
++  .casa-colonna {
++    display: grid;
++    grid-template-columns: repeat(2, minmax(0, 1fr));
++    column-gap: 28px;
++    align-items: start;
++  }
++  .casa-colonna > .casa-topbar,
++  .casa-colonna > .casa-intro,
++  .casa-colonna > .empty-inline {
++    grid-column: 1 / -1;
++  }
++  .casa-colonna > .casa:only-of-type {
++    grid-column: 1 / -1;
++    display: grid;
++    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
++    gap: 24px;
++    align-items: stretch;
++  }
++  .casa-colonna > .casa:only-of-type .casa-hero {
++    height: auto;
++    min-height: 360px;
++  }
++  .casa-colonna > .casa:only-of-type .casa-tessere {
++    margin-top: 0;
++    grid-template-columns: 1fr;
++    align-content: stretch;
++  }
++  .casa-colonna > .casa:only-of-type > :not(.casa-hero):not(.casa-tessere) {
++    grid-column: 1 / -1;
++  }
++
++  /* ---- Database: le persone in due colonne, i pulsanti affiancati ---- */
++  .schede-lista {
++    grid-template-columns: repeat(2, minmax(0, 1fr));
++    gap: 18px;
++    align-items: start;
++  }
++  .persona-azioni {
++    flex-direction: row;
++  }
++  .persona-azioni > * {
++    flex: 1 1 0;
++  }
++}
++
++@media (min-width: 1440px) {
++  .screen-inner {
++    max-width: 1120px;
++  }
++}
++
++@media (min-width: 1760px) {
++  .screen-inner {
++    max-width: 1320px;
++  }
++  .schede-lista {
++    grid-template-columns: repeat(3, minmax(0, 1fr));
++  }
++}
+-- 
+2.43.0
+
