@@ -23,7 +23,7 @@ test("intestazione: nome (e cognome) in alto come titolo, email sotto, iniziali 
 
 test("nessuna riga «Novità» (c'è la campanella) e nessun «I tuoi dati»: restano Account e accesso, Privacy e consensi, FAQ, Esci", () => {
   assert.ok(!/RigaNovita|title="Novità"/.test(prop)); for (const vietato of ["I tuoi dati", "DatiProprietarioForm", "TIPO_VOCAB", "OBIETTIVO_VOCAB", "datiAperto", "Tipo di proprietario", "immobili gestiti", "Affittare velocemente", "updateDatiProprietario", "useActionState"]) assert.ok(!prop.includes(vietato), `resta «${vietato}»`);
-  const titoli = [...prop.matchAll(/(?<![a-zA-Z])title="([^"]+)"/g)].map((m) => m[1]); assert.deepEqual(titoli, ["Account e accesso", "Privacy e consensi", "FAQ"]); assert.match(prop, /<form action=\{logout\} className="mt-6">\s+<button className="redo-link"[^>]*>\s+Esci\s+<\/button>/);
+  const titoli = [...prop.matchAll(/(?<![a-zA-Z])title="([^"]+)"/g)].map((m) => m[1]); assert.deepEqual(titoli, ["Account e accesso", "Privacy e consensi", "FAQ"], "i titoli scritti nel Profilo (la riga «Come funziona» è un componente a sé: RigaComeFunziona)"); assert.match(prop, /<RigaComeFunziona ruolo="proprietario" \/>\s+<Row\s+color="var\(--gold\)"/, "«Come funziona» sta prima della FAQ"); assert.match(prop, /<FaqSheet open=\{faqAperto\} onClose=\{\(\) => setFaqAperto\(false\)\} ruolo="proprietario" \/>/); assert.match(prop, /<form action=\{logout\} className="mt-6">\s+<button className="redo-link"[^>]*>\s+Esci\s+<\/button>/);
   for (const x of ["<AccountSheet", "<PrivacySheet", "<FaqSheet"]) assert.ok(prop.includes(x), `manca ${x}`); assert.ok(!/visibileProprietariIniziale/.test(prop), "il proprietario non ha la scelta di farsi trovare");
 });
 

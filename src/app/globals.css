@@ -4957,6 +4957,22 @@ button.contratto-testa:focus-visible {
   color: var(--body-soft);
 }
 
+/* «Come funziona» riletto dal Profilo: la stessa impostazione del benvenuto (classi intro-*), con il ritorno al Profilo in alto */
+.guida-indietro {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  margin-bottom: 4px;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--moss);
+  text-decoration: none;
+}
+.guida-pagina {
+  margin-top: 18px;
+  padding-bottom: 24px;
+}
+
 /* ---- Database: l'elenco per immobile e il dettaglio della persona ---- */
 /* ============================================================
    DATABASE INQUILINI — un elenco di persone diviso per immobile + il dettaglio della persona

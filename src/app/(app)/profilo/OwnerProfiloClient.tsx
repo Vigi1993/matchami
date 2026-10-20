@@ -7,6 +7,7 @@ import { Row } from "@/components/ui/Row";
 import { CampanellaNovita } from "@/components/CampanellaNovita";
 import { PrivacySheet } from "@/components/PrivacySheet";
 import { FaqSheet } from "@/components/FaqSheet";
+import { RigaComeFunziona } from "@/components/RigaComeFunziona";
 import { AccountSheet } from "@/components/AccountSheet";
 import { iniziali, nomeCompleto } from "@/lib/persona";
 import { IconDomanda, IconLucchetto, IconScudo } from "@/components/icons";
@@ -65,6 +66,7 @@ export function OwnerProfiloClient({
           cta="Gestisci consensi"
           onClick={() => setPrivacyAperto(true)}
         />
+        <RigaComeFunziona ruolo="proprietario" />
         <Row
           color="var(--gold)"
           icon={<IconDomanda className="fill-none stroke-[var(--ink)] stroke-2" />}
@@ -89,7 +91,7 @@ export function OwnerProfiloClient({
         consensoMarketingIniziale={consensoMarketingIniziale}
         consensoTerziIniziale={consensoTerziIniziale}
       />
-      <FaqSheet open={faqAperto} onClose={() => setFaqAperto(false)} />
+      <FaqSheet open={faqAperto} onClose={() => setFaqAperto(false)} ruolo="proprietario" />
     </PageContainer>
   );
 }

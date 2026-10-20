@@ -19,6 +19,7 @@ import type { Luogo } from "@/lib/luoghi";
 import type { ProfiloRicerca } from "@/lib/match";
 import { PrivacySheet } from "@/components/PrivacySheet";
 import { FaqSheet } from "@/components/FaqSheet";
+import { RigaComeFunziona } from "@/components/RigaComeFunziona";
 import { AccountSheet } from "@/components/AccountSheet";
 import {
   IconDomanda,
@@ -177,6 +178,7 @@ export function ProfiloClient({
           cta="Gestisci consensi"
           onClick={() => setSheetAperta("privacy")}
         />
+        <RigaComeFunziona ruolo="inquilino" />
         <Row
           color="var(--gold)"
           icon={<IconDomanda className="fill-none stroke-[var(--ink)] stroke-2" />}
