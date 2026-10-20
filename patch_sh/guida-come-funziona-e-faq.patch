@@ -1,0 +1,634 @@
+From 78d1891a9250e2800b03bddc5402955f98be20d5 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 20 Oct 2026 09:58:32 +0000
+Subject: [PATCH] =?UTF-8?q?feat(guida):=20pagina=20=C2=ABCome=20funziona?=
+ =?UTF-8?q?=C2=BB=20rileggibile=20dal=20Profilo=20e=20FAQ=20per=20ruolo=20?=
+ =?UTF-8?q?su=20match,=20affidabilit=C3=A0=20e=20recensioni;=20corretta=20?=
+ =?UTF-8?q?la=20FAQ=20che=20diceva=20che=20le=20recensioni=20entrano=20nel?=
+ =?UTF-8?q?l'affidabilit=C3=A0?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ package.json                                 |   2 +-
+ scripts/test-guida.mjs                       |  90 +++++++++
+ scripts/test-profilo-proprietario.mjs        |   2 +-
+ src/app/(app)/come-funziona/page.tsx         |  30 +++
+ src/app/(app)/profilo/OwnerProfiloClient.tsx |   4 +-
+ src/app/(app)/profilo/ProfiloClient.tsx      |   2 +
+ src/app/globals.css                          |  16 ++
+ src/components/FaqSheet.tsx                  |  52 ++---
+ src/components/GuidaComeFunziona.tsx         |  55 +++++
+ src/components/RigaComeFunziona.tsx          |  20 ++
+ src/lib/guida-testi.ts                       | 202 +++++++++++++++++++
+ 11 files changed, 434 insertions(+), 41 deletions(-)
+ create mode 100644 scripts/test-guida.mjs
+ create mode 100644 src/app/(app)/come-funziona/page.tsx
+ create mode 100644 src/components/GuidaComeFunziona.tsx
+ create mode 100644 src/components/RigaComeFunziona.tsx
+ create mode 100644 src/lib/guida-testi.ts
+
+diff --git a/package.json b/package.json
+index c3b4a11..e30b46d 100644
+--- a/package.json
++++ b/package.json
+@@ -8,7 +8,7 @@
+     "start": "next start",
+     "lint": "eslint",
+     "pretest": "node scripts/controlla-dipendenze.mjs",
+-    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-affidabilita.mjs scripts/test-profilo-gestione.mjs scripts/test-avvisi-profilo.mjs scripts/test-raccomandato.mjs scripts/test-home-proprietario.mjs scripts/test-richieste.mjs scripts/test-database-proprietario.mjs scripts/test-affitto-contratto.mjs scripts/test-profilo-proprietario.mjs scripts/test-stile.mjs scripts/test-verifica-immobile.mjs scripts/test-protesti.mjs scripts/test-iscrizione-prova.mjs scripts/test-login-form.mjs scripts/test-benvenuto.mjs scripts/test-db-richieste.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-dati-immobile.mjs scripts/test-candidati.mjs scripts/test-desktop.mjs scripts/test-database-elenco.mjs"
++    "test": "node --test scripts/test-dipendenze.mjs scripts/test-match.mjs scripts/test-sicurezza.mjs scripts/test-verifica.mjs scripts/test-rapporti.mjs scripts/test-informativa.mjs scripts/test-verifica-inquilino.mjs scripts/test-notifiche.mjs scripts/test-candidature.mjs scripts/test-truffe.mjs scripts/test-conversazioni.mjs scripts/test-contratti.mjs scripts/test-ricerca-candidati.mjs scripts/test-visite.mjs scripts/test-scelte.mjs scripts/test-mappe.mjs scripts/test-accettazione.mjs scripts/test-utenze.mjs scripts/test-email.mjs scripts/test-annunci.mjs scripts/test-prezzi.mjs scripts/test-contratto.mjs scripts/test-documenti-contratto.mjs scripts/test-firma.mjs scripts/test-home.mjs scripts/test-affidabilita.mjs scripts/test-profilo-gestione.mjs scripts/test-avvisi-profilo.mjs scripts/test-raccomandato.mjs scripts/test-home-proprietario.mjs scripts/test-richieste.mjs scripts/test-database-proprietario.mjs scripts/test-affitto-contratto.mjs scripts/test-profilo-proprietario.mjs scripts/test-stile.mjs scripts/test-verifica-immobile.mjs scripts/test-protesti.mjs scripts/test-iscrizione-prova.mjs scripts/test-login-form.mjs scripts/test-benvenuto.mjs scripts/test-db-richieste.mjs scripts/test-parametri-ricerca.mjs scripts/test-ricerca-form.mjs scripts/test-dati-immobile.mjs scripts/test-candidati.mjs scripts/test-desktop.mjs scripts/test-database-elenco.mjs scripts/test-guida.mjs"
+   },
+   "dependencies": {
+     "@supabase/ssr": "^0.12.5",
+diff --git a/scripts/test-guida.mjs b/scripts/test-guida.mjs
+new file mode 100644
+index 0000000..36827ca
+--- /dev/null
++++ b/scripts/test-guida.mjs
+@@ -0,0 +1,90 @@
++/**
++ * Test delle SPIEGAZIONI che l'utente può rileggere dopo l'iscrizione: la pagina «Come funziona» (dal Profilo) e le domande frequenti, per ruolo.
++ * Nati da un difetto vero: la FAQ diceva che l'affidabilità «combina le recensioni» con le verifiche, mentre le recensioni sono separate dal
++ * punteggio. Le regole: i NUMERI vengono dalle stesse costanti del calcolo (mai scritti a mano), le spiegazioni sono per ruolo, e la pagina si apre dal Profilo.
++ * Si lancia con:   npm test
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import fs from "node:fs";
++import path from "node:path";
++import { createRequire } from "node:module";
++import { caricaTs, radice } from "./carica-ts.mjs";
++
++const richiedi = createRequire(import.meta.url); const React = richiedi("react"); const { renderToStaticMarkup } = richiedi("react-dom/server");
++const g = caricaTs(path.join(radice, "src", "lib", "guida-testi.ts")); const cfg = caricaTs(path.join(radice, "src", "lib", "match", "config.ts")); const aff = caricaTs(path.join(radice, "src", "lib", "affidabilita.ts")); const rec = caricaTs(path.join(radice, "src", "lib", "recensioni.ts"));
++const leggi = (...p) => fs.readFileSync(path.join(radice, ...p), "utf8").replace(/\r\n/g, "\n");
++const tutto = (ruolo) => g.testiGuida(ruolo).blocchi.flatMap((b) => [b.titolo, ...b.paragrafi, ...(b.pesi ?? []).flatMap((p) => [p.etichetta, p.valore])]).join(" ");
++const faq = (ruolo) => g.domandeFrequenti(ruolo).map((d) => `${d.q} ${d.a}`).join(" ");
++const id = (ruolo) => g.testiGuida(ruolo).blocchi.map((b) => b.id);
++
++test("guida: i blocchi sono quelli giusti per ruolo, nell'ordine (l'inquilino non legge dei possibili match, il proprietario sì)", () => {
++  assert.deepEqual(id("inquilino"), ["cosa", "match", "affidabilita", "recensioni", "documenti"]); assert.deepEqual(id("proprietario"), ["cosa", "match", "possibili", "affidabilita", "recensioni", "ordinamento", "documenti"]);
++  for (const r of ["inquilino", "proprietario"]) for (const b of g.testiGuida(r).blocchi) { assert.ok(b.titolo.length > 5 && b.paragrafi.length >= 1 && b.paragrafi.every((p) => p.length > 20), `${r}/${b.id}`); }
++  assert.ok(g.testiGuida("inquilino").blocchi.find((b) => b.id === "match").pesi.length === 5, "i cinque pesi del match dell'inquilino"); assert.ok(!g.testiGuida("proprietario").blocchi.find((b) => b.id === "match").pesi, "il proprietario non ha pesi: ha criteri scelti da lui");
++});
++
++test("guida: nessuna frase del percorso di iscrizione («alla fine di questi passaggi», «schede») nella versione che si rilegge", () => {
++  for (const r of ["inquilino", "proprietario"]) { const t = tutto(r); for (const vietata of ["alla fine di questi passaggi", "durante questi passaggi", "Cosa facciamo adesso", " schede, pochi minuti"]) assert.ok(!t.includes(vietata), `${r}: «${vietata}»`); }
++});
++
++test("guida inquilino: i pesi, la tolleranza sul budget, i massimi e le etichette sono quelli del calcolo vero", () => {
++  const t = tutto("inquilino"); const p = cfg.PESI_INQUILINO; const s = cfg.PESI_INQUILINO_SENZA_CARATTERISTICHE;
++  for (const [k, e] of [["budget", "Budget"], ["zona", "Zona"], ["locali", "Locali"], ["mq", "Metri quadri"], ["caratteristiche", "Caratteristiche"]]) assert.ok(t.includes(`${e} ${p[k]} punti`), `peso di ${e}: ${p[k]}`);
++  assert.ok(t.includes(`valgono ${s.budget}, ${s.zona}, ${s.locali} e ${s.mq}`), "i pesi senza caratteristiche"); assert.ok(t.includes(`per un totale di ${Object.values(p).reduce((a, b) => a + b, 0)} punti`));
++  assert.ok(t.includes(`fino al ${Math.round(cfg.TOLLERANZA_BUDGET * 100)}% più del tuo budget`) && t.includes(`di oltre il ${Math.round(cfg.TOLLERANZA_BUDGET * 100)}%`), "la tolleranza sul budget"); assert.ok(t.includes(`Il massimo è ${cfg.PUNTEGGIO_MAX}`));
++  for (const e of cfg.SOGLIE_ETICHETTE) assert.ok(t.includes(`da ${e.da} «${e.etichetta}»`), e.etichetta); assert.ok(t.includes(`«${cfg.ETICHETTA_MINIMA}»`));
++  assert.ok(t.includes(`pesi`) || t.includes(`un peso da ${cfg.PESO_MIN} a ${cfg.PESO_MAX}`), "il peso delle caratteristiche preferite"); assert.ok(t.includes(`prendi il ${Math.round(cfg.PUNTI_DATO_MANCANTE * 100)}% dei punti`), "dato mancante dell'annuncio");
++  for (const x of ["in linea con la tua ricerca", "oltre la tua ricerca", "esclusa", "necessarie", "preferite"]) assert.ok(t.includes(x), `manca «${x}»`);
++});
++
++test("guida proprietario: i criteri, le soglie, i pesi e i limiti sono quelli del calcolo vero; il bloccato, il «non indicato» e l'assenza di criteri sulla famiglia sono detti", () => {
++  const t = tutto("proprietario"); const { min, max, predefinita } = cfg.SOGLIA_REDDITO_CANONE;
++  for (const x of ["reddito rispetto al canone", "garante o fideiussione", "profilo verificato", "profilo completo", "nessun protesto"]) assert.ok(t.includes(x), `criterio «${x}»`);
++  assert.ok(t.includes(`dal ${min}% al ${max}% del reddito del nucleo, di partenza ${predefinita}%`), "soglia del reddito"); assert.ok(t.includes(`da ${cfg.SOGLIA_PROFILO_COMPLETO}% dei campi`), "profilo completo"); assert.ok(t.includes(`un peso da ${cfg.PESO_MIN} a ${cfg.PESO_MAX} (di partenza ${cfg.PESO_PREDEFINITO})`), "pesi");
++  for (const x of ["bloccata", "«non indicato»", "Senza nessun criterio non c'è una percentuale", "composizione della famiglia", "tipologia, budget (tra il minimo e il massimo), zona, locali, metri quadri e le caratteristiche necessarie", "pubblicata e verificata", "non si può contattare", "Chi non ha il dato", "resta sempre in fondo"]) assert.ok(t.replace(/\s+/g, " ").includes(x), `manca «${x}»`);
++});
++
++test("affidabilità e recensioni: i punti sono quelli veri, le recensioni sono dette A PARTE (era sbagliato nella FAQ), il badge ha le regole vere", () => {
++  const p = aff.PUNTI_AFFIDABILITA;
++  for (const r of ["inquilino", "proprietario"]) {
++    const f = faq(r); assert.ok(f.includes(`reddito verificato +${p.reddito}`) && f.includes(`nessun protesto +${p.protesti}`) && f.includes(`garante o fideiussione +${p.garanzia}`) && f.includes(`tolgono ${p.protesti}`), `${r}: punti`); assert.ok(f.includes(`da ${aff.PUNTEGGIO_MINIMO} a ${aff.PUNTEGGIO_MASSIMO}`));
++    assert.ok(f.includes("Le recensioni NON ne fanno parte"), `${r}: le recensioni non sono nell'affidabilità`); assert.ok(!/Combina le recensioni/.test(f), `${r}: la frase sbagliata di prima`);
++    for (const t of [tutto(r), f]) { assert.ok(t.includes(`almeno ${rec.AUTORI_DIVERSI_MINIMI} recensioni positive (${rec.VOTO_POSITIVO_MINIMO}-${rec.VOTO_MASSIMO} stelle) di proprietari diversi negli ultimi ${rec.ANNI_VALIDITA} anni`), `${r}: regola del badge`); assert.ok(t.includes(`nessuna negativa (${rec.VOTO_NEGATIVO_MASSIMO} stelle o meno)`)); assert.ok(t.includes(`«${rec.NOME_BADGE_RACCOMANDATO}»`)); assert.ok(t.includes("Non entrano nell'affidabilità né nella percentuale di match")); }
++  }
++});
++
++test("domande frequenti: per ruolo (bonus e detrazioni solo all'inquilino, i possibili match e l'ordinamento solo al proprietario), senza domande doppie", () => {
++  const qi = g.domandeFrequenti("inquilino").map((d) => d.q), qp = g.domandeFrequenti("proprietario").map((d) => d.q);
++  for (const x of ["Come funziona il match", "Come funziona il voto di affidabilità"]) { assert.ok(qi.includes(x) && qp.includes(x), x); } for (const x of ["Bonus giovani per l'affitto", "Detrazioni 730 per l'affitto", "Contributi comunali per l'affitto", "Perché vedo una casa «oltre la tua ricerca»?"]) { assert.ok(qi.includes(x), `inquilino: ${x}`); assert.ok(!qp.includes(x), `proprietario non deve vedere: ${x}`); }
++  for (const x of ["Perché vedo pochi possibili match?", "Come ordino le persone nel Database"]) { assert.ok(qp.includes(x), `proprietario: ${x}`); assert.ok(!qi.includes(x), `inquilino non deve vedere: ${x}`); }
++  assert.equal(new Set(qi).size, qi.length); assert.equal(new Set(qp).size, qp.length); for (const r of ["inquilino", "proprietario"]) assert.ok(g.domandeFrequenti(r).every((d) => d.q && d.a.length > 40));
++  assert.ok(qi.includes("Cos'è la fideiussione bancaria/assicurativa") && qp.includes("Cos'è la fideiussione bancaria/assicurativa"), "la fideiussione serve a entrambi (è un criterio del proprietario)");
++});
++
++test("nessun numero scritto a mano nelle frasi di match, affidabilità e recensioni (tutti da costanti); le voci fiscali hanno i loro", () => {
++  const src = leggi("src", "lib", "guida-testi.ts").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, ""); const fino = src.indexOf("const FAQ_BONUS"); const dopo = src.indexOf("function domandaAffidabilita");
++  assert.ok(fino > 0 && dopo > fino); const parte = src.slice(0, fino) + src.slice(dopo);
++  const stringhe = [...parte.matchAll(/`((?:[^`\\]|\\.)*)`|"((?:[^"\\]|\\.)*)"/g)].map((m) => (m[1] ?? m[2]).replace(/\$\{[^}]*\}/g, "")).filter((x) => !x.startsWith("@/"));
++  const conCifre = stringhe.filter((x) => /\d/.test(x)); assert.deepEqual(conCifre, [], "numeri scritti a mano: " + conCifre.join(" | "));
++});
++
++test("la pagina «Come funziona» si apre dal Profilo di entrambi, mostra la versione del ruolo e non legge né scrive dati (solo il ruolo)", () => {
++  const prop = leggi("src", "app", "(app)", "profilo", "OwnerProfiloClient.tsx"), ten = leggi("src", "app", "(app)", "profilo", "ProfiloClient.tsx");
++  assert.match(prop, /<RigaComeFunziona ruolo="proprietario" \/>/); assert.match(ten, /<RigaComeFunziona ruolo="inquilino" \/>/); assert.match(ten, /<FaqSheet open=\{sheetAperta === "faq"\} onClose=\{\(\) => setSheetAperta\(null\)\} \/>/, "la FAQ dell'inquilino è quella di sempre");
++  const riga = leggi("src", "components", "RigaComeFunziona.tsx"); assert.match(riga, /router\.push\("\/come-funziona"\)/); assert.match(riga, /title="Come funziona"/);
++  const pag = leggi("src", "app", "(app)", "come-funziona", "page.tsx"); assert.match(pag, /select\("ruolo"\)/); assert.match(pag, /const ruolo = profilo\?\.ruolo === "proprietario" \? "proprietario" : "inquilino";/, "la versione dipende dal ruolo di chi apre"); assert.match(pag, /ruolo === "proprietario" \? "Match, affidabilità e recensioni: cosa vedi/, "anche il sottotitolo"); assert.ok(!/\.(insert|update|upsert|delete)\(|\.rpc\(/.test(pag), "la pagina non scrive"); assert.match(pag, /<GuidaComeFunziona ruolo=\{ruolo\} \/>/); assert.match(pag, /href="\/profilo"/, "si torna al Profilo"); assert.match(pag, /if \(!user\) redirect\("\/login"\)/);
++  const comp = leggi("src", "components", "GuidaComeFunziona.tsx"); assert.match(comp, /testiGuida\(ruolo\)/); assert.match(comp, /aria-labelledby=\{`guida-\$\{b\.id\}`\}/);
++});
++
++test("pagina disegnata: i titoli dei blocchi, i pesi in elenco e il collegamento per tornare al Profilo (versione inquilino e proprietario)", () => {
++  const comp = caricaTs(path.join(radice, "src", "components", "GuidaComeFunziona.tsx"));
++  const i = renderToStaticMarkup(React.createElement(comp.GuidaComeFunziona, { ruolo: "inquilino" })), p = renderToStaticMarkup(React.createElement(comp.GuidaComeFunziona, { ruolo: "proprietario" }));
++  assert.match(i, /aria-label="Quanto pesa ogni parte del match"/); assert.ok(!/Quanto pesa ogni parte/.test(p)); assert.match(i, /Match: quanto una casa va bene per te/); assert.match(p, /Match: quanto un inquilino va bene per la tua casa/); assert.match(p, /Possibili match: chi cerca una casa come la tua/); assert.ok(!/Possibili match/.test(i));
++  for (const h of [i, p]) { assert.match(h, /Affidabilità/); assert.match(h, /aria-label="Le fasce di affidabilità"/); assert.match(h, /Recensioni e badge «Inquilino raccomandato»/); assert.match(h, /<li class="piu">/); }
++  assert.equal([...i.matchAll(/<h2 /g)].length, 5); assert.equal([...p.matchAll(/<h2 /g)].length, 7);
++});
++
++test("stile: «Come funziona» ha il ritorno al Profilo (44 px, 15 px) e riusa lo stile del benvenuto", () => {
++  const css = leggi("src", "app", "globals.css"); assert.match(css, /\.guida-indietro \{[^}]*min-height: 44px;[^}]*font-size: 15px;/); assert.match(css, /\.guida-pagina \{/); assert.match(css, /\.intro-voci \{/, "lo stile del benvenuto c'è ancora");
++});
+diff --git a/scripts/test-profilo-proprietario.mjs b/scripts/test-profilo-proprietario.mjs
+index e8a4000..08958f4 100644
+--- a/scripts/test-profilo-proprietario.mjs
++++ b/scripts/test-profilo-proprietario.mjs
+@@ -23,7 +23,7 @@ test("intestazione: nome (e cognome) in alto come titolo, email sotto, iniziali
+ 
+ test("nessuna riga «Novità» (c'è la campanella) e nessun «I tuoi dati»: restano Account e accesso, Privacy e consensi, FAQ, Esci", () => {
+   assert.ok(!/RigaNovita|title="Novità"/.test(prop)); for (const vietato of ["I tuoi dati", "DatiProprietarioForm", "TIPO_VOCAB", "OBIETTIVO_VOCAB", "datiAperto", "Tipo di proprietario", "immobili gestiti", "Affittare velocemente", "updateDatiProprietario", "useActionState"]) assert.ok(!prop.includes(vietato), `resta «${vietato}»`);
+-  const titoli = [...prop.matchAll(/(?<![a-zA-Z])title="([^"]+)"/g)].map((m) => m[1]); assert.deepEqual(titoli, ["Account e accesso", "Privacy e consensi", "FAQ"]); assert.match(prop, /<form action=\{logout\} className="mt-6">\s+<button className="redo-link"[^>]*>\s+Esci\s+<\/button>/);
++  const titoli = [...prop.matchAll(/(?<![a-zA-Z])title="([^"]+)"/g)].map((m) => m[1]); assert.deepEqual(titoli, ["Account e accesso", "Privacy e consensi", "FAQ"], "i titoli scritti nel Profilo (la riga «Come funziona» è un componente a sé: RigaComeFunziona)"); assert.match(prop, /<RigaComeFunziona ruolo="proprietario" \/>\s+<Row\s+color="var\(--gold\)"/, "«Come funziona» sta prima della FAQ"); assert.match(prop, /<FaqSheet open=\{faqAperto\} onClose=\{\(\) => setFaqAperto\(false\)\} ruolo="proprietario" \/>/); assert.match(prop, /<form action=\{logout\} className="mt-6">\s+<button className="redo-link"[^>]*>\s+Esci\s+<\/button>/);
+   for (const x of ["<AccountSheet", "<PrivacySheet", "<FaqSheet"]) assert.ok(prop.includes(x), `manca ${x}`); assert.ok(!/visibileProprietariIniziale/.test(prop), "il proprietario non ha la scelta di farsi trovare");
+ });
+ 
+diff --git a/src/app/(app)/come-funziona/page.tsx b/src/app/(app)/come-funziona/page.tsx
+new file mode 100644
+index 0000000..8679eb8
+--- /dev/null
++++ b/src/app/(app)/come-funziona/page.tsx
+@@ -0,0 +1,30 @@
++import Link from "next/link";
++import { redirect } from "next/navigation";
++import { createClient } from "@/lib/supabase/server";
++import { PageContainer } from "@/components/ui/PageContainer";
++import { GuidaComeFunziona } from "@/components/GuidaComeFunziona";
++
++/**
++ * «Come funziona»: la spiegazione di match, affidabilità e recensioni, da rileggere quando si vuole (si apre dal Profilo). Mostra la versione del ruolo di chi
++ * la apre. Non legge né scrive dati: solo il ruolo.
++ */
++export default async function ComeFunzionaPage() {
++  const supabase = await createClient();
++  const {
++    data: { user },
++  } = await supabase.auth.getUser();
++  if (!user) redirect("/login");
++  const { data: profilo } = await supabase.from("profiles").select("ruolo").eq("id", user.id).single();
++  const ruolo = profilo?.ruolo === "proprietario" ? "proprietario" : "inquilino";
++
++  return (
++    <PageContainer>
++      <Link href="/profilo" className="redo-link guida-indietro">
++        ‹ Torna al Profilo
++      </Link>
++      <h1 className="screen-title">Come funziona</h1>
++      <p className="screen-sub">{ruolo === "proprietario" ? "Match, affidabilità e recensioni: cosa vedi e come si calcola." : "Match, affidabilità e recensioni: cosa vedono i proprietari e come si calcola."}</p>
++      <GuidaComeFunziona ruolo={ruolo} />
++    </PageContainer>
++  );
++}
+diff --git a/src/app/(app)/profilo/OwnerProfiloClient.tsx b/src/app/(app)/profilo/OwnerProfiloClient.tsx
+index 214ff8f..3e7ee2f 100644
+--- a/src/app/(app)/profilo/OwnerProfiloClient.tsx
++++ b/src/app/(app)/profilo/OwnerProfiloClient.tsx
+@@ -7,6 +7,7 @@ import { Row } from "@/components/ui/Row";
+ import { CampanellaNovita } from "@/components/CampanellaNovita";
+ import { PrivacySheet } from "@/components/PrivacySheet";
+ import { FaqSheet } from "@/components/FaqSheet";
++import { RigaComeFunziona } from "@/components/RigaComeFunziona";
+ import { AccountSheet } from "@/components/AccountSheet";
+ import { iniziali, nomeCompleto } from "@/lib/persona";
+ import { IconDomanda, IconLucchetto, IconScudo } from "@/components/icons";
+@@ -65,6 +66,7 @@ export function OwnerProfiloClient({
+           cta="Gestisci consensi"
+           onClick={() => setPrivacyAperto(true)}
+         />
++        <RigaComeFunziona ruolo="proprietario" />
+         <Row
+           color="var(--gold)"
+           icon={<IconDomanda className="fill-none stroke-[var(--ink)] stroke-2" />}
+@@ -89,7 +91,7 @@ export function OwnerProfiloClient({
+         consensoMarketingIniziale={consensoMarketingIniziale}
+         consensoTerziIniziale={consensoTerziIniziale}
+       />
+-      <FaqSheet open={faqAperto} onClose={() => setFaqAperto(false)} />
++      <FaqSheet open={faqAperto} onClose={() => setFaqAperto(false)} ruolo="proprietario" />
+     </PageContainer>
+   );
+ }
+diff --git a/src/app/(app)/profilo/ProfiloClient.tsx b/src/app/(app)/profilo/ProfiloClient.tsx
+index d0dfe0b..d583d1c 100644
+--- a/src/app/(app)/profilo/ProfiloClient.tsx
++++ b/src/app/(app)/profilo/ProfiloClient.tsx
+@@ -19,6 +19,7 @@ import type { Luogo } from "@/lib/luoghi";
+ import type { ProfiloRicerca } from "@/lib/match";
+ import { PrivacySheet } from "@/components/PrivacySheet";
+ import { FaqSheet } from "@/components/FaqSheet";
++import { RigaComeFunziona } from "@/components/RigaComeFunziona";
+ import { AccountSheet } from "@/components/AccountSheet";
+ import {
+   IconDomanda,
+@@ -177,6 +178,7 @@ export function ProfiloClient({
+           cta="Gestisci consensi"
+           onClick={() => setSheetAperta("privacy")}
+         />
++        <RigaComeFunziona ruolo="inquilino" />
+         <Row
+           color="var(--gold)"
+           icon={<IconDomanda className="fill-none stroke-[var(--ink)] stroke-2" />}
+diff --git a/src/app/globals.css b/src/app/globals.css
+index 69f5274..3ef9693 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -4957,6 +4957,22 @@ button.contratto-testa:focus-visible {
+   color: var(--body-soft);
+ }
+ 
++/* «Come funziona» riletto dal Profilo: la stessa impostazione del benvenuto (classi intro-*), con il ritorno al Profilo in alto */
++.guida-indietro {
++  display: inline-flex;
++  align-items: center;
++  min-height: 44px;
++  margin-bottom: 4px;
++  font-size: 15px;
++  font-weight: 800;
++  color: var(--moss);
++  text-decoration: none;
++}
++.guida-pagina {
++  margin-top: 18px;
++  padding-bottom: 24px;
++}
++
+ /* ---- Database: l'elenco per immobile e il dettaglio della persona ---- */
+ /* ============================================================
+    DATABASE INQUILINI — un elenco di persone diviso per immobile + il dettaglio della persona
+diff --git a/src/components/FaqSheet.tsx b/src/components/FaqSheet.tsx
+index 6cdf12f..516c5ae 100644
+--- a/src/components/FaqSheet.tsx
++++ b/src/components/FaqSheet.tsx
+@@ -1,52 +1,28 @@
+ "use client";
+ 
+ import { Sheet } from "@/components/Sheet";
++import { domandeFrequenti, type Ruolo } from "@/lib/guida-testi";
+ 
+-const FAQ = [
+-  {
+-    q: "Bonus giovani per l'affitto",
+-    a: "Diverse misure nazionali e regionali prevedono agevolazioni per chi ha meno di 31 anni e affitta un immobile lontano dalla residenza dei genitori. Requisiti e importi cambiano spesso: verifica sul sito dell'Agenzia delle Entrate o del tuo Comune quali sono attive quest'anno.",
+-  },
+-  {
+-    q: "Detrazioni 730 per l'affitto",
+-    a: "Chi vive in affitto come abitazione principale può avere diritto a una detrazione IRPEF, con importi diversi in base al reddito e al tipo di contratto (libero, concordato, giovani under 31). Il commercialista o il CAF che ti segue può calcolare l'importo esatto in base alla tua situazione.",
+-  },
+-  {
+-    q: "Contributi comunali per l'affitto",
+-    a: "Molti Comuni, incluso il Comune di Milano, pubblicano periodicamente bandi di sostegno all'affitto per chi rientra in determinate fasce ISEE. Le finestre di apertura cambiano ogni anno: conviene controllare direttamente sul sito del proprio Comune.",
+-  },
+-  {
+-    q: "Cos'è la fideiussione bancaria/assicurativa",
+-    a: "È una garanzia che una banca o un'assicurazione offre al posto (o in aggiunta) al deposito cauzionale: se l'inquilino non paga, interviene l'ente garante. Va attivata con un intermediario finanziario, non è ancora un servizio diretto di MatchAmI.",
+-  },
+-  {
+-    q: "Come funziona il voto di affidabilità",
+-    a: "Combina le recensioni ricevute nei contratti conclusi su MatchAmI con le verifiche sul tuo stato economico (reddito dichiarato, eventuale verifica, garante, assenza di protesti). Più informazioni fornisci e più solida è la tua storia, più il punteggio sale.",
+-  },
+-];
+-
+-export function FaqSheet({
+-  open,
+-  onClose,
+-}: {
+-  open: boolean;
+-  onClose: () => void;
+-}) {
++/**
++ * Le domande frequenti, per ruolo. Le risposte su match, affidabilità e recensioni vengono da lib/guida-testi.ts (stesse costanti del calcolo); quelle su
++ * bonus e detrazioni sono solo per l'inquilino. «Come funziona» (dal Profilo) è la versione lunga delle stesse cose.
++ */
++export function FaqSheet({ open, onClose, ruolo = "inquilino" }: { open: boolean; onClose: () => void; ruolo?: Ruolo }) {
+   return (
+-    <Sheet open={open} onClose={onClose} title="FAQ e bonus affitto">
++    <Sheet open={open} onClose={onClose} title={ruolo === "inquilino" ? "FAQ e bonus affitto" : "Domande frequenti"}>
+       <div>
+-        {FAQ.map((item) => (
++        {domandeFrequenti(ruolo).map((item) => (
+           <div key={item.q} className="faq-item">
+             <div className="faq-q">{item.q}</div>
+             <p className="faq-a">{item.a}</p>
+           </div>
+         ))}
+-        <p className="field-note" style={{ marginTop: 18, lineHeight: 1.6 }}>
+-          Informazioni a scopo indicativo: requisiti e importi di bonus,
+-          detrazioni e contributi possono cambiare nel tempo. Per la tua
+-          situazione specifica verifica sempre le fonti ufficiali (Agenzia
+-          delle Entrate, Comune) o parla con un commercialista/CAF.
+-        </p>
++        {ruolo === "inquilino" && (
++          <p className="field-note" style={{ marginTop: 18, lineHeight: 1.6 }}>
++            Informazioni a scopo indicativo: requisiti e importi di bonus, detrazioni e contributi possono cambiare nel tempo. Per la tua situazione specifica
++            verifica sempre le fonti ufficiali (Agenzia delle Entrate, Comune) o parla con un commercialista/CAF.
++          </p>
++        )}
+       </div>
+     </Sheet>
+   );
+diff --git a/src/components/GuidaComeFunziona.tsx b/src/components/GuidaComeFunziona.tsx
+new file mode 100644
+index 0000000..a7723f9
+--- /dev/null
++++ b/src/components/GuidaComeFunziona.tsx
+@@ -0,0 +1,55 @@
++import { testiGuida, type Ruolo } from "@/lib/guida-testi";
++
++/**
++ * La pagina «Come funziona» che si rilegge dal Profilo: cosa vuol dire match, affidabilità e recensioni, per il ruolo di chi legge. Solo disegno: i testi e i
++ * numeri vengono da lib/guida-testi.ts (che li prende dalle costanti del calcolo vero). Usa lo stile del benvenuto, così le due pagine sembrano la stessa.
++ */
++export function GuidaComeFunziona({ ruolo }: { ruolo: Ruolo }) {
++  const t = testiGuida(ruolo);
++  return (
++    <div className="intro-benvenuto guida-pagina">
++      {t.blocchi.map((b) => (
++        <section key={b.id} className={`intro-blocco intro-${b.id}`} aria-labelledby={`guida-${b.id}`}>
++          <h2 id={`guida-${b.id}`} className="intro-titolo">
++            {b.titolo}
++          </h2>
++          {b.paragrafi.map((p, i) => (
++            <p key={i} className="intro-testo">
++              {p}
++            </p>
++          ))}
++          {b.pesi && (
++            <ul className="intro-voci" aria-label="Quanto pesa ogni parte del match">
++              {b.pesi.map((v) => (
++                <li key={v.etichetta} className="piu">
++                  <span>{v.etichetta}</span>
++                  <b>{v.valore}</b>
++                </li>
++              ))}
++            </ul>
++          )}
++          {b.voci && (
++            <ul className="intro-voci" aria-label="Cosa dà o toglie punti">
++              {b.voci.map((v) => (
++                <li key={v.etichetta} className={v.tono}>
++                  <span>{v.etichetta}</span>
++                  <b>{v.valore}</b>
++                </li>
++              ))}
++            </ul>
++          )}
++          {b.fasce && (
++            <ul className="intro-fasce" aria-label="Le fasce di affidabilità">
++              {b.fasce.map((f) => (
++                <li key={f.etichetta}>
++                  <b>{f.etichetta}</b>
++                  <span>{f.intervallo}</span>
++                </li>
++              ))}
++            </ul>
++          )}
++        </section>
++      ))}
++    </div>
++  );
++}
+diff --git a/src/components/RigaComeFunziona.tsx b/src/components/RigaComeFunziona.tsx
+new file mode 100644
+index 0000000..66f86ff
+--- /dev/null
++++ b/src/components/RigaComeFunziona.tsx
+@@ -0,0 +1,20 @@
++"use client";
++
++import { useRouter } from "next/navigation";
++import { Row } from "@/components/ui/Row";
++import { IconInfo } from "@/components/icons";
++
++/** La riga «Come funziona» del Profilo (inquilino e proprietario): apre la spiegazione di match, affidabilità e recensioni. */
++export function RigaComeFunziona({ ruolo }: { ruolo: "inquilino" | "proprietario" }) {
++  const router = useRouter();
++  return (
++    <Row
++      color="var(--ink-soft)"
++      icon={<IconInfo className="fill-none stroke-white stroke-2" />}
++      title="Come funziona"
++      subtitle={ruolo === "proprietario" ? "Come si calcolano match, affidabilità e recensioni, e come leggere i numeri che vedi." : "Come si calcolano match, affidabilità e recensioni, e cosa vedono i proprietari."}
++      cta="Leggi la spiegazione"
++      onClick={() => router.push("/come-funziona")}
++    />
++  );
++}
+diff --git a/src/lib/guida-testi.ts b/src/lib/guida-testi.ts
+new file mode 100644
+index 0000000..d7ee54d
+--- /dev/null
++++ b/src/lib/guida-testi.ts
+@@ -0,0 +1,202 @@
++/**
++ * Le spiegazioni di match, affidabilità e recensioni che l'utente può rileggere DOPO l'iscrizione: la pagina «Come funziona» (dal Profilo) e le domande
++ * frequenti, per ruolo. Come i testi del benvenuto, i NUMERI (pesi, punti, soglie, fasce, limiti) non sono scritti a mano: arrivano dalle stesse costanti
++ * che usa il calcolo vero, così le spiegazioni non possono dire una cosa diversa da ciò che l'app fa. Logica pura: si prova con `npm test`.
++ */
++import { PUNTI_AFFIDABILITA, PUNTEGGIO_MASSIMO, PUNTEGGIO_MINIMO } from "@/lib/affidabilita";
++import { testiIntro, type BloccoIntro, type Ruolo } from "@/lib/benvenuto-testi";
++import {
++  PESI_INQUILINO,
++  PESI_INQUILINO_SENZA_CARATTERISTICHE,
++  PESO_MAX,
++  PESO_MIN,
++  PESO_PREDEFINITO,
++  PUNTEGGIO_MAX,
++  PUNTI_DATO_MANCANTE,
++  SOGLIA_PROFILO_COMPLETO,
++  SOGLIA_REDDITO_CANONE,
++  SOGLIE_ETICHETTE,
++  TOLLERANZA_BUDGET,
++  ETICHETTA_MINIMA,
++} from "@/lib/match/config";
++import { CATALOGO_CRITERI, CHIAVI_CRITERI } from "@/lib/match/proprietario";
++import { ANNI_VALIDITA, AUTORI_DIVERSI_MINIMI, NOME_BADGE_RACCOMANDATO, VOTO_MASSIMO, VOTO_MINIMO, VOTO_NEGATIVO_MASSIMO, VOTO_POSITIVO_MINIMO } from "@/lib/recensioni";
++
++export type { Ruolo };
++
++/** Un blocco della pagina «Come funziona» riletta dal Profilo. In più rispetto al benvenuto: `pesi` (quanto pesa ogni parte del match). */
++export type BloccoGuida = Omit<BloccoIntro, "id"> & { id: string; pesi?: { etichetta: string; valore: string }[] };
++export type DomandaFrequente = { q: string; a: string };
++
++const percento = (frazione: number) => `${Math.round(frazione * 100)}%`;
++const elenco = (voci: readonly string[]) => (voci.length <= 1 ? (voci[0] ?? "") : `${voci.slice(0, -1).join(", ")} e ${voci[voci.length - 1]}`);
++
++/** Una sola frase, usata dalla pagina e dalle domande: chi può avere il badge e cosa vuol dire. */
++export function fraseBadge(): string {
++  return `Con almeno ${AUTORI_DIVERSI_MINIMI} recensioni positive (${VOTO_POSITIVO_MINIMO}-${VOTO_MASSIMO} stelle) di proprietari diversi negli ultimi ${ANNI_VALIDITA} anni, e nessuna negativa (${VOTO_NEGATIVO_MASSIMO} stelle o meno), si ottiene il badge «${NOME_BADGE_RACCOMANDATO}»: a parità di match passa avanti.`;
++}
++
++/** Le recensioni stanno a parte dall'affidabilità: lo dice chiaramente, perché è la cosa che più si fraintende. */
++export function fraseRecensioni(ruolo: Ruolo): string {
++  const chi = ruolo === "inquilino" ? "Le lasciano i proprietari dopo un affitto confermato" : "Le lasci tu, dopo un affitto confermato, e le lasciano gli altri proprietari";
++  return `Le recensioni vanno da ${VOTO_MINIMO} a ${VOTO_MASSIMO} stelle, con qualità scelte da un elenco. ${chi}. Non entrano nell'affidabilità né nella percentuale di match: si vedono a parte.`;
++}
++
++export function fraseEtichette(): string {
++  const s = SOGLIE_ETICHETTE.map((e) => `da ${e.da} «${e.etichetta}»`);
++  return `Le parole: ${s.join(", ")}, sotto ${SOGLIE_ETICHETTE[SOGLIE_ETICHETTE.length - 1].da} «${ETICHETTA_MINIMA}».`;
++}
++
++export function fraseMassimo(): string {
++  return `Il massimo è ${PUNTEGGIO_MAX}: la percentuale non arriva mai al pieno, perché sono dati dichiarati dalle persone, non una garanzia.`;
++}
++
++// ---------------------------------------------------------------- inquilino: il match
++function pesiInquilino(): { etichetta: string; valore: string }[] {
++  const p = PESI_INQUILINO;
++  return [
++    { etichetta: "Budget", valore: `${p.budget} punti` },
++    { etichetta: "Zona", valore: `${p.zona} punti` },
++    { etichetta: "Locali", valore: `${p.locali} punti` },
++    { etichetta: "Metri quadri", valore: `${p.mq} punti` },
++    { etichetta: "Caratteristiche", valore: `${p.caratteristiche} punti` },
++  ];
++}
++
++function paragrafiMatchInquilino(): string[] {
++  const s = PESI_INQUILINO_SENZA_CARATTERISTICHE;
++  return [
++    `La percentuale somma cinque parti, per un totale di ${Object.values(PESI_INQUILINO).reduce((a, b) => a + b, 0)} punti: budget, zona, locali, metri quadri e caratteristiche. Se non scegli nessuna caratteristica, le altre quattro valgono ${s.budget}, ${s.zona}, ${s.locali} e ${s.mq}.`,
++    `Budget: se la casa costa quanto il tuo massimo prende una buona parte dei punti; più costa meno, più sale, fino al pieno; sopra il massimo i punti calano fino a zero. Zona: pieno se la casa sta in uno dei luoghi che hai scelto (scegliere una città copre tutti i suoi quartieri). Locali e metri quadri: pieno se la casa sta nell'intervallo che indichi.`,
++    `Caratteristiche: quelle «necessarie» non danno punti, sono un cancello (senza, la casa non compare); quelle «preferite» hanno un peso da ${PESO_MIN} a ${PESO_MAX} e fanno salire la percentuale. ${fraseMassimo()} ${fraseEtichette()}`,
++    `Una casa può essere in linea con la tua ricerca (rispetta tutto), oltre la tua ricerca (compare in fondo, con il motivo: per esempio costa fino al ${percento(TOLLERANZA_BUDGET)} più del tuo budget, o ha meno locali del tuo minimo) oppure esclusa (non te la mostriamo: tipologia diversa, budget superato di oltre il ${percento(TOLLERANZA_BUDGET)}, o manca una caratteristica necessaria).`,
++    `Se il proprietario non ha indicato un dato (per esempio i metri quadri) prendi il ${percento(PUNTI_DATO_MANCANTE)} dei punti di quella voce e lo vedi segnato: non vieni penalizzato per una dimenticanza di un altro.`,
++  ];
++}
++
++// ---------------------------------------------------------------- proprietario: il match
++function paragrafiMatchProprietario(): string[] {
++  const nomi = CHIAVI_CRITERI.map((k) => CATALOGO_CRITERI[k].nome.toLowerCase());
++  const { min, max, predefinita } = SOGLIA_REDDITO_CANONE;
++  return [
++    `Per ogni casa scegli fino a ${CHIAVI_CRITERI.length} criteri: ${elenco(nomi)}. Per il reddito decidi la soglia (dal ${min}% al ${max}% del reddito del nucleo, di partenza ${predefinita}%); il profilo è «completo» da ${SOGLIA_PROFILO_COMPLETO}% dei campi compilati.`,
++    `Ogni criterio è obbligatorio o preferenziale, e ha un peso da ${PESO_MIN} a ${PESO_MAX} (di partenza ${PESO_PREDEFINITO}). La percentuale è la quota di peso dei criteri soddisfatti sul peso totale. ${fraseMassimo()} ${fraseEtichette()}`,
++    `Se un criterio obbligatorio non è soddisfatto la persona risulta «bloccata», ma la sua percentuale resta visibile e puoi comunque scegliere. Un dato che la persona non ha indicato conta come non soddisfatto, ma si legge «non indicato», non «no»: se lo compila, la percentuale può salire. Senza nessun criterio non c'è una percentuale.`,
++    "Non esistono criteri sulla composizione della famiglia (figli, persone nel nucleo): è una scelta voluta, per non discriminare.",
++  ];
++}
++
++const bloccoPossibili = (): BloccoGuida => ({
++  id: "possibili",
++  titolo: "Possibili match: chi cerca una casa come la tua",
++  paragrafi: [
++    "Sono gli inquilini per cui la tua casa rispetta tutto ciò che cercano: tipologia, budget (tra il minimo e il massimo), zona, locali, metri quadri e le caratteristiche necessarie. Compaiono solo se la casa è pubblicata e verificata dal nostro staff.",
++    "Chi ha scelto di non farsi trovare viene contato ma non si può contattare, e i contatti di nessuno sono visibili: se una persona accetta la tua richiesta, o si candida, potete scrivervi in chat.",
++    "Se ne vedi pochi, di solito la casa è fuori dalle ricerche per canone, locali o metri quadri, o manca una caratteristica che per qualcuno è necessaria (per esempio gli animali ammessi). Controlla i dati dell'annuncio: più sono completi e più sono precisi i risultati.",
++  ],
++});
++
++const bloccoOrdinamento = (): BloccoGuida => ({
++  id: "ordinamento",
++  titolo: "Come ordinare le persone nel Database",
++  paragrafi: [
++    "In alto scegli il criterio con cui ordinare: affidabilità, match o recensioni, ognuno con il suo colore. Toccando di nuovo lo stesso criterio inverti l'ordine, dal più alto al più basso. Il numero accanto al nome è il valore del criterio scelto.",
++    "Chi non ha il dato (per esempio nessuna recensione) resta sempre in fondo. A parità di valore passa avanti chi ha il badge «" + NOME_BADGE_RACCOMANDATO + "», poi chi ha di più negli altri criteri.",
++  ],
++});
++
++const bloccoRecensioni = (ruolo: Ruolo): BloccoGuida => ({ id: "recensioni", titolo: "Recensioni e badge «" + NOME_BADGE_RACCOMANDATO + "»", paragrafi: [fraseRecensioni(ruolo), fraseBadge()] });
++
++function bloccoDa(ruolo: Ruolo, id: BloccoIntro["id"]): BloccoIntro {
++  const b = testiIntro(ruolo).blocchi.find((x) => x.id === id);
++  if (!b) throw new Error(`blocco «${id}» mancante nel benvenuto`);
++  return b;
++}
++
++/**
++ * La pagina «Come funziona» riletta dal Profilo: gli stessi blocchi del benvenuto (cos'è, match, affidabilità) ma più completi, e senza le frasi che
++ * parlano del percorso di iscrizione («te li chiederemo alla fine di questi passaggi»).
++ */
++export function testiGuida(ruolo: Ruolo): { blocchi: BloccoGuida[] } {
++  const cosa = bloccoDa(ruolo, "cosa");
++  const match = bloccoDa(ruolo, "match");
++  const aff = bloccoDa(ruolo, "affidabilita");
++  if (ruolo === "inquilino") {
++    return {
++      blocchi: [
++        cosa,
++        { ...match, paragrafi: [...match.paragrafi, ...paragrafiMatchInquilino()], pesi: pesiInquilino() },
++        aff,
++        bloccoRecensioni(ruolo),
++        {
++          id: "documenti",
++          titolo: "Perché conviene verificare i documenti",
++          paragrafi: [
++            "Ciò che dichiari vale poco, ciò che il nostro staff verifica vale molto. Il reddito dà punti solo se verificato: con le sole dichiarazioni non si va oltre «Buona».",
++            "Puoi caricare o completare i documenti in ogni momento dal Profilo, aprendo la scheda dell'affidabilità («Vedi e modifica i tuoi dati»). I documenti li vede solo il nostro staff: al proprietario arriva soltanto «verificato», sì o no.",
++          ],
++        },
++      ],
++    };
++  }
++  return {
++    blocchi: [
++      cosa,
++      { ...match, paragrafi: [...match.paragrafi, ...paragrafiMatchProprietario()] },
++      bloccoPossibili(),
++      aff,
++      bloccoRecensioni(ruolo),
++      bloccoOrdinamento(),
++      {
++        id: "documenti",
++        titolo: "Perché è importante verificare la tua casa",
++        paragrafi: [
++          "Gli inquilini vedono il tuo annuncio, e tu vedi i possibili match, solo dopo che il nostro staff ha verificato che la casa è tua: servono il tuo documento d'identità e la visura catastale o l'atto di proprietà.",
++          "Puoi caricarli o completarli in ogni momento dalla scheda della casa, in Immobili. Finché non lo fai la casa resta invisibile.",
++        ],
++      },
++    ],
++  };
++}
++
++// ---------------------------------------------------------------- le domande frequenti
++const FAQ_BONUS: readonly DomandaFrequente[] = [
++  { q: "Bonus giovani per l'affitto", a: "Diverse misure nazionali e regionali prevedono agevolazioni per chi ha meno di 31 anni e affitta un immobile lontano dalla residenza dei genitori. Requisiti e importi cambiano spesso: verifica sul sito dell'Agenzia delle Entrate o del tuo Comune quali sono attive quest'anno." },
++  { q: "Detrazioni 730 per l'affitto", a: "Chi vive in affitto come abitazione principale può avere diritto a una detrazione IRPEF, con importi diversi in base al reddito e al tipo di contratto (libero, concordato, giovani under 31). Il commercialista o il CAF che ti segue può calcolare l'importo esatto in base alla tua situazione." },
++  { q: "Contributi comunali per l'affitto", a: "Molti Comuni, incluso il Comune di Milano, pubblicano periodicamente bandi di sostegno all'affitto per chi rientra in determinate fasce ISEE. Le finestre di apertura cambiano ogni anno: conviene controllare direttamente sul sito del proprio Comune." },
++];
++const FAQ_FIDEIUSSIONE: DomandaFrequente = { q: "Cos'è la fideiussione bancaria/assicurativa", a: "È una garanzia che una banca o un'assicurazione offre al posto (o in aggiunta) al deposito cauzionale: se l'inquilino non paga, interviene l'ente garante. Va attivata con un intermediario finanziario, non è ancora un servizio diretto di MatchAmI." };
++
++function domandaAffidabilita(ruolo: Ruolo): DomandaFrequente {
++  const p = PUNTI_AFFIDABILITA;
++  const chi = ruolo === "inquilino" ? "I proprietari lo vedono accanto alla tua candidatura" : "Lo vedi accanto a ogni candidato";
++  return {
++    q: "Come funziona il voto di affidabilità",
++    a: `È un numero da ${PUNTEGGIO_MINIMO} a ${PUNTEGGIO_MASSIMO}. ${chi}. Si costruisce con ciò che lo staff ha verificato: reddito verificato +${p.reddito}, nessun protesto +${p.protesti} (dichiarato, o verificato sul certificato), garante o fideiussione +${p.garanzia}; i protesti, o la risposta non data, tolgono ${p.protesti}. Il reddito dà punti solo se verificato. Le recensioni NON ne fanno parte: si vedono a parte.`,
++  };
++}
++
++function domandaRecensioni(ruolo: Ruolo): DomandaFrequente {
++  return { q: `Come funzionano le recensioni e il badge «${NOME_BADGE_RACCOMANDATO}»`, a: `${fraseRecensioni(ruolo)} ${fraseBadge()}` };
++}
++
++export function domandeFrequenti(ruolo: Ruolo): DomandaFrequente[] {
++  if (ruolo === "inquilino") {
++    return [
++      { q: "Come funziona il match", a: `${paragrafiMatchInquilino().slice(0, 1).join(" ")} ${fraseMassimo()} ${fraseEtichette()}` },
++      { q: "Perché vedo una casa «oltre la tua ricerca»?", a: `È una casa che rispetta quasi tutto ma sfora un limite: per esempio costa fino al ${percento(TOLLERANZA_BUDGET)} più del tuo budget, sta fuori dalle tue zone o ha meno locali del tuo minimo. Compare in fondo, con il motivo scritto. Oltre il ${percento(TOLLERANZA_BUDGET)} di budget, o senza una caratteristica necessaria, non la vedi.` },
++      domandaAffidabilita(ruolo),
++      domandaRecensioni(ruolo),
++      ...FAQ_BONUS,
++      FAQ_FIDEIUSSIONE,
++    ];
++  }
++  return [
++    { q: "Come funziona il match", a: paragrafiMatchProprietario().slice(0, 3).join(" ") },
++    { q: "Perché vedo pochi possibili match?", a: bloccoPossibili().paragrafi.join(" ") },
++    domandaAffidabilita(ruolo),
++    domandaRecensioni(ruolo),
++    { q: "Come ordino le persone nel Database", a: bloccoOrdinamento().paragrafi.join(" ") },
++    FAQ_FIDEIUSSIONE,
++  ];
++}
+-- 
+2.43.0
+
