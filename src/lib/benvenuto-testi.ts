@@ -4,6 +4,7 @@
  * che usa il punteggio vero, così le spiegazioni non possono dire una cosa diversa da ciò che l'app fa. Logica pura: si prova con `npm test`.
  */
 import { PUNTI_AFFIDABILITA, PUNTEGGIO_MASSIMO, fasceAffidabilita } from "@/lib/affidabilita";
+import { VALIDITA_MESI } from "@/lib/scadenze-verifiche";
 import { NOME_BADGE_RACCOMANDATO } from "@/lib/recensioni";
 
 export type Ruolo = "inquilino" | "proprietario";
@@ -63,6 +64,7 @@ export function testiIntro(ruolo: Ruolo): TestiIntro {
           titolo: "Affidabilità: quanto i proprietari possono fidarsi di te",
           paragrafi: [
             `È un numero da 0 a ${PUNTEGGIO_MASSIMO} che i proprietari vedono accanto alla tua candidatura. Non cambia la percentuale di match: a parità di match, passa avanti chi ha il badge «${NOME_BADGE_RACCOMANDATO}» e poi chi ha l'affidabilità più alta.`,
+            `Una verifica non dura per sempre: il reddito vale ${VALIDITA_MESI.reddito} mesi, i protesti ${VALIDITA_MESI.protesti}, e ti avvisiamo prima che scada. Il reddito dà punti in proporzione a quanto del reddito del nucleo che dichiari è documentato.`,
           ],
           voci: VOCI_AFFIDABILITA,
           fasce: fasceTesto(),
@@ -72,7 +74,7 @@ export function testiIntro(ruolo: Ruolo): TestiIntro {
           titolo: "Perché è importante caricare i documenti",
           paragrafi: [
             "Ciò che dichiari vale poco, ciò che il nostro staff verifica vale molto. Il reddito dà punti solo se verificato: con le sole dichiarazioni non si va oltre «Buona».",
-            "Per verificarlo servono un documento d'identità e una busta paga, la CU o la dichiarazione dei redditi; per i protesti, il certificato dei protesti. I documenti li vede solo il nostro staff: ai proprietari arriva solo «verificato», sì o no.",
+            "Per verificarlo servono un documento d'identità e una busta paga, la CU o la dichiarazione dei redditi; per i protesti, il certificato dei protesti. I documenti li vede solo il nostro staff: ai proprietari arriva solo «verificato», sì o no. Se nel tuo nucleo più persone hanno un reddito serve la prova di ognuna, con il suo consenso.",
             "Te li chiederemo alla fine di questi passaggi. Se non li hai sottomano puoi caricarli più tardi, ma finché non lo fai il tuo punteggio resta basso.",
           ],
         },
@@ -110,6 +112,7 @@ export function testiIntro(ruolo: Ruolo): TestiIntro {
         paragrafi: [
           `È un numero da 0 a ${PUNTEGGIO_MASSIMO} che vedi accanto a ogni candidato. Non cambia la percentuale di match: a parità di match, passa avanti chi ha il badge «${NOME_BADGE_RACCOMANDATO}» e poi chi ha l'affidabilità più alta.`,
           "Conta di più ciò che il nostro staff ha verificato di ciò che la persona dichiara: sulla scheda vedi se reddito e protesti sono verificati. I documenti non li vedi mai.",
+          `Una verifica vale per un periodo (reddito ${VALIDITA_MESI.reddito} mesi, protesti ${VALIDITA_MESI.protesti}): sulla scheda vedi quando è stata fatta; se è scaduta non conta, e se copre solo una parte del reddito del nucleo lo vedi.`,
         ],
         voci: VOCI_AFFIDABILITA,
         fasce: fasceTesto(),

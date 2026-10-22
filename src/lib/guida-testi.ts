@@ -4,6 +4,7 @@
  * che usa il calcolo vero, così le spiegazioni non possono dire una cosa diversa da ciò che l'app fa. Logica pura: si prova con `npm test`.
  */
 import { PUNTI_AFFIDABILITA, PUNTEGGIO_MASSIMO, PUNTEGGIO_MINIMO } from "@/lib/affidabilita";
+import { VALIDITA_MESI } from "@/lib/scadenze-verifiche";
 import { testiIntro, type BloccoIntro, type Ruolo } from "@/lib/benvenuto-testi";
 import {
   PESI_INQUILINO,
@@ -133,7 +134,8 @@ export function testiGuida(ruolo: Ruolo): { blocchi: BloccoGuida[] } {
           titolo: "Perché conviene verificare i documenti",
           paragrafi: [
             "Ciò che dichiari vale poco, ciò che il nostro staff verifica vale molto. Il reddito dà punti solo se verificato: con le sole dichiarazioni non si va oltre «Buona».",
-            "Puoi caricare o completare i documenti in ogni momento dal Profilo, aprendo la scheda dell'affidabilità («Vedi e modifica i tuoi dati»). I documenti li vede solo il nostro staff: al proprietario arriva soltanto «verificato», sì o no.",
+            `Una verifica scade (reddito ${VALIDITA_MESI.reddito} mesi, protesti ${VALIDITA_MESI.protesti}): rinnovala con documenti recenti, senza perdere i punti nel frattempo. Se nel tuo nucleo più persone hanno un reddito serve la prova di ognuna, e solo con il suo consenso: i punti sono in proporzione alla parte documentata. Ogni tre mesi ti chiediamo di confermare che la tua situazione non è cambiata.`,
+            "Puoi caricare o completare i documenti in ogni momento dal Profilo, aprendo la scheda dell'affidabilità («Vedi e modifica i tuoi dati»). I documenti li vede solo il nostro staff: al proprietario arriva soltanto «verificato», quando, e quanta parte del reddito del nucleo è documentata.",
           ],
         },
       ],
@@ -172,7 +174,7 @@ function domandaAffidabilita(ruolo: Ruolo): DomandaFrequente {
   const chi = ruolo === "inquilino" ? "I proprietari lo vedono accanto alla tua candidatura" : "Lo vedi accanto a ogni candidato";
   return {
     q: "Come funziona il voto di affidabilità",
-    a: `È un numero da ${PUNTEGGIO_MINIMO} a ${PUNTEGGIO_MASSIMO}. ${chi}. Si costruisce con ciò che lo staff ha verificato: reddito verificato +${p.reddito}, nessun protesto +${p.protesti} (dichiarato, o verificato sul certificato), garante o fideiussione +${p.garanzia}; i protesti, o la risposta non data, tolgono ${p.protesti}. Il reddito dà punti solo se verificato. Le recensioni NON ne fanno parte: si vedono a parte.`,
+    a: `È un numero da ${PUNTEGGIO_MINIMO} a ${PUNTEGGIO_MASSIMO}. ${chi}. Si costruisce con ciò che lo staff ha verificato: reddito verificato +${p.reddito}, nessun protesto +${p.protesti} (dichiarato, o verificato sul certificato), garante o fideiussione +${p.garanzia}; i protesti, o la risposta non data, tolgono ${p.protesti}. Il reddito dà punti solo se verificato, e in proporzione a quanto del reddito del nucleo dichiarato è documentato. Una verifica scade (reddito ${VALIDITA_MESI.reddito} mesi, protesti ${VALIDITA_MESI.protesti}): dopo non dà più punti finché non si rinnova, e ${ruolo === "inquilino" ? "ti avvisiamo prima" : "sulla scheda la vedi come «scaduta»"}. Le recensioni NON ne fanno parte: si vedono a parte.`,
   };
 }
 

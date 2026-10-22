@@ -6,6 +6,7 @@ import {
   TIPI_DOCUMENTO_INQUILINO,
   type DocumentoInquilino,
 } from "@/lib/verifica-inquilino";
+import { dataBreve, etichettaPersona } from "@/lib/scadenze-verifiche";
 import { EsitoInquilinoForm } from "./EsitoInquilinoForm";
 
 const euro = (n: number | null) =>
@@ -27,7 +28,11 @@ export default async function StaffInquilinoPage({ params }: { params: Promise<{
         professione: string | null;
         reddito_mensile: number | null;
         reddito_nucleo: number | null;
+        redditi_nucleo: number | null;
+        nucleo: string | null;
         verifica_stato: string;
+        reddito_scade_il: string | null;
+        reddito_nucleo_verificato: number | null;
       }
     | undefined;
   if (!dati) notFound();
@@ -36,7 +41,7 @@ export default async function StaffInquilinoPage({ params }: { params: Promise<{
 
   const { data: documentiData } = await supabase
     .from("documenti_inquilino")
-    .select("id, tipo, percorso, nome_file")
+    .select("id, tipo, percorso, nome_file, persona, importo_verificato, verificato_at")
     .eq("tenant_id", id)
     .order("created_at", { ascending: true });
   const documenti = (documentiData ?? []) as DocumentoInquilino[];
@@ -80,6 +85,17 @@ export default async function StaffInquilinoPage({ params }: { params: Promise<{
         <span className="k">Reddito del nucleo</span>
         <span className="v">{euro(dati.reddito_nucleo)}</span>
       </div>
+      <div className="feat-row">
+        <span className="k">Persone del nucleo con un reddito</span>
+        <span className="v">{dati.redditi_nucleo ?? 1}</span>
+      </div>
+      {dati.reddito_scade_il && (
+        <div className="note-box" style={{ marginTop: 14 }}>
+          <b>È un rinnovo (o un&apos;integrazione).</b> La verifica precedente vale fino al {dataBreve(dati.reddito_scade_il)}
+          {dati.reddito_nucleo_verificato !== null ? `, con ${euro(dati.reddito_nucleo_verificato)} del nucleo documentati` : ""}. Le prove già verificate qui sotto, se approvi, vengono sostituite
+          da quelle nuove e cancellate.
+        </div>
+      )}
 
       {TIPI_DOCUMENTO_INQUILINO.map((tipo) => {
         const miei = firmati.filter((d) => d.tipo === tipo);
@@ -96,6 +112,8 @@ export default async function StaffInquilinoPage({ params }: { params: Promise<{
                   d.url ? (
                     <a key={d.id} href={d.url} target="_blank" rel="noopener noreferrer" className="staff-doc">
                       {d.nome_file}
+                      {tipo === "reddito" && (dati.redditi_nucleo ?? 1) > 1 ? ` · ${etichettaPersona(d.persona ?? 1)}` : ""}
+                      {d.verificato_at ? ` · già verificata${d.importo_verificato ? ` (€${d.importo_verificato.toLocaleString("it-IT")})` : ""}` : " · nuova"}
                     </a>
                   ) : (
                     <p key={d.id} className="note-error">
@@ -116,7 +134,13 @@ export default async function StaffInquilinoPage({ params }: { params: Promise<{
 
       <div style={{ marginTop: 26 }}>
         {decidibile ? (
-          <EsitoInquilinoForm id={id} />
+          <EsitoInquilinoForm
+            id={id}
+            documenti={firmati.filter((d) => d.tipo === "reddito" && !d.verificato_at).map((d) => ({ id: d.id, persona: d.persona ?? 1, nome: d.nome_file }))}
+            redditiNucleo={dati.redditi_nucleo}
+            redditoNucleo={dati.reddito_nucleo}
+            redditoMensile={dati.reddito_mensile}
+          />
         ) : (
           <div className="note-box">
             Questa persona non ha una verifica in attesa (stato: {dati.verifica_stato.replace("_", " ")}).

@@ -19,6 +19,13 @@ export type AffidabilitaInput = {
   fideiussione: boolean | null;
   /** lo staff ha verificato i protesti sul certificato: `protestato` è allora il risultato dello staff */
   protestiVerificati?: boolean;
+  /**
+   * Quanta parte del reddito del nucleo dichiarato è documentata, da 0 a 1 (vedi lib/scadenze-verifiche.ts). Senza, vale 1: tutto documentato. I punti del
+   * reddito sono proporzionali: documentare la metà dà metà dei punti.
+   */
+  coperturaReddito?: number;
+  /** la verifica del reddito c'era ma è scaduta: non dà punti finché non si rinnova (`verificato` deve essere false) */
+  redditoScaduto?: boolean;
 };
 
 /** `protesti` è il peso della voce: +30 se non ne hai, −30 se ne hai o non hai risposto. */
@@ -108,9 +115,15 @@ export function esempiAffidabilita(): { descrizione: string; punteggio: number; 
 export function computeAffidabilita(p: AffidabilitaInput): AffidabilitaResult {
   const { reddito, protesti, garanzia } = PUNTI_AFFIDABILITA;
 
+  const cop = Math.max(0, Math.min(1, p.coperturaReddito ?? 1));
+  const puntiReddito = Math.round(reddito * cop);
   const voceReddito: VoceAffidabilita = p.verificato
-    ? { id: "reddito", etichetta: "Reddito verificato", punti: reddito, massimo: reddito, presa: true, origine: "verificato", potenziale: 0, suggerimento: null, sezione: null, nota: "Controllato dallo staff sui tuoi documenti." }
-    : { id: "reddito", etichetta: "Reddito verificato", punti: 0, massimo: reddito, presa: false, origine: "verificato", potenziale: reddito, suggerimento: "Verifica il tuo reddito", sezione: "verifica", nota: "Non ancora verificato: carica i documenti e lo controlla lo staff." };
+    ? cop >= 1
+      ? { id: "reddito", etichetta: "Reddito verificato", punti: reddito, massimo: reddito, presa: true, origine: "verificato", potenziale: 0, suggerimento: null, sezione: null, nota: "Controllato dallo staff sui tuoi documenti." }
+      : { id: "reddito", etichetta: "Reddito verificato in parte", punti: puntiReddito, massimo: reddito, presa: puntiReddito > 0, origine: "verificato", potenziale: reddito - puntiReddito, suggerimento: "Documenta il reddito di tutto il nucleo", sezione: "verifica", nota: `Lo staff ha verificato il ${Math.round(cop * 100)}% del reddito del nucleo che hai dichiarato: i punti sono in proporzione.` }
+    : p.redditoScaduto
+      ? { id: "reddito", etichetta: "Reddito verificato (scaduto)", punti: 0, massimo: reddito, presa: false, origine: "verificato", potenziale: reddito, suggerimento: "Rinnova la verifica del reddito", sezione: "verifica", nota: "La verifica è scaduta: non dà più punti finché non la rinnovi con documenti recenti." }
+      : { id: "reddito", etichetta: "Reddito verificato", punti: 0, massimo: reddito, presa: false, origine: "verificato", potenziale: reddito, suggerimento: "Verifica il tuo reddito", sezione: "verifica", nota: "Non ancora verificato: carica i documenti e lo controlla lo staff." };
 
   // «sì» e «non indicato» valgono lo stesso: tolgono i punti. Solo il «non indicato» si può ancora correggere.
   const voceProtesti: VoceAffidabilita =

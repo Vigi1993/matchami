@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { richiediStaff, èUuid } from "@/lib/staff";
 import { messaggioErroreVerifica } from "@/lib/verifica";
 
+import { importiDaForm } from "@/lib/verifica-importi";
 export type EsitoState = { error?: string } | null;
 
 /**
@@ -93,10 +94,30 @@ export async function decidiInquilino(
     return { error: messaggioErroreVerifica("INQUILINO_NOTA_OBBLIGATORIA") };
   }
 
+  // Verificare = scrivere QUANTO dimostra ogni prova del reddito (uno per documento riconosciuto): lo si controlla qui, prima del database
+  let importi: { documento: string; importo: number }[] | null = null;
+  if (esito === "verifica") {
+    const [{ data: docs }, { data: datiRows }] = await Promise.all([
+      supabase.from("documenti_inquilino").select("id, persona, nome_file").eq("tenant_id", id).eq("tipo", "reddito").is("verificato_at", null),
+      supabase.rpc("dati_per_verifica_inquilino", { p_tenant: id }),
+    ]);
+    const redditiNucleo = ((datiRows ?? [])[0] as { redditi_nucleo?: number | null } | undefined)?.redditi_nucleo ?? null;
+    const valori: Record<string, string> = {};
+    for (const [chiave, valore] of formData.entries()) if (chiave.startsWith("importo-")) valori[chiave.slice("importo-".length)] = String(valore);
+    const letti = importiDaForm({
+      documenti: (docs ?? []).map((d) => ({ id: d.id as string, persona: (d.persona as number | null) ?? 1, nome: d.nome_file as string })),
+      valori,
+      redditiNucleo,
+    });
+    if (!letti.ok) return { error: letti.errore };
+    importi = letti.importi;
+  }
+
   const { error } = await supabase.rpc("esito_verifica_inquilino", {
     p_tenant: id,
     p_verificato: esito === "verifica",
     p_note: esito === "respingi" ? nota : null,
+    p_importi: importi,
   });
   if (error) return { error: messaggioErroreVerifica(error.message) };
 

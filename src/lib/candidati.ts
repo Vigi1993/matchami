@@ -3,6 +3,7 @@ import { leggiFotografia, valutaCandidato } from "@/lib/match";
 import type { CriterioRichiesto, ProfiloCandidato } from "@/lib/match";
 import type { CandidaturaRicevuta } from "@/lib/types";
 
+import { leggiVerificheVista } from "./scadenze-verifiche";
 /** Una riga della tabella `candidature`, come la legge il proprietario. */
 export type RigaCandidatura = {
   id: string;
@@ -33,16 +34,24 @@ export type RigaVistaCandidato = {
   avatar_url: string | null;
   animali_compilato: boolean | null;
   nucleo_compilato: boolean | null;
-  /** lo staff ha verificato i protesti sul certificato: `protestato` è il risultato dello staff */
+  /** lo staff ha verificato i protesti sul certificato E la verifica vale ancora: `protestato` è il risultato dello staff */
   protesti_verificati: boolean | null;
+  /** (migrazione 0040) la verifica del reddito c'era ma è scaduta; quando è stata fatta; quanto del reddito del nucleo è documentato */
+  reddito_scaduto?: boolean | null;
+  reddito_verificato_at?: string | null;
+  reddito_nucleo_verificato?: number | null;
+  protesti_scaduti?: boolean | null;
+  protesti_verificati_at?: string | null;
+  situazione_confermata_at?: string | null;
 };
 
 /** Le colonne da chiedere alla vista, in un posto solo. */
 export const COLONNE_VISTA_CANDIDATI =
-  "candidatura_id, nome, cognome, professione, reddito_mensile, reddito_nucleo, garante, fideiussione, protestato, verificato, presentazione, avatar_url, animali_compilato, nucleo_compilato, protesti_verificati";
+  "candidatura_id, nome, cognome, professione, reddito_mensile, reddito_nucleo, garante, fideiussione, protestato, verificato, presentazione, avatar_url, animali_compilato, nucleo_compilato, protesti_verificati, reddito_scaduto, reddito_verificato_at, reddito_nucleo_verificato, protesti_scaduti, protesti_verificati_at, situazione_confermata_at";
 
 /** Dalla riga della vista al profilo che legge il calcolo del match. */
 export function profiloDaVista(v: Partial<RigaVistaCandidato> | null | undefined): ProfiloCandidato {
+  const ver = leggiVerificheVista(v);
   return {
     professione: v?.professione ?? null,
     reddito_mensile: v?.reddito_mensile ?? null,
@@ -55,6 +64,8 @@ export function profiloDaVista(v: Partial<RigaVistaCandidato> | null | undefined
     presentazione: v?.presentazione ?? null,
     verificato: v?.verificato === true,
     protestiVerificati: v?.protesti_verificati === true,
+    coperturaReddito: ver.coperturaReddito,
+    redditoScaduto: ver.redditoScaduto,
   };
 }
 
@@ -112,6 +123,12 @@ export function assemblaCandidature(input: {
         reddito_nucleo: v?.reddito_nucleo ?? null,
         verificato: v?.verificato === true,
         protesti_verificati: v?.protesti_verificati === true,
+        reddito_scaduto: v?.reddito_scaduto === true,
+        reddito_verificato_at: v?.reddito_verificato_at ?? null,
+        reddito_nucleo_verificato: v?.reddito_nucleo_verificato ?? null,
+        protesti_scaduti: v?.protesti_scaduti === true,
+        protesti_verificati_at: v?.protesti_verificati_at ?? null,
+        situazione_confermata_at: v?.situazione_confermata_at ?? null,
         protestato: v?.protestato ?? null,
         presentazione: v?.presentazione ?? null,
         avatar_url: v?.avatar_url ?? null,

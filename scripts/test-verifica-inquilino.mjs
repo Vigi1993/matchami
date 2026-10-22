@@ -117,7 +117,9 @@ test("documenti: si tolgono solo prima dell'invio", () => {
 });
 
 test("documenti: il limite è quello del database", () => {
-  const m = sql.match(/select count\(\*\) from documenti_inquilino d where d\.tenant_id = auth\.uid\(\)\) < (\d+)/);
+  // il limite vale quello dell'ULTIMA definizione della regola (la 0040 l'ha alzato da 12 a 20, per i nuclei con più redditi e i rinnovi)
+  const ultima = fs.readFileSync(path.join(radice, "supabase", "migrations", "0040_scadenza_verifiche.sql"), "utf8");
+  const m = ultima.match(/select count\(\*\) from documenti_inquilino d where d\.tenant_id = auth\.uid\(\)\) < (\d+)/);
   assert.ok(m, "non trovo il limite nella policy della migrazione");
   assert.equal(v.LIMITE_DOCUMENTI, Number(m[1]));
   assert.equal(v.puoAggiungereDocumento(v.LIMITE_DOCUMENTI - 1), true);

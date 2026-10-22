@@ -8,6 +8,7 @@
  * compone qui, così le parole si possono cambiare senza toccare i dati.
  */
 import { percorsoInterno } from "./percorso";
+import { dataBreve } from "./scadenze-verifiche";
 import { formattaQuando } from "./visite";
 
 /** Gli stessi tipi del vincolo sulla tabella `notifiche`: un test li tiene allineati. */
@@ -35,6 +36,8 @@ export const TIPI_NOTIFICA = [
   "affitto_non_confermato",
   "protesti_verificati",
   "protesti_respinti",
+  "verifica_in_scadenza",
+  "verifica_scaduta",
 ] as const;
 
 export type TipoNotifica = (typeof TIPI_NOTIFICA)[number];
@@ -121,6 +124,24 @@ export function descriviNotifica(
         titolo: "Verifica dei protesti non riuscita",
         testo: "Leggi la nota nei tuoi dati, correggi i documenti e invia di nuovo.",
       };
+    case "verifica_in_scadenza": {
+      // dati: { tipo: "reddito" | "protesti", giorni, scade: "AAAA-MM-GG" } (li scrive il promemoria del database)
+      const cosa = dati?.tipo === "protesti" ? "dei protesti" : "del reddito";
+      const giorni = typeof dati?.giorni === "number" ? dati.giorni : null;
+      const quando = giorni === 1 ? "domani" : giorni !== null && giorni > 1 ? `tra ${giorni} giorni` : "a breve";
+      const data = typeof dati?.scade === "string" ? dataBreve(`${dati.scade}T12:00:00Z`) : "";
+      return {
+        titolo: `La verifica ${cosa} sta per scadere`,
+        testo: `Scade ${quando}${data ? ` (${data})` : ""}. Rinnovala con documenti recenti per non perdere i punti: nel frattempo vale ancora.`,
+      };
+    }
+    case "verifica_scaduta": {
+      const cosa = dati?.tipo === "protesti" ? "dei protesti" : "del reddito";
+      return {
+        titolo: `La verifica ${cosa} è scaduta`,
+        testo: "Non dà più punti e i proprietari non la vedono più come verificata. Rinnovala nel Profilo con documenti recenti.",
+      };
+    }
     case "affitto_verificato":
       return {
         titolo: "Affitto verificato",

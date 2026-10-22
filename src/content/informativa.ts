@@ -28,7 +28,7 @@ export const INFORMATIVA = {
    * controllo che fa il database (migrazione 0017): un test fallisce se
    * questa stringa non lo supera.
    */
-  versione: "2026-10-provvisoria-22",
+  versione: "2026-10-provvisoria-23",
   /**
    * Versioni precedenti che chi le ha accettate NON deve riaccettare.
    *
@@ -42,9 +42,12 @@ export const INFORMATIVA = {
    * vuoto su un testo definitivo: lì un cambio di dati trattati richiede davvero
    * una nuova accettazione.
    */
-  // Dalla versione 20 il profilo di chi cerca casa è visibile ai proprietari di partenza: è un cambiamento che riguarda anche chi era
+  // Dalla versione 23 le verifiche del reddito e dei protesti scadono (6 e 3 mesi) e il reddito del nucleo si documenta persona per persona, anche con documenti di altre persone;
+  // dalla 20 il profilo di chi cerca casa è visibile ai proprietari di partenza: è un cambiamento che riguarda anche chi era
   // già iscritto, quindi le versioni precedenti NON sono equivalenti e chi le aveva accettate deve riaccettare al prossimo accesso.
-  equivalenti: [] as readonly string[],
+  // La 23 (verifiche con scadenza, documenti di altre persone) NON ferma chi aveva accettato la 22: finché il testo è provvisorio un cambio non ferma nessuno. Il testo
+  // del legale farà riaccettare tutti, e le modifiche della 23 sono tra i punti da fargli rivedere.
+  equivalenti: ["2026-10-provvisoria-22"] as readonly string[],
   provvisoria: true,
   titolo: "Informativa sulla privacy",
   aggiornata: "ottobre 2026",
@@ -70,6 +73,7 @@ export const INFORMATIVA = {
         "Se sei inquilino: lavoro, reddito tuo e del tuo nucleo, garante, fideiussione, protesti (li dichiari tu; se vuoi, li verifica il nostro staff sul certificato dei protesti che carichi, e il risultato dello staff prevale su ciò che hai dichiarato), animali, composizione del nucleo, numero di figli, presentazione, foto del profilo, le tue preferenze di ricerca (budget, zone, locali, metri, tipo di casa e di contratto, caratteristiche e se per te sono necessarie) e gli annunci che salvi tra i preferiti o che scarti.",
         "Se sei proprietario: gli annunci con titolo, descrizione, zona, prezzo, caratteristiche, classe energetica e foto; l'indirizzo preciso, se lo indichi, e la posizione sulla mappa che se ne ricava; i criteri che chiedi ai candidati.",
         "Per le verifiche: il documento d'identità e la prova di proprietà dell'immobile (proprietari); se sei inquilino e chiedi di verificare il reddito, un documento d'identità e una prova del reddito (una busta paga, la CU o la dichiarazione dei redditi); se chiedi di verificare i protesti, un documento d'identità e il certificato dei protesti intestato a te; e i contratti di affitto caricati per dichiarare un affitto. Non chiediamo lo stato di famiglia.",
+        "Verifiche con scadenza e reddito del nucleo: una verifica non dura per sempre. Conserviamo la data in cui il nostro staff l'ha fatta, la sua scadenza (sei mesi per il reddito, tre per i protesti) e l'ultima volta che hai confermato che la tua situazione non è cambiata. Se nel tuo nucleo più persone hanno un reddito, chiediamo una prova del reddito per ognuna: le carichi tu, e solo se quella persona è d'accordo che il suo documento sia caricato e controllato da noi (non caricare i documenti di nessuno senza il suo consenso). Per ogni prova riconosciuta il nostro staff scrive l'importo mensile che dimostra: da lì ricaviamo quanta parte del reddito del nucleo che hai dichiarato è documentata.",
         "Mentre usi l'app: candidature, messaggi, visite (giorno e ora, e chi le ha prenotate), contratti, recensioni, richieste di conferma di un affitto e inviti. Inoltre le notifiche sulle novità del tuo account, e le email che le riassumono (la tua impostazione, la data dell'ultimo invio e un registro di data, esito e numero di notifiche, senza contenuto né indirizzi, per 90 giorni) (per esempio l'esito di una verifica o la risposta a una candidatura): contengono il tipo di evento e, al massimo, il titolo di un annuncio e, per le visite, il giorno e l'ora; mai nomi di persone.",
         "Dati di un'altra persona: se inviti il tuo proprietario, scrivi il suo nome e, se vuoi, la sua email.",
       ],
@@ -88,7 +92,8 @@ export const INFORMATIVA = {
         "Ai proprietari mostriamo anche QUANTI inquilini hanno una ricerca compatibile con il loro immobile (budget, zona, locali, caratteristiche): è un numero anonimo, non vedono chi sono né nessun loro dato. Se uno di loro si candida, il proprietario vede la candidatura come tutte le altre.",
         "Se dichiari dei protesti o segnalazioni in centrale rischi, o non rispondi alla domanda (la risposta è obbligatoria e «non indicato» vale come «sì»), il punteggio di affidabilità scende di 30 punti. Il reddito verificato dallo staff e un garante o una fideiussione dichiarati lo fanno salire. Il punteggio non è mai inferiore a zero.",
         "Il badge «Inquilino raccomandato» lo ottieni in automatico con almeno due recensioni positive (da 4 stelle in su) scritte da due proprietari diversi, se negli ultimi quattro anni non hai recensioni negative. Lo vedono i proprietari a cui ti candidi, possono cercare solo gli inquilini raccomandati e, a parità di compatibilità, i candidati con il badge compaiono prima. Non cambia il punteggio di affidabilità. La decisione di accettare o rifiutare una candidatura resta sempre del proprietario.",
-        "La verifica del reddito invece non è automatica: la decide una persona del team di MatchAmI, guardando i documenti che hai caricato. Se dopo la verifica cambi il lavoro o il reddito indicati, la verifica decade e va rifatta.",
+        "La verifica del reddito invece non è automatica: la decide una persona del team di MatchAmI, guardando i documenti che hai caricato. Se dopo la verifica cambi il lavoro, il reddito o quante persone del nucleo hanno un reddito, la verifica decade e va rifatta.",
+        "Una verifica vale per un periodo: sei mesi per il reddito, tre per i protesti. Dopo la scadenza non dà più punti e i proprietari non la vedono più come verificata, finché non la rinnovi con documenti recenti; nel frattempo, se hai già inviato il rinnovo, la verifica precedente vale ancora. Ti avvisiamo con una notifica prima che scada. Se dichiari un reddito del nucleo più alto di quello che i documenti dimostrano, i punti del reddito sono in proporzione alla parte documentata. Ogni tre mesi ti chiediamo di confermare che la tua situazione non è cambiata: non sostituisce i documenti.",
       ],
     },
     {
@@ -108,7 +113,7 @@ export const INFORMATIVA = {
         "Nella chat, l'app evidenzia i messaggi che parlano di pagamenti sospetti (per esempio un IBAN, una caparra o un anticipo) e ti avvisa prima di inviarne uno così, per aiutarti a riconoscere una truffa. È un controllo automatico che fa parte della visualizzazione della chat: non salviamo il risultato e non lo comunichiamo a nessuno, e non impedisce mai di inviare un messaggio.",
         "Le recensioni su un inquilino le leggono la persona recensita, chi le ha scritte e i proprietari a cui ha inviato una candidatura.",
         "Gli annunci pubblicati e verificati li vedono tutti gli utenti connessi. L'indirizzo esatto degli immobili non lo raccogliamo.",
-        "Il documento d'identità, la prova del reddito, la prova di proprietà e i contratti li vedono solo chi li ha caricati e il team di MatchAmI che li controlla. Un proprietario non vede mai i documenti di un inquilino: vede solo se il reddito è verificato, sì o no, e se i protesti sono verificati dallo staff (e con quale risultato). L'altra parte di un affitto non vede il contratto.",
+        "Il documento d'identità, la prova del reddito, la prova di proprietà e i contratti li vedono solo chi li ha caricati e il team di MatchAmI che li controlla. Un proprietario non vede mai i documenti di un inquilino: vede solo se il reddito è verificato (e se la verifica è scaduta), il mese in cui è stata fatta e quanta parte del reddito del nucleo è documentata (in percentuale, non gli importi), e se i protesti sono verificati dallo staff (e con quale risultato). L'altra parte di un affitto non vede il contratto.",
         "Il team di MatchAmI vede nome e cognome di tutti, e gli annunci e gli affitti da verificare. Chi amministra il sistema ha un accesso tecnico a tutti i dati.",
       ],
     },
@@ -121,7 +126,7 @@ export const INFORMATIVA = {
     {
       titolo: "Per quanto tempo conserviamo i dati",
       paragrafi: [
-        "Al momento non c'è una scadenza automatica: una candidatura, un messaggio, una visita, un invito o un documento restano finché non cancelli l'account (o, per le visite, l'immobile). I preferiti restano finché li togli. Gli annunci che scarti smettono di contare dopo 30 giorni e si cancellano la volta successiva che scarti o salvi un annuncio. Un documento caricato per la verifica del reddito puoi toglierlo tu, ma solo finché non hai inviato la richiesta. Le notifiche sono pensate per sparire dopo 60 giorni se lette e dopo 180 se non lette, ma questa pulizia non è ancora attiva. I tempi di conservazione saranno definiti nel testo definitivo.",
+        "Al momento non c'è una scadenza automatica: una candidatura, un messaggio, una visita, un invito o un documento restano finché non cancelli l'account (o, per le visite, l'immobile). I preferiti restano finché li togli. Gli annunci che scarti smettono di contare dopo 30 giorni e si cancellano la volta successiva che scarti o salvi un annuncio. Un documento caricato per la verifica del reddito puoi toglierlo tu, ma solo finché non hai inviato la richiesta. Quando una verifica viene rinnovata, i documenti sostituiti vengono cancellati (insieme ai file); le prove non riconosciute dallo staff si cancellano anch'esse. Le notifiche sono pensate per sparire dopo 60 giorni se lette e dopo 180 se non lette, ma questa pulizia non è ancora attiva. I tempi di conservazione saranno definiti nel testo definitivo.",
       ],
     },
     {

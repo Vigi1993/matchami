@@ -15,6 +15,7 @@ import {
 import type { CasaDatabase } from "@/lib/database-proprietario";
 import { testoPrezzo } from "@/lib/proprietario/home";
 import { stelleTesto, testoRecensioni } from "@/lib/recensioni";
+import { etichettaProtestiProprietario, etichettaRedditoProprietario, fraseCopertura, meseAnno } from "@/lib/scadenze-verifiche";
 import type { Ref } from "react";
 
 const SIMBOLO = { ok: "✓", no: "–", non_indicato: "?" } as const;
@@ -50,6 +51,18 @@ export function DettaglioPersona({
   const c = voce.candidatura;
   const v = c?.valutazione;
   const zona = casa.zona.replace(", Milano", "");
+  // le verifiche valgono finché non scadono: si dice QUANDO sono state fatte, quanta parte del reddito è documentata, e se sono scadute
+  const parziale = s.redditoVerificato && s.coperturaReddito !== null && s.coperturaReddito < 1;
+  const etReddito = etichettaRedditoProprietario({ valida: s.redditoVerificato, scaduta: s.redditoScaduto, verificatoIl: s.redditoVerificatoIl, cop: s.coperturaReddito });
+  const etProtesti = etichettaProtestiProprietario({ esito: s.protestiVerificati, scaduta: s.protestiScaduti, verificatoIl: s.protestiVerificatiIl });
+  const quandoReddito = meseAnno(s.redditoVerificatoIl);
+  const testoReddito = s.redditoVerificato
+    ? parziale
+      ? `${s.redditoDichiarato !== null ? fraseCopertura(s.redditoDichiarato, s.redditoNucleoVerificato) : `Documentato il ${Math.round((s.coperturaReddito ?? 0) * 100)}% del reddito dichiarato`}${quandoReddito ? ` · ${quandoReddito}` : ""}`
+      : `Verificato sui documenti${quandoReddito ? ` · ${quandoReddito}` : ""}`
+    : s.redditoScaduto
+      ? "Verifica scaduta: non conta più"
+      : "Non verificato";
 
   return (
     <section
@@ -91,9 +104,8 @@ export function DettaglioPersona({
           {s.professione && <p className="db-persona-lavoro">{s.professione}</p>}
           <div className="db-etichette">
             {s.raccomandato && <BadgeRaccomandato />}
-            {s.redditoVerificato && <span className="persona-chip">Reddito verificato</span>}
-            {s.protestiVerificati === "nessuno" && <span className="persona-chip">Nessun protesto · verificato</span>}
-            {s.protestiVerificati === "si" && <span className="persona-chip persona-chip-attenzione">Ha protesti · verificato</span>}
+            {etReddito && <span className={`persona-chip ${s.redditoScaduto || parziale ? "persona-chip-attenzione" : ""}`}>{etReddito}</span>}
+            {etProtesti && <span className={`persona-chip ${s.protestiVerificati === "si" || s.protestiScaduti ? "persona-chip-attenzione" : ""}`}>{etProtesti}</span>}
             {s.recensioni && s.recensioni.numero > 0 && (
               <span className="persona-chip">
                 <span aria-hidden="true">{stelleTesto(s.recensioni.media)}</span> {testoRecensioni(s.recensioni)}
@@ -131,11 +143,19 @@ export function DettaglioPersona({
       <div className="db-colonne">
         <div>
           <h3 className="db-sezione">Verificato dallo staff</h3>
-          <Voce esito={s.redditoVerificato ? "si" : "nd"} titolo="Reddito" testo={s.redditoVerificato ? "Verificato sui documenti" : "Non verificato"} />
+          <Voce esito={s.redditoVerificato ? (parziale ? "nd" : "si") : s.redditoScaduto ? "no" : "nd"} titolo="Reddito" testo={testoReddito} />
           <Voce
             esito={s.protestiVerificati === "nessuno" ? "si" : s.protestiVerificati === "si" ? "no" : "nd"}
             titolo="Protesti"
-            testo={s.protestiVerificati === "nessuno" ? "Nessun protesto, certificato verificato" : s.protestiVerificati === "si" ? "Ci sono protesti, certificato verificato" : "Non ancora verificati dallo staff"}
+            testo={
+              s.protestiVerificati === "nessuno"
+                ? `Nessun protesto, certificato verificato${s.protestiVerificatiIl ? ` · ${meseAnno(s.protestiVerificatiIl)}` : ""}`
+                : s.protestiVerificati === "si"
+                  ? `Ci sono protesti, certificato verificato${s.protestiVerificatiIl ? ` · ${meseAnno(s.protestiVerificatiIl)}` : ""}`
+                  : s.protestiScaduti
+                    ? "Verifica scaduta: non conta più"
+                    : "Non ancora verificati dallo staff"
+            }
           />
         </div>
 

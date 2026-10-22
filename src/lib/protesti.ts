@@ -6,6 +6,7 @@
  * verificare l'uno senza l'altro. Il risultato dello staff PREVALE su ciò che la persona aveva dichiarato, e una volta verificato non si cambia più da soli.
  */
 import type { DescrizioneStato, DocumentoInquilino, StatoVerificaInquilino } from "@/lib/verifica-inquilino";
+import { fraseValidita, type VerificheLette } from "@/lib/scadenze-verifiche";
 
 export type StatoProtesti = StatoVerificaInquilino;
 
@@ -53,18 +54,40 @@ export function descriviStatoProtesti(stato: StatoProtesti, nota: string | null,
   };
 }
 
-/** Cosa manca prima di poter inviare. Vuoto: si può inviare. */
-export function cosaMancaProtesti(input: { documenti: Pick<DocumentoInquilino, "tipo">[]; protestato: boolean | null }): string[] {
+/**
+ * Cosa dire sulla verifica dei protesti tenendo conto della SCADENZA (3 mesi): valida (con la data), in scadenza, scaduta. Senza una verifica valida o
+ * scaduta vale la descrizione di sempre (`descriviStatoProtesti`).
+ */
+export function descriviVerificaProtesti(input: { stato: StatoProtesti; nota: string | null; protestato: boolean | null; ver: VerificheLette }): DescrizioneStato {
+  const { stato, nota, protestato, ver } = input;
+  const s = ver.protesti;
+  if (!s || s.fase === "non_avviata" || s.fase === "in_verifica") return descriviStatoProtesti(stato, nota, protestato);
+  const rinnovoNonRiuscito = nota && nota.trim() ? ` Il rinnovo non è riuscito: ${nota.trim()}` : "";
+  if (s.fase === "scaduta") {
+    return { titolo: "Verifica dei protesti scaduta", testo: `${fraseValidita("protesti", s)} La risposta si può correggere, poi rinnova la verifica con un certificato recente.${rinnovoNonRiuscito}`, tono: "no" };
+  }
+  const base = descriviStatoProtesti("verificato", null, protestato);
+  return {
+    titolo: s.fase === "in_scadenza" ? `${base.titolo} · in scadenza` : base.titolo,
+    testo: [base.testo, fraseValidita("protesti", s), rinnovoNonRiuscito.trim()].filter(Boolean).join(" "),
+    tono: s.fase === "in_scadenza" ? "attesa" : base.tono,
+  };
+}
+
+/** Cosa manca prima di poter inviare. Vuoto: si può inviare. Serve un certificato NUOVO (quello già verificato non conta per un rinnovo). */
+export function cosaMancaProtesti(input: { documenti: Pick<DocumentoInquilino, "tipo" | "verificato_at">[]; protestato: boolean | null }): string[] {
   const manca: string[] = [];
   if (input.protestato === null) manca.push("Rispondi alla domanda sui protesti, in «I tuoi dati»");
   if (!input.documenti.some((d) => d.tipo === "identita")) manca.push("Carica un documento d'identità");
-  if (!input.documenti.some((d) => d.tipo === "protesti")) manca.push("Carica il certificato dei protesti");
+  if (!input.documenti.some((d) => d.tipo === "protesti" && !d.verificato_at)) manca.push("Carica il certificato dei protesti");
   return manca;
 }
 
-/** Si può inviare solo se non è già stato inviato o verificato, e non manca niente. */
-export function puoInviareProtesti(input: { stato: StatoProtesti; documenti: Pick<DocumentoInquilino, "tipo">[]; protestato: boolean | null }): boolean {
-  return input.stato === "non_avviata" && cosaMancaProtesti(input).length === 0;
+/** Si può inviare la prima volta, o come rinnovo quando sta per scadere o è scaduta (`rinnovabile`), e solo se non manca niente. Mai mentre lo staff controlla. */
+export function puoInviareProtesti(input: { stato: StatoProtesti; documenti: Pick<DocumentoInquilino, "tipo" | "verificato_at">[]; protestato: boolean | null; rinnovabile?: boolean }): boolean {
+  const primaVolta = input.stato === "non_avviata";
+  const rinnovo = input.stato === "verificato" && input.rinnovabile === true;
+  return (primaVolta || rinnovo) && cosaMancaProtesti(input).length === 0;
 }
 
 /** I documenti si tolgono solo finché la verifica dei protesti non è partita (regola del database). */
@@ -72,13 +95,17 @@ export function puoTogliereDocumentiProtesti(stato: StatoProtesti): boolean {
   return stato === "non_avviata";
 }
 
-/** La domanda sui protesti non si cambia più da soli quando lo staff l'ha verificata. */
-export function rispostaBloccata(stato: StatoProtesti): boolean {
-  return stato === "verificato";
+/**
+ * La domanda sui protesti non si cambia più da soli quando lo staff l'ha verificata, FINCHÉ LA VERIFICA VALE (`valida`): scaduta, la risposta si può
+ * correggere e poi si rinnova. Senza `valida` (dati vecchi) vale lo stato.
+ */
+export function rispostaBloccata(stato: StatoProtesti, valida: boolean = stato === "verificato"): boolean {
+  return stato === "verificato" && Boolean(valida);
 }
 
 /** Cosa si scrive sotto la domanda sui protesti nei dati: lo dice, a seconda dello stato, che li verifica lo staff. */
-export function notaDomandaProtesti(stato: StatoProtesti): string {
+export function notaDomandaProtesti(stato: StatoProtesti, valida: boolean = stato === "verificato"): string {
+  if (stato === "verificato" && !valida) return "La verifica dello staff è scaduta: puoi correggere la risposta, poi rinnova la verifica in «Verifica dei protesti», qui sotto.";
   if (stato === "verificato") return "Verificato dallo staff: non si cambia da soli. Se qualcosa non è corretto, scrivici.";
   if (stato === "in_verifica") return "Lo staff sta controllando il tuo certificato: il risultato vale più di questa risposta.";
   return "Lo verifica il nostro staff: carica il certificato dei protesti in «Verifica dei protesti», qui sotto. Il risultato vale più di questa risposta.";

@@ -63,7 +63,7 @@ export default async function ProfiloPage({ searchParams }: { searchParams: Prom
     supabase.from("recensioni").select("voto, autore_id, created_at").eq("tenant_id", user!.id),
     supabase
       .from("documenti_inquilino")
-      .select("id, tipo, percorso, nome_file")
+      .select("id, tipo, percorso, nome_file, persona, importo_verificato, verificato_at")
       .eq("tenant_id", user!.id)
       .order("created_at", { ascending: true }),
   ]);
@@ -96,6 +96,7 @@ export default async function ProfiloPage({ searchParams }: { searchParams: Prom
             reddito_mensile: (tenant as TenantProfile).reddito_mensile,
           }}
           documenti={(documentiRows ?? []) as DocumentoInquilino[]}
+          riga={tenant as TenantProfile}
         />
       }
       protestiPanel={
@@ -104,6 +105,7 @@ export default async function ProfiloPage({ searchParams }: { searchParams: Prom
           nota={(tenant as TenantProfile).protesti_verifica_esito_note ?? null}
           protestato={(tenant as TenantProfile).protestato}
           documenti={(documentiRows ?? []) as DocumentoInquilino[]}
+          riga={(tenant as TenantProfile)}
         />
       }
       ricerca={ricerca}

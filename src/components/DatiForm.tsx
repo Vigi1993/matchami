@@ -14,6 +14,7 @@ import { AvatarUpload } from "@/components/AvatarUpload";
 import { CampoImporto } from "@/components/CampoImporto";
 import { NOTE_DOCUMENTI } from "@/lib/benvenuto-testi";
 
+import { leggiVerifiche } from "@/lib/scadenze-verifiche";
 /**
  * Il modulo dei dati personali: lavoro, reddito, garante, protesti, nucleo e presentazione. Sta dentro la scheda
  * «I tuoi dati» (DatiSheet), che sulla Home e nel Profilo è la stessa. Alcune risposte valgono nel punteggio di
@@ -66,6 +67,8 @@ export function DatiForm({
     tenant.protestato
   );
   const statoProtesti = tenant.protesti_verifica_stato ?? "non_avviata";
+  // la risposta resta bloccata solo finché la verifica dello staff vale (poi scade: si corregge e si rinnova)
+  const protestiValidi = leggiVerifiche(tenant).protestiValidi;
   const [fideiussione, setFideiussione] = useState<boolean | null>(
     tenant.fideiussione
   );
@@ -162,7 +165,7 @@ export function DatiForm({
         <>
         <div id="dati-protesti" className="ancora-dati" />
         <Field label="Hai protesti o segnalazioni in centrale rischi? · obbligatorio">
-          {rispostaBloccata(statoProtesti) ? (
+          {rispostaBloccata(statoProtesti, protestiValidi) ? (
             // verificato dallo staff: non si cambia da soli (il valore resta nel modulo, nascosto, e viene riscritto uguale)
             <p className="risposta-verificata" role="status">
               <b>{protestato ? "Sì, risultano protesti" : "No, nessun protesto"}</b> · verificato dallo staff
@@ -174,7 +177,7 @@ export function DatiForm({
             </div>
           )}
           <p className="field-note">
-            Va indicato. Rispondere «No» vale +{PUNTI_AFFIDABILITA.protesti} nel punteggio; «Sì», o non rispondere, toglie {PUNTI_AFFIDABILITA.protesti}. {notaDomandaProtesti(statoProtesti)}
+            Va indicato. Rispondere «No» vale +{PUNTI_AFFIDABILITA.protesti} nel punteggio; «Sì», o non rispondere, toglie {PUNTI_AFFIDABILITA.protesti}. {notaDomandaProtesti(statoProtesti, protestiValidi)}
           </p>
         </Field>
         </>

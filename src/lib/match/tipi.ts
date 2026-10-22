@@ -159,7 +159,12 @@ export type DatiCandidato = {
   redditoMensileNucleo: number | null;
   garante: boolean | null;
   fideiussione: boolean | null;
+  /** il reddito è verificato E la verifica vale ancora */
   verificato: boolean;
+  /** quanta parte del reddito del nucleo dichiarato è documentata, da 0 a 1; `null` se non è verificato */
+  coperturaReddito?: number | null;
+  /** la verifica del reddito c'era ma è scaduta */
+  redditoScaduto?: boolean;
   /** percentuale di completezza del profilo, 0-100 */
   completezza: number;
   protestato: boolean | null;

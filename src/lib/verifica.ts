@@ -263,10 +263,14 @@ const MESSAGGI: Record<string, string> = {
   RAPPORTO_GIA_RECENSITO: "Hai già lasciato il feedback per questo affitto.",
   // verifica del reddito dell'inquilino
   NON_INQUILINO: "Solo gli inquilini possono verificare il reddito.",
-  INQUILINO_GIA_VERIFICATO: "Il tuo reddito risulta già verificato.",
+  INQUILINO_GIA_VERIFICATO: "Il tuo reddito risulta già verificato, e la verifica vale ancora: potrai rinnovarla quando sta per scadere.",
+  NIENTE_DA_CONFERMARE: "Non c'è una verifica valida da confermare: se è scaduta, rinnovala con documenti recenti.",
+  IMPORTI_OBBLIGATORI: "Scrivi l'importo mensile che ogni prova del reddito dimostra.",
+  IMPORTI_NON_VALIDI: "Un importo non è valido: deve essere un numero positivo, riferito a una prova di reddito di questa persona.",
+  IMPORTI_PERSONE_MANCANTI: "Per ogni persona del nucleo con un reddito serve almeno una prova riconosciuta, con il suo importo.",
   INQUILINO_GIA_IN_VERIFICA: "La tua richiesta è già in verifica.",
   DOCUMENTI_INQUILINO_MANCANTI:
-    "Mancano dei documenti: servono un documento d'identità e una prova del reddito.",
+    "Mancano dei documenti: servono un documento d'identità e una prova del reddito NUOVA per ogni persona del nucleo che ha un reddito.",
   DATI_PROFILO_MANCANTI:
     "Prima completa il tuo profilo: indica il lavoro e il reddito mensile, così possiamo confrontarli con i documenti.",
   INQUILINO_NON_IN_VERIFICA: "Questa persona non ha una verifica in attesa.",

@@ -6,6 +6,7 @@ import { valutaCandidato } from "../match/candidato";
 import { ordinaCandidati } from "../match/proprietario";
 import type { AnnuncioPerMatch, CriterioRichiesto } from "../match";
 
+import { leggiVerificheVista } from "@/lib/scadenze-verifiche";
 /**
  * I possibili inquilini di una casa, per il proprietario: chi si è reso disponibile a essere contattato (il consenso si controlla
  * prima di arrivare qui), ha una ricerca in linea con la casa e rispetta i criteri OBBLIGATORI che il proprietario ha chiesto,
@@ -24,8 +25,14 @@ export type InquilinoDisponibile = {
   presentazione: string | null;
   verificato: boolean;
   protestato: boolean | null;
-  /** lo staff ha verificato i protesti */
+  /** lo staff ha verificato i protesti (e la verifica vale ancora) */
   protestiVerificati?: boolean;
+  /** (migrazione 0040) la verifica del reddito era valida ed è scaduta; quando è stata fatta; quanto del reddito del nucleo è documentato (assente = tutto) */
+  redditoScaduto?: boolean;
+  redditoVerificatoIl?: string | null;
+  redditoNucleoVerificato?: number | null;
+  protestiScaduti?: boolean;
+  protestiVerificatiIl?: string | null;
   garante: boolean | null;
   fideiussione: boolean | null;
   reddito_mensile: number | null;
@@ -52,8 +59,16 @@ export type SchedaInquilino = {
   raccomandato: boolean;
   recensioni: RiepilogoRecensioni;
   redditoVerificato: boolean;
-  /** come stanno i protesti SE li ha verificati lo staff: «nessuno» o «si»; altrimenti `null` (non si mostra il dichiarato) */
+  /** la verifica del reddito c'era ma è scaduta */
+  redditoScaduto: boolean;
+  /** quando è stata fatta la verifica del reddito (vale se `redditoVerificato`) */
+  redditoVerificatoIl: string | null;
+  /** quanta parte del reddito del nucleo dichiarato è documentata, da 0 a 1; `null` se il reddito non è verificato */
+  coperturaReddito: number | null;
+  /** come stanno i protesti SE li ha verificati lo staff (e la verifica vale): «nessuno» o «si»; altrimenti `null` (non si mostra il dichiarato) */
   protestiVerificati: "nessuno" | "si" | null;
+  protestiScaduti: boolean;
+  protestiVerificatiIl: string | null;
   /** quanto combacia con i criteri del proprietario, da 0 a 99; `null` se non ne ha chiesto nessuno */
   compatibilita: number | null;
 };
@@ -104,6 +119,18 @@ export function schedeInquilini(input: {
 
     const riepilogo = riepilogoRecensioni((d.recensioni ?? []).map((r) => r.voto));
     const raccomandato = statoRaccomandazione(d.recensioni, input.ora).raccomandato;
+    // la verifica del reddito: vale? quanta parte del reddito del nucleo è documentata? (un campo assente = tutto documentato: dati vecchi)
+    const ver = leggiVerificheVista({
+      verificato: d.verificato,
+      reddito_scaduto: d.redditoScaduto,
+      reddito_verificato_at: d.redditoVerificatoIl,
+      reddito_nucleo_verificato: d.redditoNucleoVerificato,
+      reddito_mensile: d.reddito_mensile,
+      reddito_nucleo: d.reddito_nucleo,
+      protesti_verificati: d.protestiVerificati,
+      protesti_scaduti: d.protestiScaduti,
+      protesti_verificati_at: d.protestiVerificatiIl,
+    });
     const valutazione = valutaCandidato({
       criteri: [...input.criteri],
       canone: input.canone,
@@ -119,6 +146,8 @@ export function schedeInquilini(input: {
         presentazione: d.presentazione,
         verificato: d.verificato === true,
         protestiVerificati: d.protestiVerificati === true,
+        coperturaReddito: ver.coperturaReddito,
+        redditoScaduto: ver.redditoScaduto,
       },
       recensioni: riepilogo,
       raccomandato,
@@ -126,7 +155,7 @@ export function schedeInquilini(input: {
     // chi non rispetta un criterio OBBLIGATORIO del proprietario non si propone
     if (valutazione.match.bloccato) continue;
 
-    const aff = computeAffidabilita({ verificato: d.verificato === true, protestato: d.protestato, garante: d.garante, fideiussione: d.fideiussione, protestiVerificati: d.protestiVerificati === true });
+    const aff = computeAffidabilita({ verificato: d.verificato === true, protestato: d.protestato, garante: d.garante, fideiussione: d.fideiussione, protestiVerificati: d.protestiVerificati === true, coperturaReddito: ver.coperturaReddito ?? 1, redditoScaduto: ver.redditoScaduto });
     voci.push({
       scheda: {
         tenantId: d.tenantId,
@@ -139,7 +168,12 @@ export function schedeInquilini(input: {
         raccomandato,
         recensioni: riepilogo,
         redditoVerificato: d.verificato === true,
+        redditoScaduto: ver.redditoScaduto,
+        redditoVerificatoIl: d.verificato === true ? (d.redditoVerificatoIl ?? null) : null,
+        coperturaReddito: ver.coperturaReddito,
         protestiVerificati: d.protestiVerificati === true && d.protestato !== null ? (d.protestato ? "si" : "nessuno") : null,
+        protestiScaduti: ver.protestiScaduti,
+        protestiVerificatiIl: d.protestiVerificati === true ? (d.protestiVerificatiIl ?? null) : null,
         compatibilita: valutazione.match.punteggio,
       },
       match: { bloccato: false, punteggio: valutazione.match.punteggio },

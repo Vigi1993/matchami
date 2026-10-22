@@ -121,8 +121,8 @@ test("migrazione 0038 su PostgreSQL vero: la verifica dei protesti da parte dell
     for (const m of migrazioni) { r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", m)]); assert.equal(r.status, 0, `la migrazione ${m} non si applica: ${r.stderr.slice(0, 300)}`); }
     r = esegui(["-d", db, "-o", nullo, "-f", path.join(radice, "scripts", "db", "protesti.sql")]); assert.ok(!/CONTROLLO FALLITO/.test(r.stderr), r.stderr.split("\n").filter((l) => /FALLITO|ERROR/.test(l)).slice(0, 4).join("\n")); assert.equal(r.status, 0, r.stderr.slice(0, 500));
     const riusciti = (r.stderr.match(/NOTICE:\s+OK:/g) ?? []).length; assert.equal(riusciti, 55, `controlli riusciti: ${riusciti}`);
-    // la migrazione si può rieseguire senza errori
-    r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", "0038_verifica_protesti.sql")]); assert.equal(r.status, 0, "rieseguire la 0038 non deve dare errori: " + r.stderr.slice(0, 300));
+    // la migrazione PIÙ RECENTE (la 0040, che ha cambiato la verifica dei protesti) si può rieseguire senza errori; le precedenti no, e non serve: riscriverebbero le funzioni con le regole vecchie
+    r = esegui(["-d", db, "-v", "ON_ERROR_STOP=1", "-f", path.join(radice, "supabase", "migrations", "0040_scadenza_verifiche.sql")]); assert.equal(r.status, 0, "rieseguire la 0040 non deve dare errori: " + r.stderr.slice(0, 300));
   } finally { fs.rmSync(nullo, { force: true }); esegui(["-d", "postgres", "-c", `drop database if exists ${db}`]); }
 });
 

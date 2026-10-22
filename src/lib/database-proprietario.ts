@@ -4,6 +4,7 @@ import type { RiepilogoRecensioni } from "./recensioni";
 import type { CandidaturaRicevuta } from "./types";
 import type { PossibiliPerCasa } from "./proprietario/possibili-server";
 
+import { leggiVerificheVista } from "./scadenze-verifiche";
 /**
  * Il Database inquilini del proprietario: per ogni casa, tre gruppi di persone.
  *   - CANDIDATURE SPONTANEE: chi si è candidato da solo e aspetta una risposta;
@@ -107,9 +108,21 @@ export type DatiScheda = {
   match: MatchScheda;
   raccomandato: boolean;
   recensioni: RiepilogoRecensioni | null;
+  /** il reddito è verificato E la verifica vale ancora */
   redditoVerificato: boolean;
-  /** come stanno i protesti SE li ha verificati lo staff; altrimenti `null` (il dichiarato non si mostra come un fatto) */
+  /** la verifica del reddito c'era ma è scaduta: si dice «scaduta», mai «verificato» */
+  redditoScaduto: boolean;
+  /** quando è stata fatta la verifica del reddito */
+  redditoVerificatoIl: string | null;
+  /** quanta parte del reddito del nucleo dichiarato è documentata, da 0 a 1; `null` se non è verificato */
+  coperturaReddito: number | null;
+  /** il reddito del nucleo dichiarato (per dire «verificati X su Y»); `null` per i possibili match (il reddito non si mostra) */
+  redditoDichiarato: number | null;
+  redditoNucleoVerificato: number | null;
+  /** come stanno i protesti SE li ha verificati lo staff (e la verifica vale ancora); altrimenti `null` (il dichiarato non si mostra come un fatto) */
   protestiVerificati: "nessuno" | "si" | null;
+  protestiScaduti: boolean;
+  protestiVerificatiIl: string | null;
   /** un estratto della presentazione, mai più di 160 caratteri */
   presentazione: string | null;
   /** manca qualche dato: il match è provvisorio */
@@ -118,6 +131,8 @@ export type DatiScheda = {
 
 export function datiSchedaCandidato(c: CandidaturaRicevuta): DatiScheda {
   const v = c.valutazione;
+  const tp = c.tenant_profiles;
+  const ver = leggiVerificheVista(tp ?? null);
   let match: MatchScheda = { tipo: "nessuno" };
   if (v) {
     if (v.match.bloccato) match = { tipo: "bloccato", mancanti: [...v.match.mancanti] };
@@ -131,8 +146,15 @@ export function datiSchedaCandidato(c: CandidaturaRicevuta): DatiScheda {
     match,
     raccomandato: v?.raccomandato === true,
     recensioni: v?.recensioni ?? null,
-    redditoVerificato: c.tenant_profiles?.verificato === true,
+    redditoVerificato: ver.redditoValido,
+    redditoScaduto: ver.redditoScaduto,
+    redditoVerificatoIl: ver.redditoVerificatoIl,
+    coperturaReddito: ver.coperturaReddito,
+    redditoDichiarato: ver.redditoDichiarato,
+    redditoNucleoVerificato: ver.redditoValido ? ver.redditoNucleoVerificato : null,
     protestiVerificati: c.tenant_profiles?.protesti_verificati === true && typeof c.tenant_profiles?.protestato === "boolean" ? (c.tenant_profiles.protestato ? "si" : "nessuno") : null,
+    protestiScaduti: ver.protestiScaduti,
+    protestiVerificatiIl: c.tenant_profiles?.protesti_verificati === true ? ver.protestiVerificatiIl : null,
     presentazione: estratto(c.tenant_profiles?.presentazione),
     incompleto: v?.match.incompleto === true,
   };
@@ -148,7 +170,14 @@ export function datiSchedaPossibile(s: SchedaInquilino): DatiScheda {
     raccomandato: s.raccomandato,
     recensioni: s.recensioni,
     redditoVerificato: s.redditoVerificato,
+    redditoScaduto: s.redditoScaduto === true,
+    redditoVerificatoIl: s.redditoVerificatoIl ?? null,
+    coperturaReddito: s.coperturaReddito ?? null,
+    redditoDichiarato: null,
+    redditoNucleoVerificato: null,
     protestiVerificati: s.protestiVerificati,
+    protestiScaduti: s.protestiScaduti === true,
+    protestiVerificatiIl: s.protestiVerificatiIl ?? null,
     presentazione: s.presentazione,
     incompleto: false,
   };

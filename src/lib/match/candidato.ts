@@ -26,8 +26,12 @@ export type ProfiloCandidato = {
   nucleo_compilato: boolean;
   presentazione: string | null;
   verificato: boolean;
-  /** lo staff ha verificato i protesti: `protestato` è allora il suo risultato */
+  /** lo staff ha verificato i protesti (e la verifica vale ancora): `protestato` è allora il suo risultato */
   protestiVerificati?: boolean;
+  /** quanta parte del reddito del nucleo dichiarato è documentata, da 0 a 1 (`null` o assente = tutta: dati vecchi) */
+  coperturaReddito?: number | null;
+  /** la verifica del reddito c'era ma è scaduta */
+  redditoScaduto?: boolean;
 };
 
 /**
@@ -67,6 +71,8 @@ export function datiCandidatoDaProfilo(p: ProfiloCandidato): DatiCandidato {
     verificato: p.verificato,
     completezza: completezzaProfiloPersonale(p),
     protestato: p.protestato,
+    coperturaReddito: p.verificato ? (p.coperturaReddito ?? 1) : null,
+    redditoScaduto: p.redditoScaduto === true,
   };
 }
 
@@ -107,6 +113,8 @@ export function valutaCandidato(input: {
     garante: profilo.garante,
     fideiussione: profilo.fideiussione,
     protestiVerificati: profilo.protestiVerificati === true,
+    coperturaReddito: profilo.coperturaReddito ?? 1,
+    redditoScaduto: profilo.redditoScaduto === true,
   }).punteggio;
 
   return {

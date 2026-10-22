@@ -29,6 +29,7 @@ import {
   IconStella,
 } from "@/components/icons";
 
+import { leggiVerifiche, parteVerificheAffidabilita } from "@/lib/scadenze-verifiche";
 type Props = {
   /** le novità non ancora lette */
   nonLette: number;
@@ -83,12 +84,13 @@ export function ProfiloClient({
     | null
   >(aperturaIniziale);
 
+  // le verifiche valgono finché non scadono, e il reddito in proporzione a ciò che è documentato (lib/scadenze-verifiche.ts)
+  const verifiche = leggiVerifiche(tenant);
   const affidabilita = computeAffidabilita({
-    verificato: tenant.verificato,
+    ...parteVerificheAffidabilita(verifiche),
     protestato: tenant.protestato,
     garante: tenant.garante,
     fideiussione: tenant.fideiussione,
-    protestiVerificati: tenant.protesti_verifica_stato === "verificato",
   });
 
   const completezza = computeProfileCompleteness({

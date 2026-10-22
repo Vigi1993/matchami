@@ -115,7 +115,7 @@ test("schede: l'ordine è compatibilità, poi il badge «raccomandato», poi l'a
 
 test("COSA VEDE IL PROPRIETARIO: solo nome e iniziale, lavoro, foto, estratto, affidabilità, badge, recensioni, reddito verificato sì/no, compatibilità; NIENTE reddito, contatti, cognome intero, identificativi interni oltre a quello per scrivere", () => {
   const p = persona("a", { nome: "Anna", cognome: "Verdi", reddito_mensile: 4321, reddito_nucleo: 8765, protestato: true, garante: true, avatarUrl: "https://x/f.jpg", presentazione: "x ".repeat(200), verificato: true });
-  const [s] = schede([p]); assert.deepEqual(Object.keys(s).sort(), ["affidabilita", "avatarUrl", "compatibilita", "etichettaAffidabilita", "nome", "presentazione", "professione", "protestiVerificati", "raccomandato", "recensioni", "redditoVerificato", "tenantId"]);
+  const [s] = schede([p]); assert.deepEqual(Object.keys(s).sort(), ["affidabilita", "avatarUrl", "compatibilita", "coperturaReddito", "etichettaAffidabilita", "nome", "presentazione", "professione", "protestiScaduti", "protestiVerificati", "protestiVerificatiIl", "raccomandato", "recensioni", "redditoScaduto", "redditoVerificato", "redditoVerificatoIl", "tenantId"]);
   const json = JSON.stringify(s); for (const vietato of ["4321", "8765", "Verdi", "reddito_mensile", "reddito_nucleo", "email", "telefono", "protestato", "cognome"]) assert.ok(!json.includes(vietato), `una scheda contiene «${vietato}»`); assert.equal(s.nome, "Anna V."); assert.equal(s.redditoVerificato, true); assert.ok(s.presentazione.length <= 161);
 });
 
@@ -187,7 +187,7 @@ test("Database (proprietario): «Fai match» NON invia subito: apre una conferma
 test("Database (proprietario): l'elenco e i possibili match non mostrano reddito né contatti; il dettaglio mostra il badge, l'affidabilità, il match e le recensioni; un rifiuto non dice chi è", () => {
   const det = senzaCommenti(leggi("src", "components", "database", "DettaglioPersona.tsx")); const el = senzaCommenti(leggi("src", "components", "database", "ElencoDatabase.tsx")); const info = senzaCommenti(leggi("src", "components", "database", "InfoPossibili.tsx"));
   for (const vietato of ["reddito_mensile", "reddito_nucleo", "email", "telefono", "cognome", "protestato"]) { assert.ok(!el.includes(vietato), `l'elenco usa «${vietato}»`); assert.ok(!info.includes(vietato), `i possibili match usano «${vietato}»`); assert.ok(!det.slice(0, det.indexOf('className="db-dichiarati"')).includes(vietato), `il dettaglio usa «${vietato}» prima dei dati dichiarati`); }
-  for (const x of ["<BadgeRaccomandato />", "Reddito verificato", "NOMI_CRITERI[k]", "testoRecensioni(s.recensioni)"]) assert.ok(det.includes(x), `manca «${x}»`);
+  for (const x of ["<BadgeRaccomandato />", "etichettaRedditoProprietario", "NOMI_CRITERI[k]", "testoRecensioni(s.recensioni)"]) assert.ok(det.includes(x), `manca «${x}»`);
   assert.match(info, /\{rifiutate === 1 \? "1 persona non ha accettato" : `\$\{rifiutate\} persone non hanno accettato`\}/); const s2 = senzaCommenti(leggi("src", "lib", "proprietario", "possibili-server.ts")); assert.match(s2, /nome: r\.stato === "inviata" \? nomiRichieste\.get\(r\.id as string\) \?\? null : null,/);
 });
 

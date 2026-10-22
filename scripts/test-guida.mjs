@@ -88,3 +88,27 @@ test("pagina disegnata: i titoli dei blocchi, i pesi in elenco e il collegamento
 test("stile: «Come funziona» ha il ritorno al Profilo (44 px, 15 px) e riusa lo stile del benvenuto", () => {
   const css = leggi("src", "app", "globals.css"); assert.match(css, /\.guida-indietro \{[^}]*min-height: 44px;[^}]*font-size: 15px;/); assert.match(css, /\.guida-pagina \{/); assert.match(css, /\.intro-voci \{/, "lo stile del benvenuto c'è ancora");
 });
+
+// ============================================================ scadenza delle verifiche e reddito del nucleo (migrazione 0040)
+const sca = caricaTs(path.join(radice, "src", "lib", "scadenze-verifiche.ts")); const inf = caricaTs(path.join(radice, "src", "content", "informativa.ts")); const ben = caricaTs(path.join(radice, "src", "lib", "benvenuto-testi.ts"));
+
+test("scadenza: la guida e le domande frequenti dicono quanto valgono le verifiche (i numeri sono quelli veri) e che il reddito conta in proporzione, per ruolo", () => {
+  const m = sca.VALIDITA_MESI;
+  for (const r of ["inquilino", "proprietario"]) {
+    const f = faq(r); assert.ok(f.includes(`reddito ${m.reddito} mesi, protesti ${m.protesti}`), `${r}: la FAQ sull'affidabilità`); assert.ok(f.includes("in proporzione a quanto del reddito del nucleo dichiarato è documentato"), `${r}: proporzione`);
+    const t = tutto(r); assert.ok(t.includes(`reddito ${m.reddito} mesi, i protesti ${m.protesti}`) || t.includes(`reddito ${m.reddito} mesi, protesti ${m.protesti}`), `${r}: la guida lo dice`); assert.ok(t.includes("proporzione") || t.includes("coprono") || t.includes("copre"), `${r}: la guida parla della copertura`);
+  }
+  assert.ok(faq("inquilino").includes("ti avvisiamo prima")); assert.ok(faq("proprietario").includes("sulla scheda la vedi come «scaduta»")); assert.ok(!faq("proprietario").includes("ti avvisiamo prima"), "il proprietario non viene avvisato delle scadenze di un altro");
+  assert.ok(tutto("inquilino").includes("serve la prova di ognuna, e solo con il suo consenso"), "documenti di altre persone: con il consenso"); assert.ok(tutto("inquilino").includes("Ogni tre mesi ti chiediamo di confermare che la tua situazione non è cambiata")); assert.equal(sca.CONFERMA_OGNI_GIORNI, 90, "«ogni tre mesi» = 90 giorni");
+});
+
+test("benvenuto: lo dice in breve, con i numeri veri, per ruolo (restando nei limiti di brevità della pagina)", () => {
+  const m = sca.VALIDITA_MESI; const i = ben.testiIntro("inquilino").blocchi.flatMap((b) => b.paragrafi).join(" "), p = ben.testiIntro("proprietario").blocchi.flatMap((b) => b.paragrafi).join(" ");
+  assert.ok(i.includes(`il reddito vale ${m.reddito} mesi, i protesti ${m.protesti}`)); assert.ok(i.includes("serve la prova di ognuna, con il suo consenso")); assert.ok(p.includes(`reddito ${m.reddito} mesi, protesti ${m.protesti}`)); assert.ok(p.includes("se è scaduta non conta"));
+});
+
+test("informativa 23: dice che le verifiche scadono (con gli stessi numeri), che i documenti di altre persone si caricano solo con il loro consenso, gli importi dello staff, la cancellazione dei sostituiti; la 22 resta equivalente (testo provvisorio)", () => {
+  const t = JSON.stringify(inf.INFORMATIVA); assert.equal(inf.INFORMATIVA.versione, "2026-10-provvisoria-23"); assert.deepEqual([...inf.INFORMATIVA.equivalenti], ["2026-10-provvisoria-22"]);
+  assert.equal(sca.VALIDITA_MESI.reddito, 6, "se cambia, va cambiata la frase «sei mesi per il reddito»"); assert.equal(sca.VALIDITA_MESI.protesti, 3, "se cambia, va cambiata la frase «tre per i protesti»");
+  for (const x of ["la sua scadenza (sei mesi per il reddito, tre per i protesti)", "più persone hanno un reddito, chiediamo una prova del reddito per ognuna", "solo se quella persona è d'accordo che il suo documento sia caricato e controllato da noi", "non caricare i documenti di nessuno senza il suo consenso", "il nostro staff scrive l'importo mensile che dimostra", "quanta parte del reddito del nucleo che hai dichiarato è documentata", "Una verifica vale per un periodo: sei mesi per il reddito, tre per i protesti", "i punti del reddito sono in proporzione alla parte documentata", "Ogni tre mesi ti chiediamo di confermare che la tua situazione non è cambiata", "il mese in cui è stata fatta e quanta parte del reddito del nucleo è documentata (in percentuale, non gli importi)", "i documenti sostituiti vengono cancellati"]) assert.ok(t.includes(x), `manca «${x}»`);
+});

@@ -68,7 +68,7 @@ export default async function BenvenutoPage({ searchParams }: { searchParams: Pr
     supabase.from("tenant_profiles").select("*").eq("profile_id", user.id).single(),
     supabase.from("tenant_zone_interesse").select("zona, luogo_id").eq("tenant_id", user.id),
     supabase.from("tenant_interessi").select("attributo_key, peso, valore, necessaria").eq("tenant_id", user.id),
-    supabase.from("documenti_inquilino").select("id, tipo, percorso, nome_file").eq("tenant_id", user.id).order("created_at", { ascending: true }),
+    supabase.from("documenti_inquilino").select("id, tipo, percorso, nome_file, persona, importo_verificato, verificato_at").eq("tenant_id", user.id).order("created_at", { ascending: true }),
   ]);
   const t = tenant as TenantProfile;
   const documenti = (documentiRows ?? []) as DocumentoInquilino[];
@@ -95,6 +95,7 @@ export default async function BenvenutoPage({ searchParams }: { searchParams: Pr
           nota={t.verifica_esito_note}
           dati={{ professione: t.professione, reddito_mensile: t.reddito_mensile }}
           documenti={documenti}
+          riga={t}
         />
       }
       protestiPanel={
@@ -103,6 +104,7 @@ export default async function BenvenutoPage({ searchParams }: { searchParams: Pr
           nota={t.protesti_verifica_esito_note ?? null}
           protestato={t.protestato}
           documenti={documenti}
+          riga={t}
         />
       }
     />

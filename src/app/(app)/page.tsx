@@ -17,6 +17,7 @@ import { VerificaRedditoPanel } from "@/components/VerificaRedditoPanel";
 import { VerificaProtestiPanel } from "@/components/VerificaProtestiPanel";
 import type { DocumentoInquilino } from "@/lib/verifica-inquilino";
 
+import { leggiVerifiche, parteVerificheAffidabilita } from "@/lib/scadenze-verifiche";
 export default async function Home() {
   const supabase = await createClient();
   const {
@@ -60,7 +61,7 @@ async function TenantHome({ userId }: { userId: string }) {
     // Se la lettura non riesce, il mazzo si vede intero: meglio un annuncio in più che nessuno.
     supabase.rpc("annunci_nascosti"),
     // i documenti della verifica del reddito (per il pannello dentro «I tuoi dati»)
-    supabase.from("documenti_inquilino").select("id, tipo, percorso, nome_file").eq("tenant_id", userId).order("created_at", { ascending: true }),
+    supabase.from("documenti_inquilino").select("id, tipo, percorso, nome_file, persona, importo_verificato, verificato_at").eq("tenant_id", userId).order("created_at", { ascending: true }),
   ]);
 
   // Le recensioni dei proprietari stanno a parte dal punteggio di affidabilità: si mostrano accanto.
@@ -70,12 +71,13 @@ async function TenantHome({ userId }: { userId: string }) {
 
   const tenantProfile = tenant as TenantProfile;
 
+  // le verifiche valgono finché non scadono, e il reddito in proporzione a ciò che è documentato (lib/scadenze-verifiche.ts)
+  const verifiche = leggiVerifiche(tenantProfile);
   const affidabilita = computeAffidabilita({
-    verificato: tenantProfile.verificato,
+    ...parteVerificheAffidabilita(verifiche),
     protestato: tenantProfile.protestato,
     garante: tenantProfile.garante,
     fideiussione: tenantProfile.fideiussione,
-    protestiVerificati: tenantProfile.protesti_verifica_stato === "verificato",
   });
 
   // ---- Tutti gli annunci pubblicati che l'inquilino non ha già scelto ----
@@ -148,6 +150,7 @@ async function TenantHome({ userId }: { userId: string }) {
           nota={tenantProfile.verifica_esito_note}
           dati={{ professione: tenantProfile.professione, reddito_mensile: tenantProfile.reddito_mensile }}
           documenti={(documentiRows ?? []) as DocumentoInquilino[]}
+          riga={tenantProfile}
         />
       }
       protestiPanel={
@@ -156,6 +159,7 @@ async function TenantHome({ userId }: { userId: string }) {
           nota={tenantProfile.protesti_verifica_esito_note ?? null}
           protestato={tenantProfile.protestato}
           documenti={(documentiRows ?? []) as DocumentoInquilino[]}
+          riga={tenantProfile}
         />
       }
       listings={mazzo as unknown as ListingConMatch[]}

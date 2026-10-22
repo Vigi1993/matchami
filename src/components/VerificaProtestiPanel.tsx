@@ -12,12 +12,13 @@ import {
   TESTI_VERIFICA_PROTESTI,
   TIPI_DOCUMENTO_PROTESTI,
   cosaMancaProtesti,
-  descriviStatoProtesti,
+  descriviVerificaProtesti,
   puoInviareProtesti,
   puoTogliereDocumentiProtesti,
   type StatoProtesti,
 } from "@/lib/protesti";
 
+import { leggiVerifiche, puoRinnovare, type RigaVerificheInquilino } from "@/lib/scadenze-verifiche";
 const BUCKET = "documenti-verifica";
 
 type Tipo = (typeof TIPI_DOCUMENTO_PROTESTI)[number];
@@ -33,21 +34,28 @@ export function VerificaProtestiPanel({
   nota,
   protestato,
   documenti,
+  riga,
 }: {
   stato: StatoProtesti;
   nota: string | null;
   /** il valore che vale oggi (se verificato, è quello dello staff) */
   protestato: boolean | null;
   documenti: DocumentoInquilino[];
+  /** la riga dell'inquilino: la scadenza dei protesti e il resto delle verifiche */
+  riga: RigaVerificheInquilino;
 }) {
   const router = useRouter();
   const [errore, setErrore] = useState<string | null>(null);
   const [inCorso, setInCorso] = useState<string | null>(null);
 
-  const descrizione = descriviStatoProtesti(stato, nota, protestato);
+  const ver = leggiVerifiche(riga);
+  const descrizione = descriviVerificaProtesti({ stato, nota, protestato, ver });
+  const rinnovabile = ver.protesti !== null && puoRinnovare(ver.protesti);
   const manca = cosaMancaProtesti({ documenti, protestato });
-  const inviabile = puoInviareProtesti({ stato, documenti, protestato });
+  const inviabile = puoInviareProtesti({ stato, documenti, protestato, rinnovabile });
   const siTolgono = puoTogliereDocumentiProtesti(stato);
+  // si può caricare un file finché la verifica non è «verificato», oppure per il rinnovo
+  const siCarica = stato !== "verificato" || rinnovabile;
 
   async function carica(tipo: Tipo, file: File | undefined) {
     if (!file) return;
@@ -172,8 +180,11 @@ export function VerificaProtestiPanel({
               <ul className="elenco-documenti">
                 {miei.map((d) => (
                   <li key={d.id}>
-                    <span>{d.nome_file}</span>
-                    {siTolgono && (
+                    <span>
+                      {d.nome_file}
+                      {d.verificato_at ? " · verificato" : ""}
+                    </span>
+                    {siTolgono && !d.verificato_at && (
                       <button
                         type="button"
                         className="redo-link"
@@ -189,7 +200,7 @@ export function VerificaProtestiPanel({
               </ul>
             )}
 
-            {stato !== "verificato" && (
+            {siCarica && (
               <SelettoreFile
                 etichetta={miei.length > 0 ? "Aggiungi un altro file" : "Scegli un file"}
                 aria={`Carica: ${ETICHETTE_DOCUMENTO_PROTESTI[tipo]}`}
@@ -201,11 +212,12 @@ export function VerificaProtestiPanel({
         );
       })}
 
-      {stato === "non_avviata" && (
+      {(stato === "non_avviata" || (stato === "verificato" && rinnovabile)) && (
         <>
           {manca.length > 0 && <p className="field-note">Per inviare manca: {manca.join("; ")}.</p>}
+          {stato === "verificato" && <p className="field-note">La verifica di adesso resta valida finché non rispondiamo.</p>}
           <button type="button" className="opp-cta" style={{ marginTop: 10 }} disabled={!inviabile || inCorso !== null} onClick={invia}>
-            {inCorso === "invia" ? "Invio..." : "Invia per la verifica"}
+            {inCorso === "invia" ? "Invio..." : stato === "verificato" ? "Rinnova la verifica" : "Invia per la verifica"}
           </button>
         </>
       )}

@@ -8,6 +8,7 @@ import type { RecensioneGrezza } from "@/lib/recensioni";
 import type { StatoRichiesta } from "@/lib/richieste";
 import type { createClient } from "@/lib/supabase/server";
 
+import { leggiVerifiche, type RigaVerificheInquilino } from "@/lib/scadenze-verifiche";
 /**
  * SOLO SUL SERVER. Legge le ricerche degli inquilini con la chiave di servizio (il proprietario non può leggerle: la sicurezza
  * a livello di riga lo vieta). Cosa esce da qui:
@@ -177,7 +178,7 @@ export async function possibiliPerCasaDelProprietario(
         admin.from("profiles").select("id, nome, cognome").in("id", blocco),
         admin
           .from("tenant_profiles")
-          .select("profile_id, visibile_ai_proprietari, professione, reddito_mensile, reddito_nucleo, garante, fideiussione, protestato, protesti_verifica_stato, animali, nucleo, presentazione, verificato, avatar_url")
+          .select("profile_id, visibile_ai_proprietari, professione, reddito_mensile, reddito_nucleo, garante, fideiussione, protestato, protesti_verifica_stato, animali, nucleo, presentazione, verificato, avatar_url, verifica_stato, reddito_scade_il, reddito_verificato_at, reddito_nucleo_verificato, protesti_scade_il, protesti_verificati_at, situazione_confermata_at")
           .in("profile_id", blocco),
         admin.from("recensioni").select("tenant_id, voto, autore_id, created_at").in("tenant_id", blocco),
       ]);
@@ -201,6 +202,8 @@ export async function possibiliPerCasaDelProprietario(
         // il consenso si ricontrolla sulla riga letta: senza, non si mostra
         if (!det || det.visibile_ai_proprietari !== true) continue;
         const pr = profili.get(d.tenantId);
+        // la validità si calcola dalle scadenze: una verifica scaduta non vale
+        const ver = leggiVerifiche(det as RigaVerificheInquilino);
         completi.push({
           tenantId: d.tenantId,
           nome: pr?.nome ?? null,
@@ -208,9 +211,14 @@ export async function possibiliPerCasaDelProprietario(
           professione: (det.professione as string | null) ?? null,
           avatarUrl: (det.avatar_url as string | null) ?? null,
           presentazione: (det.presentazione as string | null) ?? null,
-          verificato: det.verificato === true,
+          verificato: ver.redditoValido,
           protestato: (det.protestato as boolean | null) ?? null,
-          protestiVerificati: det.protesti_verifica_stato === "verificato",
+          protestiVerificati: ver.protestiValidi,
+          redditoScaduto: ver.redditoScaduto,
+          redditoVerificatoIl: ver.redditoVerificatoIl,
+          redditoNucleoVerificato: (det.reddito_nucleo_verificato as number | null) ?? null,
+          protestiScaduti: ver.protestiScaduti,
+          protestiVerificatiIl: ver.protestiVerificatiIl,
           garante: (det.garante as boolean | null) ?? null,
           fideiussione: (det.fideiussione as boolean | null) ?? null,
           reddito_mensile: (det.reddito_mensile as number | null) ?? null,

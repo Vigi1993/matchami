@@ -22,6 +22,15 @@ export type TenantProfile = {
   /** perché la verifica non è riuscita, o è decaduta; lo scrive solo lo staff */
   verifica_esito_note: string | null;
   verifica_inviata_at: string | null;
+  /** quando lo staff ha verificato il reddito, e quando la verifica SCADE (migrazione 0040): dopo, non vale più finché non si rinnova */
+  reddito_verificato_at?: string | null;
+  reddito_scade_il?: string | null;
+  /** la parte del reddito del nucleo che i documenti dimostrano (la somma degli importi scritti dallo staff) */
+  reddito_nucleo_verificato?: number | null;
+  protesti_verificati_at?: string | null;
+  protesti_scade_il?: string | null;
+  /** l'ultima volta che la persona ha confermato «la mia situazione non è cambiata» */
+  situazione_confermata_at?: string | null;
   /** la verifica dei protesti da parte dello staff (migrazione 0038): se «verificato», `protestato` è il valore dello staff */
   protesti_verifica_stato?: "non_avviata" | "in_verifica" | "verificato";
   protesti_verifica_esito_note?: string | null;
@@ -126,8 +135,16 @@ export type CandidaturaRicevuta = {
     reddito_mensile: number | null;
     reddito_nucleo: number | null;
     verificato: boolean;
-    /** lo staff ha verificato i protesti */
+    /** lo staff ha verificato i protesti E la verifica vale ancora */
     protesti_verificati?: boolean;
+    /** c'era una verifica del reddito ma è scaduta (migrazione 0040) */
+    reddito_scaduto?: boolean;
+    reddito_verificato_at?: string | null;
+    /** la parte del reddito del nucleo documentata dallo staff */
+    reddito_nucleo_verificato?: number | null;
+    protesti_scaduti?: boolean;
+    protesti_verificati_at?: string | null;
+    situazione_confermata_at?: string | null;
     /** la risposta sui protesti (se verificati, quella dello staff) */
     protestato?: boolean | null;
     presentazione: string | null;

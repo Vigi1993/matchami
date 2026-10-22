@@ -50,9 +50,11 @@ export const CATALOGO_CRITERI: Record<ChiaveCriterio, DefinizioneCriterio> = {
         return { stato: "no", dettaglio: "Reddito non positivo" };
       }
       const peso = (canone / c.redditoMensileNucleo) * 100;
+      // se i documenti coprono solo una parte del reddito dichiarato, lo si dice: il calcolo resta sul dichiarato
+      const parziale = typeof c.coperturaReddito === "number" && c.coperturaReddito < 1;
       return {
         stato: peso <= sogliaPct + EPS ? "ok" : "no",
-        dettaglio: `Il canone pesa il ${Math.round(peso)}% sul reddito`,
+        dettaglio: parziale ? `Il canone pesa il ${Math.round(peso)}% sul reddito dichiarato (documentato solo il ${Math.round((c.coperturaReddito ?? 0) * 100)}%)` : `Il canone pesa il ${Math.round(peso)}% sul reddito`,
       };
     },
   },
@@ -72,13 +74,15 @@ export const CATALOGO_CRITERI: Record<ChiaveCriterio, DefinizioneCriterio> = {
 
   profiloVerificato: {
     nome: "Profilo verificato",
-    descrizione: "Il reddito è stato verificato con documenti.",
+    descrizione: "Il reddito del nucleo è stato verificato con documenti, e la verifica vale ancora.",
     etichetta: () => "Profilo verificato con documenti",
-    // `verificato` non è mai "non indicato": o è stato verificato o no.
+    // `verificato` non è mai "non indicato": o è stato verificato o no. Se i documenti coprono solo una parte del reddito del nucleo, o la verifica è scaduta, non basta.
     valuta: (c) =>
       c.verificato
-        ? { stato: "ok" }
-        : { stato: "no", dettaglio: "Verifica non ancora effettuata" },
+        ? (c.coperturaReddito ?? 1) >= 1
+          ? { stato: "ok" }
+          : { stato: "no", dettaglio: `Reddito verificato solo in parte (${Math.round((c.coperturaReddito ?? 0) * 100)}%)` }
+        : { stato: "no", dettaglio: c.redditoScaduto ? "Verifica scaduta: va rinnovata" : "Verifica non ancora effettuata" },
   },
 
   profiloCompleto: {

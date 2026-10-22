@@ -84,7 +84,7 @@ test("Home: «Modifica dati» apre la scheda unica qui (punteggio, dati, verific
   const h = leggi("src", "app", "(app)", "HomeClient.tsx"); assert.match(h, /import \{ DatiSheet \} from "@\/components\/DatiSheet"/);
   assert.match(h, /\{schedaDati && \(\s+<DatiSheet\s+open\s+onClose=\{\(\) => setSchedaDati\(false\)\}\s+tenant=\{tenant\}\s+affidabilita=\{affidabilita\}\s+recensioni=\{recensioni\}\s+raccomandazione=\{raccomandazione\}\s+verificaPanel=\{verificaPanel\}\s+protestiPanel=\{protestiPanel\}\s+onSalvata=\{\(\) => \{\s+setSchedaDati\(false\);\s+setAvviso\(\{ errore: false, testo: "Dati aggiornati\." \}\);/);
   assert.ok(!/useRouter|router\.push/.test(h), "la Home rimanda ancora altrove"); assert.ok(!/href="\/profilo"/.test(h));
-  const pg = leggi("src", "app", "(app)", "page.tsx"); assert.match(pg, /from\("documenti_inquilino"\)\.select\("id, tipo, percorso, nome_file"\)\.eq\("tenant_id", userId\)/); assert.match(pg, /<VerificaRedditoPanel\s+stato=\{tenantProfile\.verifica_stato\}/);
+  const pg = leggi("src", "app", "(app)", "page.tsx"); assert.match(pg, /from\("documenti_inquilino"\)\.select\("id, tipo, percorso, nome_file, persona, importo_verificato, verificato_at"\)\.eq\("tenant_id", userId\)/); assert.match(pg, /<VerificaRedditoPanel\s+stato=\{tenantProfile\.verifica_stato\}/);
 });
 
 test("Profilo: una sola riga e una sola scheda per punteggio, dati e verifica (le altre schede condivise restano), legge ?apri= e passa le recensioni a parte", () => {

@@ -64,7 +64,7 @@ export default async function StaffPage() {
   // legge i profili: la funzione del database gli dà solo nome e data.
   // Gli inquilini che hanno chiesto la verifica dei protesti (stessa regola: lo staff non legge i profili)
   const { data: protestiData } = await supabase.rpc("protesti_da_verificare");
-  const protesti = (protestiData ?? []) as { tenant_id: string; nome: string | null; cognome: string | null; inviata_at: string | null }[];
+  const protesti = (protestiData ?? []) as { tenant_id: string; nome: string | null; cognome: string | null; inviata_at: string | null; rinnovo?: boolean }[];
 
   const { data: inquiliniData } = await supabase.rpc("inquilini_da_verificare");
   const inquilini = (inquiliniData ?? []) as {
@@ -72,6 +72,8 @@ export default async function StaffPage() {
     nome: string | null;
     cognome: string | null;
     inviata_at: string | null;
+    /** è un rinnovo o un'integrazione (la persona era già stata verificata) */
+    rinnovo?: boolean;
   }[];
 
   return (
@@ -149,7 +151,10 @@ export default async function StaffPage() {
               <div className="mc-body">
                 <div className="mc-zona">Inquilino</div>
                 <div className="mc-title">{nome}</div>
-                <div className="mc-meta">inviato {quandoFa(q.inviata_at)}</div>
+                <div className="mc-meta">
+                  inviato {quandoFa(q.inviata_at)}
+                  {q.rinnovo ? " · rinnovo" : ""}
+                </div>
               </div>
               <div className="mc-pct is-wait">Da controllare</div>
             </Link>
@@ -172,7 +177,10 @@ export default async function StaffPage() {
               <div className="mc-body">
                 <div className="mc-zona">Inquilino</div>
                 <div className="mc-title">{nome}</div>
-                <div className="mc-meta">inviato {quandoFa(q.inviata_at)}</div>
+                <div className="mc-meta">
+                  inviato {quandoFa(q.inviata_at)}
+                  {q.rinnovo ? " · rinnovo" : ""}
+                </div>
               </div>
               <div className="mc-pct is-wait">Da controllare</div>
             </Link>

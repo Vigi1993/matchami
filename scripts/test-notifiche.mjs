@@ -20,12 +20,13 @@ const sql0032 = fs.readFileSync(path.join(radice, "supabase", "migrations", "003
 const sql0034 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0034_riapri_candidatura.sql"), "utf8");
 const sql0035 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0035_affitto_da_contratto.sql"), "utf8");
 const sql0038 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0038_verifica_protesti.sql"), "utf8");
+const sql0040 = fs.readFileSync(path.join(radice, "supabase", "migrations", "0040_scadenza_verifiche.sql"), "utf8");
 
 /** I tipi che il vincolo sulla tabella ammette. */
 function tipiDelDatabase() {
   // l'ultima definizione del vincolo, in ordine di migrazione
-  const tutte = [...(sql + "\n" + sql0020 + "\n" + sql0022 + "\n" + sql0032 + "\n" + sql0034 + "\n" + sql0035 + "\n" + sql0038).matchAll(/check \(tipo in \(([\s\S]*?)\)\)/g)];
-  assert.ok(tutte.length >= 7, "dovrei trovare il vincolo della 0019, quello della 0020, quello della 0022, quello della 0032, quello della 0034, quello della 0035 e quello della 0038");
+  const tutte = [...(sql + "\n" + sql0020 + "\n" + sql0022 + "\n" + sql0032 + "\n" + sql0034 + "\n" + sql0035 + "\n" + sql0038 + "\n" + sql0040).matchAll(/check \(tipo in \(([\s\S]*?)\)\)/g)];
+  assert.ok(tutte.length >= 8, "dovrei trovare il vincolo della 0019, quello della 0020, quello della 0022, quello della 0032, quello della 0034, quello della 0035, quello della 0038 e quello della 0040");
   return [...tutte[tutte.length - 1][1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
 }
 
@@ -49,7 +50,10 @@ const trigger =
   sql0035.slice(sql0035.indexOf("create or replace function public.avvisa_affitto_da_contratto")) +
   "\n" +
   // la 0038: il trigger sull'esito dei protesti crea le notifiche «protesti verificati» e «protesti respinti»
-  sql0038.slice(sql0038.indexOf("create or replace function public.notifica_protesti_esito"));
+  sql0038.slice(sql0038.indexOf("create or replace function public.notifica_protesti_esito")) +
+  "\n" +
+  // la 0040: il promemoria delle scadenze crea «verifica in scadenza» e «verifica scaduta»
+  sql0040.slice(sql0040.indexOf("create or replace function public.promemoria_scadenze_verifiche"));
 
 // ------------------------------------------------------------
 // I tipi
@@ -235,4 +239,17 @@ test("riga del profilo: singolare, plurale e nessuna", () => {
   assert.equal(n.sottotitoloNovita(-1), "Nessuna novità da leggere.");
   assert.equal(n.sottotitoloNovita(1), "Hai 1 novità da leggere.");
   assert.equal(n.sottotitoloNovita(7), "Hai 7 novità da leggere.");
+});
+
+// ------------------------------------------------------------
+// I promemoria di scadenza delle verifiche (migrazione 0040)
+// ------------------------------------------------------------
+
+test("promemoria: «in scadenza» dice cosa, quando e fino a che data; «scaduta» dice cosa non vale più e dove rinnovare; mai testi vuoti con dati mancanti", () => {
+  const a = n.descriviNotifica("verifica_in_scadenza", { tipo: "reddito", giorni: 12, scade: "2027-04-21" });
+  assert.equal(a.titolo, "La verifica del reddito sta per scadere"); assert.match(a.testo, /^Scade tra 12 giorni \(21 apr 2027\)\. Rinnovala con documenti recenti per non perdere i punti: nel frattempo vale ancora\.$/);
+  assert.equal(n.descriviNotifica("verifica_in_scadenza", { tipo: "protesti", giorni: 1, scade: "2027-01-21" }).titolo, "La verifica dei protesti sta per scadere"); assert.match(n.descriviNotifica("verifica_in_scadenza", { tipo: "protesti", giorni: 1, scade: "2027-01-21" }).testo, /^Scade domani \(21 gen 2027\)/);
+  const generica = n.descriviNotifica("verifica_in_scadenza", null); assert.equal(generica.titolo, "La verifica del reddito sta per scadere"); assert.match(generica.testo, /^Scade a breve\./); assert.ok(!/undefined|NaN|null/.test(generica.testo));
+  const s = n.descriviNotifica("verifica_scaduta", { tipo: "reddito", giorni: 0, scade: "2026-10-01" }); assert.equal(s.titolo, "La verifica del reddito è scaduta"); assert.match(s.testo, /Non dà più punti e i proprietari non la vedono più come verificata\. Rinnovala nel Profilo con documenti recenti\./); assert.equal(n.descriviNotifica("verifica_scaduta", { tipo: "protesti" }).titolo, "La verifica dei protesti è scaduta");
+  for (const t of ["verifica_in_scadenza", "verifica_scaduta"]) { assert.ok(n.TIPI_NOTIFICA.includes(t)); assert.notEqual(n.descriviNotifica(t, null).titolo, "Novità", `${t} deve avere un testo suo`); }
 });
